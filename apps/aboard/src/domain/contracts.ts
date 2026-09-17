@@ -1,21 +1,21 @@
 /**
  * Aboard session types after the REFACTOR.md redesign:
  * - interactive: Ordinary user-controlled agent TUI
- * - Explore: Read-only exploration session
- * - Prototype, Web Search, Brainstorm, General: manual delegation identities whose
+ * - Explore: Read-only exploration session (Claude's builtin agent name)
+ * - prototype, websearch, brainstorm, general: manual delegation identities whose
  *   execution mode is recorded separately from Auto Run worker semantics
- * - implementer: Auto Run worker that implements one frozen issue
- * - reviewer: Auto Run worker that reviews (both AFK and HITL use this profile)
+ * - address: Auto Run worker that addresses one frozen issue
+ * - review: Auto Run worker that reviews (both AFK and HITL use this profile)
  */
 export const AGENT_TYPES = [
   "interactive",
   "Explore",
-  "Prototype",
-  "Web Search",
-  "Brainstorm",
-  "General",
-  "implementer",
-  "reviewer",
+  "prototype",
+  "websearch",
+  "brainstorm",
+  "general",
+  "address",
+  "review",
 ] as const;
 
 export type AgentType = (typeof AGENT_TYPES)[number];
@@ -33,15 +33,15 @@ export function isInteractiveAgentType(type: AgentType): boolean {
   return (INTERACTIVE_AGENT_TYPES as readonly AgentType[]).includes(type);
 }
 
-/** Explore is the stable provider-neutral read-only role. */
+/** Explore is the stable provider-neutral read-only session type. */
 export const NAMED_BUILTIN_AGENT_TYPES = ["Explore"] as const;
 
 export function isNamedBuiltinAgentType(type: AgentType): boolean {
   return (NAMED_BUILTIN_AGENT_TYPES as readonly AgentType[]).includes(type);
 }
 
-/** Auto Run workers: implementer and reviewer */
-export const AUTO_RUN_WORKER_TYPES = ["implementer", "reviewer"] as const;
+/** Auto Run workers: address and review */
+export const AUTO_RUN_WORKER_TYPES = ["address", "review"] as const;
 
 export function isAutoRunWorkerType(type: AgentType): boolean {
   return (AUTO_RUN_WORKER_TYPES as readonly AgentType[]).includes(type);

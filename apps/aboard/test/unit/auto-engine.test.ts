@@ -14,7 +14,7 @@ import { parseAutoRunRecord } from "../../src/runtime/persistence.js";
 import type { DelegationLaunchInput } from "../../src/bridge/delegation.js";
 
 const WORKTREE_OFF = { enabled: false, root: "", keep: false, setupTimeoutSeconds: 600 } as const;
-const SETTINGS: AutoRunSettings = { review: false, exploreBeforeImplement: false, issueContextDepth: 1, permanentPrompt: "", discardBehavior: "record-only", mergeStrategy: "squash", mergeRunPullRequest: false, worktree: WORKTREE_OFF };
+const SETTINGS: AutoRunSettings = { review: false, exploreBeforeAddress: false, issueContextDepth: 1, permanentPrompt: "", discardBehavior: "record-only", mergeStrategy: "squash", mergeRunPullRequest: false, worktree: WORKTREE_OFF };
 
 /** `runIdFactory` is fixed at `run_test`, so every run's session branch is this. */
 const SESSION = "run/test";
@@ -99,27 +99,27 @@ interface HarnessOptions {
   readonly issues?: readonly QueueIssue[];
   /** Whether a worker commits before it exits. Defaults to true. */
   readonly producesChanges?: boolean;
-  readonly implementerFails?: boolean;
-  readonly implementerFailsForIssue?: number;
+  readonly addressFails?: boolean;
+  readonly addressFailsForIssue?: number;
   readonly exploreFails?: boolean;
   readonly explorationReport?: string;
-  /** Final message returned by the implementer. */
-  readonly implementerMessage?: string;
+  /** Final message returned by the address. */
+  readonly addressMessage?: string;
   /** Makes a worker leave residual uncommitted edits behind its commit. */
   readonly workerLeavesDirtyTree?: boolean;
   /** Makes a worker commit more than the one commit the protocol allows. */
   readonly workerCommitCount?: number;
-  /** Whether the reviewer finds anything to fix. Defaults to `producesChanges`. */
-  readonly reviewerProducesChanges?: boolean;
-  /** Final message returned by the reviewer; semantics must not affect orchestration. */
-  readonly reviewerMessage?: string;
-  readonly reviewerFails?: boolean;
-  /** Violates the HITL reviewer contract by moving HEAD. */
-  readonly hitlReviewerCommits?: boolean;
+  /** Whether the review finds anything to fix. Defaults to `producesChanges`. */
+  readonly reviewProducesChanges?: boolean;
+  /** Final message returned by the review; semantics must not affect orchestration. */
+  readonly reviewMessage?: string;
+  readonly reviewFails?: boolean;
+  /** Violates the HITL review contract by moving HEAD. */
+  readonly hitlReviewCommits?: boolean;
   /** Simulates a reset implementation that failed to restore the index to beforeSha. */
   readonly resetLeavesStaged?: boolean;
-  /** Whether the reviewer reaches a completed verdict and creates its required commit. */
-  readonly reviewerCompletes?: boolean;
+  /** Whether the review reaches a completed verdict and creates its required commit. */
+  readonly reviewCompletes?: boolean;
   /** Called once a hitl pull request has been observed as open; returns its next state. */
   readonly startDirty?: boolean;
   readonly pushFails?: boolean;
@@ -145,9 +145,9 @@ interface HarnessOptions {
   /** Runs with a checkout of its own instead of the user's working tree. */
   readonly worktree?: boolean;
   /** Changes a frozen classification after the worker returns, before commit. */
-  readonly relabelAfterImplementer?: boolean;
+  readonly relabelAfterAddress?: boolean;
   /** Leaves this automated worker pending until the run aborts it. */
-  readonly pendingWorkerType?: "implementer" | "reviewer" | "Explore";
+  readonly pendingWorkerType?: "address" | "review" | "Explore";
   /** Adds controllable latency or failure to every remote-ref observation. */
   readonly fetch?: () => Promise<void>;
   /** Head branches GitHub reports as already having a pull request, before the run opens any. */
@@ -186,19 +186,19 @@ test("single-branch HITL review resets the local checkpoint and reviews before a
   assert.equal(context.closures.length, 0);
   assert.equal(context.engine.state()?.phase, "await-commit");
   assert.equal(context.createdPullRequests.length, 0, "the temporary implementation checkpoint is never published");
-  assert.deepEqual(context.launches.map((launch) => launch.type), ["implementer", "reviewer"]);
-  assert.ok(context.launches[0]?.completionCommitStartingSha, "the reviewed HITL implementer must create a checkpoint commit");
-  assert.equal(context.launches[1]?.completionCommitStartingSha, undefined, "the HITL reviewer must leave the handoff uncommitted");
+  assert.deepEqual(context.launches.map((launch) => launch.type), ["address", "review"]);
+  assert.ok(context.launches[0]?.completionCommitStartingSha, "the reviewed HITL address must create a checkpoint commit");
+  assert.equal(context.launches[1]?.completionCommitStartingSha, undefined, "the HITL review must leave the handoff uncommitted");
   assert.ok(context.gitCalls.some((call) => call.startsWith("resetMixed ")));
   const checkpoint = context.record()?.progress["35"];
-  assert.ok(checkpoint?.state === "current" && checkpoint.implementerCommitSha && checkpoint.resetCompleted && checkpoint.hitlReviewCompleted);
+  assert.ok(checkpoint?.state === "current" && checkpoint.addressCommitSha && checkpoint.resetCompleted && checkpoint.hitlReviewCompleted);
   assert.equal(checkpoint.implementationSha, undefined);
   await context.git.add();
   await context.git.commit("User accepts", "");
   await context.engine.settle();
   assert.equal(context.state.cleared, true, context.notifications.join("\n"));
-  const review = context.launches.find((launch) => launch.type === "reviewer");
-  assert.ok(review, "reviewer should be launched");
+  const review = context.launches.find((launch) => launch.type === "review");
+  assert.ok(review, "review should be launched");
   assert.deepEqual(context.closures.map((closure) => closure.issue), [35]);
   assert.equal(context.merges.length, 0, "the cumulative PR is not an issue-acceptance signal");
 });
@@ -501,7 +501,7 @@ function harness(options: HarnessOptions = {}): Harness {
   const launcher: AutoRunLauncher = {
     runAutomated: async (input, signal) => {
       launches.push(input);
-      // implement and review signal completion by committing;
+      // address and review signal completion by committing;
       // Explore is read-only.
       if (input.type === options.pendingWorkerType) {
         // Killed mid-edit: what it had written is still uncommitted.
@@ -517,29 +517,29 @@ function harness(options: HarnessOptions = {}): Harness {
           result: { outcome: "failed", failure: { type: "killed", exitCode: null, lastAssistantMessage: null }, telemetry: telemetry() },
         };
       }
-      const commits = input.type === "reviewer"
-        ? input.completionCommitStartingSha !== undefined && options.reviewerCompletes !== false && options.reviewerFails !== true
+      const commits = input.type === "review"
+        ? input.completionCommitStartingSha !== undefined && options.reviewCompletes !== false && options.reviewFails !== true
         : input.completionCommitStartingSha !== undefined && options.producesChanges !== false;
-      if (input.type === "implementer" && input.completionCommitStartingSha === undefined && options.hitlUncommitted) dirty = true;
-      else if (input.type === "reviewer" && input.completionCommitStartingSha === undefined && options.hitlReviewerCommits === true) {
+      if (input.type === "address" && input.completionCommitStartingSha === undefined && options.hitlUncommitted) dirty = true;
+      else if (input.type === "review" && input.completionCommitStartingSha === undefined && options.hitlReviewCommits === true) {
         commitOn(currentBranch);
         dirty = false;
       }
-      else if (input.type === "reviewer" && input.completionCommitStartingSha === undefined && options.reviewerProducesChanges === true) dirty = true;
+      else if (input.type === "review" && input.completionCommitStartingSha === undefined && options.reviewProducesChanges === true) dirty = true;
       else if (input.type !== "Explore" && commits) {
         for (let made = 0; made < (options.workerCommitCount ?? 1); made += 1) commitOn(currentBranch);
         if (options.workerLeavesDirtyTree === true) dirty = true;
       }
-      if (input.type === "implementer" && options.relabelAfterImplementer === true) {
+      if (input.type === "address" && options.relabelAfterAddress === true) {
         queue.find((entry) => entry.number === input.issues?.[0])?.labels.splice(0, Infinity, "[AI]-hitl");
       }
-      const implementer = input.type === "implementer";
-      const failed = (implementer && (
-        options.implementerFails === true
-        || options.implementerFailsForIssue === input.issues?.[0]
+      const address = input.type === "address";
+      const failed = (address && (
+        options.addressFails === true
+        || options.addressFailsForIssue === input.issues?.[0]
       ))
         || (input.type === "Explore" && options.exploreFails === true)
-        || (input.type === "reviewer" && options.reviewerFails === true);
+        || (input.type === "review" && options.reviewFails === true);
       return {
         agentId: `agent-${launches.length}` as AgentId,
         sessionId: "6b1e3f7a-2c4d-4a8b-9f10-2c3d4e5f6071" as SessionId,
@@ -549,11 +549,11 @@ function harness(options: HarnessOptions = {}): Harness {
           : {
               outcome: "succeeded",
               exitCode: 0,
-              lastAssistantMessage: implementer
-                ? options.implementerMessage ?? "Addressed the issue.\n\n<commit>Implement requested change</commit>"
+              lastAssistantMessage: address
+                ? options.addressMessage ?? "Addressed the issue.\n\n<commit>Implement requested change</commit>"
                 : input.type === "Explore"
                   ? options.explorationReport ?? "Relevant code lives in src/retry.ts; verify with retry tests."
-                  : options.reviewerMessage ?? "Addressed the issue.",
+                  : options.reviewMessage ?? "Addressed the issue.",
               telemetry: telemetry(),
             },
       };
@@ -761,7 +761,7 @@ function plannedRecord(overrides: Partial<AutoRunRecord> = {}): AutoRunRecord {
     settings: {
       branchMode: "per-issue",
       review: false,
-      exploreBeforeImplement: false,
+      exploreBeforeAddress: false,
       issueContextDepth: 1,
       mergeStrategy: "squash",
       mergeRunPullRequest: false,
@@ -862,7 +862,7 @@ test("the afk path runs branch to merge and performs every side effect itself", 
   const result = await context.engine.start();
   assert.equal(result.started, true);
   await context.engine.settle();
-  assert.deepEqual(context.launches.map((launch) => launch.type), ["implementer"]);
+  assert.deepEqual(context.launches.map((launch) => launch.type), ["address"]);
   assert.equal(context.launches[0]?.issueContextDepth, 1);
   assert.equal(context.launches[0]?.description, "address issue 34");
   assert.deepEqual(context.gitCalls.filter((call) => call !== "fetch"), [
@@ -870,7 +870,7 @@ test("the afk path runs branch to merge and performs every side effect itself", 
     // published yet, and is published before any issue starts.
     `createBranch ${SESSION} main`, `push ${SESSION} -u`,
     `checkout ${SESSION}`, `fastForward ${SESSION}`, `createBranch issue/34-add-retry-backoff ${SESSION}`,
-    // implement made the commit itself; aboard only publishes it.
+    // address made the commit itself; aboard only publishes it.
     "push issue/34-add-retry-backoff -u",
     // After the merge, so the record carries the session branch tip the merge
     // produced rather than the one it had before.
@@ -883,27 +883,27 @@ test("the afk path runs branch to merge and performs every side effect itself", 
   assert.equal(context.pullRequests.get(56)?.state, "merged");
   assert.match(context.notifications.join("\n"), /issue #34 committed \([0-9a-z]+\) and opened PR #56/);
   assert.match(context.notifications.join("\n"), new RegExp(`issue #34 merged into ${SESSION}`));
-  assert.deepEqual(context.closedTerminals, ["terminal-1"], "the successful implementer is closed as soon as its result is accepted");
+  assert.deepEqual(context.closedTerminals, ["terminal-1"], "the successful address is closed as soon as its result is accepted");
   assert.equal(context.state.cleared, true);
 });
 
-test("optional exploration runs just before a fresh implementer and publishes its complete context", async () => {
+test("optional exploration runs just before a fresh address and publishes its complete context", async () => {
   const report = `Relevant code lives in src/retry.ts; preserve RetryPolicy and run retry tests.\n${"x".repeat(7_000)}`;
   const context = harness({
-    settings: { exploreBeforeImplement: true, issueContextDepth: 2 },
+    settings: { exploreBeforeAddress: true, issueContextDepth: 2 },
     explorationReport: report,
   });
 
   const result = await context.engine.start();
   assert.equal(result.started, true);
-  assert.equal(result.started && result.exploresBeforeImplement, true);
+  assert.equal(result.started && result.exploresBeforeAddress, true);
   await context.engine.settle();
 
-  assert.deepEqual(context.launches.map((launch) => launch.type), ["Explore", "implementer"]);
+  assert.deepEqual(context.launches.map((launch) => launch.type), ["Explore", "address"]);
   assert.equal(context.launches[0]?.issues?.[0], 34);
   assert.equal(context.launches[0]?.issueContextDepth, 2);
   assert.equal(context.launches[1]?.codebaseContext, report);
-  assert.equal(context.saved.some((record) => record.settings.exploreBeforeImplement), true);
+  assert.equal(context.saved.some((record) => record.settings.exploreBeforeAddress), true);
   assert.equal(context.states.some((state) => state.phase === "explore"), true);
   assert.match(context.comments[0]?.body ?? "", /^## Codebase context\n/);
   assert.doesNotMatch(context.comments[0]?.body ?? "", /<!--|aboard|abd\//iu);
@@ -911,9 +911,9 @@ test("optional exploration runs just before a fresh implementer and publishes it
   assert.deepEqual(context.closedTerminals.slice(0, 2), ["terminal-1", "terminal-2"]);
 });
 
-test("single-branch exploration is repeated immediately before each fresh implementer", async () => {
+test("single-branch exploration is repeated immediately before each fresh address", async () => {
   const context = harness({
-    settings: { branchMode: "single-branch", exploreBeforeImplement: true },
+    settings: { branchMode: "single-branch", exploreBeforeAddress: true },
     issues: [
       { number: 34, title: "first", labels: ["[AI]-afk"], state: "open", openBlockedByNumbers: [] },
       { number: 35, title: "second", labels: ["[AI]-afk"], state: "open", openBlockedByNumbers: [] },
@@ -923,12 +923,12 @@ test("single-branch exploration is repeated immediately before each fresh implem
   await context.engine.start();
   await context.engine.settle();
 
-  assert.deepEqual(context.launches.map((launch) => launch.type), ["Explore", "implementer", "Explore", "implementer"]);
+  assert.deepEqual(context.launches.map((launch) => launch.type), ["Explore", "address", "Explore", "address"]);
   assert.deepEqual(context.launches.map((launch) => launch.issues?.[0]), [34, 34, 35, 35]);
 });
 
 test("Explore failure stops recoverably before implementation", async () => {
-  const context = harness({ settings: { exploreBeforeImplement: true }, exploreFails: true });
+  const context = harness({ settings: { exploreBeforeAddress: true }, exploreFails: true });
 
   await context.engine.start();
   await context.engine.settle();
@@ -942,12 +942,12 @@ test("Explore failure stops recoverably before implementation", async () => {
 });
 
 test("exploration comment failure does not withhold direct context", async () => {
-  const context = harness({ settings: { exploreBeforeImplement: true }, commentFails: true });
+  const context = harness({ settings: { exploreBeforeAddress: true }, commentFails: true });
 
   await context.engine.start();
   await context.engine.settle();
 
-  assert.deepEqual(context.launches.map((launch) => launch.type), ["Explore", "implementer"]);
+  assert.deepEqual(context.launches.map((launch) => launch.type), ["Explore", "address"]);
   assert.match(context.launches[1]?.codebaseContext ?? "", /Relevant code lives/);
   assert.match(context.logs.join("\n"), /could not comment on issue/);
 });
@@ -955,7 +955,7 @@ test("exploration comment failure does not withhold direct context", async () =>
 test("resume creates a missing session branch from the unpublished local target", async () => {
   const context = harness({
     remoteBaseSha: "f".repeat(40),
-    // The implementer commits nothing, so the run stops right after the session
+    // The address commits nothing, so the run stops right after the session
     // branch is created and its recorded tip stays the one under test.
     producesChanges: false,
   });
@@ -1024,7 +1024,7 @@ test("a dependent issue is unblocked within the run by the closure of the issue 
   await context.engine.start();
   await context.engine.settle();
 
-  assert.deepEqual(context.launches.filter((launch) => launch.type === "implementer").map((launch) => launch.issues?.[0]), [34, 33]);
+  assert.deepEqual(context.launches.filter((launch) => launch.type === "address").map((launch) => launch.issues?.[0]), [34, 33]);
   assert.deepEqual(context.closures.map((closure) => closure.issue), [34, 33]);
   assert.match(context.notifications.join("\n"), /plan drained \(2 issues addressed\)/);
 });
@@ -1071,7 +1071,7 @@ test("a failed run leaves its partial run pull request open even when automatic 
       { number: 34, title: "land first", labels: ["[AI]-afk"], state: "open", openBlockedByNumbers: [] },
       { number: 35, title: "fail second", labels: ["[AI]-afk"], state: "open", openBlockedByNumbers: [] },
     ],
-    implementerFailsForIssue: 35,
+    addressFailsForIssue: 35,
   });
   await context.engine.start();
   await context.engine.settle();
@@ -1181,7 +1181,7 @@ test("a run's pull request that will not merge is left open with the reason", as
 });
 
 test("a run that landed nothing opens no pull request", async () => {
-  const context = harness({ implementerFails: true, producesChanges: false });
+  const context = harness({ addressFails: true, producesChanges: false });
   await context.engine.start();
   await context.engine.settle();
 
@@ -1202,7 +1202,7 @@ test("a target branch that is not on origin still leaves the work pushed and say
   assert.equal(context.createdPullRequests.filter((pr) => pr.head === SESSION).length, 0);
 });
 
-test("[AI]-chrome is frozen per issue and reaches that issue's implementer only", async () => {
+test("[AI]-chrome is frozen per issue and reaches that issue's address only", async () => {
   const context = harness({
     settings: { review: true },
     issues: [{ number: 34, title: "Add retry backoff", labels: ["[AI]-afk", "[AI]-chrome"], state: "open", openBlockedByNumbers: [] }],
@@ -1211,9 +1211,9 @@ test("[AI]-chrome is frozen per issue and reaches that issue's implementer only"
   assert.equal(result.started && result.issues[0]?.chrome, true);
   await context.engine.settle();
 
-  assert.equal(context.launches[0]?.type, "implementer");
+  assert.equal(context.launches[0]?.type, "address");
   assert.equal(context.launches[0]?.chrome, true);
-  assert.equal(context.launches[1]?.type, "reviewer");
+  assert.equal(context.launches[1]?.type, "review");
   assert.equal(context.launches[1]?.chrome, undefined);
   assert.equal(context.saved.every((record) => record.plan[0]?.chrome === true), true);
 });
@@ -1223,7 +1223,7 @@ test("configured and per-run guidance are persisted and reach every auto agent s
   await context.engine.start({ additionalGuideline: "  no unit tests needed  " });
   await context.engine.settle();
 
-  assert.deepEqual(context.launches.map((launch) => launch.type), ["implementer", "reviewer"]);
+  assert.deepEqual(context.launches.map((launch) => launch.type), ["address", "review"]);
   assert.deepEqual(context.launches.map((launch) => launch.permanentPrompt), ["run browser tests", "run browser tests"]);
   assert.deepEqual(context.launches.map((launch) => launch.additionalGuideline), ["no unit tests needed", "no unit tests needed"]);
   assert.equal(context.saved.every((record) => record.settings.permanentPrompt === "run browser tests"), true);
@@ -1250,22 +1250,22 @@ test("the end-of-run restore does not trigger on the mid-run cleanup checkout", 
 });
 
 test("a failed run keeps its current branch active when the tree is clean", async () => {
-  // A failed implementer stops the run; even without edits, its issue branch is
+  // A failed address stops the run; even without edits, its issue branch is
   // the useful place for the user to inspect and fix the failure.
-  const context = harness({ startBranch: "feature/wip", implementerFails: true, producesChanges: false });
+  const context = harness({ startBranch: "feature/wip", addressFails: true, producesChanges: false });
   await context.engine.start();
   await context.engine.settle();
 
-  assert.match(context.notifications.join("\n"), /implementer failed/);
+  assert.match(context.notifications.join("\n"), /address failed/);
   assert.equal(context.gitCalls.includes("checkout feature/wip"), false);
 });
 
 test("a stop with uncommitted work does not check out over it", async () => {
-  const context = harness({ startBranch: "feature/wip", implementerFails: true });
+  const context = harness({ startBranch: "feature/wip", addressFails: true });
   await context.engine.start();
   await context.engine.settle();
 
-  assert.match(context.notifications.join("\n"), /implementer failed/);
+  assert.match(context.notifications.join("\n"), /address failed/);
   assert.equal(context.gitCalls.includes("checkout feature/wip"), false);
 });
 
@@ -1281,14 +1281,14 @@ test("a user cancellation still restores the original branch", async () => {
   assert.equal(await context.git.currentBranch(), "feature/wip");
 });
 
-test("cancelling a running implementer settles its terminal and records cancellation", async () => {
+test("cancelling a running address settles its terminal and records cancellation", async () => {
   const context = harness({
     startBranch: "feature/wip",
     producesChanges: false,
-    pendingWorkerType: "implementer",
+    pendingWorkerType: "address",
   });
   await context.engine.start();
-  await waitForLaunch(context, "implementer");
+  await waitForLaunch(context, "address");
 
   context.engine.stop();
   await context.engine.settle();
@@ -1299,13 +1299,13 @@ test("cancelling a running implementer settles its terminal and records cancella
   assert.doesNotMatch(context.notifications.join("\n"), /Foreground wait/u);
 });
 
-test("cancelling a running implementer keeps its partial edits on the issue branch", async () => {
+test("cancelling a running address keeps its partial edits on the issue branch", async () => {
   const context = harness({
     startBranch: "feature/wip",
-    pendingWorkerType: "implementer",
+    pendingWorkerType: "address",
   });
   await context.engine.start();
-  await waitForLaunch(context, "implementer");
+  await waitForLaunch(context, "address");
 
   context.engine.stop();
   await context.engine.settle();
@@ -1316,14 +1316,14 @@ test("cancelling a running implementer keeps its partial edits on the issue bran
   assert.equal((await context.git.status()).entries.length, 1);
 });
 
-test("cancelling a running automated reviewer uses the same owned-terminal path", async () => {
+test("cancelling a running automated review uses the same owned-terminal path", async () => {
   const context = harness({
     startBranch: "feature/wip",
     settings: { review: true },
-    pendingWorkerType: "reviewer",
+    pendingWorkerType: "review",
   });
   await context.engine.start();
-  await waitForLaunch(context, "reviewer");
+  await waitForLaunch(context, "review");
 
   context.engine.stop();
   await context.engine.settle();
@@ -1333,9 +1333,9 @@ test("cancelling a running automated reviewer uses the same owned-terminal path"
   assert.equal(context.gitCalls.includes("checkout feature/wip"), false);
 });
 
-test("the implementer's account of its change is posted on the issue it addressed", async () => {
+test("the address's account of its change is posted on the issue it addressed", async () => {
   const context = harness({
-    implementerMessage: "Rewrote the backoff. Covered retry exhaustion.",
+    addressMessage: "Rewrote the backoff. Covered retry exhaustion.",
   });
   await context.engine.start();
   await context.engine.settle();
@@ -1414,11 +1414,11 @@ test("a merge refused for a reason other than a conflict still stops the whole r
 });
 
 test("a review that finds nothing records an empty completion commit", async () => {
-  const context = harness({ settings: { review: true }, reviewerProducesChanges: false });
+  const context = harness({ settings: { review: true }, reviewProducesChanges: false });
   await context.engine.start();
   await context.engine.settle();
 
-  assert.deepEqual(context.launches.map((launch) => launch.type), ["implementer", "reviewer"]);
+  assert.deepEqual(context.launches.map((launch) => launch.type), ["address", "review"]);
   assert.match(context.notifications.join("\n"), /issue #34 reviewed; review committed/);
   assert.equal(context.gitCalls.filter((call) => call.startsWith("push issue/34")).length, 2);
   assert.equal(context.pullRequests.get(56)?.state, "merged");
@@ -1429,8 +1429,8 @@ test("a review that finds nothing records an empty completion commit", async () 
   assert.notEqual(landed.reviewedSha, landed.implementationSha);
 });
 
-test("a reviewer that produces no completion commit stops the run", async () => {
-  const context = harness({ settings: { review: true }, reviewerCompletes: false });
+test("a review that produces no completion commit stops the run", async () => {
+  const context = harness({ settings: { review: true }, reviewCompletes: false });
   await context.engine.start();
   await context.engine.settle();
 
@@ -1449,12 +1449,12 @@ test("a worker that makes more than one commit stops the run", async () => {
   assert.equal(context.record()?.currentIssue, 34, "the commits and the branch are left for inspection");
 });
 
-test("review mode launches an AFK reviewer and commits its fixes as a second commit", async () => {
+test("review mode launches an AFK review and commits its fixes as a second commit", async () => {
   const context = harness({ settings: { review: true } });
   await context.engine.start();
   await context.engine.settle();
 
-  assert.deepEqual(context.launches.map((launch) => launch.type), ["implementer", "reviewer"]);
+  assert.deepEqual(context.launches.map((launch) => launch.type), ["address", "review"]);
   // Both workers commit for themselves; aboard creates no commit of its own.
   assert.equal(context.gitCalls.filter((call) => call === "commit").length, 0);
   assert.match(context.notifications.join("\n"), /issue #34 reviewed; review committed \([0-9a-z]{8}\)/);
@@ -1469,9 +1469,9 @@ test("every agent sent at an issue is launched at that issue's difficulty", asyn
   await context.engine.start();
   await context.engine.settle();
 
-  // The reviewer checks the same change the implementer made, so it is rated the
+  // The review checks the same change the address made, so it is rated the
   // same. What each tier costs is the launch planner's business.
-  assert.deepEqual(context.launches.map((launch) => launch.type), ["implementer", "reviewer"]);
+  assert.deepEqual(context.launches.map((launch) => launch.type), ["address", "review"]);
   assert.deepEqual(context.launches.map((launch) => launch.difficulty), ["basic", "basic"]);
 });
 
@@ -1483,17 +1483,17 @@ test("an unrated issue is delegated with no difficulty at all, rather than a gue
   assert.deepEqual(context.launches.map((launch) => launch.difficulty), [undefined, undefined]);
 });
 
-test("a failing implementer stops the run with no commit and no pull request", async () => {
-  const context = harness({ implementerFails: true });
+test("a failing address stops the run with no commit and no pull request", async () => {
+  const context = harness({ addressFails: true });
   await context.engine.start();
   await context.engine.settle();
 
   assert.equal(context.gitCalls.includes("commit"), false);
   assert.equal(context.pullRequests.size, 0);
-  assert.match(context.notifications.join("\n"), /stopped at issue #34 \(implementer failed: context-exhausted\)/);
+  assert.match(context.notifications.join("\n"), /stopped at issue #34 \(address failed: context-exhausted\)/);
 });
 
-test("an implementer that commits nothing stops for user judgment", async () => {
+test("an address that commits nothing stops for user judgment", async () => {
   const context = harness({
     producesChanges: false,
     issues: [
@@ -1527,14 +1527,14 @@ test("residual uncommitted changes stop the run even though the worker also comm
   // another worker, so it stops on the same condition rather than relaunching.
   assert.equal((await context.engine.resume()).started, true);
   await context.engine.settle();
-  assert.equal(context.launches.filter((launch) => launch.type === "implementer").length, 1);
+  assert.equal(context.launches.filter((launch) => launch.type === "address").length, 1);
   assert.match(context.notifications.join("\n"), /uncommitted path\(s\).*src\/a.ts/);
 });
 
 test("a failed run can continue its exact ended worker with one Continue message", async () => {
   const context = harness({
-    settings: { exploreBeforeImplement: true },
-    implementerFails: true,
+    settings: { exploreBeforeAddress: true },
+    addressFails: true,
     producesChanges: false,
   });
   await context.engine.start();
@@ -1565,7 +1565,7 @@ test("a failed run can continue its exact ended worker with one Continue message
   assert.equal((await context.engine.resume({ continueSession: session })).started, true);
   await context.engine.settle();
 
-  assert.equal(context.launches.filter((launch) => launch.type === "implementer").length, 1, "no fresh worker was launched");
+  assert.equal(context.launches.filter((launch) => launch.type === "address").length, 1, "no fresh worker was launched");
   assert.equal(context.launches.filter((launch) => launch.type === "Explore").length, 1, "continuation reuses its original exploration context");
   assert.equal(context.continuations.length, 1);
   assert.equal(context.continuations[0]?.session, session);
@@ -1574,9 +1574,9 @@ test("a failed run can continue its exact ended worker with one Continue message
   assert.equal(context.gitCalls.some((call) => call.startsWith("push issue/34-add-retry-backoff")), true);
 });
 
-test("a resumed HITL-without-review implementer retains its non-committing contract", async () => {
+test("a resumed HITL-without-review address retains its non-committing contract", async () => {
   const context = harness({
-    implementerFails: true,
+    addressFails: true,
     producesChanges: false,
     issues: [{ number: 35, title: "human gate", labels: ["[AI]-hitl"], state: "open", openBlockedByNumbers: [] }],
   });
@@ -1591,9 +1591,9 @@ test("a resumed HITL-without-review implementer retains its non-committing contr
   await context.engine.settle();
 });
 
-test("a resumed HITL-with-review implementer retains its one-checkpoint-commit contract", async () => {
+test("a resumed HITL-with-review address retains its one-checkpoint-commit contract", async () => {
   const context = harness({
-    implementerFails: true,
+    addressFails: true,
     producesChanges: false,
     settings: { review: true },
     issues: [{ number: 35, title: "human gate", labels: ["[AI]-hitl"], state: "open", openBlockedByNumbers: [] }],
@@ -1605,13 +1605,13 @@ test("a resumed HITL-with-review implementer retains its one-checkpoint-commit c
   assert.equal((await context.engine.resume({ continueSession: session })).started, true);
   await waitForCommit(context);
   assert.ok(context.continuations[0]?.completionCommitStartingSha);
-  assert.deepEqual(context.launches.map((launch) => launch.type), ["implementer", "reviewer"]);
+  assert.deepEqual(context.launches.map((launch) => launch.type), ["address", "review"]);
   context.engine.stop();
   await context.engine.settle();
 });
 
-test("a resumed AFK reviewer retains its fix-or-empty completion commit contract", async () => {
-  const context = harness({ settings: { review: true }, reviewerFails: true });
+test("a resumed AFK review retains its fix-or-empty completion commit contract", async () => {
+  const context = harness({ settings: { review: true }, reviewFails: true });
   await context.engine.start();
   await context.engine.settle();
   const session = endedWorkerSession(context.record()!, 34, "terminal-2");
@@ -1623,7 +1623,7 @@ test("a resumed AFK reviewer retains its fix-or-empty completion commit contract
 });
 
 test("a run with its own checkout works there, launches there, and never moves the user's HEAD", async () => {
-  const context = harness({ worktree: true, producesChanges: true, settings: { exploreBeforeImplement: true } });
+  const context = harness({ worktree: true, producesChanges: true, settings: { exploreBeforeAddress: true } });
   assert.equal((await context.engine.start()).started, true);
   await context.engine.settle();
 
@@ -1696,7 +1696,7 @@ test("a dry run forecasts the exact queue and branches without creating run stat
   const context = harness({
     startBranch: "feature/wip",
     startDirty: true,
-    settings: { review: true, exploreBeforeImplement: true, mergeRunPullRequest: true, permanentPrompt: "  run browser tests  " },
+    settings: { review: true, exploreBeforeAddress: true, mergeRunPullRequest: true, permanentPrompt: "  run browser tests  " },
     issues: [
       { number: 41, title: "Ship the UI", labels: ["[AI]-hitl", "[AI]-advanced-difficulty", "[AI]-chrome"], state: "open", openBlockedByNumbers: [], dependencyNumbers: [42], createdAt: "2026-01-01T00:00:00.000Z" },
       { number: 42, title: "Build the API", labels: ["[AI]-afk"], state: "open", openBlockedByNumbers: [], createdAt: "2026-01-02T00:00:00.000Z" },
@@ -1713,7 +1713,7 @@ test("a dry run forecasts the exact queue and branches without creating run stat
   assert.equal(result.sessionBranch, "run/<run-id>");
   assert.equal(result.sessionBase, "feature/wip");
   assert.equal(result.reviewMode, true);
-  assert.equal(result.exploresBeforeImplement, true);
+  assert.equal(result.exploresBeforeAddress, true);
   assert.equal(result.permanentPrompt, "run browser tests");
   assert.equal(result.additionalGuideline, "no unit tests needed");
   assert.equal(result.mergesItsOwnPullRequest, true);
@@ -1957,7 +1957,7 @@ test("progress expands when an older blocked issue becomes ready", async () => {
   await context.engine.start();
   await context.engine.settle();
 
-  assert.deepEqual(context.launches.filter((launch) => launch.type === "implementer").map((launch) => launch.issues?.[0]), [34, 33, 35]);
+  assert.deepEqual(context.launches.filter((launch) => launch.type === "address").map((launch) => launch.issues?.[0]), [34, 33, 35]);
   assert.equal(context.states.some((state) => state.currentIssue === 33 && state.completedCount === 1 && state.totalCount === 3), true);
   assert.equal(context.states.some((state) => state.currentIssue === 35 && state.completedCount === 2 && state.totalCount === 3), true);
 });
@@ -1973,7 +1973,7 @@ test("a dependency cycle is visible and drains in deterministic order", async ()
   await context.engine.settle();
 
   assert.deepEqual(
-    context.launches.filter((launch) => launch.type === "implementer").map((launch) => launch.issues?.[0]),
+    context.launches.filter((launch) => launch.type === "address").map((launch) => launch.issues?.[0]),
     [34, 37],
   );
   assert.equal(context.notifications.some((entry) => entry.includes("dependency cycle") && entry.includes("#34, #37")), true);
@@ -1987,7 +1987,7 @@ test("resume re-enters at the first unsatisfied checkpoint and keeps the run's f
   assert.equal((await context.engine.resume()).started, true);
   await context.engine.settle();
 
-  assert.deepEqual(context.launches.map((launch) => launch.type), ["implementer"]);
+  assert.deepEqual(context.launches.map((launch) => launch.type), ["address"]);
   assert.equal(context.launches[0]?.additionalGuideline, "keep fixtures small");
   // Resuming is a second attempt on the same run, not a new run.
   assert.equal(context.saved[0]?.runId, "run_test");
@@ -2008,7 +2008,7 @@ test("a plan entry is never rediscovered: an issue labelled mid-run belongs to t
   await context.engine.settle();
 
   assert.deepEqual(
-    context.launches.filter((launch) => launch.type === "implementer").map((launch) => launch.issues?.[0]),
+    context.launches.filter((launch) => launch.type === "address").map((launch) => launch.issues?.[0]),
     [34],
   );
   assert.deepEqual(context.record()?.plan.map((issue) => issue.number) ?? [34], [34]);
@@ -2035,11 +2035,11 @@ test("recovered checkout validation and discard stay inside the recorded checkou
 });
 
 test("a frozen-plan mismatch after a worker returns stops before the next side effect", async () => {
-  const context = harness({ relabelAfterImplementer: true });
+  const context = harness({ relabelAfterAddress: true });
   assert.equal((await context.engine.start()).started, true);
   await context.engine.settle();
 
-  assert.deepEqual(context.launches.map((launch) => launch.type), ["implementer"]);
+  assert.deepEqual(context.launches.map((launch) => launch.type), ["address"]);
   assert.equal(context.gitCalls.includes("add"), false, "validation runs again before staging the worker's edits");
   assert.equal(context.comments.length, 0, "best-effort publication also waits for post-worker validation");
   assert.equal(context.createdPullRequests.length, 0);
@@ -2055,7 +2055,7 @@ test("a commit that failed to push resumes by pushing, not by reporting no chang
   assert.match(context.notifications.join("\n"), /stopped at issue #34 \(push rejected\)/);
 
   // The commit landed; only the push failed. A resume must retry the push rather
-  // than read the now-clean tree as "the implementer produced no changes".
+  // than read the now-clean tree as "the address produced no changes".
   const resumed = harness({ pushFails: false });
   assert.equal((await resumed.engine.start()).started, true);
   await resumed.engine.settle();
@@ -2085,7 +2085,7 @@ test("a resumed run uses the settings it froze, not the ones configured now", as
   await context.engine.resume();
   await context.engine.settle();
 
-  assert.deepEqual(context.launches.map((launch) => launch.type), ["implementer", "reviewer"]);
+  assert.deepEqual(context.launches.map((launch) => launch.type), ["address", "review"]);
 });
 
 test("a review already recorded is not repeated after a restart", async () => {
@@ -2099,7 +2099,7 @@ test("a review already recorded is not repeated after a restart", async () => {
   await context.engine.resume();
   await context.engine.settle();
 
-  assert.deepEqual(context.launches.map((launch) => launch.type), ["implementer"]);
+  assert.deepEqual(context.launches.map((launch) => launch.type), ["address"]);
 });
 
 async function waitForCommit(context: Harness): Promise<void> {
@@ -2130,16 +2130,16 @@ test("recovery fast-forwards an already merged issue without merging or implemen
 });
 
 for (const branchMode of ["per-issue", "single-branch"] as const) {
-  for (const reviewerProducesChanges of [false, true]) {
-    test(`${branchMode}: HITL review runs on the uncommitted checkpoint before one human acceptance commit (fixes=${reviewerProducesChanges})`, async () => {
-      const context = harness({ hitlUncommitted: true, reviewerProducesChanges,
+  for (const reviewProducesChanges of [false, true]) {
+    test(`${branchMode}: HITL review runs on the uncommitted checkpoint before one human acceptance commit (fixes=${reviewProducesChanges})`, async () => {
+      const context = harness({ hitlUncommitted: true, reviewProducesChanges,
         settings: { branchMode, review: true },
         issues: [{ number: 35, title: "human gate", labels: ["[AI]-hitl"], state: "open", openBlockedByNumbers: [] }],
       });
       await context.engine.start();
       await waitForCommit(context);
       assert.equal(context.createdPullRequests.length, 0);
-      assert.deepEqual(context.launches.map((launch) => launch.type), ["implementer", "reviewer"]);
+      assert.deepEqual(context.launches.map((launch) => launch.type), ["address", "review"]);
       assert.ok(context.launches[0]?.completionCommitStartingSha);
       assert.equal(context.launches[1]?.completionCommitStartingSha, undefined);
       assert.match(context.launches[1]?.reviewRange ?? "", /^[0-9a-z]{40}\.\.[0-9a-z]{40}$/u);
@@ -2148,16 +2148,16 @@ for (const branchMode of ["per-issue", "single-branch"] as const) {
       await context.git.commit("User accepts reviewed work", "");
       await context.engine.settle();
       assert.equal(context.state.cleared, true, context.notifications.join("\n"));
-      assert.deepEqual(context.launches.map((launch) => launch.type), ["implementer", "reviewer"]);
+      assert.deepEqual(context.launches.map((launch) => launch.type), ["address", "review"]);
       assert.equal(context.merges.length, branchMode === "per-issue" ? 1 : 0);
       assert.equal(context.createdPullRequests.at(-1)?.base, "main");
       assert.deepEqual(context.closures.map((entry) => entry.issue), [35]);
       assert.equal(context.commitCalls.length, 1, "Aboard never manufactures acceptance");
       assert.ok(context.closedTerminals.includes("terminal-1" as TerminalId), "settled HITL terminal is released after integration");
       const landed = [...context.saved].reverse().find((record) => record.progress["35"]?.state === "done")?.progress["35"];
-      assert.ok(landed?.state === "done" && landed.result === "landed" && landed.beforeSha && landed.implementerCommitSha && landed.resetCompleted && landed.hitlReviewCompleted && landed.implementationSha);
+      assert.ok(landed?.state === "done" && landed.result === "landed" && landed.beforeSha && landed.addressCommitSha && landed.resetCompleted && landed.hitlReviewCompleted && landed.implementationSha);
       assert.notEqual(landed.beforeSha, landed.implementationSha);
-      assert.notEqual(landed.implementerCommitSha, landed.implementationSha);
+      assert.notEqual(landed.addressCommitSha, landed.implementationSha);
     });
   }
 
@@ -2179,7 +2179,7 @@ for (const branchMode of ["per-issue", "single-branch"] as const) {
   });
 
   test(`${branchMode}: failed HITL launch stops before handoff even with a commit`, async () => {
-    const context = harness({ implementerFails: true, settings: { branchMode },
+    const context = harness({ addressFails: true, settings: { branchMode },
       issues: [{ number: 35, title: "human gate", labels: ["[AI]-hitl"], state: "open", openBlockedByNumbers: [] }],
     });
     await context.engine.start();
@@ -2233,12 +2233,12 @@ for (const branchMode of ["per-issue", "single-branch"] as const) {
     assert.deepEqual(context.merges, []);
   });
 
-  for (const reviewerProducesChanges of [false, true]) {
-    test(`${branchMode}: interrupted reviewer adopts its completion commit when its result was not recorded (fixes=${reviewerProducesChanges})`, async () => {
+  for (const reviewProducesChanges of [false, true]) {
+    test(`${branchMode}: interrupted review adopts its completion commit when its result was not recorded (fixes=${reviewProducesChanges})`, async () => {
       let interrupted: AutoRunRecord | undefined;
-      const context = harness({ reviewerProducesChanges, settings: { branchMode, review: true },
+      const context = harness({ reviewProducesChanges, settings: { branchMode, review: true },
         interruptBeforeSave: (next) => {
-          if (interrupted !== undefined || next.pendingAction?.kind !== "worker-turn" || next.pendingAction.role !== "reviewer" || next.pendingAction.outcome !== "succeeded") return false;
+          if (interrupted !== undefined || next.pendingAction?.kind !== "worker-turn" || next.pendingAction.role !== "review" || next.pendingAction.outcome !== "succeeded") return false;
           interrupted = context.record();
           return true;
         },
@@ -2250,7 +2250,7 @@ for (const branchMode of ["per-issue", "single-branch"] as const) {
       assert.equal((await context.engine.resume()).started, true);
       await context.engine.settle();
       assert.equal(context.state.cleared, true, context.notifications.join("\n"));
-      assert.equal(context.launches.filter((launch) => launch.type === "reviewer").length, 1);
+      assert.equal(context.launches.filter((launch) => launch.type === "review").length, 1);
     });
   }
 
@@ -2264,7 +2264,7 @@ for (const branchMode of ["per-issue", "single-branch"] as const) {
           const previous = context.record();
           const action = previous?.pendingAction;
           const matches = boundary === "publish" ? action?.kind === "push" && previous?.currentIssue !== undefined && next.pendingAction === undefined
-            : boundary === "implementation" || boundary === "review" ? action?.kind === "worker-turn" && action.outcome === "succeeded" && action.role === (boundary === "review" ? "reviewer" : "implementer") && next.pendingAction === undefined
+            : boundary === "implementation" || boundary === "review" ? action?.kind === "worker-turn" && action.outcome === "succeeded" && action.role === (boundary === "review" ? "review" : "address") && next.pendingAction === undefined
               : action?.kind === boundary && next.pendingAction === undefined;
           if (!enabled || !matches) return false;
           enabled = false;
@@ -2280,16 +2280,16 @@ for (const branchMode of ["per-issue", "single-branch"] as const) {
       assert.equal((await context.engine.resume()).started, true, context.notifications.join("\n"));
       await context.engine.settle();
       assert.equal(context.state.cleared, true, context.notifications.join("\n"));
-      assert.deepEqual(context.launches.map((launch) => launch.type), ["implementer", "reviewer"]);
+      assert.deepEqual(context.launches.map((launch) => launch.type), ["address", "review"]);
       if (boundary === "update-run-pr") assert.equal(context.updatedPullRequests.length, updatesBeforeResume, "completed PR update must not be repeated");
     });
   }
 }
 
-test("a normally completed HITL reviewer blocker message still enters human acceptance waiting", async () => {
+test("a normally completed HITL review blocker message still enters human acceptance waiting", async () => {
   const context = harness({
     hitlUncommitted: true,
-    reviewerMessage: "Blocked: the product owner must decide the compatibility behavior.",
+    reviewMessage: "Blocked: the product owner must decide the compatibility behavior.",
     settings: { review: true },
     issues: [{ number: 35, title: "human gate", labels: ["[AI]-hitl"], state: "open", openBlockedByNumbers: [] }],
   });
@@ -2305,10 +2305,10 @@ test("a normally completed HITL reviewer blocker message still enters human acce
   await context.engine.settle();
 });
 
-test("a technical HITL reviewer failure preserves and resumes the exact non-committing reviewer contract", async () => {
+test("a technical HITL review failure preserves and resumes the exact non-committing review contract", async () => {
   const context = harness({
     hitlUncommitted: true,
-    reviewerFails: true,
+    reviewFails: true,
     settings: { review: true },
     issues: [{ number: 35, title: "human gate", labels: ["[AI]-hitl"], state: "open", openBlockedByNumbers: [] }],
   });
@@ -2316,12 +2316,12 @@ test("a technical HITL reviewer failure preserves and resumes the exact non-comm
   await context.engine.settle();
 
   const reference = context.record()?.workerSession;
-  assert.ok(reference?.type === "reviewer" && reference.continuable === true);
+  assert.ok(reference?.type === "review" && reference.continuable === true);
   assert.equal(context.record()?.outcome?.kind, "failed");
   assert.deepEqual(context.createdPullRequests, []);
   const session: AgentSession = {
     platform: "claude",
-    identity: { agentId: reference.agentId, type: "reviewer" },
+    identity: { agentId: reference.agentId, type: "review" },
     sessionId: reference.sessionId,
     sessionBinding: "bound",
     terminal: { terminalId: "terminal-2" as TerminalId, name: "aboard: review issue 35 before acceptance" },
@@ -2344,15 +2344,15 @@ test("a technical HITL reviewer failure preserves and resumes the exact non-comm
   assert.equal(context.continuations[0]?.session, session);
   assert.equal(context.continuations[0]?.completionCommitStartingSha, undefined);
   assert.match(context.continuations[0]?.reviewRange ?? "", /^[0-9a-z]{40}\.\.[0-9a-z]{40}$/u);
-  assert.equal(context.launches.filter((launch) => launch.type === "reviewer").length, 1, "the failed reviewer was continued, not relaunched");
+  assert.equal(context.launches.filter((launch) => launch.type === "review").length, 1, "the failed review was continued, not relaunched");
   context.engine.stop();
   await context.engine.settle();
 });
 
-test("a commit created by the initial HITL reviewer is rejected before publication", async () => {
+test("a commit created by the initial HITL review is rejected before publication", async () => {
   const context = harness({
     hitlUncommitted: true,
-    hitlReviewerCommits: true,
+    hitlReviewCommits: true,
     settings: { review: true },
     issues: [{ number: 35, title: "human gate", labels: ["[AI]-hitl"], state: "open", openBlockedByNumbers: [] }],
   });
@@ -2361,7 +2361,7 @@ test("a commit created by the initial HITL reviewer is rejected before publicati
   await context.engine.settle();
 
   assert.equal(context.record()?.outcome?.kind, "failed");
-  assert.match(context.notifications.join("\n"), /HITL reviewer committed, changed branches, or rewrote history/u);
+  assert.match(context.notifications.join("\n"), /HITL review committed, changed branches, or rewrote history/u);
   assert.deepEqual(context.createdPullRequests, []);
 });
 
@@ -2381,7 +2381,7 @@ test("a HITL implementation reset must leave the checkpoint diff unstaged", asyn
   await context.engine.settle();
 
   assert.equal(context.record()?.outcome?.kind, "failed");
-  assert.deepEqual(context.launches.map((launch) => launch.type), ["implementer"]);
+  assert.deepEqual(context.launches.map((launch) => launch.type), ["address"]);
   assert.deepEqual(context.createdPullRequests, []);
   assert.match(context.notifications.join("\n"), /mixed reset.*index/iu);
 });
@@ -2410,7 +2410,7 @@ test("a dirty partial HITL commit stops recoverably and an amended single commit
   assert.equal(context.createdPullRequests.length > 0, true);
 });
 
-for (const boundary of ["before-reset", "after-reset", "reviewer-launch", "after-review"] as const) {
+for (const boundary of ["before-reset", "after-reset", "review-launch", "after-review"] as const) {
   test(`HITL review recovery resumes ${boundary} without duplicating completed work`, async () => {
     let interrupted: AutoRunRecord | undefined;
     let enabled = true;
@@ -2427,9 +2427,9 @@ for (const boundary of ["before-reset", "after-reset", "reviewer-launch", "after
           : boundary === "after-reset"
             ? previous?.pendingAction?.kind === "reset-implementation" && next.pendingAction === undefined
               && nextProgress?.state === "current" && nextProgress.resetCompleted === true
-            : boundary === "reviewer-launch"
-              ? next.pendingAction?.kind === "worker-turn" && next.pendingAction.role === "reviewer" && next.pendingAction.outcome === undefined
-              : previous?.pendingAction?.kind === "worker-turn" && previous.pendingAction.role === "reviewer"
+            : boundary === "review-launch"
+              ? next.pendingAction?.kind === "worker-turn" && next.pendingAction.role === "review" && next.pendingAction.outcome === undefined
+              : previous?.pendingAction?.kind === "worker-turn" && previous.pendingAction.role === "review"
                 && previous.pendingAction.outcome === "succeeded" && next.pendingAction === undefined
                 && nextProgress?.state === "current" && nextProgress.hitlReviewCompleted === true;
         if (!matches) return false;
@@ -2445,8 +2445,8 @@ for (const boundary of ["before-reset", "after-reset", "reviewer-launch", "after
     context.seed(interrupted);
     assert.equal((await context.engine.resume()).started, true, context.notifications.join("\n"));
     await waitForCommit(context);
-    assert.equal(context.launches.filter((launch) => launch.type === "implementer").length, 1);
-    assert.equal(context.launches.filter((launch) => launch.type === "reviewer").length, 1);
+    assert.equal(context.launches.filter((launch) => launch.type === "address").length, 1);
+    assert.equal(context.launches.filter((launch) => launch.type === "review").length, 1);
     await context.git.commit("Accept recovered review", "");
     await context.engine.settle();
     assert.equal(context.state.cleared, true, context.notifications.join("\n"));
@@ -2481,7 +2481,7 @@ test("HITL acceptance recorded before publication resumes by publishing only the
   assert.equal((await context.engine.resume()).started, true, context.notifications.join("\n"));
   await context.engine.settle();
   assert.equal(context.state.cleared, true, context.notifications.join("\n"));
-  assert.equal(context.launches.filter((launch) => launch.type === "implementer").length, 1);
-  assert.equal(context.launches.filter((launch) => launch.type === "reviewer").length, 1);
+  assert.equal(context.launches.filter((launch) => launch.type === "address").length, 1);
+  assert.equal(context.launches.filter((launch) => launch.type === "review").length, 1);
   assert.equal(context.commitCalls.length, 1);
 });

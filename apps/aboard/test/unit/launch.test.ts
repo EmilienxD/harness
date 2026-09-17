@@ -22,10 +22,10 @@ const agentId = "agent-1" as AgentId;
 const sessionId = "6b1e3f7a-2c4d-4a8b-9f10-2c3d4e5f6071" as SessionId;
 const runtimeRoot = "C:\\storage\\aboard";
 
-function workerConfiguration(type: "implementer" | "reviewer"): LaunchConfiguration {
+function workerConfiguration(type: "address" | "review"): LaunchConfiguration {
   return {
     shape: "skill",
-    skillName: type === "implementer" ? "address-this" : "review-this",
+    skillName: type === "address" ? "address-this" : "review-this",
     declaredModel: BY_DIFFICULTY,
     declaredEffort: BY_DIFFICULTY,
   };
@@ -35,9 +35,9 @@ function request(overrides: Partial<LaunchPlanRequest> = {}): LaunchPlanRequest 
   return {
     agentId,
     sessionId,
-    agentType: "implementer",
+    agentType: "address",
     shell: "powershell",
-    configuration: workerConfiguration("implementer"),
+    configuration: workerConfiguration("address"),
     prompt: "Address issue #47.",
     runtimeDirectory: runtimeRoot,
     ...overrides,
@@ -68,7 +68,7 @@ test("plans an unmodified interactive session without an initial prompt", () => 
 
 test("a delegated Claude skill preserves its invocation and caller-supplied text", () => {
   const plan = planLaunch(request({
-    agentType: "Web Search",
+    agentType: "websearch",
     configuration: { shape: "default" },
     prompt: "Check /api and report primary sources.",
     skill: "websearch",
@@ -119,8 +119,8 @@ test("plans Explore through Claude Code's builtin agent", () => {
 });
 
 for (const [type, invocation] of [
-  ["implementer", "/address-this"],
-  ["reviewer", "/review-this"],
+  ["address", "/address-this"],
+  ["review", "/review-this"],
 ] as const) {
   test(`plans ${type} as a literal skill invocation`, () => {
     const configuration = workerConfiguration(type);
@@ -144,7 +144,7 @@ test("requires a first prompt for skill launches", () => {
 
 test("preserves immutable and isolation deny rules without MCP allowlisting", () => {
   const plan = planLaunch(request({
-    configuration: { ...workerConfiguration("implementer"), deniedTools: ["Agent", "WebSearch", "WebFetch"] },
+    configuration: { ...workerConfiguration("address"), deniedTools: ["Agent", "WebSearch", "WebFetch"] },
     restrictions: { deniedCommands: ["git push*", "git push*"], denyWeb: true },
   }));
 
@@ -174,9 +174,9 @@ test("spills long skill prompts and keeps the original task separately", () => {
 });
 
 test("names the Claude session after its fleet agent label", () => {
-  const plan = planLaunch(request({ agentId: "7" as AgentId, agentType: "reviewer", configuration: workerConfiguration("reviewer") }));
+  const plan = planLaunch(request({ agentId: "7" as AgentId, agentType: "review", configuration: workerConfiguration("review") }));
 
-  assert.equal(hasPair(plan.args, "--name", "aboard-reviewer-7"), true);
+  assert.equal(hasPair(plan.args, "--name", "aboard-review-7"), true);
 });
 
 test("uses a wrapper request to keep child argv out of terminal input", () => {
@@ -200,9 +200,9 @@ test("resume restores policy and restrictions without re-expanding a skill", () 
   const plan = planSessionResume({
     agentId,
     sessionId,
-    agentType: "reviewer",
+    agentType: "review",
     shell: "powershell",
-    configuration: workerConfiguration("reviewer"),
+    configuration: workerConfiguration("review"),
     runtimeDirectory: runtimeRoot,
     prompt: "Continue",
     restrictions: { deniedCommands: ["git push*"] },
@@ -220,9 +220,9 @@ test("spilled continuation prompts use short fresh names under the activation ro
   const plan = planSessionResume({
     agentId,
     sessionId,
-    agentType: "reviewer",
+    agentType: "review",
     shell: "powershell",
-    configuration: workerConfiguration("reviewer"),
+    configuration: workerConfiguration("review"),
     runtimeDirectory: runtimeRoot,
     promptRoot: "C:/Temp/abd-K7M2Q1",
     prompt: "Continue with the review context. ".repeat(100),
@@ -233,24 +233,24 @@ test("spilled continuation prompts use short fresh names under the activation ro
   assert.match(plan.spill?.relativePath ?? "", /^C:\/Temp\/abd-K7M2Q1\/agent-1\/c-[0-9a-f]{16}\.md$/u);
 });
 
-test("Chrome is available only to implementers and is replayed on resume", () => {
+test("Chrome is available only to address workers and is replayed on resume", () => {
   assert.equal(planLaunch(request({ chrome: true })).args.includes("--chrome"), true);
   assert.throws(
     () => planLaunch(request({
-      agentType: "reviewer",
-      configuration: workerConfiguration("reviewer"),
+      agentType: "review",
+      configuration: workerConfiguration("review"),
       chrome: true,
     })),
     (error: unknown) => error instanceof LaunchPlanError && error.code === "shape-not-allowed",
   );
 });
 
-test("launch capability follows the stable public role", () => {
+test("launch capability follows the stable public type", () => {
   const cases: readonly [AgentType, LaunchConfiguration, string][] = [
     ["interactive", { shape: "default" }, "write-capable"],
     ["Explore", { shape: "builtin", agentName: "Explore" }, "read-only"],
-    ["implementer", workerConfiguration("implementer"), "write-capable"],
-    ["reviewer", workerConfiguration("reviewer"), "write-capable"],
+    ["address", workerConfiguration("address"), "write-capable"],
+    ["review", workerConfiguration("review"), "write-capable"],
   ];
   for (const [type, configuration, expected] of cases) {
     assert.equal(launchWriteCapability(type, configuration), expected);

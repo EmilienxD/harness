@@ -103,7 +103,7 @@ export type AutoRunCard =
 
 export type AutoRunNode =
   | { readonly kind: "card"; readonly card: AutoRunCard }
-  | { readonly kind: "issue"; readonly issue: FrozenIssue; readonly progress: IssueProgress; readonly title: string; readonly handoff?: { readonly type: "implementer" | "reviewer"; readonly agentId: string }; readonly workingBranch: string }
+  | { readonly kind: "issue"; readonly issue: FrozenIssue; readonly progress: IssueProgress; readonly title: string; readonly handoff?: { readonly type: "address" | "review"; readonly agentId: string }; readonly workingBranch: string }
   | { readonly kind: "forecast-issue"; readonly issue: PlannedIssue; readonly position: number; readonly total: number; readonly branchMode: "per-issue" | "single-branch" };
 
 export interface AutoRunTreeItem {
@@ -125,7 +125,7 @@ export interface AutoRunViewSources {
   /** Live issue titles, for display only; the plan's frozen titles do the work. */
   readonly titles: () => Readonly<Record<string, string>>;
   /** The live worker conversation currently available as this issue's handoff. */
-  readonly liveHandoff?: (issueNumber: number) => { readonly type: "implementer" | "reviewer"; readonly agentId: string } | undefined;
+  readonly liveHandoff?: (issueNumber: number) => { readonly type: "address" | "review"; readonly agentId: string } | undefined;
 }
 
 export function autoRunCard(sources: AutoRunViewSources): AutoRunCard {
@@ -377,7 +377,7 @@ function forecastIssueItem(node: Extract<AutoRunNode, { kind: "forecast-issue" }
 
 function waitingHandoff(record: AutoRunRecord, issueNumber: number | undefined): string {
   const worker = record.workerSession;
-  return worker === undefined || worker.issueNumber !== issueNumber || (worker.type !== "implementer" && worker.type !== "reviewer")
+  return worker === undefined || worker.issueNumber !== issueNumber || (worker.type !== "address" && worker.type !== "review")
     ? ""
     : `\n\nHandoff session: ${worker.type} ${worker.agentId} (${worker.sessionId}).`;
 }
@@ -394,7 +394,7 @@ function forecastTooltip(forecast: AutoRunForecast & { readonly preview: AutoRun
     preview.branchMode === "single-branch" ? "All issues are committed to the session branch; one cumulative pull request is used." : "Each issue uses its own branch and pull request.",
     ...preview.warnings.map((warning) => `Warning: ${warning}`),
     preview.isolatedWorkspace ? "Would work in a separate checkout" : "Would work in your checkout",
-    `Fresh Explore context ${preview.exploresBeforeImplement ? "on" : "off"}`,
+    `Fresh Explore context ${preview.exploresBeforeAddress ? "on" : "off"}`,
     `Review ${preview.reviewMode ? "on" : "off"}`,
     preview.permanentPrompt === undefined ? "" : "Configured auto-run note will be included",
     preview.additionalGuideline === undefined ? "" : "Per-run auto note will be included after the configured note",
@@ -447,7 +447,7 @@ function runTooltip(record: AutoRunRecord, state?: AutoRunState): string {
     progress?.state === "current" && progress.beforeSha !== undefined && progress.implementationSha !== undefined ? `Accepted range: ${progress.beforeSha}..${progress.implementationSha}` : "",
     progress?.state === "current" && progress.reviewedSha !== undefined ? `Reviewed through: ${progress.reviewedSha}` : "",
     record.settings.workspaceRoot === undefined ? "Working in your checkout" : `Working in ${record.settings.workspaceRoot}`,
-    `Fresh Explore context ${record.settings.exploreBeforeImplement ? "on" : "off"}`,
+    `Fresh Explore context ${record.settings.exploreBeforeAddress ? "on" : "off"}`,
     `Review ${record.settings.review ? "on" : "off"}`,
     record.runPullRequest === undefined ? "" : `Run pull request: #${record.runPullRequest}`,
     state?.currentPullRequest === undefined ? "" : `Current pull request: #${state.currentPullRequest}`,

@@ -32,7 +32,7 @@ TASK_POLICIES = {
     "prototype-with-agent": TaskPolicy("prototype", frozenset({"interactive", "auto"})),
     "websearch-with-agent": TaskPolicy("websearch", frozenset({"interactive", "auto"})),
     "brainstorm-with-agent": TaskPolicy("brainstorm", frozenset({"interactive"})),
-    "address-with-agent": TaskPolicy("implement", frozenset({"interactive", "auto"})),
+    "address-with-agent": TaskPolicy("address", frozenset({"interactive", "auto"})),
     "review-with-agent": TaskPolicy("review", frozenset({"interactive", "auto"})),
     "work-with-agent": TaskPolicy("general", frozenset({"interactive", "auto"})),
 }

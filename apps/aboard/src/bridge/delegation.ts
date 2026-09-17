@@ -60,10 +60,10 @@ export interface DelegationLaunchInput {
   readonly issues?: readonly number[];
   /** How many relation levels of issue context the resolved prompt preloads. */
   readonly issueContextDepth?: number;
-  /** Fresh bounded codebase evidence supplied only to an implementer. */
+  /** Fresh bounded codebase evidence supplied only to an address. */
   readonly codebaseContext?: string;
   readonly pullRequest?: number;
-  /** Set only by auto-run when the implementer's frozen issue has `[AI]-chrome`. */
+  /** Set only by auto-run when the address's frozen issue has `[AI]-chrome`. */
   readonly chrome?: true;
   /** Set only by the auto-run engine, and only when the run has its own checkout. */
   readonly isolation?: LaunchIsolation;
@@ -71,7 +71,7 @@ export interface DelegationLaunchInput {
   readonly executionMode?: ExecutionMode;
   /** Pinned parent for a worker whose successful turn must add exactly one commit. */
   readonly completionCommitStartingSha?: string;
-  /** Immutable implementation range for a reviewer working from an uncommitted HITL handoff. */
+  /** Immutable implementation range for a review working from an uncommitted HITL handoff. */
   readonly reviewRange?: string;
   /** A provider-explicit manual launch may bypass the project's default provider. */
   readonly configuration?: ConfiguredLaunch;
@@ -291,7 +291,7 @@ export class DelegationCoordinator {
       attended,
       executionMode,
       ...(target.autoRunRestricted === true ? { autoRunRestricted: true as const } : {}),
-      ...(target.type === "implementer" && target.chromeEnabled === true ? { chrome: true } : {}),
+      ...(target.type === "address" && target.chromeEnabled === true ? { chrome: true } : {}),
       configuration: configured.settings,
       runtimeDirectory: this.options.runtimeDirectory ?? (this.options.wrapper === undefined ? undefined : dirname(dirname(this.options.wrapper.lockPathFor(target.agentId)))),
       ...(this.options.promptRoot === undefined ? {} : { promptRoot: this.options.promptRoot }),
@@ -510,7 +510,7 @@ export class DelegationCoordinator {
       attended,
       executionMode,
       ...(origin === "auto-run" ? { autoRunRestricted: true as const } : {}),
-      ...(agentType === "implementer" && input.chrome === true ? { chrome: true } : {}),
+      ...(agentType === "address" && input.chrome === true ? { chrome: true } : {}),
       configuration: configured.settings,
       runtimeDirectory: this.options.runtimeDirectory ?? (this.options.wrapper === undefined ? undefined : dirname(dirname(this.options.wrapper.lockPathFor(agentId)))),
       ...(this.options.promptRoot === undefined ? {} : { promptRoot: this.options.promptRoot }),
@@ -571,7 +571,7 @@ export class DelegationCoordinator {
           telemetry: EMPTY_TELEMETRY,
           ...(input.chrome === true ? { chromeEnabled: true as const } : {}),
           ...(input.issues === undefined ? {} : { issueNumbers: input.issues }),
-          // This policy is not derivable from the stable reviewer identity: a
+          // This policy is not derivable from the stable review identity: a
           // manual review is user-driven and deliberately unrestricted.
           ...(origin === "auto-run" ? { autoRunRestricted: true as const } : {}),
           ...(cwd === undefined ? {} : { cwd }),

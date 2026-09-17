@@ -4,7 +4,7 @@ import { LaunchFileError, type PlatformLaunchFile } from "../platform/launch-con
 import { BY_DIFFICULTY, EFFORT_LEVELS, type DeclaredEffort, type EffortLevel } from "../platform/launch.js";
 import type { LaunchConfiguration } from "./launch.js";
 
-const PROFILE_NAMES = ["interactive", "explore", "implementer", "reviewer"] as const;
+const PROFILE_NAMES = ["interactive", "explore", "address", "review"] as const;
 const ROOT_FIELDS = new Set(["command", ...PROFILE_NAMES]);
 const PROFILE_FIELDS = new Set(["model", "effort", "deniedTools"]);
 const MODELS = ["haiku", "sonnet", "opus"] as const;
@@ -19,8 +19,8 @@ interface Profile { readonly model: Model; readonly effort: Effort; readonly den
 const DEFAULT_PROFILES: Readonly<Record<ProfileName, Profile>> = {
   interactive: { model: "inherit", effort: "inherit", deniedTools: [] },
   explore: { model: "haiku", effort: "low", deniedTools: [] },
-  implementer: { model: BY_DIFFICULTY, effort: BY_DIFFICULTY, deniedTools: [] },
-  reviewer: { model: BY_DIFFICULTY, effort: BY_DIFFICULTY, deniedTools: [] },
+  address: { model: BY_DIFFICULTY, effort: BY_DIFFICULTY, deniedTools: [] },
+  review: { model: BY_DIFFICULTY, effort: BY_DIFFICULTY, deniedTools: [] },
 };
 
 function object(value: unknown, path: string): Record<string, unknown> {
@@ -61,7 +61,7 @@ class ClaudeLaunchFile implements PlatformLaunchFile {
 
   public configuration(type: AgentType): ConfiguredLaunch {
     const profileName: ProfileName = type === "Explore" ? "explore"
-      : type === "implementer" || type === "reviewer" ? type : "interactive";
+      : type === "address" || type === "review" ? type : "interactive";
     const profile = this.profiles[profileName];
     const common = {
       declaredCommand: this.command,
@@ -70,9 +70,9 @@ class ClaudeLaunchFile implements PlatformLaunchFile {
       deniedTools: profile.deniedTools,
     };
     let settings: LaunchConfiguration;
-    if (["interactive", "Prototype", "Web Search", "Brainstorm", "General"].includes(type)) settings = { shape: "default", ...common };
+    if (["interactive", "prototype", "websearch", "brainstorm", "general"].includes(type)) settings = { shape: "default", ...common };
     else if (type === "Explore") settings = { shape: "builtin", agentName: "Explore", ...common };
-    else if (type === "implementer") settings = { shape: "skill", skillName: "address-this", ...common };
+    else if (type === "address") settings = { shape: "skill", skillName: "address-this", ...common };
     // AFK and HITL are auto-run orchestration modes, not separate review skills.
     else settings = { shape: "skill", skillName: "review-this", ...common };
     return { platform: this.platform, settings };

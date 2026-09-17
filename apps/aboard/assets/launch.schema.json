@@ -80,8 +80,8 @@
         "command": { "$ref": "#/$defs/command" },
         "interactive": { "$ref": "#/$defs/claudeInteractiveProfile" },
         "explore": { "$ref": "#/$defs/claudeExploreProfile" },
-        "implementer": { "$ref": "#/$defs/claudeWorkerProfile" },
-        "reviewer": { "$ref": "#/$defs/claudeWorkerProfile" }
+        "address": { "$ref": "#/$defs/claudeWorkerProfile" },
+        "review": { "$ref": "#/$defs/claudeWorkerProfile" }
       }
     },
     "chatgptProvider": {
@@ -90,8 +90,8 @@
         "command": { "$ref": "#/$defs/command" },
         "interactive": { "$ref": "#/$defs/chatgptSessionProfile" },
         "explore": { "$ref": "#/$defs/chatgptSessionProfile" },
-        "implementer": { "$ref": "#/$defs/chatgptWorkerProfile" },
-        "reviewer": { "$ref": "#/$defs/chatgptWorkerProfile" }
+        "address": { "$ref": "#/$defs/chatgptWorkerProfile" },
+        "review": { "$ref": "#/$defs/chatgptWorkerProfile" }
       }
     }
   }

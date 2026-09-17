@@ -57,7 +57,7 @@ export interface ResolvedPrompt {
 
 export type PromptResolutionRequest =
   | {
-      readonly kind: "implementation";
+      readonly kind: "address";
       readonly instruction: string;
       readonly issueNumbers: readonly number[];
       readonly codebaseContext?: string;
@@ -95,7 +95,7 @@ export const DEFAULT_PROMPT_RESOLUTION_LIMITS: PromptResolutionLimits = {
 export const DEFAULT_REVIEW_CHANGE_INSTRUCTION =
   "Review the supplied change against its contract.";
 
-export const DEFAULT_IMPLEMENTATION_INSTRUCTION =
+export const DEFAULT_ADDRESS_INSTRUCTION =
   "Address the following issue.";
 
 export const DEFAULT_CONTINUATION_INSTRUCTION =
@@ -123,7 +123,7 @@ export function autoRunExplorePrompt(issue: Pick<IssueSnapshot, "number" | "titl
   );
 }
 
-export function autoRunImplementerPrompt(
+export function autoRunAddressPrompt(
   issue: Pick<IssueSnapshot, "number" | "title">,
   options: {
     readonly completionCommitStartingSha?: string;
@@ -152,7 +152,7 @@ export function autoRunReviewGuideline(issueNumber: number, exactRange: string):
   );
 }
 
-export function autoRunReviewerPrompt(
+export function autoRunReviewPrompt(
   issue: Pick<IssueSnapshot, "number" | "title">,
   pullRequestNumber: number,
 ): string {
@@ -163,7 +163,7 @@ export function autoRunReviewerPrompt(
   );
 }
 
-export function autoRunHitlReviewerPrompt(
+export function autoRunHitlReviewPrompt(
   issue: Pick<IssueSnapshot, "number" | "title">,
   exactRange: string,
 ): string {
@@ -301,7 +301,7 @@ export function workerContinuationPrompt(
   return `${continuation}\n\nReminder: Perform the task described in @${task.path}.\n\n${task.contents}`;
 }
 
-/** Rejects an empty Explore handoff before implementation starts. */
+/** Rejects an empty Explore handoff before address starts. */
 export function requireExploreReport(value: string): string {
   const report = value.trim();
   if (report.length === 0) throw new Error("Explore returned no codebase context");
@@ -326,8 +326,8 @@ export class PromptResolver {
     request: PromptResolutionRequest,
   ): Promise<ResolvedPrompt | undefined> {
     switch (request.kind) {
-      case "implementation":
-        return this.#resolveImplementation(request);
+      case "address":
+        return this.#resolveAddress(request);
       case "exploration":
         return this.#resolveExploration(request);
       case "review":
@@ -452,8 +452,8 @@ export class PromptResolver {
     }
   }
 
-  async #resolveImplementation(
-    request: Extract<PromptResolutionRequest, { kind: "implementation" }>,
+  async #resolveAddress(
+    request: Extract<PromptResolutionRequest, { kind: "address" }>,
   ): Promise<ResolvedPrompt> {
     const instruction = requireInstruction(request.instruction);
     const issues = await this.#fetchIssues(request.issueNumbers);

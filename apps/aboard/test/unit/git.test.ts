@@ -136,16 +136,16 @@ test("mixed reset exposes an exact commit tree as an unstaged review handoff", a
   await writeFile(join(root, "README.md"), "implemented\n");
   await writeFile(join(root, "added.ts"), "export const added = true;\n");
   await client.add();
-  const implementerCommitSha = await client.commit("checkpoint", "");
+  const addressCommitSha = await client.commit("checkpoint", "");
 
-  assert.notEqual(await client.treeSha(implementerCommitSha), beforeTreeSha);
+  assert.notEqual(await client.treeSha(addressCommitSha), beforeTreeSha);
   await client.resetMixed(beforeSha);
   assert.equal(await client.headSha(false), beforeSha);
-  assert.equal(await client.workingTreeMatchesCommit(implementerCommitSha), true);
+  assert.equal(await client.workingTreeMatchesCommit(addressCommitSha), true);
   assert.deepEqual((await client.status()).entries.map((entry) => entry.status).sort(), ["??", "M"]);
 
   await writeFile(join(root, "unexpected.ts"), "export const unexpected = true;\n");
-  assert.equal(await client.workingTreeMatchesCommit(implementerCommitSha), false);
+  assert.equal(await client.workingTreeMatchesCommit(addressCommitSha), false);
 });
 
 test("deleteBranch removes only a fully merged local branch", async () => {

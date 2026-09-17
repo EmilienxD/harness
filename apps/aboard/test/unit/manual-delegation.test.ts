@@ -19,8 +19,8 @@ test("manual delegation maps task identity and explicit execution mode", async (
 
   assert.equal(response.status, 201);
   assert.deepEqual(launches, [{
-    requestId: "request-1", type: "Web Search", provider: "chatgpt", executionMode: "auto",
-    prompt: "Find primary sources.", skill: "websearch", cwd: "C:\\work", description: "Web Search",
+    requestId: "request-1", type: "websearch", provider: "chatgpt", executionMode: "auto",
+    prompt: "Find primary sources.", skill: "websearch", cwd: "C:\\work", description: "websearch",
   }]);
 });
 
@@ -30,7 +30,7 @@ test("manual issue delegation invokes the reader worker skills", async () => {
     launch: async (request) => { launches.push(request); return { agentId: "agent-4", sessionId: "session", terminalId: "terminal" }; },
   });
 
-  for (const [index, task] of ["implement", "review"].entries()) {
+  for (const [index, task] of ["address", "review"].entries()) {
     const response = await handler({
       method: "POST",
       url: new URL("http://127.0.0.1/delegations"),
@@ -43,12 +43,12 @@ test("manual issue delegation invokes the reader worker skills", async () => {
 
   assert.deepEqual(launches, [
     {
-      requestId: "request-0", type: "General", provider: "chatgpt", executionMode: "auto",
-      prompt: "Do it.", skill: "address-this", cwd: "C:\\work", description: "Issue Implementation",
+      requestId: "request-0", type: "general", provider: "chatgpt", executionMode: "auto",
+      prompt: "Do it.", skill: "address-this", cwd: "C:\\work", description: "Address",
     },
     {
-      requestId: "request-1", type: "General", provider: "chatgpt", executionMode: "auto",
-      prompt: "Do it.", skill: "review-this", cwd: "C:\\work", description: "Issue Review",
+      requestId: "request-1", type: "general", provider: "chatgpt", executionMode: "auto",
+      prompt: "Do it.", skill: "review-this", cwd: "C:\\work", description: "Review",
     },
   ]);
 });

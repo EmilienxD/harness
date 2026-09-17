@@ -311,7 +311,7 @@ export class ProcessGitClient implements GitClient {
 
   public async deleteBranch(branch: string): Promise<void> {
     // Deliberately not `-D`: cleanup must never discard a commit merely because
-    // an implementer unexpectedly left the working tree clean.
+    // an address worker unexpectedly left the working tree clean.
     await this.run(["branch", "-d", branch]);
   }
 

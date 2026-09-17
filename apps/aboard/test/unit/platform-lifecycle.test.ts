@@ -79,7 +79,7 @@ test("platform lifecycle ingress dispatches only normalized stop, end, compactio
   const { attended: _attended, ...unattended } = registered();
   fleet.register({
     ...unattended,
-    identity: { agentId, type: "implementer" },
+    identity: { agentId, type: "address" },
     sessionId: actual,
     sessionBinding: "bound",
     lifecycle: { status: "starting", startedAt: at },

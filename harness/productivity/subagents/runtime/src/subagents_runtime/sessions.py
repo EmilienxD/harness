@@ -444,7 +444,7 @@ def launch_delegated(request, request_id: str, agent_number: int, cwd: Path) -> 
         "prototype": "prototype",
         "websearch": "websearch",
         "brainstorm": "grill-me",
-        "implement": "address-this",
+        "address": "address-this",
         "review": "review-this",
     }.get(request.task)
     continuing = bool(request.resume)

@@ -15,7 +15,7 @@ const startedAt = at("2026-07-30T10:00:00.000Z");
 function worker(delivery: AgentSession["resultDelivery"] = { mode: "tool-result" }): AgentSession {
   return {
     platform: "claude",
-    identity: { agentId: agent("worker-10"), type: "implementer" },
+    identity: { agentId: agent("worker-10"), type: "address" },
     sessionId: session("4db0ed4c-5d9e-4ab5-a493-2b8575ab19ee"),
     sessionBinding: "bound",
     terminal: { terminalId: terminal("terminal-10"), name: "worker" },
@@ -153,7 +153,7 @@ test("only Auto Run workers with result delivery are reconciled on terminal clos
   const automated = worker();
   assert.equal(reportsResult(automated), true);
   assert.equal(reportsResult({ ...automated, resultDelivery: { mode: "none" } }), false);
-  assert.equal(reportsResult({ ...automated, identity: { agentId: agent("a"), type: "reviewer" } }), true);
+  assert.equal(reportsResult({ ...automated, identity: { agentId: agent("a"), type: "review" } }), true);
   assert.equal(reportsResult({ ...automated, identity: { agentId: agent("a"), type: "interactive" }, attended: true }), false);
   assert.equal(reportsResult({ ...automated, identity: { agentId: agent("a"), type: "Explore" }, resultDelivery: { mode: "none" } }), false);
 });

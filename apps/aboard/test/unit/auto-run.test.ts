@@ -262,24 +262,24 @@ test("HITL distinguishes ordinary pre-commit waiting from a dirty partial commit
   assert.match(partial.kind === "rejected" ? partial.reason : "", /amend/u);
 });
 
-test("a pending HITL reviewer re-enters its handoff even while the checkpoint diff is dirty", () => {
+test("a pending HITL review re-enters its handoff even while the checkpoint diff is dirty", () => {
   assert.deepEqual(step("review", { workingTreeDirty: true, dirtyPaths: ["src/a.ts"], hitlReviewPending: true }, {
     reviewMode: true,
     issue: { ...issue, disposition: "hitl" },
-  }), { action: "implement", issue: { ...issue, disposition: "hitl" } });
+  }), { action: "address", issue: { ...issue, disposition: "hitl" } });
 });
 
 test("the reducer walks the phases in order from a clean start", () => {
   // The base is the run's session branch, never the repository's default one.
   assert.deepEqual(step("branch", { branchExists: false, currentBranch: "main" }), { action: "branch", branch: issue.branch, base: SESSION_BRANCH });
-  assert.deepEqual(step("implement"), { action: "implement", issue });
+  assert.deepEqual(step("address"), { action: "address", issue });
   // The worker committed; the commit phase only publishes what it produced.
   assert.deepEqual(step("publish", { hasCommit: true }), { action: "publish", issue });
 });
 
 test("uncommitted changes stop the run instead of feeding a worker or a commit", () => {
   const dirty = { workingTreeDirty: true, dirtyPaths: ["src/a.ts"] } as const;
-  const beforeImplementation = step("implement", dirty);
+  const beforeImplementation = step("address", dirty);
   assert.equal(beforeImplementation.action, "stop");
   assert.match(beforeImplementation.action === "stop" ? beforeImplementation.reason : "", /src\/a\.ts/);
 

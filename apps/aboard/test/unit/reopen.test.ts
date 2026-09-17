@@ -74,8 +74,8 @@ test("interactive delegated continuations refuse a live terminal and require a n
     launcher: { reopen: async () => { throw new Error("must not launch without a message"); } },
     isResumable: async () => true,
   });
-  const candidate = { platform: "claude" as const, agentId, type: "General" as const,
-    executionMode: "interactive" as const, sessionId, description: "General", origin: "ended" as const, at };
+  const candidate = { platform: "claude" as const, agentId, type: "general" as const,
+    executionMode: "interactive" as const, sessionId, description: "general", origin: "ended" as const, at };
   assert.deepEqual(await coordinator.reopen(candidate), { action: "unresumable", candidate, reason: "execution-active" });
   live = undefined;
   assert.deepEqual(await coordinator.reopen(candidate), { action: "unresumable", candidate, reason: "next-message-required" });

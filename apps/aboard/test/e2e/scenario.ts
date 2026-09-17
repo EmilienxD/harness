@@ -27,7 +27,7 @@ export const AFTER_CONTENT = "harness e2e fixture: after\n";
 /** No completion markup: a worker signals completion by committing. */
 export const FINAL_RESPONSE = "Fixture updated and verified.";
 export const WORKER_COMMIT_COMMAND = 'git add -A; git commit -m "Update deterministic fixture"';
-export const REVIEWER_APPROVAL_COMMIT_COMMAND = 'git commit --allow-empty -m "Approve deterministic fixture"';
+export const REVIEW_APPROVAL_COMMIT_COMMAND = 'git commit --allow-empty -m "Approve deterministic fixture"';
 
 export type ScenarioId = "single-file-success" | "auto-run-afk" | "auto-run-hitl" | "auto-run-hitl-review" | "auto-run-followup";
 
@@ -162,12 +162,12 @@ function autoRunHitlReviewTransition(request: MessagesRequest, repoRoot: string,
     };
   }
   if (read.is_error === true || !contentContains(read.content, AFTER_CONTENT.trimEnd())) {
-    throw new ScenarioMismatch("$.messages", "HITL reviewer did not observe the reset implementation", scenario);
+    throw new ScenarioMismatch("$.messages", "HITL review did not observe the reset implementation", scenario);
   }
   const acceptanceRequested = messageText(request.messages.filter((message) => message.role === "user")).includes(HITL_ACCEPT_PROMPT);
   const commit = results.get(commitId);
   if (!acceptanceRequested) {
-    if (commit) throw new ScenarioMismatch("$.messages", "HITL reviewer committed during its automated turn", scenario);
+    if (commit) throw new ScenarioMismatch("$.messages", "HITL review committed during its automated turn", scenario);
     return {
       scenario,
       checkpoint: "auto-hitl-review-complete",
@@ -210,10 +210,10 @@ function autoRunAfkTransition(request: MessagesRequest, repoRoot: string): Scena
         checkpoint: "auto-review-commit",
         messageId: scenarioStableId(scenario, "auto-review-commit"),
         stopReason: "tool_use",
-        content: [{ type: "tool_use", id: commitId, name: "Bash", input: { command: REVIEWER_APPROVAL_COMMIT_COMMAND } }],
+        content: [{ type: "tool_use", id: commitId, name: "Bash", input: { command: REVIEW_APPROVAL_COMMIT_COMMAND } }],
       };
     }
-    if (commit.is_error === true) throw new ScenarioMismatch("$.messages", "the reviewer's approval commit reported an error", scenario);
+    if (commit.is_error === true) throw new ScenarioMismatch("$.messages", "the review's approval commit reported an error", scenario);
     return {
       scenario,
       checkpoint: "auto-review-complete",

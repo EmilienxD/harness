@@ -3,7 +3,7 @@ import type { IssueDifficulty } from "../shared/labels.js";
 
 export const AUTO_RUN_PHASES = [
   "branch",
-  "implement",
+  "address",
   "await-commit",
   "publish",
   "pr",
@@ -60,8 +60,8 @@ export type DiscardBehavior = (typeof DISCARD_BEHAVIORS)[number];
 export interface AutoRunSettings {
   readonly branchMode?: AutoRunBranchMode;
   readonly review: boolean;
-  /** Whether a read-only Explore worker prepares fresh context for each fresh implementer. */
-  readonly exploreBeforeImplement: boolean;
+  /** Whether a read-only Explore worker prepares fresh context for each fresh address. */
+  readonly exploreBeforeAddress: boolean;
   /** How many relation levels of issue context are preloaded around each issue. */
   readonly issueContextDepth: number;
   /** Persistent user-authored note added to every auto-run agent prompt. */
@@ -107,7 +107,7 @@ export type AutoRunDryRunResult =
        */
       readonly emptyReason: string | undefined;
       readonly reviewMode: boolean;
-      readonly exploresBeforeImplement: boolean;
+      readonly exploresBeforeAddress: boolean;
       readonly branchMode?: AutoRunBranchMode;
       /** Persistent configured note that would be added to every auto agent. */
       readonly permanentPrompt?: string;
@@ -136,12 +136,12 @@ export interface RepositoryFacts {
   readonly dirtyPaths: readonly string[];
   readonly hasCommit: boolean;
   readonly awaitingCommit?: boolean;
-  /** A HITL implementation checkpoint is exposed and its reviewer still needs to run or continue. */
+  /** A HITL implementation checkpoint is exposed and its review still needs to run or continue. */
   readonly hitlReviewPending?: boolean;
   readonly implementationSha?: string;
   readonly commitPushed: boolean;
   readonly pullRequest: PullRequestFacts | undefined;
-  /** Whether a reviewer has already run against the open pull request. */
+  /** Whether a review has already run against the open pull request. */
   readonly reviewed: boolean;
   readonly issueClosed: boolean;
 }
@@ -153,7 +153,7 @@ export interface PullRequestFacts {
 
 export type AutoRunStep =
   | { readonly action: "branch"; readonly branch: string; readonly base: string }
-  | { readonly action: "implement"; readonly issue: PlannedIssue }
+  | { readonly action: "address"; readonly issue: PlannedIssue }
   | { readonly action: "publish"; readonly issue: PlannedIssue }
   | { readonly action: "await-commit"; readonly issue: PlannedIssue }
   | { readonly action: "pr"; readonly issue: PlannedIssue }
@@ -172,7 +172,7 @@ export interface ReducerInput {
 
 export function nextStep(input: ReducerInput): AutoRunStep {
   const { issue, facts, reviewMode } = input;
-  if (facts.hitlReviewPending) return { action: "implement", issue };
+  if (facts.hitlReviewPending) return { action: "address", issue };
   if ((facts.hasCommit || facts.pullRequest !== undefined) && facts.implementationSha === undefined && !facts.awaitingCommit) return { action: "stop", reason: `issue #${issue.number} has no recorded accepted implementation` };
   if (facts.awaitingCommit) return { action: "await-commit", issue };
   if (facts.issueClosed) return { action: "cleanup", issue };
@@ -188,10 +188,10 @@ export function nextStep(input: ReducerInput): AutoRunStep {
           };
         }
         return { action: "branch", branch: issue.branch, base: input.baseBranch };
-      case "implement":
+      case "address":
         if (facts.implementationSha !== undefined) continue;
         if (facts.workingTreeDirty) return { action: "stop", reason: dirtyReason(issue, facts) };
-        return { action: "implement", issue };
+        return { action: "address", issue };
       case "await-commit":
         continue;
       case "publish":

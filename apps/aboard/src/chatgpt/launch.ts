@@ -194,24 +194,24 @@ function planChatGptSession(request: PlatformLaunchRequest | PlatformResumeReque
 function assertShape(agentType: AgentType, configuration: ChatGptLaunchConfiguration): void {
   switch (agentType) {
     case "interactive":
-    case "Prototype":
-    case "Web Search":
-    case "Brainstorm":
-    case "General":
+    case "prototype":
+    case "websearch":
+    case "brainstorm":
+    case "general":
       if (configuration.shape !== "default") throw new LaunchPlanError("shape-not-allowed", "interactive launches as Codex's default session");
       return;
     case "Explore":
       if (configuration.shape !== "explore") throw new LaunchPlanError("shape-not-allowed", "Explore launches as a read-only Codex session");
       return;
-    case "implementer":
+    case "address":
       if (configuration.shape !== "skill" || configuration.skillName !== "address-this") {
-        throw new LaunchPlanError("shape-not-allowed", "implementer must launch through $address-this");
+        throw new LaunchPlanError("shape-not-allowed", "address must launch through $address-this");
       }
       return;
-    case "reviewer":
+    case "review":
       // One skill for both dispositions: AFK and HITL differ in orchestration.
       if (configuration.shape !== "skill" || configuration.skillName !== "review-this") {
-        throw new LaunchPlanError("shape-not-allowed", "reviewer must launch through $review-this");
+        throw new LaunchPlanError("shape-not-allowed", "review must launch through $review-this");
       }
       return;
   }

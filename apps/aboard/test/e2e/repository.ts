@@ -15,7 +15,7 @@ const LABELS = [
 
   { name: "[AI]-afk", color: "0E8A16", description: "May run and merge unattended" },
   { name: "[AI]-hitl", color: "D93F0B", description: "Requires human review" },
-  { name: "[AI]-chrome", color: "5319E7", description: "Enable Claude in Chrome for the implementer" },
+  { name: "[AI]-chrome", color: "5319E7", description: "Enable Claude in Chrome for the address worker" },
   { name: "[AI]-routine-difficulty", color: "C2E0C6", description: "Routine implementation difficulty" },
   { name: "[AI]-basic-difficulty", color: "BFDADC", description: "Basic implementation difficulty" },
   { name: "[AI]-advanced-difficulty", color: "FBCA04", description: "Advanced implementation difficulty" },

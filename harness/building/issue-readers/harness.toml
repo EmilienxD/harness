@@ -1,6 +1,6 @@
 name = "issue-readers"
-version = "1.2.0"
-description = "Prepare issue and commit context for implementation and review workers"
+version = "1.3.0"
+description = "Prepare issue and commit context for address and review workers"
 requires = ["git", "gh"]
 docs = "https://github.com/EmilienxD/harness/blob/main/README.md#user-invoked-skills"
 

@@ -43,10 +43,10 @@ points.
 - `interactive`: empty, user-controlled Claude Code or Codex TUI.
 - `Explore`: read-only exploration; Claude's built-in agent or a top-level Codex session enforced with
   `sandbox_mode="read-only"` and `approval_policy="never"`.
-- `Prototype`, `Web Search`, `Brainstorm`, and `General`: manual delegation identities. Their explicit
+- `prototype`, `websearch`, `brainstorm`, and `general`: manual delegation identities. Their explicit
   `interactive` or `auto` execution mode is separate from Auto Run worker semantics.
-- `implementer`: Auto Run worker invoking `/address-this` on Claude or `$address-this` on ChatGPT.
-- `reviewer`: Auto Run worker invoking `/review-this` on Claude or `$review-this` on ChatGPT. AFK and
+- `address`: Auto Run worker invoking `/address-this` on Claude or `$address-this` on ChatGPT.
+- `review`: Auto Run worker invoking `/review-this` on Claude or `$review-this` on ChatGPT. AFK and
   HITL are orchestration modes, not separate skills.
 
 `.abd/scaffold.json` is the initialized-project marker; when absent, runtime surfaces and the command
@@ -92,7 +92,7 @@ user/profile/default settings. `.abd/settings.json` accepts flat or nested keys,
 | `aboard.terminals.closeOnSessionEnd` | `false` | Leave exited session terminals available. |
 | `aboard.autoRun.review` | `false` | Add the mode-specific automated review turn. |
 | `aboard.autoRun.branchMode` | `per-issue` | Per-issue PRs or one cumulative branch. |
-| `aboard.autoRun.exploreBeforeImplement` | `false` | Run read-only Explore before a fresh worker. |
+| `aboard.autoRun.exploreBeforeAddress` | `false` | Run read-only Explore before a fresh worker. |
 | `aboard.autoRun.issueContextDepth` | `1` | Related-issue traversal depth. |
 | `aboard.autoRun.prompt` | `""` | Persistent worker guidance. |
 | `aboard.autoRun.mergeStrategy` | `squash` | PR merge method. |
@@ -145,10 +145,10 @@ are outside workspaces, permissioned `0600`, and removed on window close.
   prompt surface is easy for humans to find and review.
 - Auto Run injects its commit contract and pinned review scope at launch; the user-owned worker skills
   supply reusable implementation and review behavior.
-  AFK implementers and reviewers require successful turns and exactly one clean descendant commit; an AFK
-  reviewer uses an empty commit when no fixes are needed. HITL without review leaves implementation edits
-  uncommitted. HITL with review creates one clean local implementer checkpoint, mixed-resets it, and gives a
-  non-committing reviewer the immutable checkpoint range. Every HITL path advances only after exactly one
+  AFK address and review workers require successful turns and exactly one clean descendant commit; an AFK
+  review uses an empty commit when no fixes are needed. HITL without review leaves implementation edits
+  uncommitted. HITL with review creates one clean local address checkpoint, mixed-resets it, and gives a
+  non-committing review the immutable checkpoint range. Every HITL path advances only after exactly one
   non-empty, clean user acceptance commit.
 - Workers receive read-only Git commands plus `git add` and `git commit`; Aboard owns every other
   Auto Run Git and GitHub mutation. Aboard observes acceptance commits and never creates them.
@@ -161,7 +161,7 @@ are outside workspaces, permissioned `0600`, and removed on window close.
   supplies a one-second fallback. Recovery uses version-1 records. Persist mutation intent, then observed
   postconditions, before clearing the journal. The HITL mixed
   reset has its own pending action whose postcondition includes an index reset to `beforeSha`, and the
-  temporary implementer checkpoint must never be published.
+  temporary address checkpoint must never be published.
 - Determine worker success only from process outcome, commit ancestry/count, and worktree cleanliness.
   Never parse final-response markup or generate/read worker commit messages.
 - Auto Run adds non-removable Git/GitHub restrictions and, for worktrees, original-checkout path

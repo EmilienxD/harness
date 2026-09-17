@@ -447,8 +447,8 @@ export function parseAgentSession(value: unknown): ValidationResult<AgentSession
     : (issues.push("session.compactSummaries must be an array"), undefined);
 
   if (identity !== undefined && resultDelivery !== undefined) {
-    if (chromeEnabled === true && identity.type !== "implementer") {
-      issues.push("session.chromeEnabled is only legal for implementer agents");
+    if (chromeEnabled === true && identity.type !== "address") {
+      issues.push("session.chromeEnabled is only legal for address agents");
     }
     if (
       isAutomatedAgentType(identity.type) && executionMode !== "auto" &&

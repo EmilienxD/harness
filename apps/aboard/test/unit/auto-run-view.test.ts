@@ -18,7 +18,7 @@ function record(overrides: Partial<AutoRunRecord> = {}): AutoRunRecord {
     settings: {
       branchMode: "per-issue",
       review: false,
-      exploreBeforeImplement: false,
+      exploreBeforeAddress: false,
       issueContextDepth: 1,
       mergeStrategy: "squash",
       mergeRunPullRequest: false,
@@ -65,7 +65,7 @@ function sources(overrides: {
   readonly persisted?: AutoRunRecord | undefined;
   readonly eligibility?: RecoveryEligibility | undefined;
   readonly titles?: Readonly<Record<string, string>>;
-  readonly liveHandoff?: (issueNumber: number) => { readonly type: "implementer" | "reviewer"; readonly agentId: string } | undefined;
+  readonly liveHandoff?: (issueNumber: number) => { readonly type: "address" | "review"; readonly agentId: string } | undefined;
 } = {}): AutoRunViewSources {
   return {
     starting: () => overrides.starting ?? false,
@@ -87,7 +87,7 @@ function preview(overrides: Partial<AutoRunPreview> = {}): AutoRunPreview {
     warnings: [],
     emptyReason: undefined,
     reviewMode: false,
-    exploresBeforeImplement: false,
+    exploresBeforeAddress: false,
     isolatedWorkspace: false,
     keepsWorkspace: false,
     sessionBranch: "run/<run-id>",
@@ -354,15 +354,15 @@ test("a live run outranks any recovery question about its own record", () => {
 
 test("a run waiting for the user names the acceptance boundary and handoff session", () => {
   const waiting = record({ workerSession: {
-    agentId: "reviewer-35" as never,
+    agentId: "review-35" as never,
     sessionId: "session-review-35" as never,
-    type: "reviewer",
+    type: "review",
     issueNumber: 35,
   } });
   const { item } = rootItem({ persisted: waiting, state: state({ waiting: true }) });
   assert.equal(item.contextValue, "aboard.autoRun.waiting");
   assert.match(item.description, /Waiting for acceptance commit · issue #35/);
-  assert.match(item.tooltip, /Handoff session: reviewer reviewer-35 \(session-review-35\)/);
+  assert.match(item.tooltip, /Handoff session: review review-35 \(session-review-35\)/);
   assert.match(item.tooltip, /continues automatically once the checkout is clean/);
 });
 
@@ -450,17 +450,17 @@ test("the whole frozen plan renders in its immutable order, whatever its progres
   assert.deepEqual(rows[2]?.command, { command: "aboard.autoRun.focusWorker", title: "Focus Handoff Session", arguments: [36] });
 });
 
-test("a row with a live reviewer handoff focuses it on click instead of opening the issue", () => {
+test("a row with a live review handoff focuses it on click instead of opening the issue", () => {
   const { model, root } = rootItem({
     persisted: record(),
     state: state(),
-    liveHandoff: (number) => number === 35 ? { type: "reviewer", agentId: "reviewer-35" } : undefined,
+    liveHandoff: (number) => number === 35 ? { type: "review", agentId: "review-35" } : undefined,
   });
   const rows = model.children(root).map((node) => model.item(node));
-  // The current issue has a live reviewer: click focuses the terminal.
+  // The current issue has a live review: click focuses the terminal.
   assert.deepEqual(rows[1]?.command, { command: "aboard.autoRun.focusWorker", title: "Focus Handoff Session", arguments: [35] });
   assert.equal(rows[1]?.contextValue, "aboard.autoRun.issue.current.handoff");
-  assert.match(rows[1]?.tooltip ?? "", /Handoff session: reviewer reviewer-35/);
+  assert.match(rows[1]?.tooltip ?? "", /Handoff session: review review-35/);
   // Done and pending rows use the same terminal-only command; without a live
   // handoff the command quietly does nothing.
   assert.deepEqual(rows[0]?.command, { command: "aboard.autoRun.focusWorker", title: "Focus Handoff Session", arguments: [34] });
@@ -496,7 +496,7 @@ test("a row shows the latest observed title while the plan keeps the one it froz
 });
 
 test("the tooltip names where the work goes and what the run froze", () => {
-  const isolated = record({ settings: { ...record().settings, workspaceRoot: "C:/checkouts/run_test/repo", review: true, exploreBeforeImplement: true } });
+  const isolated = record({ settings: { ...record().settings, workspaceRoot: "C:/checkouts/run_test/repo", review: true, exploreBeforeAddress: true } });
   const { item } = rootItem({ persisted: isolated, state: state() });
   assert.match(item.tooltip, /Session branch: run\/test/);
   assert.match(item.tooltip, /Target branch: feature\/wip/);

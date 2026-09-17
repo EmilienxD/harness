@@ -15,7 +15,7 @@ const startedAt = at("2026-08-23T10:00:00.000Z");
 function session(): AgentSession {
   return {
     platform: "claude",
-    identity: { agentId, type: "implementer" },
+    identity: { agentId, type: "address" },
     sessionId,
     sessionBinding: "bound",
     terminal: { terminalId, name: "aboard: address issue 206" },
@@ -30,7 +30,7 @@ function snapshot(status: TerminalSnapshot["status"] = "open"): TerminalSnapshot
     terminalId,
     agentId,
     sessionId,
-    agentType: "implementer",
+    agentType: "address",
     name: "aboard: address issue 206",
     cwd: "C:\\project",
     status,

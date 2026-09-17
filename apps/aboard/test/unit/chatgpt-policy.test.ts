@@ -99,7 +99,7 @@ test("managed permission requirements reject an isolated ChatGPT worker before l
     ].join("\n"),
   });
 
-  await assert.rejects(policy.require("implementer", "aboard-worktree"), (error: unknown) => {
+  await assert.rejects(policy.require("address", "aboard-worktree"), (error: unknown) => {
     assert.ok(error instanceof ChatGptPolicyError);
     assert.equal(error.capability, "permission-profile");
     assert.match(error.message, /aboard-worktree/u);
@@ -116,7 +116,7 @@ test("an allowed isolated ChatGPT profile still requires never approval", async 
     ].join("\n"),
   });
 
-  await assert.rejects(policy.require("reviewer", "aboard-worktree"), (error: unknown) => {
+  await assert.rejects(policy.require("review", "aboard-worktree"), (error: unknown) => {
     assert.ok(error instanceof ChatGptPolicyError);
     assert.equal(error.capability, "never-approval");
     return true;

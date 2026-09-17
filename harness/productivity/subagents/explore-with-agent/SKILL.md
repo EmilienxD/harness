@@ -14,7 +14,7 @@ Follow the shared delegation workflow and inbox supplied by the hook. If no hook
 
 Request parameters:
 - task: explore
-- mode:auto
+- mode: auto
 - provider (Optional): `claude` or `chatgpt`
 
-Ask the child to inspect the codebase and report findings without editing files. The task param already tells the agent how to explore, not what to address.
+Ask the child to inspect the codebase and report findings without editing files. The task param already tells the agent how to explore, not what to explore.

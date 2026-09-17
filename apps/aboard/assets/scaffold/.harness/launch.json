@@ -14,11 +14,11 @@
         "model": "haiku",
         "effort": "low"
       },
-      "implementer": {
+      "address": {
         "model": "by-difficulty",
         "effort": "by-difficulty"
       },
-      "reviewer": {
+      "review": {
         "model": "by-difficulty",
         "effort": "by-difficulty"
       }
@@ -33,11 +33,11 @@
         "model": "inherit",
         "effort": "inherit"
       },
-      "implementer": {
+      "address": {
         "model": "by-difficulty",
         "effort": "by-difficulty"
       },
-      "reviewer": {
+      "review": {
         "model": "by-difficulty",
         "effort": "by-difficulty"
       }

@@ -178,10 +178,10 @@ function effortArguments(effort: EffortLevel | undefined): readonly string[] {
 
 function chromeArguments(agentType: AgentType, enabled: true | undefined): readonly string[] {
   if (enabled !== true) return [];
-  if (agentType !== "implementer") {
+  if (agentType !== "address") {
     throw new LaunchPlanError(
       "shape-not-allowed",
-      `Claude in Chrome is available only to [AI]-chrome auto-run implementers: ${agentType}`,
+      `Claude in Chrome is available only to [AI]-chrome auto-run address workers: ${agentType}`,
     );
   }
   return ["--chrome"];
@@ -374,22 +374,22 @@ function wrapCommand(
 }
 
 function assertLaunchShape(agentType: AgentType, configuration: LaunchConfiguration): void {
-  if (["interactive", "Prototype", "Web Search", "Brainstorm", "General"].includes(agentType)) {
+  if (["interactive", "prototype", "websearch", "brainstorm", "general"].includes(agentType)) {
     if (configuration.shape !== "default") {
       throw new LaunchPlanError("shape-not-allowed", "interactive launches as Claude Code's default session");
     }
     return;
   }
-  if (agentType === "implementer") {
+  if (agentType === "address") {
     if (configuration.shape !== "skill" || configuration.skillName !== "address-this") {
-      throw new LaunchPlanError("shape-not-allowed", "implementer must launch through /address-this");
+      throw new LaunchPlanError("shape-not-allowed", "address must launch through /address-this");
     }
     return;
   }
-  if (agentType === "reviewer") {
+  if (agentType === "review") {
     // One skill for both dispositions: AFK and HITL differ in orchestration.
     if (configuration.shape !== "skill" || configuration.skillName !== "review-this") {
-      throw new LaunchPlanError("shape-not-allowed", "reviewer must launch through /review-this");
+      throw new LaunchPlanError("shape-not-allowed", "review must launch through /review-this");
     }
     return;
   }
@@ -415,7 +415,7 @@ export function planLaunch(request: LaunchPlanRequest): LaunchPlan {
   }
 
   const launchRuntimeDirectory = agentRuntimeDirectory(runtimeDirectory, request.agentId);
-  const task = prompt !== undefined && (agentType === "implementer" || agentType === "reviewer")
+  const task = prompt !== undefined && (agentType === "address" || agentType === "review")
     ? { agentId: request.agentId, relativePath: taskPromptPath(runtimeDirectory, request.agentId, request.promptRoot), contents: typeof prompt === "string" ? prompt : prompt.text }
     : undefined;
   const shapeArguments: string[] = [

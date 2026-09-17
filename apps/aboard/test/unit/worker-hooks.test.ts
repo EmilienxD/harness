@@ -40,7 +40,7 @@ function fleetWithWorker(): FleetRegistry {
   const fleet = new FleetRegistry();
   const worker: AgentSession = {
     platform: "claude",
-    identity: { agentId: parentId, type: "implementer" },
+    identity: { agentId: parentId, type: "address" },
     sessionId: "4db0ed4c-5d9e-4ab5-a493-2b8575ab19ee" as SessionId,
     sessionBinding: "bound",
     terminal: { terminalId: "worker-terminal" as TerminalId, name: "worker" },
@@ -85,7 +85,7 @@ test("records compact telemetry and serves each continuation", async () => {
 test("re-grounding names every bound issue and refuses a worker bound to none", async () => {
   const bound = (agentId: string, issueNumbers: readonly number[]): AgentSession => ({
     platform: "claude",
-    identity: { agentId: agentId as AgentId, type: "implementer" },
+    identity: { agentId: agentId as AgentId, type: "address" },
     sessionId: "af817a6c-cd41-41e2-a4db-44d3f43cd560" as SessionId,
     sessionBinding: "bound",
     terminal: { terminalId: `${agentId}-terminal` as TerminalId, name: agentId },
@@ -155,8 +155,8 @@ test("Python Stop hook reports final output for every Aboard session", async () 
     };
 
     await report({ ABOARD_AGENT_ID: "interactive-1", ABOARD_AGENT_TYPE: "interactive" });
-    await report({ ABOARD_AGENT_ID: "implementer-1", ABOARD_AGENT_TYPE: "implementer" });
-    await report({ ABOARD_AGENT_ID: "reviewer-1", ABOARD_AGENT_TYPE: "reviewer" });
+    await report({ ABOARD_AGENT_ID: "address-1", ABOARD_AGENT_TYPE: "address" });
+    await report({ ABOARD_AGENT_ID: "review-1", ABOARD_AGENT_TYPE: "review" });
     await report({ ABOARD_AGENT_ID: "explore-1", ABOARD_AGENT_TYPE: "Explore" });
 
     assert.equal(received.length, 4);
@@ -176,7 +176,7 @@ test("Python Stop hook reports final output for every Aboard session", async () 
   }
 });
 
-test("Auto Run implementer Stop reminds a dirty worker to commit or report blockers", () => {
+test("Auto Run address Stop reminds a dirty worker to commit or report blockers", () => {
   const repository = temporaryRepository();
   try {
     writeFileSync(join(repository.root, "tracked.txt"), "changed\n");
@@ -185,7 +185,7 @@ test("Auto Run implementer Stop reminds a dirty worker to commit or report block
       cwd: repository.root,
       input: JSON.stringify({ hook_event_name: "Stop", cwd: repository.root, stop_hook_active: false, last_assistant_message: "Done." }),
       encoding: "utf8",
-      env: { ...process.env, ABOARD_AGENT_ID: "implementer-1", ABOARD_AGENT_TYPE: "implementer", ABOARD_WORKER_START_SHA: repository.startingSha },
+      env: { ...process.env, ABOARD_AGENT_ID: "address-1", ABOARD_AGENT_TYPE: "address", ABOARD_WORKER_START_SHA: repository.startingSha },
     });
     assert.equal(result.status, 0);
     assert.deepEqual(JSON.parse(result.stdout), {
@@ -198,7 +198,7 @@ test("Auto Run implementer Stop reminds a dirty worker to commit or report block
   }
 });
 
-test("Auto Run reviewer Stop reminds an unchanged worker to create its approval commit", () => {
+test("Auto Run review Stop reminds an unchanged worker to create its approval commit", () => {
   const repository = temporaryRepository();
   try {
     const script = join(process.cwd(), "assets", "runtime", "abd_hook.py");
@@ -206,7 +206,7 @@ test("Auto Run reviewer Stop reminds an unchanged worker to create its approval 
       cwd: repository.root,
       input: JSON.stringify({ hook_event_name: "Stop", cwd: repository.root, stop_hook_active: false, last_assistant_message: "The review passed." }),
       encoding: "utf8",
-      env: { ...process.env, ABOARD_AGENT_ID: "reviewer-1", ABOARD_AGENT_TYPE: "reviewer", ABOARD_WORKER_START_SHA: repository.startingSha },
+      env: { ...process.env, ABOARD_AGENT_ID: "review-1", ABOARD_AGENT_TYPE: "review", ABOARD_WORKER_START_SHA: repository.startingSha },
     });
     assert.equal(result.status, 0);
     assert.deepEqual(JSON.parse(result.stdout), {
@@ -219,12 +219,12 @@ test("Auto Run reviewer Stop reminds an unchanged worker to create its approval 
   }
 });
 
-test("non-committing HITL implementer and reviewer turns receive no Stop commit reminder", () => {
+test("non-committing HITL address and review turns receive no Stop commit reminder", () => {
   const repository = temporaryRepository();
   try {
     writeFileSync(join(repository.root, "tracked.txt"), "changed\n");
     const script = join(process.cwd(), "assets", "runtime", "abd_hook.py");
-    for (const agentType of ["implementer", "reviewer"] as const) {
+    for (const agentType of ["address", "review"] as const) {
       const result = spawnSync("uv", ["run", "--no-project", "python", script, "worker-stop"], {
         cwd: repository.root,
         input: JSON.stringify({ hook_event_name: "Stop", cwd: repository.root, stop_hook_active: false, last_assistant_message: "Done." }),
@@ -240,11 +240,11 @@ test("non-committing HITL implementer and reviewer turns receive no Stop commit 
   }
 });
 
-test("Auto Run Stop reminders do not repeat or mistake a clean reviewer commit for missing work", () => {
+test("Auto Run Stop reminders do not repeat or mistake a clean review commit for missing work", () => {
   const repository = temporaryRepository();
   try {
     const script = join(process.cwd(), "assets", "runtime", "abd_hook.py");
-    const run = (agentType: "implementer" | "reviewer", stopHookActive: boolean) => spawnSync(
+    const run = (agentType: "address" | "review", stopHookActive: boolean) => spawnSync(
       "uv",
       ["run", "--no-project", "python", script, "worker-stop"],
       {
@@ -256,13 +256,13 @@ test("Auto Run Stop reminders do not repeat or mistake a clean reviewer commit f
     );
 
     writeFileSync(join(repository.root, "tracked.txt"), "changed\n");
-    const continuation = run("implementer", true);
+    const continuation = run("address", true);
     assert.equal(continuation.status, 0);
     assert.equal(continuation.stdout, "");
 
     git(repository.root, "add", "tracked.txt");
     git(repository.root, "commit", "-m", "review fixes");
-    const completedReview = run("reviewer", false);
+    const completedReview = run("review", false);
     assert.equal(completedReview.status, 0);
     assert.equal(completedReview.stdout, "");
   } finally {

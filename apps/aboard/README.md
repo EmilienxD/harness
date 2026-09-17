@@ -70,7 +70,7 @@ flowchart TD
     AFK -->|Yes| A1["/address-this<br/>Commit once"]
     A1 --> APUB[Push accepted implementation<br/>to its issue branch / PR]
     APUB --> AR["/review-this<br/>Commit once"]
-    AR --> ARPUB[Publish reviewer commit]
+    AR --> ARPUB[Publish review commit]
 
     MODE -->|HITL| HITL{Review enabled?}
     HITL -->|No| H0["/address-this<br/>Leave work uncommitted"]
@@ -94,7 +94,7 @@ flowchart TD
 
 - **HITL** publishes nothing until the user accept the final code by creating exactly 1 (non-empty) commit with a completely clean checkout. Aboard detects ordinary acceptance automatically.
 - **AFK** accepts only a successful worker result with exactly 1 clean descendant commit.
-- **Review** is mode-specific: an AFK reviewer contributes one fix or empty approval commit after publication; a HITL reviewer examines the uncommitted pinned code and leaves its fixes uncommitted for the user.
+- **Review** is mode-specific: an AFK review contributes one fix or empty approval commit after publication; a HITL review examines the uncommitted pinned code and leaves its fixes uncommitted for the user.
 - Aboard owns branch changes, publication, integration, and GitHub mutations. Workers may inspect, edit, stage, and commit within their assigned checkout.
 
 While HITL waits, inspect the worker's checkout and create the acceptance commit when the changes are ready.

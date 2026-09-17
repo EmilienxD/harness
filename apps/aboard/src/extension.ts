@@ -115,7 +115,7 @@ async function readProjectSettings(workspaceRoot: string): Promise<ProjectSettin
 
 function workerConfigurations(workspaceRoot: string, source: FileLaunchConfigurationSource): DelegationConfigurationSource {
   const requireSkills = async (configured: Awaited<ReturnType<FileLaunchConfigurationSource["get"]>>, type: AgentType) => {
-    if (type === "implementer" || type === "reviewer") {
+    if (type === "address" || type === "review") {
       if (configured.platform === "claude") await requireHarnessWorkerSkills(workspaceRoot);
       else await requireChatGptWorkerSkills(workspaceRoot);
     }

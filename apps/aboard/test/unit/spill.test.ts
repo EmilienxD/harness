@@ -49,7 +49,7 @@ test("compaction restores an archived worker task into its activation root", asy
     ...planLaunch({
       agentId,
       sessionId: "6b1e3f7a-2c4d-4a8b-9f10-2c3d4e5f6071" as SessionId,
-      agentType: "implementer",
+      agentType: "address",
       shell: "powershell",
       configuration: { shape: "skill", skillName: "address-this" },
       prompt: "Address issue #9.",

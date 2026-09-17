@@ -8,23 +8,23 @@ import { protocolError, type BridgeRequestHandler } from "./protocol.js";
 
 const TASKS = {
   explore: { type: "Explore", modes: ["auto"] },
-  prototype: { type: "Prototype", modes: ["interactive", "auto"] },
-  websearch: { type: "Web Search", modes: ["interactive", "auto"] },
-  brainstorm: { type: "Brainstorm", modes: ["interactive"] },
-  implement: { type: "General", modes: ["interactive", "auto"] },
-  review: { type: "General", modes: ["interactive", "auto"] },
-  general: { type: "General", modes: ["interactive", "auto"] },
+  prototype: { type: "prototype", modes: ["interactive", "auto"] },
+  websearch: { type: "websearch", modes: ["interactive", "auto"] },
+  brainstorm: { type: "brainstorm", modes: ["interactive"] },
+  address: { type: "general", modes: ["interactive", "auto"] },
+  review: { type: "general", modes: ["interactive", "auto"] },
+  general: { type: "general", modes: ["interactive", "auto"] },
 } as const;
 const SKILLS: Readonly<Record<string, string>> = {
   prototype: "prototype",
   websearch: "websearch",
   brainstorm: "grill-me",
-  implement: "address-this",
+  address: "address-this",
   review: "review-this",
 };
 const DESCRIPTIONS: Readonly<Record<string, string>> = {
-  implement: "Issue Implementation",
-  review: "Issue Review",
+  address: "Address",
+  review: "Review",
 };
 const SKILL_INVOCATION = /^[/\$][A-Za-z0-9_-]+(?:\s|$)/u;
 

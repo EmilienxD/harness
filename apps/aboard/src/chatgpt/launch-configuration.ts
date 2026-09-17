@@ -4,7 +4,7 @@ import type { ConfiguredLaunch } from "../platform/agent-platform.js";
 import { LaunchFileError, type PlatformLaunchFile } from "../platform/launch-configuration.js";
 import { CHATGPT_EFFORTS, CHATGPT_WEB_SEARCH_MODES, type ChatGptEffort, type ChatGptLaunchConfiguration, type ChatGptWebSearch } from "./launch.js";
 
-const PROFILE_NAMES = ["interactive", "explore", "implementer", "reviewer"] as const;
+const PROFILE_NAMES = ["interactive", "explore", "address", "review"] as const;
 const ROOT_FIELDS = new Set(["command", ...PROFILE_NAMES]);
 const PROFILE_FIELDS = new Set(["model", "effort", "webSearch", "subagents"]);
 const WORKER_FIELDS = new Set(["webSearch", "subagents"]);
@@ -29,12 +29,12 @@ const WORKER_DEFAULTS: Profile = { model: BY_DIFFICULTY, effort: BY_DIFFICULTY }
 const DEFAULT_PROFILES: Readonly<Record<ProfileName, Profile>> = {
   interactive: {},
   explore: {},
-  implementer: WORKER_DEFAULTS,
-  reviewer: WORKER_DEFAULTS,
+  address: WORKER_DEFAULTS,
+  review: WORKER_DEFAULTS,
 };
 
 function isWorkerProfile(name: ProfileName): boolean {
-  return name === "implementer" || name === "reviewer";
+  return name === "address" || name === "review";
 }
 
 export function parseChatGptLaunchFile(root: Record<string, unknown>): { readonly value: PlatformLaunchFile; readonly unknownFields: readonly string[] } {
@@ -45,7 +45,7 @@ export function parseChatGptLaunchFile(root: Record<string, unknown>): { readonl
     const input = root[name] === undefined ? {} : object(root[name], `${PATH}.${name}`);
     unknown.push(...Object.keys(input).filter((field) => !PROFILE_FIELDS.has(field)).map((field) => `${name}.${field}`));
     for (const field of WORKER_FIELDS) {
-      if (!isWorkerProfile(name) && input[field] !== undefined) throw new LaunchFileError(`${PATH}.${name}.${field} is only supported for the implementer and reviewer profiles`);
+      if (!isWorkerProfile(name) && input[field] !== undefined) throw new LaunchFileError(`${PATH}.${name}.${field} is only supported for the address and review profiles`);
     }
     const fallback = DEFAULT_PROFILES[name];
     profiles[name] = {
@@ -63,7 +63,7 @@ class ChatGptLaunchFile implements PlatformLaunchFile {
   public constructor(private readonly command: readonly string[], private readonly profiles: Readonly<Record<ProfileName, Profile>>) {}
   public configuration(type: AgentType): ConfiguredLaunch {
     const profileName: ProfileName = type === "Explore" ? "explore"
-      : type === "implementer" || type === "reviewer" ? type : "interactive";
+      : type === "address" || type === "review" ? type : "interactive";
     const profile = this.profiles[profileName];
     const common = {
       declaredCommand: this.command,
@@ -73,7 +73,7 @@ class ChatGptLaunchFile implements PlatformLaunchFile {
     const settings: ChatGptLaunchConfiguration = isAutoRunWorkerType(type)
       ? {
           shape: "skill",
-          skillName: type === "implementer" ? "address-this" : "review-this",
+          skillName: type === "address" ? "address-this" : "review-this",
           ...common,
           ...(profile.webSearch === undefined ? {} : { webSearch: profile.webSearch }),
           ...(profile.subagents === undefined ? {} : { subagents: profile.subagents }),

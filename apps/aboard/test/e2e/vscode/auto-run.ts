@@ -72,7 +72,7 @@ export async function runAutoRunJourney(platform: E2ePlatform): Promise<void> {
       });
       if (phase === "initialize") await commitInitializedScaffold(config.cloneRoot, {
         "aboard.autoRun.review": true,
-        "aboard.autoRun.exploreBeforeImplement": true,
+        "aboard.autoRun.exploreBeforeAddress": true,
         "aboard.autoRun.issueContextDepth": 2,
         "aboard.autoRun.prompt": AUTO_RUN_PERMANENT_NOTE,
         "aboard.autoRun.mergeStrategy": "merge",
@@ -268,7 +268,7 @@ async function runHitlJourney(platform: E2ePlatform, branchMode: "per-issue" | "
       if (phase === "initialize") await commitInitializedScaffold(config.cloneRoot, {
         "aboard.autoRun.branchMode": branchMode,
         "aboard.autoRun.review": review,
-        "aboard.autoRun.exploreBeforeImplement": false,
+        "aboard.autoRun.exploreBeforeAddress": false,
         "aboard.autoRun.issueContextDepth": 1,
         "aboard.autoRun.mergeStrategy": "rebase",
         "aboard.autoRun.mergeRunPullRequest": false,

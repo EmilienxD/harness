@@ -68,12 +68,12 @@ const pull42: PullRequestSnapshot = {
   issueNumber: 47,
 };
 
-test("resolves an implementation prompt from issue and parent issue", async () => {
+test("resolves an address prompt from issue and parent issue", async () => {
   const github = new FakeGitHub({ issues: [issue47, parent31] });
   const resolver = new PromptResolver({ github });
 
   const prompt = await resolver.resolve({
-    kind: "implementation",
+    kind: "address",
     instruction: "Keep the change small.",
     issueNumbers: [47],
   });
@@ -128,7 +128,7 @@ test("preserves complete primary, parent, and related issue bodies", async () =>
     ] }),
   });
   const prompt = await resolver.resolve({
-    kind: "implementation",
+    kind: "address",
     instruction: "Go.",
     issueNumbers: [47],
   });
@@ -161,7 +161,7 @@ test("a global review budget stops only after a complete HTML-delimited source",
 });
 
 test("the global budget counts headings and instructions and stops related issue traversal", async () => {
-  const request = { kind: "implementation", instruction: "Go.", issueNumbers: [47] } as const;
+  const request = { kind: "address", instruction: "Go.", issueNumbers: [47] } as const;
   const primary = await new PromptResolver({ github: new FakeGitHub({ issues: [issue47] }) }).resolve(request);
   assert.ok(primary);
   const github = new FakeGitHub({ issues: [issue47, parent31] });
@@ -185,7 +185,7 @@ test("a document crossing the budget is complete and later primary issues are om
       comments: [{ authorLogin: "architect", body: "This omitted issue comment must stay omitted." }],
     }] }),
     limits: { maxPromptChars: 100 },
-  }).resolve({ kind: "implementation", instruction: "Go.", issueNumbers: [47, 31] });
+  }).resolve({ kind: "address", instruction: "Go.", issueNumbers: [47, 31] });
   assert.deepEqual(prompt?.sources.map((source) => source.number), [47]);
 });
 
@@ -194,7 +194,7 @@ test("resolves a review prompt with the contract and the diff", async () => {
     github: new FakeGitHub({
       issues: [{
         ...issue47,
-        comments: [{ authorLogin: "reviewer", body: "The timeout must remain configurable." }],
+        comments: [{ authorLogin: "review", body: "The timeout must remain configurable." }],
       }],
       pullRequests: [pull42],
       diff: "--- a/src/auth.ts\n+++ b/src/auth.ts",
@@ -218,12 +218,12 @@ test("rejects an empty instruction and a missing issue or pull request", async (
   const resolver = new PromptResolver({ github: new FakeGitHub({}) });
 
   await assert.rejects(
-    () => resolver.resolve({ kind: "implementation", instruction: "  ", issueNumbers: [47] }),
+    () => resolver.resolve({ kind: "address", instruction: "  ", issueNumbers: [47] }),
     (error: unknown) =>
       error instanceof PromptResolutionError && error.code === "empty-instruction",
   );
   await assert.rejects(
-    () => resolver.resolve({ kind: "implementation", instruction: "Go.", issueNumbers: [47] }),
+    () => resolver.resolve({ kind: "address", instruction: "Go.", issueNumbers: [47] }),
     (error: unknown) =>
       error instanceof PromptResolutionError && error.code === "issue-not-found",
   );
@@ -252,7 +252,7 @@ test("recursive issue context terminates across parent and reference cycles", as
     ],
   });
   const prompt = await new PromptResolver({ github }).resolve({
-    kind: "implementation",
+    kind: "address",
     instruction: "Go.",
     issueNumbers: [47],
     issueContextDepth: 5,
@@ -265,7 +265,7 @@ test("recursive issue context terminates across parent and reference cycles", as
   );
 });
 
-test("implementation context can stop after the primary issue's direct references", async () => {
+test("address context can stop after the primary issue's direct references", async () => {
   const issue52: IssueSnapshot = {
     number: 52,
     title: "Cache the token",
@@ -282,7 +282,7 @@ test("implementation context can stop after the primary issue's direct reference
     ],
   });
   const prompt = await new PromptResolver({ github }).resolve({
-    kind: "implementation",
+    kind: "address",
     instruction: "Go.",
     issueNumbers: [47],
     issueContextDepth: 1,
@@ -307,7 +307,7 @@ test("recursive issue context has a hard node bound even without a cycle", async
   }));
   const github = new FakeGitHub({ issues });
   const prompt = await new PromptResolver({ github, limits: { relatedIssueCount: 3 } }).resolve({
-    kind: "implementation",
+    kind: "address",
     instruction: "Go.",
     issueNumbers: [1],
     issueContextDepth: 9,
@@ -322,7 +322,7 @@ test("an issue-bound prompt with no issues is rejected", async () => {
   // An issue-bound prompt with nothing to bind to is a typed refusal, not an
   // empty section list.
   await assert.rejects(
-    () => resolver.resolve({ kind: "implementation", instruction: "Go.", issueNumbers: [] }),
+    () => resolver.resolve({ kind: "address", instruction: "Go.", issueNumbers: [] }),
     (error: unknown) => error instanceof PromptResolutionError && error.code === "no-issue",
   );
 });
@@ -332,7 +332,7 @@ test("summarizes a prompt without repeating its content", async () => {
     github: new FakeGitHub({ issues: [{ ...issue47, body: "The API key is hunter2." }] }),
   });
   const prompt = await resolver.resolve({
-    kind: "implementation",
+    kind: "address",
     instruction: "Go.",
     issueNumbers: [47],
   });
@@ -390,7 +390,7 @@ test("interactive launches resolve to no prompt so the terminal opens empty", as
     const withTopic = await adapter.resolve({ type, description: "d", prompt: "caching layer" }, { authority: "user" });
     assert.ok(withTopic, "withTopic should be resolved");
   }
-  const doctor = await adapter.resolve({ type: "reviewer", description: "d" }, { authority: "auto-run" });
+  const doctor = await adapter.resolve({ type: "review", description: "d" }, { authority: "auto-run" });
   assert.notEqual(doctor, undefined);
   assert.ok(doctor!.text.length > 0);
 });
@@ -400,17 +400,17 @@ test("manual prompt authority never falls back to Auto Run instructions", async 
   const adapter = new GitHubDelegationPromptResolver(new PromptResolver({ github: new FakeGitHub({ issues: [issue47] }) }));
 
   await assert.rejects(
-    () => adapter.resolve({ type: "implementer", description: "manual", issues: [47] }, { authority: "delegation" }),
+    () => adapter.resolve({ type: "address", description: "manual", issues: [47] }, { authority: "delegation" }),
     /Manual delegation requires an explicit prompt/u,
   );
 });
 
-test("a pull-request reviewer requires an explicit workflow instruction", async () => {
+test("a pull-request review requires an explicit workflow instruction", async () => {
   const { GitHubDelegationPromptResolver } = await import("../../src/github/prompt-adapter.js");
   const adapter = new GitHubDelegationPromptResolver(new PromptResolver({ github: new FakeGitHub({}) }));
 
   await assert.rejects(
-    () => adapter.resolve({ type: "reviewer", description: "review pull request 42", pullRequest: 42 }, { authority: "auto-run" }),
+    () => adapter.resolve({ type: "review", description: "review pull request 42", pullRequest: 42 }, { authority: "auto-run" }),
     /requires an explicit prompt/u,
   );
 });

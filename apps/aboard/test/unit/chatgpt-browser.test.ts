@@ -54,7 +54,7 @@ BROWSER_USE_AVAILABLE_BACKENDS = "chrome"
   });
 
   assert.deepEqual(await probe.backends(), ["builtin", "chrome"]);
-  await probe.require("implementer");
+  await probe.require("address");
 });
 
 test("the browser probe refuses Chrome work without exposing unrelated configuration", async () => {
@@ -70,7 +70,7 @@ BROWSER_USE_AVAILABLE_BACKENDS = "builtin"
 `,
   });
 
-  await assert.rejects(probe.require("implementer"), (error: Error) => {
+  await assert.rejects(probe.require("address"), (error: Error) => {
     assert.match(error.message, /BROWSER_USE_AVAILABLE_BACKENDS/u);
     assert.match(error.message, /declared: builtin/u);
     assert.doesNotMatch(error.message, /sk-do-not-print-this|browser-use/u);
@@ -82,5 +82,5 @@ test("the browser probe treats an unreadable Codex configuration as no declared 
   const probe = new ChatGptBrowserProbe({ paths: [codexConfigPath("C:/missing")], read: async () => undefined });
 
   assert.deepEqual(await probe.backends(), []);
-  await assert.rejects(probe.require("implementer"), /config\.toml/u);
+  await assert.rejects(probe.require("address"), /config\.toml/u);
 });
