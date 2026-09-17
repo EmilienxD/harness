@@ -66,7 +66,7 @@ function isOwnedAssetPath(path: string): boolean {
   const segments = path.split("/");
   const safe = segments.every((segment) => segment.length > 0 && segment !== "." && segment !== ".." && !segment.includes("\\"));
   return safe && ((segments.length >= 2 && segments[0] === ".abd")
-    || (segments.length === 2 && segments[0] === ".harness" && segments[1] === "launch.json"));
+    || (segments.length === 2 && segments[0] === ".harness" && segments[1] === "config.json"));
 }
 
 async function loadManifest(path: string): Promise<Manifest> {

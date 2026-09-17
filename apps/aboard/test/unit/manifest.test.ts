@@ -19,7 +19,7 @@ interface Manifest {
   };
 }
 
-test("launch command, model, effort, and denials live only in .harness/launch.json", async () => {
+test("launch command, model, effort, and denials live only in .harness/config.json", async () => {
   const { contributes } = await manifest();
   const settings = Object.keys(contributes.configuration.properties);
   assert.equal(settings.includes("aboard.launch.claudeCommand"), false);
@@ -113,8 +113,8 @@ test("each provider is launched from its own row above the fleet, not a title ic
 
 test("the launch file has editor validation for the provider schema", async () => {
   const { contributes, files } = await manifest();
-  assert.deepEqual(contributes.jsonValidation, [{ fileMatch: "**/.harness/launch.json", url: "./assets/launch.schema.json" }]);
-  assert.ok(files.includes("assets/launch.schema.json"), "the registered schema must ship in the VSIX");
+  assert.deepEqual(contributes.jsonValidation, [{ fileMatch: "**/.harness/config.json", url: "./assets/config.schema.json" }]);
+  assert.ok(files.includes("assets/config.schema.json"), "the registered schema must ship in the VSIX");
 });
 
 test("every action rendered inline in a panel has an icon", async () => {

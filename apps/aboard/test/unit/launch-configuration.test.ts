@@ -21,7 +21,7 @@ function providerFile(provider: "claude" | "chatgpt", value: Record<string, unkn
   return JSON.stringify({ version: 1, autoRun: { provider }, providers: { [provider]: value } });
 }
 
-test("a sparse launch.json uses product-owned defaults", () => {
+test("a sparse config.json uses product-owned defaults", () => {
   const parsed = parseLaunchFile(defaults);
 
   assert.equal(parsed.value.autoRunProvider, "claude");
@@ -39,7 +39,7 @@ test("a sparse launch.json uses product-owned defaults", () => {
   });
 });
 
-test("launch.json configures providers independently while Claude remains the Auto Run default", () => {
+test("config.json configures providers independently while Claude remains the Auto Run default", () => {
   const parsed = parseLaunchFile(`{
     "version": 1,
     "autoRun": { "provider": "claude" },
@@ -54,7 +54,7 @@ test("launch.json configures providers independently while Claude remains the Au
   assert.deepEqual(settings(parsed.value.configurationFor("chatgpt", "interactive")).declaredCommand, ["wrapper", "codex"]);
 });
 
-test("launch.json resolves interactive and Auto Run profiles", () => {
+test("config.json resolves interactive and Auto Run profiles", () => {
   const parsed = parseLaunchFile(defaults);
 
   assert.deepEqual(parsed.diagnostics, []);
@@ -129,7 +129,7 @@ test("Claude keeps tool denials local to the profile that declares them", () => 
   assert.deepEqual(settings(parsed.value.delegationConfigurationFor("claude", "brainstorm")).deniedTools, []);
 });
 
-test("launch.json selects an attended ChatGPT session with its Codex command", () => {
+test("config.json selects an attended ChatGPT session with its Codex command", () => {
   const parsed = parseLaunchFile(providerFile("chatgpt", { command: ["wrapper", "codex"], interactive: { model: "inherit", effort: "inherit" } }));
 
   assert.deepEqual(parsed.diagnostics, []);
@@ -142,7 +142,7 @@ test("launch.json selects an attended ChatGPT session with its Codex command", (
   });
 });
 
-test("launch.json selects a read-only ChatGPT explore session and still refuses unsupported kinds", () => {
+test("config.json selects a read-only ChatGPT explore session and still refuses unsupported kinds", () => {
   const parsed = parseLaunchFile(providerFile("chatgpt", { command: ["codex"], autoRun: { explore: { model: "gpt-test", effort: "low" } } }));
 
   assert.deepEqual(parsed.diagnostics, []);
@@ -165,7 +165,7 @@ test("launch.json selects a read-only ChatGPT explore session and still refuses 
   );
 });
 
-test("launch.json routes a ChatGPT address without overriding native tool settings", () => {
+test("config.json routes a ChatGPT address without overriding native tool settings", () => {
   const parsed = parseLaunchFile(providerFile("chatgpt", { command: ["codex"] }));
 
   assert.deepEqual(parsed.diagnostics, []);
@@ -181,7 +181,7 @@ test("launch.json routes a ChatGPT address without overriding native tool settin
   });
 });
 
-test("launch.json routes ChatGPT review workers through the review skill their disposition selects", () => {
+test("config.json routes ChatGPT review workers through the review skill their disposition selects", () => {
   const parsed = parseLaunchFile(providerFile("chatgpt", { command: ["codex"], autoRun: { review: { effort: "high" } } }));
 
   assert.deepEqual(parsed.diagnostics, []);
@@ -271,7 +271,7 @@ test("invalid known launch fields block configuration", () => {
   }
 });
 
-test("launch.json requires only its format marker", () => {
+test("config.json requires only its format marker", () => {
   assert.throws(
     () => parseLaunchFile('{"version":2,"platform":"claude","command":["claude"]}'),
     (error: LaunchFileError) => /version must be 1/u.test(error.message)
@@ -308,9 +308,9 @@ test("provider diagnostics identify unknown and cross-platform settings", () => 
   );
 });
 
-test("the file source reads the latest valid launch.json on every launch", async () => {
+test("the file source reads the latest valid config.json on every launch", async () => {
   const root = await mkdtemp(join(tmpdir(), "aboard-launch-file-"));
-  const path = join(root, "launch.json");
+  const path = join(root, "config.json");
   const source = new FileLaunchConfigurationSource(path);
   await writeFile(path, defaults, "utf8");
   assert.deepEqual(settings(await source.get("interactive")).declaredCommand, ["claude"]);
@@ -324,8 +324,8 @@ test("the file source reads the latest valid launch.json on every launch", async
 
 test("launch configuration resolves project, then global, then built-in defaults", async () => {
   const root = await mkdtemp(join(tmpdir(), "aboard-launch-resolution-"));
-  const project = join(root, "project", ".harness", "launch.json");
-  const global = join(root, "home", ".harness", "launch.json");
+  const project = join(root, "project", ".harness", "config.json");
+  const global = join(root, "home", ".harness", "config.json");
   await mkdir(join(root, "home", ".harness"), { recursive: true });
   const source = new FileLaunchConfigurationSource({ project, global });
 

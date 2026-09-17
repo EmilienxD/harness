@@ -94,7 +94,7 @@ export async function runAutoRunJourney(platform: E2ePlatform): Promise<void> {
 }
 
 async function commitInitializedScaffold(root: string, settings: Readonly<Record<string, unknown>>, platform: E2ePlatform): Promise<void> {
-  const launchPath = join(root, ".harness", "launch.json");
+  const launchPath = join(root, ".harness", "config.json");
   const launch = JSON.parse(await readFile(launchPath, "utf8")) as {
     autoRun: { provider: E2ePlatform };
     providers: Record<E2ePlatform, { command: string[] }>;
@@ -110,7 +110,7 @@ async function commitInitializedScaffold(root: string, settings: Readonly<Record
   if (settings["aboard.autoRun.worktree.enabled"] === true) await installWorktreeTrustSetup(root, platform);
   const hooks = join(root, ".git", "e2e-empty-hooks");
   await mkdir(hooks, { recursive: true });
-  await execFileAsync("git", ["add", "--", ".abd", ".harness/launch.json", ".vscode/settings.json", ...(platform === "chatgpt" ? [".agents"] : [])], { cwd: root, encoding: "utf8", windowsHide: true });
+  await execFileAsync("git", ["add", "--", ".abd", ".harness/config.json", ".vscode/settings.json", ...(platform === "chatgpt" ? [".agents"] : [])], { cwd: root, encoding: "utf8", windowsHide: true });
   await execFileAsync("git", ["-c", `core.hooksPath=${hooks}`, "-c", "commit.gpgSign=false", "commit", "--message", "Initialize aboard E2E fixture"], {
     cwd: root,
     encoding: "utf8",

@@ -8,7 +8,7 @@ const AUTO_RUN_TASKS = ["explore", "address", "review"] as const;
 const ROOT_FIELDS = new Set(["command", "interactive", "delegations", "autoRun"]);
 const PROFILE_FIELDS = new Set(["model", "effort", "deniedTools"]);
 const MODELS = ["haiku", "sonnet", "opus"] as const;
-const PATH = "launch.json providers.claude";
+const PATH = "config.json providers.claude";
 
 type AutoRunTask = (typeof AUTO_RUN_TASKS)[number];
 type Model = (typeof MODELS)[number] | "inherit" | typeof BY_DIFFICULTY;

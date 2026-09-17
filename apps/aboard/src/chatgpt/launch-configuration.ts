@@ -9,7 +9,7 @@ const ROOT_FIELDS = new Set(["command", "interactive", "delegations", "autoRun"]
 const PROFILE_FIELDS = new Set(["model", "effort", "webSearch", "subagents"]);
 const CLAUDE_MODELS = new Set(["haiku", "sonnet", "opus"]);
 const SUBAGENT_MODES = ["allowed", "denied"] as const;
-const PATH = "launch.json providers.chatgpt";
+const PATH = "config.json providers.chatgpt";
 
 type AutoRunTask = (typeof AUTO_RUN_TASKS)[number];
 interface Profile { readonly model?: string; readonly effort?: ChatGptEffort | typeof BY_DIFFICULTY; readonly webSearch?: ChatGptWebSearch; readonly subagents?: (typeof SUBAGENT_MODES)[number]; }

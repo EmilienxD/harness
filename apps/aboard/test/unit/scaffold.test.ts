@@ -12,13 +12,13 @@ test("a flat .abd scaffold is recognized as initialized", async () => {
   const project = join(root, "project");
   await mkdir(join(assets, ".abd"), { recursive: true });
   await mkdir(join(assets, ".harness"), { recursive: true });
-  await writeFile(join(assets, ".harness", "launch.json"), '{"version":1,"providers":{"claude":{},"chatgpt":{}}}\n');
+  await writeFile(join(assets, ".harness", "config.json"), '{"version":1,"providers":{"claude":{},"chatgpt":{}}}\n');
   await writeFile(join(assets, ".abd", "session-setup.ps1"), "");
 
   const revision = await scaffoldCatalogRevision(assets);
   const report = await scaffoldProject({ projectRoot: project, assetRoot: assets });
 
-  assert.deepEqual(report.created, [".abd/session-setup.ps1", ".harness/launch.json"]);
+  assert.deepEqual(report.created, [".abd/session-setup.ps1", ".harness/config.json"]);
   assert.equal(await readScaffoldState(project, revision), "ready");
 });
 

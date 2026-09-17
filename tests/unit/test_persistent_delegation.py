@@ -551,7 +551,7 @@ def test_detached_supervisor_binds_conversation_and_delivers_after_process_exit(
         'import json\nprint(json.dumps({"type":"thread.started","thread_id":"saved-conversation"}),flush=True)\nprint(json.dumps({"type":"item.completed","item":{"type":"agent_message","text":"Done"}}),flush=True)\n',
         encoding="utf-8",
     )
-    launch = tmp_path / ".harness" / "launch.json"
+    launch = tmp_path / ".harness" / "config.json"
     launch.parent.mkdir()
     launch.write_text(
         json.dumps(

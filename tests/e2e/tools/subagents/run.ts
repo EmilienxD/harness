@@ -68,7 +68,7 @@ export async function runSubagentsJourney(platform: Platform, mode: "interactive
     await writeFile(join(stateRoot, "config.json"), `${JSON.stringify({
       terminalCommand: [process.execPath, bridge, "--spawn"],
     }, null, 2)}\n`, "utf8");
-    await writeFile(join(projectRoot, ".harness", "launch.json"), `${JSON.stringify({
+    await writeFile(join(projectRoot, ".harness", "config.json"), `${JSON.stringify({
       version: 1,
       autoRun: { provider: "claude" },
       providers: {

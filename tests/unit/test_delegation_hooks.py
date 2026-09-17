@@ -39,7 +39,7 @@ def configured(
 
 
 def test_stop_wait_uses_the_provider_neutral_session_setting(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    launch = tmp_path / ".harness" / "launch.json"
+    launch = tmp_path / ".harness" / "config.json"
     launch.parent.mkdir()
     launch.write_text(
         '{"version":1,"autoRun":{"provider":"claude"},"providers":{"claude":{},"chatgpt":{}},"session":{"stopWaitHours":1.5}}',

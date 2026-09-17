@@ -38,7 +38,7 @@ function object(value: unknown, path: string): Record<string, unknown> {
 
 function providerSection(value: unknown, name: AgentPlatformId): Record<string, unknown> {
   if (value === undefined) return {};
-  return object(value, `launch.json providers.${name}`);
+  return object(value, `config.json providers.${name}`);
 }
 
 function platform(value: unknown, path: string): AgentPlatformId {
@@ -49,10 +49,10 @@ function platform(value: unknown, path: string): AgentPlatformId {
 
 function sessionSettings(value: unknown): { readonly unknownFields: readonly string[] } {
   if (value === undefined) return { unknownFields: [] };
-  const session = object(value, "launch.json session");
+  const session = object(value, "config.json session");
   const stopWaitHours = session.stopWaitHours;
   if (stopWaitHours !== undefined && (typeof stopWaitHours !== "number" || !Number.isFinite(stopWaitHours) || stopWaitHours < 0)) {
-    throw new LaunchFileError("launch.json session.stopWaitHours must be a non-negative finite number");
+    throw new LaunchFileError("config.json session.stopWaitHours must be a non-negative finite number");
   }
   return { unknownFields: Object.keys(session).filter((field) => field !== "stopWaitHours") };
 }
@@ -65,12 +65,12 @@ class ConfiguredLaunchFile implements LaunchFile {
 
   public configurationFor(platform: AgentPlatformId, type: AgentType): ConfiguredLaunch {
     const configured = this.providers.get(platform);
-    if (configured === undefined) throw new LaunchFileError(`launch.json has no configuration for provider ${platform}`);
+    if (configured === undefined) throw new LaunchFileError(`config.json has no configuration for provider ${platform}`);
     return configured.configuration(type);
   }
   public delegationConfigurationFor(platform: AgentPlatformId, task: DelegationTask): ConfiguredLaunch {
     const configured = this.providers.get(platform);
-    if (configured === undefined) throw new LaunchFileError(`launch.json has no configuration for provider ${platform}`);
+    if (configured === undefined) throw new LaunchFileError(`config.json has no configuration for provider ${platform}`);
     return configured.delegationConfiguration(task);
   }
 }
@@ -78,16 +78,16 @@ class ConfiguredLaunchFile implements LaunchFile {
 export function parseLaunchFile(text: string): ParsedLaunchFile {
   let parsed: unknown;
   try { parsed = JSON.parse(text) as unknown; }
-  catch (error) { throw new LaunchFileError(`launch.json contains invalid JSON: ${error instanceof Error ? error.message : "parse error"}`); }
-  const root = object(parsed, "launch.json");
+  catch (error) { throw new LaunchFileError(`config.json contains invalid JSON: ${error instanceof Error ? error.message : "parse error"}`); }
+  const root = object(parsed, "config.json");
   if (root.version !== 1) {
     throw new LaunchFileError(
-      `launch.json version must be 1: {"version": 1}; received ${JSON.stringify(root.version)}`,
+      `config.json version must be 1: {"version": 1}; received ${JSON.stringify(root.version)}`,
     );
   }
-  const autoRun = root.autoRun === undefined ? {} : object(root.autoRun, "launch.json autoRun");
-  const autoRunProvider = root.autoRun === undefined || autoRun.provider === undefined ? "claude" : platform(autoRun.provider, "launch.json autoRun.provider");
-  const providerValues = root.providers === undefined ? {} : object(root.providers, "launch.json providers");
+  const autoRun = root.autoRun === undefined ? {} : object(root.autoRun, "config.json autoRun");
+  const autoRunProvider = root.autoRun === undefined || autoRun.provider === undefined ? "claude" : platform(autoRun.provider, "config.json autoRun.provider");
+  const providerValues = root.providers === undefined ? {} : object(root.providers, "config.json providers");
   const session = sessionSettings(root.session);
   const claude = parseClaudeLaunchFile(providerSection(providerValues.claude, "claude"));
   const chatgpt = parseChatGptLaunchFile(providerSection(providerValues.chatgpt, "chatgpt"));
@@ -105,7 +105,7 @@ export function parseLaunchFile(text: string): ParsedLaunchFile {
   ]));
   const diagnostics = unknownFields.length === 0
     ? []
-    : [{ severity: "warning" as const, message: `launch.json ignores unsupported fields: ${unknownFields.join(", ")}` }];
+    : [{ severity: "warning" as const, message: `config.json ignores unsupported fields: ${unknownFields.join(", ")}` }];
   return { value, diagnostics };
 }
 
@@ -113,7 +113,7 @@ export async function readLaunchFile(path: string): Promise<ParsedLaunchFile> {
   try { return parseLaunchFile(await readFile(path, "utf8")); }
   catch (error) {
     if (error instanceof LaunchFileError) throw error;
-    throw new LaunchFileError(`Unable to read launch.json: ${error instanceof Error ? error.message : "unknown error"}`, error);
+    throw new LaunchFileError(`Unable to read config.json: ${error instanceof Error ? error.message : "unknown error"}`, error);
   }
 }
 

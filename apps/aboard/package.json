@@ -32,8 +32,8 @@
   "contributes": {
     "jsonValidation": [
       {
-        "fileMatch": "**/.harness/launch.json",
-        "url": "./assets/launch.schema.json"
+        "fileMatch": "**/.harness/config.json",
+        "url": "./assets/config.schema.json"
       }
     ],
     "commands": [
@@ -593,7 +593,7 @@
     "dist/extension.js.map",
     "assets/aboard.png",
     "assets/aboard.svg",
-    "assets/launch.schema.json",
+    "assets/config.schema.json",
     "assets/scaffold/",
     "assets/runtime/abd_hook.py",
     "assets/runtime/abd-hooks.json",

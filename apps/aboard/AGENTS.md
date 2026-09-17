@@ -58,7 +58,7 @@ both launch adapters ask, so a mode never means headless in one of them and visi
 `.abd/scaffold.json` is the initialized-project marker; when absent, runtime surfaces and the command
 endpoint are closed. Mutable runtime state belongs in VS Code storage, not the workspace.
 
-`.harness/launch.json` is a sparse launch authority and is re-read whenever launch, resume, or reopen
+`.harness/config.json` is a sparse launch authority and is re-read whenever launch, resume, or reopen
 starts a new process. Resuming into an existing terminal retains that process's configuration.
 Omitted fields use code-owned defaults. `providers.claude` and `providers.chatgpt` are equal,
 independently validated configurations; neither is inferred from the wrapper-friendly `command` array. **Run Agent** asks which provider to launch,
@@ -119,7 +119,7 @@ user/profile/default settings. `.abd/settings.json` accepts flat or nested keys,
 | `aboard.autoRun.worktree.setupTimeoutSeconds` | `600` | Limit scaffold setup time. |
 
 Auto Run freezes run-specific settings for recovery. Launch configuration is not frozen; resumes use the
-latest valid `.harness/launch.json`.
+latest valid `.harness/config.json`.
 
 ## Command Terminal API
 

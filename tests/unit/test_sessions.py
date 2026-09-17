@@ -194,13 +194,13 @@ def test_launch_configuration_resolves_project_then_global_then_defaults(tmp_pat
 
     assert sessions.launch_configuration(project) == {"version": 1}
     state.mkdir()
-    (state / "launch.json").write_text(
+    (state / "config.json").write_text(
         '{"version":1,"autoRun":{"provider":"claude"},"providers":{"claude":{},"chatgpt":{"command":["global-codex"]}}}', encoding="utf-8"
     )
     assert sessions._provider_command(sessions.launch_configuration(project), "chatgpt") == ["global-codex"]
 
     (project / ".harness").mkdir()
-    (project / ".harness" / "launch.json").write_text(
+    (project / ".harness" / "config.json").write_text(
         '{"version":1,"autoRun":{"provider":"claude"},"providers":{"claude":{"command":["project-claude"]},"chatgpt":{}}}', encoding="utf-8"
     )
     assert sessions._provider_command(sessions.launch_configuration(project), "claude") == ["project-claude"]
@@ -209,7 +209,7 @@ def test_launch_configuration_resolves_project_then_global_then_defaults(tmp_pat
 
 def test_launch_configuration_validates_sparse_provider_and_session_shapes(tmp_path, monkeypatch):
     project = tmp_path / "project"
-    launch = project / ".harness" / "launch.json"
+    launch = project / ".harness" / "config.json"
     launch.parent.mkdir(parents=True)
     monkeypatch.setenv("HARNESS_STATE_DIR", str(tmp_path / "state"))
 

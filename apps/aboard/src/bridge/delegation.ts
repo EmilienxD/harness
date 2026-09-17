@@ -154,7 +154,7 @@ export interface DelegationCoordinatorOptions {
   readonly sessions?: { observe(agentId: AgentId): SessionObservation };
   readonly onStaleLeaseRecovered?: (holder: WriteLeaseHolder, observation: LeaseHolderObservation) => void;
   readonly configurations: DelegationConfigurationSource;
-  /** Installed runtime integrations, selected explicitly by launch.json. */
+  /** Installed runtime integrations, selected explicitly by config.json. */
   readonly platforms: ReadonlyMap<AgentPlatformId, AgentPlatform>;
   readonly prompts: DelegationPromptResolver;
   readonly spills: PromptSpillStore;

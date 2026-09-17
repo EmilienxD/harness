@@ -243,8 +243,8 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
     onDidChange: () => { for (const listener of activityListeners) listener(); },
   });
   const launchFile = new FileLaunchConfigurationSource({
-    project: join(workspaceRoot, ".harness", "launch.json"),
-    global: join(homedir(), ".harness", "launch.json"),
+    project: join(workspaceRoot, ".harness", "config.json"),
+    global: join(homedir(), ".harness", "config.json"),
   });
   const claudePlatform = new ClaudeAgentPlatform({
     commandRunner: spawnCommandRunner(workspaceRoot),
@@ -326,7 +326,7 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
       if (launchFileNotice !== undefined && notice.length === 0) void window.showInformationMessage("Launch configuration is valid. New and reopened sessions use it.");
       launchFileNotice = notice.length === 0 ? undefined : notice;
     } catch (error) {
-      const notice = error instanceof Error ? error.message : "Invalid .harness/launch.json";
+      const notice = error instanceof Error ? error.message : "Invalid .harness/config.json";
       output.appendLine(`Launch configuration: ${notice}`);
       if (notice !== launchFileNotice) void window.showErrorMessage(`${notice}. New and reopened sessions are blocked until it is fixed.`);
       launchFileNotice = notice;

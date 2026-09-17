@@ -5,7 +5,7 @@ const DEFAULT_PROBE_TIMEOUT_MS = 15_000;
 
 export class ChatGptPreflightError extends Error {
   public constructor(public readonly reason: string) {
-    super(`The configured ChatGPT command cannot be run: ${reason}. Check .harness/launch.json.`);
+    super(`The configured ChatGPT command cannot be run: ${reason}. Check .harness/config.json.`);
     this.name = "ChatGptPreflightError";
   }
 }

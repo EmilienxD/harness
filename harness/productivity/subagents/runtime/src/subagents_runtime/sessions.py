@@ -43,8 +43,8 @@ def _config() -> dict[str, Any]:
 
 def launch_configuration(cwd: Path) -> dict[str, Any]:
     """Resolve the project, global, then built-in launch configuration."""
-    project = cwd.resolve() / ".harness" / "launch.json"
-    global_path = state_dir() / "launch.json"
+    project = cwd.resolve() / ".harness" / "config.json"
+    global_path = state_dir() / "config.json"
     for path in (project, global_path):
         if not path.is_file():
             continue
@@ -52,11 +52,11 @@ def launch_configuration(cwd: Path) -> dict[str, Any]:
             value = json.loads(path.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError) as exc:
             raise SessionError(
-                f"invalid Harness launch configuration {path}: {exc}"
+                f"invalid Harness configuration {path}: {exc}"
             ) from exc
         if not isinstance(value, dict) or value.get("version") != 1:
             raise SessionError(
-                f"Harness launch configuration {path} must be a version-1 JSON object"
+                f"Harness configuration {path} must be a version-1 JSON object"
             )
         auto_run = value.get("autoRun", {})
         providers = value.get("providers", {})
@@ -65,19 +65,19 @@ def launch_configuration(cwd: Path) -> dict[str, Any]:
             and auto_run.get("provider") not in {"claude", "chatgpt"}
         ):
             raise SessionError(
-                f"Harness launch configuration {path} autoRun.provider must be claude or chatgpt"
+                f"Harness configuration {path} autoRun.provider must be claude or chatgpt"
             )
         if not isinstance(providers, dict) or any(
             name in providers and not isinstance(providers[name], dict)
             for name in ("claude", "chatgpt")
         ):
             raise SessionError(
-                f"Harness launch configuration {path} providers must contain JSON objects"
+                f"Harness configuration {path} providers must contain JSON objects"
             )
         session = value.get("session", {})
         if not isinstance(session, dict):
             raise SessionError(
-                f"Harness launch configuration {path} session must be a JSON object"
+                f"Harness configuration {path} session must be a JSON object"
             )
         stop_wait = session.get("stopWaitHours")
         if stop_wait is not None and (
@@ -87,7 +87,7 @@ def launch_configuration(cwd: Path) -> dict[str, Any]:
             or stop_wait < 0
         ):
             raise SessionError(
-                f"Harness launch configuration {path} session.stopWaitHours must be a non-negative finite number"
+                f"Harness configuration {path} session.stopWaitHours must be a non-negative finite number"
             )
         return value
     return {"version": 1}
