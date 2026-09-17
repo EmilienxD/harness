@@ -9,7 +9,7 @@ import { protocolError, type BridgeRequestHandler } from "./protocol.js";
 
 const TASKS = {
   explore: { type: "explore", modes: ["auto"] },
-  prototype: { type: "prototype", modes: ["interactive", "auto"] },
+  prototype: { type: "prototype", modes: ["interactive"] },
   websearch: { type: "websearch", modes: ["interactive", "auto"] },
   brainstorm: { type: "brainstorm", modes: ["interactive"] },
   address: { type: "general", modes: ["interactive", "auto"] },

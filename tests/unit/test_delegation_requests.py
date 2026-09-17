@@ -111,6 +111,7 @@ def test_provider_defaults_to_the_parent_provider(tmp_path: Path) -> None:
         ("request.md", "---\ntask: general\nmode: auto\n---\n", "body"),
 
         ("request.md", "---\ntask: general\nmode: invalid\n---\nbody", "unsupported mode"),
+        ("request.md", "---\ntask: prototype\nmode: auto\n---\nbody", "unsupported mode"),
         ("request.md", "---\ntask: general\nmode: auto\n---\n$prototype do something else", "plain prompt"),
         ("request.md", "---\ntask: general\nmode: auto\n---\nPlease use $prototype for this", "plain prompt"),
         ("request.md", "task: general\nmode: auto\nbody", "frontmatter"),
@@ -208,7 +209,7 @@ def test_ask_requires_a_live_grant(tmp_path: Path, monkeypatch: pytest.MonkeyPat
 def test_grant_policy_is_the_exact_authorization_table() -> None:
     assert TASK_POLICIES == {
         "explore-with-agent": TaskPolicy("explore", frozenset({"auto"})),
-        "prototype-with-agent": TaskPolicy("prototype", frozenset({"interactive", "auto"})),
+        "prototype-with-agent": TaskPolicy("prototype", frozenset({"interactive"})),
         "websearch-with-agent": TaskPolicy("websearch", frozenset({"interactive", "auto"})),
         "brainstorm-with-agent": TaskPolicy("brainstorm", frozenset({"interactive"})),
         "address-with-agent": TaskPolicy("address", frozenset({"interactive", "auto"})),

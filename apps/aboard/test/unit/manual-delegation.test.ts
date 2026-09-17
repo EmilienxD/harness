@@ -56,6 +56,7 @@ test("manual issue delegation invokes the reader worker skills", async () => {
 test("manual delegation rejects unknown fields and task-mode combinations", async () => {
   const handler = createDelegationRoutes({ launch: async () => { throw new Error("must not launch"); } });
   for (const body of [
+    { requestId: "prototype-auto", task: "prototype", provider: "claude", mode: "auto", prompt: "x", cwd: "C:\\work" },
     { requestId: "request-1", task: "explore", provider: "claude", mode: "interactive", prompt: "x", cwd: "C:\\work" },
     { requestId: "request-2", task: "general", provider: "claude", mode: "auto", prompt: "x", cwd: "C:\\work", token: "leak" },
     { requestId: "request-3", task: "general", provider: "claude", mode: "auto", prompt: "/prototype substitute", cwd: "C:\\work" },

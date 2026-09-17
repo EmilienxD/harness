@@ -36,7 +36,7 @@ class TaskPolicy:
 
 TASK_POLICIES = {
     "explore-with-agent": TaskPolicy("explore", frozenset({"auto"})),
-    "prototype-with-agent": TaskPolicy("prototype", frozenset({"interactive", "auto"})),
+    "prototype-with-agent": TaskPolicy("prototype", frozenset({"interactive"})),
     "websearch-with-agent": TaskPolicy("websearch", frozenset({"interactive", "auto"})),
     "brainstorm-with-agent": TaskPolicy("brainstorm", frozenset({"interactive"})),
     "address-with-agent": TaskPolicy("address", frozenset({"interactive", "auto"})),
@@ -515,6 +515,17 @@ def process_inbox(
                         raise RequestFileError(
                             "child is not owned by this conversation"
                         )
+                    original = connection.execute(
+                        "SELECT task FROM requests WHERE child_session_id=? ORDER BY created_at LIMIT 1",
+                        (child_id,),
+                    ).fetchone()
+                    policy = next(
+                        (item for item in TASK_POLICIES.values() if item.task == original[0]), None
+                    )
+                    if policy is None or row[1] not in policy.modes:
+                        raise RequestFileError(
+                            f"unsupported mode {row[1]!r} for task {original[0]!r}"
+                        )
                     if fork:
                         if not row[4]:
                             raise RequestFileError(
@@ -522,10 +533,6 @@ def process_inbox(
                             )
                         fork_of = row[4]
                         _supersede_child(connection, child_id)
-                    original = connection.execute(
-                        "SELECT task FROM requests WHERE child_session_id=? ORDER BY created_at LIMIT 1",
-                        (child_id,),
-                    ).fetchone()
                     request = replace(
                         request, provider=row[0], mode=row[1], task=original[0]
                     )

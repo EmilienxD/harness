@@ -83,5 +83,22 @@
       "type": "string",
       "minLength": 1
     }
+  },
+  "if": {
+    "properties": {
+      "task": {
+        "const": "prototype"
+      }
+    },
+    "required": [
+      "task"
+    ]
+  },
+  "then": {
+    "properties": {
+      "mode": {
+        "const": "interactive"
+      }
+    }
   }
 }

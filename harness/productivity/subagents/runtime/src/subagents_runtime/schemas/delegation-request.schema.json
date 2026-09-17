@@ -72,5 +72,22 @@
         ]
       }
     }
-  ]
+  ],
+  "if": {
+    "properties": {
+      "task": {
+        "const": "prototype"
+      }
+    },
+    "required": [
+      "task"
+    ]
+  },
+  "then": {
+    "properties": {
+      "mode": {
+        "const": "interactive"
+      }
+    }
+  }
 }
