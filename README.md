@@ -59,7 +59,7 @@ Claude Code invokes a skill as `/skill-name`; ChatGPT uses `$skill-name`. The ex
 
 - **`breakdown-help-wanted-issue`**: Explores a request against the codebase and helps you agree on what to build, with questions and concrete recommendations. With no argument, it fetches the oldest open `[AI]-help-wanted` GitHub issue.
 
-- **`grill-me-in-lavish`**: Stress-tests a plan or design through branching rounds in an interactive Lavish HTML artifact. Every option is clickable, the recommended A choice starts selected, and one button submits the round back to the agent; diagrams and images can clarify decisions when useful.
+- **`grill-me-in-lavish`**: Stress-tests a plan or design through branching rounds in a polished interactive Lavish board. Every option is clickable, the recommended A choice starts selected but remains unapproved until queued, and each question can be queued with freeform context before one round-level submission; unqueued questions stay open, while diagrams and images can clarify decisions when useful.
 
 - **`prototype`**: Builds a throwaway logic or UI prototype in a separate workspace to answer one explicit design question. It keeps prototype code and dependencies outside the repository, exercises only the decisive paths, and reports what the result supports and where its evidence stops.
 

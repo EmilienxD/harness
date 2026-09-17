@@ -48,6 +48,6 @@ Prioritize questioning high-impact decisions (e.g., UI/UX changes, failure behav
 
 If a question cannot be answered solely from the code or from judgment, you may consider a web search to find real-world examples, open-source code to reuse, benchmarks, or prototyping before assuming your recommendation is correct. If so, propose your ideas to the user before proceeding (e.g., "This API doesn't provide enough documentation; we should consider prototyping it before assuming it's the right decision.").
 
-Assume the user has approved your recommendation if they do not provide their own choice or a different answer to a question. Flag it in 1 short sentence at the top of your next round message.
+Every question requires an explicit answer from the user. Silence, omission, an ambiguous response, or answering other questions does not approve your recommendation. Keep every unanswered question open and present it again in a later round; settle only the questions the user actually answered.
 
 The session is done when the frontier is empty: every branch of the design tree has been visited, and nothing is left silently assumed. Do not act on it until the user confirms you have reached a shared understanding. Simply tell the user that you have reached a shared understanding, summarize the core solution decided upon to solve the initial problem in 1–3 sentences, and state that you are ready to proceed to the next steps.

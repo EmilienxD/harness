@@ -1,0 +1,605 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Grill Me — decision board</title>
+<style>
+@import url("https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,700;9..144,800&family=JetBrains+Mono:wght@500;600&family=Manrope:wght@400;500;600;700;800&display=swap");
+
+:root {
+  --violet-700: #3e2f86; --violet-600: #5140a4; --violet-500: #6552c7;
+  --violet-100: #ded8f7; --violet-050: #f0edff;
+  --coral-600: #c95038; --coral-500: #e36b4f; --coral-100: #f8d7cf;
+  --amber-600: #a86d0d; --amber-400: #efb936; --amber-100: #faedbd;
+  --teal-700: #205c54; --teal-500: #2f7c70; --teal-100: #cce5df; --teal-050: #eaf5f2;
+  --paper-000: #fffdf8; --paper-100: #f7f2e8; --paper-200: #eee5d5; --paper-300: #dfd2bd;
+  --ink-900: #211d2b; --ink-700: #40394c; --ink-500: #6d6578; --ink-300: #9b92a5;
+  --surface: var(--paper-000); --surface-warm: #fbf8f1; --border: var(--paper-300);
+  --font-display: "Fraunces", Georgia, serif;
+  --font-sans: "Manrope", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: "JetBrains Mono", Consolas, monospace;
+  --radius-sm: 9px; --radius-md: 13px; --radius-lg: 20px;
+  --shadow-soft: 0 1px 2px rgba(33,29,43,.06), 0 14px 40px rgba(62,47,134,.08);
+  --shadow-hard: 5px 5px 0 var(--ink-900);
+  --focus: 0 0 0 4px rgba(239,185,54,.45);
+  --texture: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.8' numOctaves='2' stitchTiles='stitchTiles'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='.035'/%3E%3C/svg%3E");
+}
+
+* { box-sizing: border-box; }
+html, body { margin: 0; min-height: 100%; }
+body {
+  color: var(--ink-700); background: var(--paper-100); background-image: var(--texture);
+  font-family: var(--font-sans); line-height: 1.5; -webkit-font-smoothing: antialiased;
+}
+button, input, textarea { font: inherit; }
+button { color: inherit; }
+
+.nav {
+  position: sticky; top: 0; z-index: 20; border-bottom: 1px solid var(--border);
+  background: color-mix(in srgb, var(--paper-100) 88%, transparent);
+  backdrop-filter: saturate(150%) blur(12px);
+}
+.nav__inner {
+  max-width: 1120px; height: 68px; margin: auto; padding: 0 28px;
+  display: flex; align-items: center; justify-content: space-between; gap: 18px;
+}
+.brand { display: inline-flex; align-items: center; gap: 12px; min-width: 0; }
+.brand__mark {
+  width: 38px; height: 38px; flex: none; display: grid; place-items: center;
+  color: var(--paper-000); background: var(--coral-500); border: 2px solid var(--ink-900);
+  border-radius: 11px 18px 11px 18px; box-shadow: 3px 3px 0 var(--ink-900); transform: rotate(-3deg);
+}
+.brand__mark svg { width: 23px; height: 23px; transform: rotate(3deg); }
+.brand__name { font: 800 24px/1 var(--font-display); color: var(--ink-900); white-space: nowrap; }
+.round-chip {
+  font: 600 11px/1 var(--font-mono); color: var(--violet-700); background: var(--violet-050);
+  border: 1px solid var(--violet-100); border-radius: 999px; padding: 8px 11px; white-space: nowrap;
+}
+
+.page { max-width: 1120px; margin: auto; padding: 34px 28px 80px; }
+.hero { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 24px; align-items: end; margin-bottom: 26px; }
+.eyebrow {
+  margin: 0 0 7px; color: var(--coral-600); font: 800 11px/1 var(--font-mono);
+  letter-spacing: .14em; text-transform: uppercase;
+}
+.hero h1 { margin: 0; color: var(--ink-900); font: 800 clamp(30px, 5vw, 50px)/1.04 var(--font-display); }
+.hero__sub { max-width: 720px; margin: 10px 0 0; color: var(--ink-500); font-size: 15px; }
+.progress { min-width: 170px; }
+.progress__row { display: flex; justify-content: space-between; gap: 14px; margin-bottom: 7px; font: 600 11px/1 var(--font-mono); color: var(--ink-500); }
+.progress__track { height: 9px; overflow: hidden; border: 1px solid var(--border); border-radius: 999px; background: var(--paper-200); }
+.progress__bar { height: 100%; width: 0; border-radius: inherit; background: var(--teal-500); transition: width 180ms ease; }
+
+.layout { display: grid; grid-template-columns: minmax(0, 1fr) 286px; gap: 28px; align-items: start; }
+.deck-wrap { min-width: 0; }
+.section-head { display: flex; align-items: baseline; justify-content: space-between; gap: 14px; margin-bottom: 12px; }
+.section-label { color: var(--violet-600); font: 800 12px/1 var(--font-mono); letter-spacing: .12em; text-transform: uppercase; }
+.section-hint { color: var(--ink-300); font-size: 12px; text-align: right; }
+
+.deck { position: relative; display: grid; }
+.deck::before, .deck::after {
+  content: ""; position: absolute; inset: 0; z-index: 0; background: var(--surface);
+  border: 2px solid var(--ink-900); border-radius: var(--radius-md); box-shadow: 3px 3px 0 var(--ink-900);
+}
+.deck::before { transform: rotate(1.1deg) translate(4px, 7px); }
+.deck::after { transform: rotate(-.8deg) translate(-3px, 11px); }
+.deck.is-last::before, .deck.is-last::after { display: none; }
+.question { grid-area: 1 / 1; z-index: 1; overflow: hidden; background: var(--surface); border: 2px solid var(--ink-900); border-radius: var(--radius-md); box-shadow: var(--shadow-hard); }
+.question[hidden] { display: none; }
+.question__pad { padding: clamp(20px, 4vw, 34px); }
+.question__top { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 16px; }
+.qid {
+  display: inline-flex; align-items: center; justify-content: center; min-width: 42px; height: 30px; padding: 0 9px;
+  color: var(--paper-000); background: var(--violet-600); border: 1.5px solid var(--ink-900);
+  border-radius: 7px; box-shadow: 2px 2px 0 var(--ink-900); font: 700 12px/1 var(--font-mono);
+}
+.state { color: var(--ink-300); font: 600 11px/1 var(--font-mono); text-transform: uppercase; letter-spacing: .08em; }
+.state.is-queued, .state.is-sent { color: var(--teal-700); }
+.state.is-edited { color: var(--amber-600); }
+.question h2 { margin: 0; color: var(--ink-900); font: 800 clamp(23px, 4vw, 34px)/1.12 var(--font-display); }
+.question__body { margin: 11px 0 0; color: var(--ink-500); font-size: 15px; white-space: pre-line; }
+.visual { margin: 20px 0 0; overflow: hidden; border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--surface-warm); }
+.visual img { display: block; width: 100%; max-height: 360px; object-fit: contain; background: var(--paper-200); }
+.visual figcaption { padding: 9px 12px; color: var(--ink-500); font-size: 12px; }
+.recommendation {
+  display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 10px; align-items: start;
+  margin: 20px 0; padding: 12px 14px; border: 1px solid var(--amber-400); border-radius: var(--radius-sm); background: var(--amber-100);
+}
+.recommendation__badge { color: var(--ink-900); font: 800 10px/1 var(--font-mono); letter-spacing: .08em; text-transform: uppercase; padding-top: 4px; }
+.recommendation__text { color: var(--ink-700); font-size: 13px; }
+
+.answer-form { display: flex; flex-direction: column; gap: 16px; }
+.options { display: flex; flex-direction: column; gap: 9px; }
+.option {
+  display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 11px; align-items: start;
+  padding: 12px 14px; cursor: pointer; background: var(--surface-warm); border: 1.5px solid var(--border);
+  border-radius: var(--radius-sm); transition: border-color 120ms, background 120ms, transform 120ms;
+}
+.option:hover { border-color: var(--violet-500); transform: translateY(-1px); }
+.option:has(input:focus-visible) { box-shadow: var(--focus); }
+.option:has(input:checked) { border-color: var(--violet-500); background: var(--violet-050); box-shadow: inset 0 0 0 1px var(--violet-500); }
+.option input { width: 17px; height: 17px; margin: 3px 0 0; accent-color: var(--violet-600); }
+.option__copy { min-width: 0; }
+.option__label { display: block; color: var(--ink-900); font-size: 14px; font-weight: 800; }
+.option__detail { display: block; margin-top: 2px; color: var(--ink-500); font-size: 12px; }
+.rec-badge { align-self: center; color: var(--violet-700); background: var(--violet-100); border: 1px solid var(--violet-500); border-radius: 6px; padding: 4px 7px 3px; font: 800 9px/1 var(--font-mono); letter-spacing: .08em; text-transform: uppercase; }
+
+.freeform { padding: 14px; border: 1px dashed var(--ink-300); border-radius: var(--radius-sm); background: var(--paper-100); }
+.freeform__head { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 9px; }
+.freeform label { color: var(--ink-700); font-size: 12px; font-weight: 800; }
+.text-link { padding: 0; color: var(--violet-600); background: none; border: 0; cursor: pointer; font-size: 11px; font-weight: 800; text-decoration: underline; text-underline-offset: 3px; }
+.text-link:focus-visible { outline: none; border-radius: 3px; box-shadow: var(--focus); }
+.freeform textarea { width: 100%; min-height: 84px; resize: vertical; padding: 10px 12px; color: var(--ink-900); background: var(--surface); border: 1.5px solid var(--border); border-radius: 8px; font-size: 13px; line-height: 1.45; }
+.freeform textarea:focus { outline: none; border-color: var(--violet-500); box-shadow: var(--focus); }
+.freeform__hint { display: block; margin-top: 6px; color: var(--ink-300); font-size: 11px; }
+
+.question__foot { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; padding-top: 2px; }
+.submit {
+  display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-height: 42px; padding: 0 18px;
+  color: white; background: var(--coral-500); border: 2px solid var(--ink-900); border-radius: 8px;
+  box-shadow: 3px 3px 0 var(--ink-900); cursor: pointer; font-size: 13px; font-weight: 800;
+  transition: background 120ms, transform 120ms, box-shadow 120ms;
+}
+.submit:hover { background: var(--coral-600); }
+.submit:active { transform: translate(2px, 2px); box-shadow: 1px 1px 0 var(--ink-900); }
+.submit:focus-visible { outline: none; box-shadow: var(--focus), 3px 3px 0 var(--ink-900); }
+.queued-badge { display: none; align-items: center; gap: 6px; color: var(--teal-700); background: var(--teal-050); border: 1px solid var(--teal-100); border-radius: 7px; padding: 7px 10px; font: 800 10px/1 var(--font-mono); text-transform: uppercase; letter-spacing: .06em; }
+.question.is-queued .queued-badge, .question.is-sent .queued-badge { display: inline-flex; }
+.form-message { flex-basis: 100%; min-height: 18px; color: var(--coral-600); font-size: 12px; font-weight: 700; }
+
+.deck-nav { display: flex; align-items: center; gap: 10px; margin-top: 20px; }
+.deck-nav__count { flex: 1; color: var(--ink-500); font: 600 12px/1 var(--font-mono); }
+.nav-btn {
+  width: 38px; height: 38px; display: grid; place-items: center; cursor: pointer;
+  color: var(--ink-900); background: var(--surface); border: 1.5px solid var(--border); border-radius: 9px;
+}
+.nav-btn:hover { border-color: var(--violet-500); background: var(--violet-050); }
+.nav-btn:focus-visible { outline: none; box-shadow: var(--focus); }
+.nav-btn:disabled { opacity: .4; cursor: not-allowed; }
+.nav-btn svg { width: 17px; height: 17px; }
+
+.side { display: flex; flex-direction: column; gap: 16px; }
+.panel { padding: 18px; background: var(--surface-warm); border: 1px solid var(--border); border-radius: var(--radius-lg); box-shadow: var(--shadow-soft); }
+.panel h3 { margin: 0 0 8px; color: var(--ink-900); font: 800 18px/1.2 var(--font-display); }
+.panel p { margin: 0; color: var(--ink-500); font-size: 12px; }
+.question-map { display: grid; grid-template-columns: repeat(4, 1fr); gap: 7px; margin-top: 14px; }
+.map-btn { min-width: 0; height: 34px; cursor: pointer; color: var(--ink-500); background: var(--surface); border: 1px solid var(--border); border-radius: 7px; font: 700 10px/1 var(--font-mono); }
+.map-btn:hover, .map-btn.is-active { color: var(--violet-700); border-color: var(--violet-500); background: var(--violet-050); }
+.map-btn.is-queued, .map-btn.is-sent { color: var(--teal-700); border-color: var(--teal-100); background: var(--teal-050); }
+.map-btn.is-edited { color: var(--amber-600); border-color: var(--amber-400); background: var(--amber-100); }
+.legend { display: flex; flex-direction: column; gap: 8px; margin-top: 14px; }
+.legend__row { display: grid; grid-template-columns: 9px 1fr; gap: 8px; align-items: center; color: var(--ink-500); font-size: 11px; }
+.dot { width: 8px; height: 8px; border-radius: 50%; background: var(--ink-300); }
+.dot--queued { background: var(--teal-500); }
+.dot--edit { background: var(--amber-400); }
+.principle { border-left: 4px solid var(--coral-500); }
+.principle strong { display: block; margin-bottom: 5px; color: var(--ink-900); font-size: 12px; }
+.round-action {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 14px; margin-top: 28px; padding: 18px 20px;
+  color: var(--paper-000); background: var(--ink-900); border: 2px solid var(--ink-900);
+  border-radius: var(--radius-md); box-shadow: 4px 4px 0 var(--violet-500);
+}
+.round-action__copy { flex: 1 1 260px; }
+.round-action__title { display: block; font: 800 16px/1.2 var(--font-display); }
+.round-action__status { display: block; margin-top: 4px; color: var(--paper-300); font-size: 12px; }
+.round-submit { background: var(--amber-400); color: var(--ink-900); }
+.round-submit:hover { background: var(--amber-100); }
+.round-submit:disabled { opacity: .45; cursor: not-allowed; transform: none; box-shadow: 3px 3px 0 #000; }
+.round-message { flex-basis: 100%; min-height: 18px; color: var(--amber-100); font-size: 12px; font-weight: 700; }
+.footer { margin-top: 28px; padding-top: 14px; border-top: 1px solid var(--border); color: var(--ink-300); font: 500 10px/1.5 var(--font-mono); }
+
+.fatal { max-width: 720px; margin: 50px auto; padding: 28px; background: var(--surface); border: 2px solid var(--ink-900); border-radius: var(--radius-md); box-shadow: var(--shadow-hard); }
+.fatal h2 { margin: 0 0 8px; color: var(--ink-900); font-family: var(--font-display); }
+
+@media (max-width: 840px) {
+  .layout { grid-template-columns: 1fr; }
+  .side { order: -1; display: grid; grid-template-columns: 1fr 1fr; }
+  .hero { grid-template-columns: 1fr; }
+  .progress { min-width: 0; }
+}
+@media (max-width: 580px) {
+  .nav__inner, .page { padding-left: 17px; padding-right: 17px; }
+  .brand__name { font-size: 21px; }
+  .side { grid-template-columns: 1fr; }
+  .question__top, .freeform__head { align-items: flex-start; }
+  .section-hint { display: none; }
+  .option { grid-template-columns: auto minmax(0, 1fr); }
+  .rec-badge { grid-column: 2; justify-self: start; }
+  .question__foot { align-items: stretch; }
+  .submit { width: 100%; }
+}
+</style>
+</head>
+<body>
+<header class="nav">
+  <div class="nav__inner">
+    <span class="brand">
+      <span class="brand__mark" aria-hidden="true">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M12.8 2.2c.4 3-1.4 4.5-3 6.3-1.7 1.9-2.8 4-1.7 6.6.5-1.6 1.6-2.7 2.8-3.9-.2 2.6 1.3 3.9 2.7 5.1 1.2-1.2 2.2-2.7 2-4.8 1.5 1.5 2.4 3.2 2 5.3-.5 2.9-2.9 5.2-6.1 5.2-3.8 0-6.8-2.9-6.8-6.8 0-4.7 3.7-7.1 8.1-13z"/>
+        </svg>
+      </span>
+      <span class="brand__name">grill me</span>
+    </span>
+    <span class="round-chip" id="round-chip">round —</span>
+  </div>
+</header>
+
+<main class="page" id="app">
+  <section class="hero">
+    <div>
+      <p class="eyebrow">Decision frontier</p>
+      <h1 id="board-title">Questions that need your call</h1>
+      <p class="hero__sub" id="board-subtitle"></p>
+    </div>
+    <div class="progress" aria-label="Round progress">
+      <div class="progress__row"><span id="progress-copy">0 queued</span><span id="progress-total">0 total</span></div>
+      <div class="progress__track"><div class="progress__bar" id="progress-bar"></div></div>
+    </div>
+  </section>
+
+  <div class="layout">
+    <section class="deck-wrap" aria-labelledby="questions-label">
+      <div class="section-head">
+        <span class="section-label" id="questions-label">Open questions</span>
+        <span class="section-hint">Queue any questions you want included in this round</span>
+      </div>
+      <div class="deck" id="deck"></div>
+      <div class="deck-nav">
+        <span class="deck-nav__count" id="deck-count">—</span>
+        <button class="nav-btn" id="prev" type="button" aria-label="Previous question">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m15 18-6-6 6-6"/></svg>
+        </button>
+        <button class="nav-btn" id="next" type="button" aria-label="Next question">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m9 18 6-6-6-6"/></svg>
+        </button>
+      </div>
+    </section>
+
+    <aside class="side">
+      <section class="panel">
+        <h3>Round map</h3>
+        <p>Jump between questions and queue the answers you want to send together.</p>
+        <div class="question-map" id="question-map"></div>
+        <div class="legend">
+          <span class="legend__row"><i class="dot"></i>Open — no answer queued</span>
+          <span class="legend__row"><i class="dot dot--queued"></i>Queued — included when the round is submitted</span>
+          <span class="legend__row"><i class="dot dot--edit"></i>Edited — queue again before submitting</span>
+        </div>
+      </section>
+      <section class="panel principle">
+        <strong>A recommendation is not a decision.</strong>
+        <p>Option A starts selected to show the agent's recommendation. The question stays open until you queue it and submit the round.</p>
+      </section>
+    </aside>
+  </div>
+
+  <section class="round-action" aria-labelledby="round-action-title">
+    <div class="round-action__copy">
+      <strong class="round-action__title" id="round-action-title">Ready to send this round?</strong>
+      <span class="round-action__status" id="round-status">Queue at least one answer. Unqueued questions will remain open.</span>
+    </div>
+    <button class="submit round-submit" id="submit-round" type="button" disabled>Submit round</button>
+    <span class="round-message" id="round-message" role="alert"></span>
+  </section>
+
+  <footer class="footer" id="provenance"></footer>
+</main>
+
+<!--
+Replace the single data placeholder in the script below with JSON shaped like:
+{
+  "round": 1,
+  "title": "Choose the shape of the feature",
+  "subtitle": "These questions are independent and can be answered in any order.",
+  "questions": [{
+    "id": "Q1",
+    "title": "Where should configuration live?",
+    "body": "Full question context. Newlines are preserved.",
+    "recommendation": "A",
+    "recommendation_reason": "Short, concrete rationale.",
+    "image": {"src": "relative-image.png", "alt": "Useful description", "caption": "Optional caption"},
+    "options": [
+      {"letter": "A", "label": "Project configuration", "detail": "Why this option matters."},
+      {"letter": "B", "label": "User configuration", "detail": "Tradeoff or consequence."}
+    ]
+  }]
+}
+The image field is optional. All displayed content is inserted with textContent.
+-->
+<script id="grill-data" type="application/json">
+__GRILL_ME_DATA__
+</script>
+
+<script>
+(function () {
+  "use strict";
+
+  function node(tag, className, text) {
+    var element = document.createElement(tag);
+    if (className) element.className = className;
+    if (text !== undefined && text !== null) element.textContent = text;
+    return element;
+  }
+
+  function fatal(message) {
+    var app = document.getElementById("app");
+    app.innerHTML = "";
+    var box = node("section", "fatal");
+    box.appendChild(node("h2", "", "This decision board could not load"));
+    box.appendChild(node("p", "", message + " Ask the agent to rebuild the artifact."));
+    app.appendChild(box);
+  }
+
+  var data;
+  try {
+    data = JSON.parse(document.getElementById("grill-data").textContent);
+  } catch (error) {
+    fatal("The embedded round data is not valid JSON.");
+    return;
+  }
+
+  var valid = data && Array.isArray(data.questions) && data.questions.length > 0 && data.questions.every(function (question) {
+    return question && typeof question.id === "string" && question.id &&
+      typeof question.title === "string" && question.title &&
+      typeof question.body === "string" &&
+      question.recommendation === "A" &&
+      Array.isArray(question.options) && question.options.length >= 1 && question.options.length <= 4 &&
+      question.options[0] && question.options[0].letter === "A" &&
+      question.options.every(function (option) {
+        return option && typeof option.letter === "string" && typeof option.label === "string" && option.label;
+      });
+  });
+  if (!valid) {
+    fatal("The round data is missing required questions, options, or the A recommendation.");
+    return;
+  }
+
+  document.getElementById("round-chip").textContent = "round " + (data.round || 1);
+  document.getElementById("board-title").textContent = data.title || "Questions that need your call";
+  document.getElementById("board-subtitle").textContent = data.subtitle || "Answer any question you are ready to settle. The rest stay open.";
+  document.getElementById("provenance").textContent = "Grill Me in Lavish · round " + (data.round || 1) + " · " + data.questions.length + " open decision" + (data.questions.length === 1 ? "" : "s");
+
+  var deck = document.getElementById("deck");
+  var map = document.getElementById("question-map");
+  var states = data.questions.map(function () { return "open"; });
+  var cards = [];
+  var mapButtons = [];
+  var active = 0;
+  var roundSubmitted = false;
+  var roundButton = document.getElementById("submit-round");
+  var roundStatus = document.getElementById("round-status");
+  var roundMessage = document.getElementById("round-message");
+
+  function optionPrompt(question, form) {
+    var selected = form.querySelector('input[name="answer"]:checked');
+    var note = form.querySelector("textarea").value.trim();
+    if (!selected && !note) return "";
+    var lines = ["Answer to " + question.id + " — " + question.title];
+    if (selected) {
+      var selectedOption = question.options.find(function (option) { return option.letter === selected.value; });
+      lines.push("Choice: " + selected.value + " — " + selectedOption.label);
+      if (note) lines.push("Additional context: " + note);
+    } else {
+      lines.push("My own answer: " + note);
+    }
+    return lines.join("\n");
+  }
+
+  function updateProgress() {
+    var queued = states.filter(function (state) { return state === "queued"; }).length;
+    var sent = states.filter(function (state) { return state === "sent"; }).length;
+    document.getElementById("progress-copy").textContent = roundSubmitted ? sent + " submitted" : queued + " queued";
+    document.getElementById("progress-total").textContent = data.questions.length + " total";
+    document.getElementById("progress-bar").style.width = ((roundSubmitted ? sent : queued) / data.questions.length * 100) + "%";
+    var edited = states.filter(function (state) { return state === "edited"; }).length;
+    roundButton.disabled = roundSubmitted || queued === 0 || edited > 0;
+    if (roundSubmitted) {
+      roundStatus.textContent = sent + " answer" + (sent === 1 ? "" : "s") + " submitted. The agent will build the next round.";
+    } else if (edited) {
+      roundStatus.textContent = "Queue every edited answer again before submitting the round.";
+    } else if (queued) {
+      roundStatus.textContent = queued + " answer" + (queued === 1 ? "" : "s") + " queued. Unqueued questions will remain open.";
+    } else {
+      roundStatus.textContent = "Queue at least one answer. Unqueued questions will remain open.";
+    }
+  }
+
+  function updateState(index, state) {
+    states[index] = state;
+    var card = cards[index];
+    var status = card.querySelector(".state");
+    var queueButton = card.querySelector('button[type="submit"]');
+    card.classList.toggle("is-queued", state === "queued");
+    card.classList.toggle("is-sent", state === "sent");
+    status.className = "state" + (state === "queued" ? " is-queued" : state === "sent" ? " is-sent" : state === "edited" ? " is-edited" : "");
+    status.textContent = state === "queued" ? "answer queued" : state === "sent" ? "round submitted" : state === "edited" ? "edited — queue again" : "open";
+    queueButton.textContent = state === "queued" ? "Update queued answer" : state === "edited" ? "Queue updated answer" : state === "sent" ? "Round submitted" : "Queue this answer";
+    mapButtons[index].className = "map-btn" + (index === active ? " is-active" : "") + (state === "queued" ? " is-queued" : state === "sent" ? " is-sent" : state === "edited" ? " is-edited" : "");
+    updateProgress();
+  }
+
+  function show(index) {
+    active = Math.max(0, Math.min(cards.length - 1, index));
+    cards.forEach(function (card, cardIndex) { card.hidden = cardIndex !== active; });
+    mapButtons.forEach(function (button, buttonIndex) {
+      button.classList.toggle("is-active", buttonIndex === active);
+      button.setAttribute("aria-current", buttonIndex === active ? "true" : "false");
+    });
+    document.getElementById("deck-count").textContent = "question " + (active + 1) + " of " + cards.length;
+    document.getElementById("prev").disabled = active === 0;
+    document.getElementById("next").disabled = active === cards.length - 1;
+    deck.classList.toggle("is-last", active === cards.length - 1);
+  }
+
+  data.questions.forEach(function (question, index) {
+    var card = node("article", "question");
+    var pad = node("div", "question__pad");
+    var top = node("div", "question__top");
+    top.appendChild(node("span", "qid", question.id));
+    top.appendChild(node("span", "state", "open"));
+    pad.appendChild(top);
+    pad.appendChild(node("h2", "", question.title));
+    pad.appendChild(node("p", "question__body", question.body));
+
+    if (question.image && question.image.src && question.image.alt) {
+      var figure = node("figure", "visual");
+      var image = document.createElement("img");
+      image.src = question.image.src;
+      image.alt = question.image.alt;
+      image.loading = "lazy";
+      figure.appendChild(image);
+      if (question.image.caption) figure.appendChild(node("figcaption", "", question.image.caption));
+      pad.appendChild(figure);
+    }
+
+    var recommendation = node("div", "recommendation");
+    recommendation.appendChild(node("span", "recommendation__badge", "Recommended A"));
+    recommendation.appendChild(node("span", "recommendation__text", question.recommendation_reason || "The first option is the agent's recommendation."));
+    pad.appendChild(recommendation);
+
+    var form = node("form", "answer-form");
+    form.setAttribute("data-lavish-question", question.id);
+    var options = node("div", "options");
+    question.options.forEach(function (option) {
+      var label = node("label", "option");
+      var radio = document.createElement("input");
+      radio.type = "radio";
+      radio.name = "answer";
+      radio.value = option.letter;
+      radio.checked = option.letter === "A";
+      label.appendChild(radio);
+      var copy = node("span", "option__copy");
+      copy.appendChild(node("span", "option__label", option.letter + ". " + option.label));
+      if (option.detail) copy.appendChild(node("span", "option__detail", option.detail));
+      label.appendChild(copy);
+      if (option.letter === "A") label.appendChild(node("span", "rec-badge", "agent pick"));
+      options.appendChild(label);
+    });
+    form.appendChild(options);
+
+    var freeform = node("div", "freeform");
+    var freeformHead = node("div", "freeform__head");
+    var textareaId = "freeform-" + index;
+    var textareaLabel = node("label", "", "Add nuance or give a different answer");
+    textareaLabel.htmlFor = textareaId;
+    freeformHead.appendChild(textareaLabel);
+    var ownAnswer = node("button", "text-link", "Write my own answer");
+    ownAnswer.type = "button";
+    freeformHead.appendChild(ownAnswer);
+    freeform.appendChild(freeformHead);
+    var textarea = document.createElement("textarea");
+    textarea.id = textareaId;
+    textarea.name = "note";
+    textarea.maxLength = 2000;
+    textarea.placeholder = "Add constraints, explain your reasoning, or answer outside these options…";
+    freeform.appendChild(textarea);
+    freeform.appendChild(node("span", "freeform__hint", "Choose an option with context, or use your written answer on its own."));
+    form.appendChild(freeform);
+
+    var foot = node("div", "question__foot");
+    var submit = node("button", "submit", "Queue this answer");
+    submit.type = "submit";
+    foot.appendChild(submit);
+    var queuedBadge = node("span", "queued-badge", "✓ queued for this round");
+    foot.appendChild(queuedBadge);
+    var message = node("span", "form-message");
+    message.setAttribute("role", "alert");
+    foot.appendChild(message);
+    form.appendChild(foot);
+
+    function markEdited() {
+      message.textContent = "";
+      roundMessage.textContent = "";
+      if (states[index] === "queued") updateState(index, "edited");
+    }
+    form.addEventListener("change", markEdited);
+    textarea.addEventListener("input", markEdited);
+    ownAnswer.addEventListener("click", function () {
+      form.querySelectorAll('input[name="answer"]').forEach(function (radio) { radio.checked = false; });
+      markEdited();
+      textarea.focus();
+    });
+
+    form.addEventListener("submit", function (event) {
+      event.preventDefault();
+      message.textContent = "";
+      var prompt = optionPrompt(question, form);
+      if (!prompt) {
+        message.textContent = "Choose an option or write your own answer first.";
+        return;
+      }
+      if (!window.lavish || typeof window.lavish.queuePrompt !== "function") {
+        message.textContent = "Open this artifact through Lavish to queue an answer.";
+        return;
+      }
+      try {
+        /* Intentionally send natural language only. No structured data object is
+           attached, so JSON never becomes part of the agent conversation. */
+        window.lavish.queuePrompt(prompt, {
+          queueKey: "grill-round-" + (data.round || 1) + "-" + question.id,
+          element: form
+        });
+        updateState(index, "queued");
+        message.textContent = "";
+        var nextOpen = states.findIndex(function (state, stateIndex) { return stateIndex > index && state === "open"; });
+        if (nextOpen < 0) nextOpen = states.findIndex(function (state) { return state === "open"; });
+        if (nextOpen >= 0 && nextOpen !== index) setTimeout(function () { show(nextOpen); }, 420);
+      } catch (error) {
+        message.textContent = "Lavish could not queue this answer. Try again.";
+      }
+    });
+
+    pad.appendChild(form);
+    card.appendChild(pad);
+    deck.appendChild(card);
+    cards.push(card);
+
+    var mapButton = node("button", "map-btn", question.id);
+    mapButton.type = "button";
+    mapButton.setAttribute("aria-label", "Open " + question.id + ": " + question.title);
+    mapButton.addEventListener("click", function () { show(index); });
+    map.appendChild(mapButton);
+    mapButtons.push(mapButton);
+  });
+
+  document.getElementById("prev").addEventListener("click", function () { show(active - 1); });
+  document.getElementById("next").addEventListener("click", function () { show(active + 1); });
+  roundButton.addEventListener("click", function () {
+    roundMessage.textContent = "";
+    var edited = states.filter(function (state) { return state === "edited"; }).length;
+    var queued = states.filter(function (state) { return state === "queued"; }).length;
+    if (edited) {
+      roundMessage.textContent = "Queue every edited answer again before submitting.";
+      return;
+    }
+    if (!queued) {
+      roundMessage.textContent = "Queue at least one answer before submitting the round.";
+      return;
+    }
+    if (!window.lavish || typeof window.lavish.sendQueuedPrompts !== "function") {
+      roundMessage.textContent = "Open this artifact through Lavish to submit the round.";
+      return;
+    }
+    try {
+      window.lavish.sendQueuedPrompts();
+      roundSubmitted = true;
+      states.forEach(function (state, index) {
+        if (state === "queued") updateState(index, "sent");
+      });
+      cards.forEach(function (card) {
+        card.querySelectorAll("input, textarea, button").forEach(function (control) { control.disabled = true; });
+      });
+      roundButton.textContent = "Round submitted";
+      roundMessage.textContent = queued + " answer" + (queued === 1 ? "" : "s") + " sent to the agent.";
+      updateProgress();
+    } catch (error) {
+      roundMessage.textContent = "Lavish could not submit this round. Try again.";
+    }
+  });
+  show(0);
+  updateProgress();
+})();
+</script>
+</body>
+</html>
