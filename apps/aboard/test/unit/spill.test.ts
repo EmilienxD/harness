@@ -9,6 +9,33 @@ import { planLaunch } from "../../src/claude/launch.js";
 import { promptSpillRoot, taskPromptPath } from "../../src/platform/launch.js";
 import type { AgentId, SessionId } from "../../src/domain/contracts.js";
 
+test("a delegated Claude fork receives a lifecycle startup hook", async (t) => {
+  const runtimeRoot = await mkdtemp(join(tmpdir(), "aboard-fork-hooks-test-"));
+  t.after(() => rm(runtimeRoot, { recursive: true, force: true }));
+  const plan = {
+    ...planLaunch({
+      agentId: "10" as AgentId,
+      sessionId: "29581ba3-a790-4a66-9b8d-dc4748eedcd9" as SessionId,
+      forkSessionId: "d4919c37-76d4-46f5-8a99-0e3c0e0c8369" as SessionId,
+      agentType: "brainstorm",
+      shell: "powershell",
+      configuration: { shape: "default" },
+      executionMode: "interactive",
+      runtimeDirectory: runtimeRoot,
+    }),
+    platform: "claude" as const,
+  };
+  const store = new FileSystemPromptSpillStore("C:/project", runtimeRoot, new Map([
+    ["claude", { settings: "assets/runtime/abd-hooks.json", script: "assets/runtime/abd_hook.py" }],
+  ]));
+  await store.prepare(plan);
+  const settings = JSON.parse(await readFile(join(plan.runtimeDirectory, "settings.json"), "utf8")) as {
+    hooks: { SessionStart: { matcher?: string; hooks: { args: string[] }[] }[] };
+  };
+  const applicable = settings.hooks.SessionStart.filter((entry) => entry.matcher === undefined || new RegExp(entry.matcher).test("fork"));
+  assert.ok(applicable.some((entry) => entry.hooks.some((hook) => hook.args.at(-1) === "session-start")));
+});
+
 test("an activation owns a short isolated prompt root", async (t) => {
   const parent = await mkdtemp(join(tmpdir(), "aboard-prompt-root-test-"));
   t.after(() => rm(parent, { recursive: true, force: true }));
