@@ -303,6 +303,8 @@ def handle(
                 ),
             )
             if delivery is not None:
+                if selected_provider == "claude":
+                    return _context(event, delivery.text)
                 return {"decision": "block", "reason": delivery.text}
         return None
 
