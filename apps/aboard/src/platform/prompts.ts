@@ -117,7 +117,7 @@ export function freshCodebaseContextPrompt(codebaseContext: string): string {
 /** Complete opening user messages for Auto Run workers. */
 export function autoRunExplorePrompt(issue: Pick<IssueSnapshot, "number" | "title">): string {
   return (
-    `Explore the current checkout for issue #${issue.number}; ${issue.title} and identify the codebase context needed to address this issue. ` +
+    `explore the current checkout for issue #${issue.number}; ${issue.title} and identify the codebase context needed to address this issue. ` +
     "Report the relevant facts, code locations, usefull grep/glob patterns. Do not modify the checkout. " +
     "And do not provide instructions, judgment, recommendations on what to do; report evidence only."
   );
@@ -301,10 +301,10 @@ export function workerContinuationPrompt(
   return `${continuation}\n\nReminder: Perform the task described in @${task.path}.\n\n${task.contents}`;
 }
 
-/** Rejects an empty Explore handoff before address starts. */
+/** Rejects an empty explore handoff before address starts. */
 export function requireExploreReport(value: string): string {
   const report = value.trim();
-  if (report.length === 0) throw new Error("Explore returned no codebase context");
+  if (report.length === 0) throw new Error("explore returned no codebase context");
   return report;
 }
 

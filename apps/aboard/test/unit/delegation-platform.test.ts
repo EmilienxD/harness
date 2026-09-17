@@ -177,7 +177,7 @@ test("shared delegation does not report a runtime-assigned session until its act
   assert.equal(fleet.get("agent-1" as AgentId)?.lifecycle.status, "running");
 });
 
-test("an auto-run ChatGPT Explore runs read-only and reports through the shared completion contract", async () => {
+test("an auto-run ChatGPT explore runs read-only and reports through the shared completion contract", async () => {
   const agentId = "agent-1" as AgentId;
   const delivered: string[] = [];
   const platform = new ChatGptAgentPlatform({
@@ -202,7 +202,7 @@ test("an auto-run ChatGPT Explore runs read-only and reports through the shared 
     agentIdFactory: () => agentId, runtimeDirectory: "C:/runtime",
   });
 
-  const run = coordinator.runAutomated({ type: "Explore", description: "explore issue 14", issues: [14] });
+  const run = coordinator.runAutomated({ type: "explore", description: "explore issue 14", issues: [14] });
   while (fleet.get(agentId) === undefined) await new Promise((resolve) => setImmediate(resolve));
   const command = host.terminals[0]?.sent.at(-1) ?? "";
   assert.match(command, /--sandbox read-only/u);

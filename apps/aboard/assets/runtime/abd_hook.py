@@ -25,7 +25,7 @@ ROUTES: dict[str, str] = {
     "session-end": "/hooks/session-end",
 }
 
-RESULT_REPORTING_TYPES: frozenset[str] = frozenset({"Explore", "address", "review"})
+RESULT_REPORTING_TYPES: frozenset[str] = frozenset({"explore", "address", "review"})
 ADDRESS_COMMIT_REMINDER = (
     'You have modified files without committing them. Is there a real reason for this? '
     'Did you discover any blockers along the way? If so, immediatly answer '

@@ -148,7 +148,7 @@ test("the ChatGPT adapter preflights the complete configured command and the ses
   const plan = platform.planLaunch({
     agentId,
     sessionId: provisional,
-    agentType: "Explore",
+    agentType: "explore",
     shell: "powershell",
     configuration: { shape: "explore", declaredCommand: ["wrapper", "run", "codex"] },
     prompt: "Report the implementation context for issue #14.",
@@ -156,10 +156,10 @@ test("the ChatGPT adapter preflights the complete configured command and the ses
   });
   await platform.preflight(plan);
   assert.deepEqual(calls, [["wrapper", "run", "codex", "--version"]]);
-  assert.deepEqual(required, ["Explore"]);
+  assert.deepEqual(required, ["explore"]);
 });
 
-test("a ChatGPT Explore session preserves its shared prompt while Codex cannot let it write", () => {
+test("a ChatGPT explore session preserves its shared prompt while Codex cannot let it write", () => {
   const platform = new ChatGptAgentPlatform({
     lifecycleAssets: { settings: "hooks.json", script: "hook.py" },
     commandRunner: async () => ({ code: 0, stdout: "codex-cli 0.153.4", stderr: "" }),
@@ -169,14 +169,14 @@ test("a ChatGPT Explore session preserves its shared prompt while Codex cannot l
   const plan = platform.planLaunch({
     agentId,
     sessionId: provisional,
-    agentType: "Explore",
+    agentType: "explore",
     shell: "powershell",
     configuration: { shape: "explore", declaredCommand: ["codex"], declaredModel: "gpt-test", declaredEffort: "low" },
     prompt: "Report the implementation context for issue #14.",
     runtimeDirectory: "C:/aboard/runtime",
   });
 
-  assert.equal(plan.agentType, "Explore");
+  assert.equal(plan.agentType, "explore");
   assert.equal(plan.writeCapability, "read-only");
   assert.equal(plan.requiresWriteLease, false);
   assert.deepEqual(plan.args.slice(plan.args.indexOf("--sandbox"), plan.args.indexOf("--sandbox") + 2), ["--sandbox", "read-only"]);
@@ -186,7 +186,7 @@ test("a ChatGPT Explore session preserves its shared prompt while Codex cannot l
   assert.equal(plan.args.at(-1), "Report the implementation context for issue #14.");
 });
 
-test("a ChatGPT Explore session refuses to launch without an exploration task or as another shape", () => {
+test("a ChatGPT explore session refuses to launch without an exploration task or as another shape", () => {
   const platform = new ChatGptAgentPlatform({
     lifecycleAssets: { settings: "hooks.json", script: "hook.py" },
     commandRunner: async () => ({ code: 0, stdout: "codex-cli 0.153.4", stderr: "" }),
@@ -194,18 +194,18 @@ test("a ChatGPT Explore session refuses to launch without an exploration task or
   const request = {
     agentId,
     sessionId: provisional,
-    agentType: "Explore",
+    agentType: "explore",
     shell: "powershell",
     runtimeDirectory: "C:/aboard/runtime",
   } as const;
 
   assert.throws(
     () => platform.planLaunch({ ...request, configuration: { shape: "explore", declaredCommand: ["codex"] } }),
-    /Explore cannot launch without its exploration task/u,
+    /explore cannot launch without its exploration task/u,
   );
   assert.throws(
     () => platform.planLaunch({ ...request, configuration: { shape: "default", declaredCommand: ["codex"] }, prompt: "Report the context." }),
-    /Explore launches as a read-only Codex session/u,
+    /explore launches as a read-only Codex session/u,
   );
   assert.throws(
     () => platform.planLaunch({ ...request, agentType: "review", configuration: { shape: "explore", declaredCommand: ["codex"] }, prompt: "Review the change." }),
@@ -213,7 +213,7 @@ test("a ChatGPT Explore session refuses to launch without an exploration task or
   );
 });
 
-test("a large ChatGPT Explore task uses spilled delivery", () => {
+test("a large ChatGPT explore task uses spilled delivery", () => {
   const platform = new ChatGptAgentPlatform({
     lifecycleAssets: { settings: "hooks.json", script: "hook.py" },
     commandRunner: async () => ({ code: 0, stdout: "codex-cli 0.153.4", stderr: "" }),
@@ -221,7 +221,7 @@ test("a large ChatGPT Explore task uses spilled delivery", () => {
   const plan = platform.planLaunch({
     agentId,
     sessionId: provisional,
-    agentType: "Explore",
+    agentType: "explore",
     shell: "powershell",
     configuration: { shape: "explore", declaredCommand: ["codex"] },
     prompt: "exploration task ".repeat(100),

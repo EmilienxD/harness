@@ -504,7 +504,7 @@
         "aboard.autoRun.exploreBeforeAddress": {
           "type": "boolean",
           "default": false,
-          "description": "Launch a visible read-only Explore agent immediately before each fresh auto-run address worker. Its bounded codebase report is passed directly to that worker and published best-effort on the issue. The setting is frozen when a run starts and preserved across resume."
+          "description": "Launch a visible read-only explore agent immediately before each fresh auto-run address worker. Its bounded codebase report is passed directly to that worker and published best-effort on the issue. The setting is frozen when a run starts and preserved across resume."
         },
         "aboard.autoRun.issueContextDepth": {
           "type": "integer",

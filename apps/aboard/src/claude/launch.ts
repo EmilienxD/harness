@@ -111,7 +111,7 @@ export function launchWriteCapability(
   agentType: AgentType,
   configuration: LaunchConfiguration,
 ): WriteCapability {
-  if (agentType === "Explore") return "read-only";
+  if (agentType === "explore") return "read-only";
   if (configuration.shape === "skill") return "write-capable";
   return configuration.shape === "default" ? "write-capable" : "read-only";
 }
@@ -393,7 +393,7 @@ function assertLaunchShape(agentType: AgentType, configuration: LaunchConfigurat
     }
     return;
   }
-  if (isNamedBuiltinAgentType(agentType) && configuration.shape === "builtin" && configuration.agentName === agentType) return;
+  if (isNamedBuiltinAgentType(agentType) && configuration.shape === "builtin" && configuration.agentName === "Explore") return;
   throw new LaunchPlanError("shape-not-allowed", `${agentType} has no supported launch configuration`);
 }
 

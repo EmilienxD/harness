@@ -61,7 +61,7 @@ test("launch.json resolves the four launch profiles", () => {
       deniedTools: [],
     },
   });
-  assert.deepEqual(parsed.value.configurationFor("claude", "Explore"), {
+  assert.deepEqual(parsed.value.configurationFor("claude", "explore"), {
     platform: "claude",
     settings: {
       shape: "builtin",
@@ -134,11 +134,11 @@ test("launch.json selects an attended ChatGPT session with its Codex command", (
   });
 });
 
-test("launch.json selects a read-only ChatGPT Explore session and still refuses unsupported kinds", () => {
+test("launch.json selects a read-only ChatGPT explore session and still refuses unsupported kinds", () => {
   const parsed = parseLaunchFile(providerFile("chatgpt", { command: ["codex"], explore: { model: "gpt-test", effort: "low" } }));
 
   assert.deepEqual(parsed.diagnostics, []);
-  assert.deepEqual(parsed.value.configurationFor("chatgpt", "Explore"), {
+  assert.deepEqual(parsed.value.configurationFor("chatgpt", "explore"), {
     platform: "chatgpt",
     settings: {
       shape: "explore",

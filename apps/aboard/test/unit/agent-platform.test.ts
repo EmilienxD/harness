@@ -39,7 +39,7 @@ test("the Claude adapter owns launch planning, capabilities, preflight, and resu
   const plan = platform.planLaunch({
     agentId,
     sessionId,
-    agentType: "Explore",
+    agentType: "explore",
     shell: "powershell",
     configuration: {
       shape: "builtin",

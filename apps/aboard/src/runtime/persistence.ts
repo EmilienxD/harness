@@ -365,9 +365,9 @@ export function parseAutoRunRecord(value: unknown): AutoRunRecord | undefined {
     workerSession === undefined
     || nonEmptyString(workerSession.agentId) === undefined
     || nonEmptyString(workerSession.sessionId) === undefined
-    || (workerSession.type !== "address" && workerSession.type !== "review" && workerSession.type !== "Explore")
+    || (workerSession.type !== "address" && workerSession.type !== "review" && workerSession.type !== "explore")
     || positiveInteger(workerSession.issueNumber) === undefined
-    || (workerSession.continuable !== undefined && (workerSession.continuable !== true || workerSession.type === "Explore"))
+    || (workerSession.continuable !== undefined && (workerSession.continuable !== true || workerSession.type === "explore"))
   )) return undefined;
   if (currentIssue !== undefined && (!issueNumbers.has(String(currentIssue)) || progress[String(currentIssue)]?.state !== "current")) return undefined;
   return {
@@ -394,7 +394,7 @@ export function parseAutoRunRecord(value: unknown): AutoRunRecord | undefined {
     ...(workerSession === undefined ? {} : { workerSession: {
       agentId: workerSession.agentId as AgentId,
       sessionId: workerSession.sessionId as SessionId,
-      type: workerSession.type as "address" | "review" | "Explore",
+      type: workerSession.type as "address" | "review" | "explore",
       issueNumber: workerSession.issueNumber as number,
       ...(workerSession.continuable === true ? { continuable: true as const } : {}),
     } }),

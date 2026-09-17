@@ -274,7 +274,7 @@ test("an unusable auto-run record degrades to nothing to recover", () => {
     { ...valid, settings: { ...valid.settings, mergeStrategy: "fast-forward" } },
     { ...valid, settings: { ...valid.settings, exploreBeforeAddress: "yes" } },
     { ...valid, settings: { ...valid.settings, issueContextDepth: "deep" } },
-    { ...valid, workerSession: { agentId: "worker-20", sessionId: "session", type: "Explore", issueNumber: 35, continuable: true } },
+    { ...valid, workerSession: { agentId: "worker-20", sessionId: "session", type: "explore", issueNumber: 35, continuable: true } },
     { ...valid, settings: undefined },
     { ...valid, plan: [{ number: 34 }] },
     { ...valid, branchShas: { "run/return": "short" } },
@@ -291,7 +291,7 @@ test("an unusable auto-run record degrades to nothing to recover", () => {
   }
   assert.equal(parseAutoRunRecord({
     ...valid,
-    workerSession: { agentId: "worker-20", sessionId: "session", type: "Explore", issueNumber: 35 },
+    workerSession: { agentId: "worker-20", sessionId: "session", type: "explore", issueNumber: 35 },
   })?.version, 1);
   // An authoritative record is all-or-nothing: silently turning damaged
   // progress into pending work could repeat an issue or a side effect.

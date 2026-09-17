@@ -155,5 +155,5 @@ test("only Auto Run workers with result delivery are reconciled on terminal clos
   assert.equal(reportsResult({ ...automated, resultDelivery: { mode: "none" } }), false);
   assert.equal(reportsResult({ ...automated, identity: { agentId: agent("a"), type: "review" } }), true);
   assert.equal(reportsResult({ ...automated, identity: { agentId: agent("a"), type: "interactive" }, attended: true }), false);
-  assert.equal(reportsResult({ ...automated, identity: { agentId: agent("a"), type: "Explore" }, resultDelivery: { mode: "none" } }), false);
+  assert.equal(reportsResult({ ...automated, identity: { agentId: agent("a"), type: "explore" }, resultDelivery: { mode: "none" } }), false);
 });

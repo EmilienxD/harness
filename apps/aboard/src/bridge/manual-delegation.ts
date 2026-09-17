@@ -7,7 +7,7 @@ import { join } from "node:path";
 import { protocolError, type BridgeRequestHandler } from "./protocol.js";
 
 const TASKS = {
-  explore: { type: "Explore", modes: ["auto"] },
+  explore: { type: "explore", modes: ["auto"] },
   prototype: { type: "prototype", modes: ["interactive", "auto"] },
   websearch: { type: "websearch", modes: ["interactive", "auto"] },
   brainstorm: { type: "brainstorm", modes: ["interactive"] },

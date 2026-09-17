@@ -41,7 +41,7 @@ points.
 ## Session and Runtime Model
 
 - `interactive`: empty, user-controlled Claude Code or Codex TUI.
-- `Explore`: read-only exploration; Claude's built-in agent or a top-level Codex session enforced with
+- `explore`: read-only exploration; Claude's built-in Explore agent or a top-level Codex session enforced with
   `sandbox_mode="read-only"` and `approval_policy="never"`.
 - `prototype`, `websearch`, `brainstorm`, and `general`: manual delegation identities. Their explicit
   `interactive` or `auto` execution mode is separate from Auto Run worker semantics.
@@ -72,7 +72,7 @@ Difficulty routing:
 
 Interactive and manual sessions inherit the user's native Claude Code or Codex tool settings, including
 built-in subagents and web search. Auto Run workers deny those tools regardless of permissive launch-profile
-settings, with extension-owned Git/GitHub restrictions enforced by a guard hook. ChatGPT Explore must pass
+settings, with extension-owned Git/GitHub restrictions enforced by a guard hook. ChatGPT explore must pass
 managed-policy checks for read-only sandboxing, `never` approval, and managed hooks. `[AI]-chrome` workers
 require `chrome` in `BROWSER_USE_AVAILABLE_BACKENDS` before launch.
 
@@ -92,7 +92,7 @@ user/profile/default settings. `.abd/settings.json` accepts flat or nested keys,
 | `aboard.terminals.closeOnSessionEnd` | `false` | Leave exited session terminals available. |
 | `aboard.autoRun.review` | `false` | Add the mode-specific automated review turn. |
 | `aboard.autoRun.branchMode` | `per-issue` | Per-issue PRs or one cumulative branch. |
-| `aboard.autoRun.exploreBeforeAddress` | `false` | Run read-only Explore before a fresh worker. |
+| `aboard.autoRun.exploreBeforeAddress` | `false` | Run read-only explore before a fresh worker. |
 | `aboard.autoRun.issueContextDepth` | `1` | Related-issue traversal depth. |
 | `aboard.autoRun.prompt` | `""` | Persistent worker guidance. |
 | `aboard.autoRun.mergeStrategy` | `squash` | PR merge method. |

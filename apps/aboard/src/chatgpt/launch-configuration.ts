@@ -62,8 +62,7 @@ class ChatGptLaunchFile implements PlatformLaunchFile {
   public readonly platform = "chatgpt" as const;
   public constructor(private readonly command: readonly string[], private readonly profiles: Readonly<Record<ProfileName, Profile>>) {}
   public configuration(type: AgentType): ConfiguredLaunch {
-    const profileName: ProfileName = type === "Explore" ? "explore"
-      : type === "address" || type === "review" ? type : "interactive";
+    const profileName: ProfileName = type === "explore" || type === "address" || type === "review" ? type : "interactive";
     const profile = this.profiles[profileName];
     const common = {
       declaredCommand: this.command,
@@ -78,7 +77,7 @@ class ChatGptLaunchFile implements PlatformLaunchFile {
           ...(profile.webSearch === undefined ? {} : { webSearch: profile.webSearch }),
           ...(profile.subagents === undefined ? {} : { subagents: profile.subagents }),
         }
-      : { shape: type === "Explore" ? "explore" : "default", ...common };
+      : { shape: type === "explore" ? "explore" : "default", ...common };
     return { platform: this.platform, settings };
   }
 }

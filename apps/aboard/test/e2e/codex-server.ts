@@ -263,7 +263,7 @@ function transition(body: ResponsesRequest, scenario: CodexScenario, text: strin
   if (outputs.length === 0) {
     if (calls.length > 0) throw new ProtocolMismatch("$.input", "contains a tool call without its output");
     if (scenario === "address") return { checkpoint: "guard", output: functionOutput("git push origin main", body, scenario) };
-    if (scenario === "explore" && body.sandboxMode !== "read-only") throw new ProtocolMismatch("$.client_metadata", "Explore did not activate the read-only sandbox");
+    if (scenario === "explore" && body.sandboxMode !== "read-only") throw new ProtocolMismatch("$.client_metadata", "explore did not activate the read-only sandbox");
     const command = scenario === "explore"
       ? "Set-Content -LiteralPath 'sandbox-target.txt' -Value 'sandbox escape'"
       : `Set-Content -LiteralPath 'write-attempt-${scenario}.txt' -Value 'real Codex tool execution'`;
@@ -454,7 +454,7 @@ function finalOutput(text: string): ResponseOutput {
 }
 
 function finalMessage(scenario: Exclude<CodexScenario, "process-failure">): string {
-  if (scenario === "explore") return "Explore report: the deterministic checkout keeps its launch plan in src/chatgpt/launch.ts.";
+  if (scenario === "explore") return "explore report: the deterministic checkout keeps its launch plan in src/chatgpt/launch.ts.";
   if (scenario === "address") return "Implemented the deterministic issue; the work is uncommitted.";
   if (scenario === "review-changes") return "Review complete: requested changes before this can merge.";
   if (scenario === "review-approve") return "Review complete: the implementation matches the frozen issue contract.";

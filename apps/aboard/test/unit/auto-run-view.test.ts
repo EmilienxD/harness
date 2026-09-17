@@ -153,7 +153,7 @@ test("the live forecast shows loading feedback, then the planned issues in execu
   const formatted = new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" })
     .format(new Date("2026-01-01T00:00:00.000Z"));
   assert.match(item.tooltip, new RegExp(`Updated at: ${formatted.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`));
-  assert.match(item.tooltip, /Fresh Explore context off/);
+  assert.match(item.tooltip, /Fresh explore context off/);
   assert.doesNotMatch(item.tooltip, /Live forecast|2026-01-01T00:00:00\.000Z/);
   assert.equal(item.collapsible, true);
   const rows = model.children(root).map((node) => model.item(node));
@@ -502,7 +502,7 @@ test("the tooltip names where the work goes and what the run froze", () => {
   assert.match(item.tooltip, /Target branch: feature\/wip/);
   assert.match(item.tooltip, /Working in C:\/checkouts\/run_test\/repo/);
   assert.match(item.tooltip, /Review on/);
-  assert.match(item.tooltip, /Fresh Explore context on/);
+  assert.match(item.tooltip, /Fresh explore context on/);
 
   const inPlace = rootItem({ persisted: record(), state: state() });
   assert.match(inPlace.item.tooltip, /Working in your checkout/);

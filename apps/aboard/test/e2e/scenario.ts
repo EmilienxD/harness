@@ -17,7 +17,7 @@ export const SCENARIO_MARKER = "[E2E:single-file-success]";
 export const AUTO_RUN_AFK_MARKER = "[E2E:auto-run-afk]";
 export const AUTO_RUN_PERMANENT_NOTE = "E2E permanent auto-run guidance.";
 export const AUTO_RUN_NESTED_CONTEXT = "E2E recursively resolved nested issue context.";
-export const AUTO_RUN_EXPLORE_REPORT = "Explore verified deterministic.txt contains the canonical before fixture for this auto-run issue.";
+export const AUTO_RUN_EXPLORE_REPORT = "explore verified deterministic.txt contains the canonical before fixture for this auto-run issue.";
 export const AUTO_RUN_HITL_MARKER = "[E2E:auto-run-hitl]";
 export const AUTO_RUN_HITL_REVIEW_MARKER = "[E2E:auto-run-hitl-review]";
 export const HITL_ACCEPT_PROMPT = "Please commit all accepted changes now. [E2E:accept-hitl]";
@@ -303,7 +303,7 @@ function autoRunExploreTransition(request: MessagesRequest, repoRoot: string): S
     };
   }
   if (result.is_error === true || !contentContains(result.content, BEFORE_CONTENT.trimEnd())) {
-    throw new ScenarioMismatch("$.messages", "Explore Read did not contain the expected fixture marker", scenario);
+    throw new ScenarioMismatch("$.messages", "explore Read did not contain the expected fixture marker", scenario);
   }
   return {
     scenario,

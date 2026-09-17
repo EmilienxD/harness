@@ -90,7 +90,7 @@ const LIFECYCLE_ASSETS = {
 } as const;
 
 function scenarioAgentType(scenario: Scenario): AgentType {
-  if (scenario.explore === true) return "Explore";
+  if (scenario.explore === true) return "explore";
   if (scenario.address === true) return "address";
   return scenario.review === undefined ? "interactive" : "review";
 }
@@ -124,7 +124,7 @@ async function writeSkill(home: string, name: string, instruction: string): Prom
 
 /** The deterministic final message each scenario's session reports on Stop. */
 function expectedFinalMessage(scenario: Scenario): string {
-  if (scenario.explore === true) return "Explore report: the deterministic checkout keeps its launch plan in src/chatgpt/launch.ts.";
+  if (scenario.explore === true) return "explore report: the deterministic checkout keeps its launch plan in src/chatgpt/launch.ts.";
   if (scenario.address === true) return "Implemented the deterministic issue; the work is uncommitted.";
   if (scenario.review !== undefined) {
     return scenario.prompt.includes("[E2E:chatgpt-review-changes]")
@@ -274,7 +274,7 @@ async function runScenario(root: string, scenario: Scenario): Promise<SessionId>
     if (expectedExit === 0 && final !== expectedFinalMessage(scenario)) throw new Error(`ChatGPT E2E lost final assistant output: ${String(final)}`);
     if (expectedExit !== 0 && final !== undefined) throw new Error("ChatGPT E2E manufactured output for a failed process");
     const attempted = existsSync(join(root, `write-attempt-${scenarioArtifact(scenario)}.txt`));
-    if (explore && await readFile(join(root, "sandbox-target.txt"), "utf8") !== "sandbox baseline\n") throw new Error("ChatGPT E2E Explore session modified the checkout");
+    if (explore && await readFile(join(root, "sandbox-target.txt"), "utf8") !== "sandbox baseline\n") throw new Error("ChatGPT E2E explore session modified the checkout");
     if (!explore && resume === undefined && expectedExit === 0 && !attempted) throw new Error("ChatGPT E2E never proved a write-capable session can execute a real Codex tool");
     return actualSessionId;
   } finally {

@@ -190,11 +190,11 @@ test("releasing is idempotent and never resurrects a closed terminal", () => {
 
 test("several bound issues reach the session as one comma-separated variable, and none as no variable", () => {
   const { controller, host } = setup();
-  controller.create({ agentId: agent("agent-7"), sessionId: session("af817a6c-cd41-41e2-a4db-44d3f43cd560"), agentType: "Explore", issueNumbers: [6, 9] });
+  controller.create({ agentId: agent("agent-7"), sessionId: session("af817a6c-cd41-41e2-a4db-44d3f43cd560"), agentType: "explore", issueNumbers: [6, 9] });
   assert.equal(host.created[0]?.options.env?.ABOARD_ISSUE_NUMBERS, "6,9");
   // An empty list is no attribution, not an empty string a hook would have to
   // tell apart from a real value.
-  controller.create({ agentId: agent("agent-8"), sessionId: session("c15badb6-d6c8-45a6-a59f-e931cd364332"), agentType: "Explore", issueNumbers: [] });
+  controller.create({ agentId: agent("agent-8"), sessionId: session("c15badb6-d6c8-45a6-a59f-e931cd364332"), agentType: "explore", issueNumbers: [] });
   assert.equal("ABOARD_ISSUE_NUMBERS" in (host.created[1]?.options.env ?? {}), false);
 });
 
@@ -234,7 +234,7 @@ test("attended sessions carry ABOARD_ATTENDED independently of reporting", () =>
   controller.create({
     agentId: agent("explore-auto"),
     sessionId: session("4db0ed4c-5d9e-4ab5-a493-2b8575ab19ee"),
-    agentType: "Explore",
+    agentType: "explore",
     initialCommand: "claude --agent Explore map the auth flow",
     attended: false,
   });
@@ -244,7 +244,7 @@ test("attended sessions carry ABOARD_ATTENDED independently of reporting", () =>
   controller.create({
     agentId: agent("explore-interactive"),
     sessionId: session("af817a6c-cd41-41e2-a4db-44d3f43cd560"),
-    agentType: "Explore",
+    agentType: "explore",
     attended: true,
   });
   assert.equal(host.created[1]!.options.env.ABOARD_ATTENDED, "1");

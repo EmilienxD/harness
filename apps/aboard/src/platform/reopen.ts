@@ -53,7 +53,7 @@ export interface ReopenCoordinatorOptions {
 
 const TYPE_SELECTORS: Readonly<Record<string, AgentType>> = {
   interactive: "interactive",
-  explore: "Explore",
+  explore: "explore",
   prototype: "prototype",
   brainstorm: "brainstorm",
   websearch: "websearch",

@@ -77,7 +77,7 @@ test("auto-run AFK address reads, edits, and reports a valid completion", () => 
   assert.doesNotMatch(String(complete.content[0]?.text), /<commit>/u);
 });
 
-test("auto-run Explore reads the checkout before returning bounded context", () => {
+test("auto-run explore reads the checkout before returning bounded context", () => {
   const initial: Message[] = [{ role: "user", content: `<work-to-explore>${AUTO_RUN_AFK_MARKER} ${AUTO_RUN_NESTED_CONTEXT}</work-to-explore>` }];
   const read = transition(request(initial, ["Read"]), root);
   assert.equal(read.checkpoint, "auto-explore-read");

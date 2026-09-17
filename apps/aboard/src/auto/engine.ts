@@ -1589,7 +1589,7 @@ export class AutoRunEngine {
     this.#publishIssuePhase(issue, "explore");
     const headSha = await this.#git.headSha(false);
     const outcome = await this.options.launcher.runAutomated({
-      type: "Explore",
+      type: "explore",
       issues: [issue.number],
       issueContextDepth: this.#current.settings.issueContextDepth,
       description: `explore issue ${issue.number}`,
@@ -1604,7 +1604,7 @@ export class AutoRunEngine {
       throw new AutomatedWorkerCancelled();
     }
     if (outcome.result.outcome === "failed") {
-      throw new Error(`Explore failed: ${outcome.result.failure.type}`);
+      throw new Error(`explore failed: ${outcome.result.failure.type}`);
     }
 
     await this.#validate();
@@ -2204,7 +2204,7 @@ export class AutoRunEngine {
     await this.#save({ ...this.#current, workerSession: {
       agentId: outcome.agentId,
       sessionId: outcome.sessionId,
-      type: "Explore",
+      type: "explore",
       issueNumber: issue.number,
     } });
   }

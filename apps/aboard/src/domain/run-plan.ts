@@ -147,7 +147,7 @@ export interface AutoRunRecord {
   readonly workerSession?: {
     readonly agentId: AgentId;
     readonly sessionId: SessionId;
-    readonly type: "address" | "review" | "Explore";
+    readonly type: "address" | "review" | "explore";
     readonly issueNumber: number;
     /** The worker itself failed or returned an unusable completion, rather than a later phase failing. */
     readonly continuable?: true;

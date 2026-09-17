@@ -38,10 +38,10 @@ export class GitHubDelegationPromptResolver implements DelegationPromptResolver 
         pullRequestNumber: input.pullRequest,
       }), input.permanentPrompt, input.additionalGuideline);
     }
-    if (input.type === "Explore") {
+    if (input.type === "explore") {
       const instruction = input.prompt;
       if (instruction === undefined || instruction.trim().length === 0) {
-        throw new Error("Explore requires an explicit prompt");
+        throw new Error("explore requires an explicit prompt");
       }
       if (input.issues === undefined) {
         return appendAutoRunGuidance(

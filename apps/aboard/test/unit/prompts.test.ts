@@ -365,11 +365,11 @@ test("delegated prompts remain free-form and fetch no GitHub context", async () 
 
   const explorationInstruction = "Trace authentication refresh and report the relevant control flow.";
   const exploration = await adapter.resolve({
-    type: "Explore",
+    type: "explore",
     description: "trace authentication refresh",
     prompt: explorationInstruction,
   }, { authority: "delegation" });
-  assert.ok(exploration, "Explore prompt should be resolved");
+  assert.ok(exploration, "explore prompt should be resolved");
   assert.deepEqual(exploration.sources, []);
 
   const exact = "  Keep /api exactly as written.  \n";
@@ -421,24 +421,24 @@ test("prompt authority, not agent type, controls automatic prompt generation", a
   // Interactive: the terminal opens empty even though the type can also run
   // unattended; the user types the first message.
   assert.equal(await adapter.resolve({ type: "interactive", description: "d" }, { authority: "user" }), undefined);
-  assert.equal(await adapter.resolve({ type: "Explore", description: "d" }, { authority: "user" }), undefined);
-  const topic = await adapter.resolve({ type: "Explore", description: "d", prompt: "auth flow" }, { authority: "user" });
+  assert.equal(await adapter.resolve({ type: "explore", description: "d" }, { authority: "user" }), undefined);
+  const topic = await adapter.resolve({ type: "explore", description: "d", prompt: "auth flow" }, { authority: "user" });
   assert.ok(topic, "topic should be resolved");
   const task = await adapter.resolve({ type: "interactive", description: "d", prompt: "find the retry bug" }, { authority: "delegation" });
   assert.ok(task, "task should be resolved");
   await assert.rejects(
-    adapter.resolve({ type: "Explore", description: "d" }, { authority: "auto-run" }),
-    /Explore requires an explicit prompt/u,
+    adapter.resolve({ type: "explore", description: "d" }, { authority: "auto-run" }),
+    /explore requires an explicit prompt/u,
   );
 });
 
-test("an issue-bound Explore launch receives resolved issue context", async () => {
+test("an issue-bound explore launch receives resolved issue context", async () => {
   const { GitHubDelegationPromptResolver } = await import("../../src/github/prompt-adapter.js");
   const github = new FakeGitHub({ issues: [issue47, parent31] });
   const adapter = new GitHubDelegationPromptResolver(new PromptResolver({ github }));
 
   const prompt = await adapter.resolve({
-    type: "Explore",
+    type: "explore",
     description: "explore issue 47",
     issues: [47],
     prompt: "Map relevant files and tests.",

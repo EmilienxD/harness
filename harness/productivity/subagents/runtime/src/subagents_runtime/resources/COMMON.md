@@ -11,7 +11,7 @@ Launch frontmatter schema (`|` separates supported values and is not literal req
 ```markdown
 ---
 task: general|explore|prototype|websearch|brainstorm|address|review # Required. Selects the agent workflow.
-mode: interactive|auto # Required. Explore uses auto; brainstorm uses interactive; every other task supports both.
+mode: interactive|auto # Required. explore uses auto; brainstorm uses interactive; every other task supports both.
 provider: claude|chatgpt # Optional. Defaults to this conversation's provider.
 ---
 

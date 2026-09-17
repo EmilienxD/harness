@@ -97,7 +97,7 @@ test("Auto Run Claude prompts preserve slash-prefixed text", () => {
   assert.equal(plan.args.at(-1), "/address-this Address /api without invoking /review.");
 });
 
-test("plans Explore through Claude Code's builtin agent", () => {
+test("plans explore through Claude Code's builtin Explore agent", () => {
   const configuration: LaunchConfiguration = {
     shape: "builtin",
     agentName: "Explore",
@@ -105,7 +105,7 @@ test("plans Explore through Claude Code's builtin agent", () => {
     declaredEffort: "low",
   };
   const plan = planLaunch(request({
-    agentType: "Explore",
+    agentType: "explore",
     configuration,
     prompt: "Map the authentication flow.",
   }));
@@ -248,7 +248,7 @@ test("Chrome is available only to address workers and is replayed on resume", ()
 test("launch capability follows the stable public type", () => {
   const cases: readonly [AgentType, LaunchConfiguration, string][] = [
     ["interactive", { shape: "default" }, "write-capable"],
-    ["Explore", { shape: "builtin", agentName: "Explore" }, "read-only"],
+    ["explore", { shape: "builtin", agentName: "Explore" }, "read-only"],
     ["address", workerConfiguration("address"), "write-capable"],
     ["review", workerConfiguration("review"), "write-capable"],
   ];

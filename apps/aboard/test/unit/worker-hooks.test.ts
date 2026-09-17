@@ -108,7 +108,7 @@ test("worker Python hook is silent for non-aboard and non-Auto-Run sessions", ()
   for (const env of [
     {},
     { ABOARD_AGENT_ID: "interactive-1", ABOARD_AGENT_TYPE: "interactive" },
-    { ABOARD_AGENT_ID: "explore-1", ABOARD_AGENT_TYPE: "Explore" },
+    { ABOARD_AGENT_ID: "explore-1", ABOARD_AGENT_TYPE: "explore" },
   ]) {
     const result = spawnSync("uv", ["run", "--no-project", "python", script, "worker-post-compact"], { input: JSON.stringify({ hook_event_name: "PostCompact", compact_summary: "x" }), encoding: "utf8", env: { ...process.env, ...env } });
     assert.equal(result.status, 0); assert.equal(result.stdout, ""); assert.equal(result.stderr, "");
@@ -157,7 +157,7 @@ test("Python Stop hook reports final output for every Aboard session", async () 
     await report({ ABOARD_AGENT_ID: "interactive-1", ABOARD_AGENT_TYPE: "interactive" });
     await report({ ABOARD_AGENT_ID: "address-1", ABOARD_AGENT_TYPE: "address" });
     await report({ ABOARD_AGENT_ID: "review-1", ABOARD_AGENT_TYPE: "review" });
-    await report({ ABOARD_AGENT_ID: "explore-1", ABOARD_AGENT_TYPE: "Explore" });
+    await report({ ABOARD_AGENT_ID: "explore-1", ABOARD_AGENT_TYPE: "explore" });
 
     assert.equal(received.length, 4);
     assert.equal(received[0]!.url, "/hooks/stop");

@@ -60,8 +60,7 @@ class ClaudeLaunchFile implements PlatformLaunchFile {
   public constructor(private readonly command: readonly string[], private readonly profiles: Readonly<Record<ProfileName, Profile>>) {}
 
   public configuration(type: AgentType): ConfiguredLaunch {
-    const profileName: ProfileName = type === "Explore" ? "explore"
-      : type === "address" || type === "review" ? type : "interactive";
+    const profileName: ProfileName = type === "explore" || type === "address" || type === "review" ? type : "interactive";
     const profile = this.profiles[profileName];
     const common = {
       declaredCommand: this.command,
@@ -71,7 +70,7 @@ class ClaudeLaunchFile implements PlatformLaunchFile {
     };
     let settings: LaunchConfiguration;
     if (["interactive", "prototype", "websearch", "brainstorm", "general"].includes(type)) settings = { shape: "default", ...common };
-    else if (type === "Explore") settings = { shape: "builtin", agentName: "Explore", ...common };
+    else if (type === "explore") settings = { shape: "builtin", agentName: "Explore", ...common };
     else if (type === "address") settings = { shape: "skill", skillName: "address-this", ...common };
     // AFK and HITL are auto-run orchestration modes, not separate review skills.
     else settings = { shape: "skill", skillName: "review-this", ...common };

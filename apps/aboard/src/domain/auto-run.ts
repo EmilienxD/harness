@@ -60,7 +60,7 @@ export type DiscardBehavior = (typeof DISCARD_BEHAVIORS)[number];
 export interface AutoRunSettings {
   readonly branchMode?: AutoRunBranchMode;
   readonly review: boolean;
-  /** Whether a read-only Explore worker prepares fresh context for each fresh address. */
+  /** Whether a read-only explore worker prepares fresh context for each fresh address. */
   readonly exploreBeforeAddress: boolean;
   /** How many relation levels of issue context are preloaded around each issue. */
   readonly issueContextDepth: number;

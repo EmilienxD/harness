@@ -147,7 +147,7 @@ interface HarnessOptions {
   /** Changes a frozen classification after the worker returns, before commit. */
   readonly relabelAfterAddress?: boolean;
   /** Leaves this automated worker pending until the run aborts it. */
-  readonly pendingWorkerType?: "address" | "review" | "Explore";
+  readonly pendingWorkerType?: "address" | "review" | "explore";
   /** Adds controllable latency or failure to every remote-ref observation. */
   readonly fetch?: () => Promise<void>;
   /** Head branches GitHub reports as already having a pull request, before the run opens any. */
@@ -502,10 +502,10 @@ function harness(options: HarnessOptions = {}): Harness {
     runAutomated: async (input, signal) => {
       launches.push(input);
       // address and review signal completion by committing;
-      // Explore is read-only.
+      // explore is read-only.
       if (input.type === options.pendingWorkerType) {
         // Killed mid-edit: what it had written is still uncommitted.
-        if (input.type !== "Explore" && options.producesChanges !== false) dirty = true;
+        if (input.type !== "explore" && options.producesChanges !== false) dirty = true;
         await new Promise<void>((resolve) => {
           if (signal?.aborted) resolve();
           else signal?.addEventListener("abort", () => resolve(), { once: true });
@@ -526,7 +526,7 @@ function harness(options: HarnessOptions = {}): Harness {
         dirty = false;
       }
       else if (input.type === "review" && input.completionCommitStartingSha === undefined && options.reviewProducesChanges === true) dirty = true;
-      else if (input.type !== "Explore" && commits) {
+      else if (input.type !== "explore" && commits) {
         for (let made = 0; made < (options.workerCommitCount ?? 1); made += 1) commitOn(currentBranch);
         if (options.workerLeavesDirtyTree === true) dirty = true;
       }
@@ -538,7 +538,7 @@ function harness(options: HarnessOptions = {}): Harness {
         options.addressFails === true
         || options.addressFailsForIssue === input.issues?.[0]
       ))
-        || (input.type === "Explore" && options.exploreFails === true)
+        || (input.type === "explore" && options.exploreFails === true)
         || (input.type === "review" && options.reviewFails === true);
       return {
         agentId: `agent-${launches.length}` as AgentId,
@@ -551,7 +551,7 @@ function harness(options: HarnessOptions = {}): Harness {
               exitCode: 0,
               lastAssistantMessage: address
                 ? options.addressMessage ?? "Addressed the issue.\n\n<commit>Implement requested change</commit>"
-                : input.type === "Explore"
+                : input.type === "explore"
                   ? options.explorationReport ?? "Relevant code lives in src/retry.ts; verify with retry tests."
                   : options.reviewMessage ?? "Addressed the issue.",
               telemetry: telemetry(),
@@ -899,7 +899,7 @@ test("optional exploration runs just before a fresh address and publishes its co
   assert.equal(result.started && result.exploresBeforeAddress, true);
   await context.engine.settle();
 
-  assert.deepEqual(context.launches.map((launch) => launch.type), ["Explore", "address"]);
+  assert.deepEqual(context.launches.map((launch) => launch.type), ["explore", "address"]);
   assert.equal(context.launches[0]?.issues?.[0], 34);
   assert.equal(context.launches[0]?.issueContextDepth, 2);
   assert.equal(context.launches[1]?.codebaseContext, report);
@@ -923,22 +923,22 @@ test("single-branch exploration is repeated immediately before each fresh addres
   await context.engine.start();
   await context.engine.settle();
 
-  assert.deepEqual(context.launches.map((launch) => launch.type), ["Explore", "address", "Explore", "address"]);
+  assert.deepEqual(context.launches.map((launch) => launch.type), ["explore", "address", "explore", "address"]);
   assert.deepEqual(context.launches.map((launch) => launch.issues?.[0]), [34, 34, 35, 35]);
 });
 
-test("Explore failure stops recoverably before implementation", async () => {
+test("explore failure stops recoverably before implementation", async () => {
   const context = harness({ settings: { exploreBeforeAddress: true }, exploreFails: true });
 
   await context.engine.start();
   await context.engine.settle();
 
-  assert.deepEqual(context.launches.map((launch) => launch.type), ["Explore"]);
+  assert.deepEqual(context.launches.map((launch) => launch.type), ["explore"]);
   assert.equal(context.gitCalls.includes("commit"), false);
-  assert.equal(context.record()?.workerSession?.type, "Explore");
+  assert.equal(context.record()?.workerSession?.type, "explore");
   assert.equal(context.record()?.workerSession?.continuable, undefined);
   const outcome = context.record()?.outcome;
-  assert.match(outcome?.kind === "failed" ? outcome.reason : "", /Explore failed/);
+  assert.match(outcome?.kind === "failed" ? outcome.reason : "", /explore failed/);
 });
 
 test("exploration comment failure does not withhold direct context", async () => {
@@ -947,7 +947,7 @@ test("exploration comment failure does not withhold direct context", async () =>
   await context.engine.start();
   await context.engine.settle();
 
-  assert.deepEqual(context.launches.map((launch) => launch.type), ["Explore", "address"]);
+  assert.deepEqual(context.launches.map((launch) => launch.type), ["explore", "address"]);
   assert.match(context.launches[1]?.codebaseContext ?? "", /Relevant code lives/);
   assert.match(context.logs.join("\n"), /could not comment on issue/);
 });
@@ -1566,7 +1566,7 @@ test("a failed run can continue its exact ended worker with one Continue message
   await context.engine.settle();
 
   assert.equal(context.launches.filter((launch) => launch.type === "address").length, 1, "no fresh worker was launched");
-  assert.equal(context.launches.filter((launch) => launch.type === "Explore").length, 1, "continuation reuses its original exploration context");
+  assert.equal(context.launches.filter((launch) => launch.type === "explore").length, 1, "continuation reuses its original exploration context");
   assert.equal(context.continuations.length, 1);
   assert.equal(context.continuations[0]?.session, session);
   assert.ok(context.continuations[0]?.completionCommitStartingSha);
