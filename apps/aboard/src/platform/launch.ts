@@ -75,6 +75,7 @@ export interface SessionWrapperLayout {
 }
 
 export interface PlatformLaunchRequest {
+  readonly forkSessionId?: SessionId;
   readonly agentId: AgentId;
   readonly sessionId: SessionId;
   readonly agentType: AgentType;

@@ -8,6 +8,21 @@ const agentId = "interactive-1" as AgentId;
 const provisional = "6b1e3f7a-2c4d-4a8b-9f10-2c3d4e5f6071" as SessionId;
 const actual = "af817a6c-cd41-41e2-a4db-44d3f43cd560" as SessionId;
 
+test("interactive ChatGPT forks preserve history and observe fork startup", () => {
+  const platform = new ChatGptAgentPlatform({
+    lifecycleAssets: { settings: "hooks.json", script: "hook.py" },
+    commandRunner: async () => ({ code: 0, stdout: "codex-cli 0.153.4", stderr: "" }),
+  });
+  const plan = platform.planLaunch({
+    agentId, sessionId: provisional, forkSessionId: actual, agentType: "general",
+    executionMode: "interactive", shell: "powershell", configuration: { shape: "default" },
+    prompt: "Continue", runtimeDirectory: "C:/aboard/runtime",
+  });
+  assert.deepEqual(plan.args.slice(0, 2), ["fork", actual]);
+  const startup = plan.args.find((argument) => argument.startsWith("hooks.SessionStart="));
+  assert.ok(startup?.includes('matcher="startup|resume|fork"'));
+});
+
 test("the ChatGPT adapter launches a visible Codex session without imposing its provisional id", () => {
   const platform = new ChatGptAgentPlatform({
     lifecycleAssets: { settings: "hooks.json", script: "hook.py" },
@@ -291,7 +306,7 @@ test("the ChatGPT adapter resumes the exact Codex conversation with current laun
   assert.equal(plan.args.includes("model_reasoning_effort=\"high\""), true);
   assert.deepEqual(plan.args.slice(-1), ["Continue from the saved state."]);
   assert.match(plan.args.join("\n"), /hooks\.SessionStart/u);
-  assert.match(plan.args.join("\n"), /matcher="startup\|resume"/u);
+  assert.match(plan.args.join("\n"), /matcher="startup\|resume\|fork"/u);
   assert.equal(plan.args.filter((argument) => argument.startsWith("hooks.SessionStart=")).length, 1);
   assert.match(plan.args.join("\n"), /worker-reground/u);
 });

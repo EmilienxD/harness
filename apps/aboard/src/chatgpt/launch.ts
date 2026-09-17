@@ -110,7 +110,7 @@ function planChatGptSession(request: PlatformLaunchRequest | PlatformResumeReque
       ? ["-c", 'web_search="disabled"']
       : configuration.webSearch === undefined ? [] : ["-c", `web_search=${JSON.stringify(configuration.webSearch)}`]),
     ...(subagentsDenied ? ["-c", "features.multi_agent=false", "-c", "agents.enabled=false"] : []),
-    ...config("SessionStart", [hookEntry("session-start", "startup|resume"), hookEntry("worker-reground", "compact")]),
+    ...config("SessionStart", [hookEntry("session-start", "startup|resume|fork"), hookEntry("worker-reground", "compact")]),
     ...config("SessionEnd", [hookEntry("session-end")]),
     ...config("Stop", [hookEntry("worker-stop")]),
     ...config("PostCompact", [hookEntry("worker-post-compact", "manual|auto")]),
@@ -153,7 +153,7 @@ function planChatGptSession(request: PlatformLaunchRequest | PlatformResumeReque
       }
     }
     const background = isHeadlessExecution(request.agentType, request.executionMode);
-    const args = [...(background ? ["exec"] : []), ...(kind === "resume" ? ["resume", request.sessionId] : []), ...(background ? ["--json"] : []), ...fixed, ...promptArgs];
+    const args = [...(background ? ["exec"] : []), ...(request.forkSessionId === undefined ? kind === "resume" ? ["resume", request.sessionId] : [] : ["fork", request.forkSessionId]), ...(background ? ["--json"] : []), ...fixed, ...promptArgs];
     const wrapped = wrap(command, args, request.wrapper, request.agentId, request.sessionId, runtimeRoot);
     return {
       promptDelivery,

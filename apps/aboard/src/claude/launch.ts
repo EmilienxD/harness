@@ -441,6 +441,7 @@ export function planLaunch(request: LaunchPlanRequest): LaunchPlan {
   const fixedArguments = [
     "--session-id",
     request.sessionId,
+    ...(request.forkSessionId === undefined ? [] : ["--resume", request.forkSessionId, "--fork-session"]),
     "--name",
     agentLabel({ agentId: request.agentId, type: agentType }),
     ...shapeArguments,

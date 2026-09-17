@@ -583,6 +583,20 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
         if (!request.harnessSessionId) throw new Error("Delegated resume requires its stable Harness identity");
         const binding = await readDelegationBinding(join(runtime.root,"delegations"),request.harnessSessionId);
         if (!binding || binding.agentId !== request.resumeAgentId || binding.sessionId !== request.resumeSessionId || binding.provider !== request.provider || binding.executionMode !== request.executionMode || binding.cwd !== request.cwd || binding.parentSessionId !== request.parentSessionId) throw new Error("Delegated session ownership or execution mode does not match");
+        if (request.forkSessionId !== undefined) {
+          const configured = await launchFile.getDelegationFor(binding.provider, binding.task);
+          return coordinator.launchManual({
+            forkSessionId: request.forkSessionId as SessionId,
+            requestId: request.requestId,
+            harnessSessionId: request.harnessSessionId,
+            ...(request.executionId === undefined ? {} : { executionId: request.executionId }),
+            ...(request.harnessStateDirectory === undefined ? {} : { harnessStateDirectory: request.harnessStateDirectory }),
+            ...(request.harnessRuntimePath === undefined ? {} : { harnessRuntimePath: request.harnessRuntimePath }),
+            type: binding.type, prompt: request.prompt, description: binding.description,
+            isolation: { cwd: binding.cwd, protectedPaths: [], writableRoots: [] },
+            executionMode: binding.executionMode, configuration: configured,
+          }, binding.executionMode);
+        }
         if (lockMarkerLive(wrapperLayout.lockPathFor(binding.agentId as AgentId))) throw new Error("Delegated execution is running or uncertain; resume refused");
         const saved = fleet.get(binding.agentId as AgentId);
         return coordinator.reopen({ platform: binding.provider, agentId: binding.agentId as AgentId, type: binding.type, delegationTask: binding.task, sessionId: binding.sessionId as SessionId, terminalName: saved?.terminal.name ?? `aboard: ${binding.description}`, executionMode: binding.executionMode, cwd: binding.cwd, prompt: request.prompt, resultDelivery: saved?.resultDelivery ?? { mode:"none" }, harnessSessionId: request.harnessSessionId, ...(request.executionId === undefined ? {} : { executionId: request.executionId }), ...(request.harnessStateDirectory === undefined ? {} : { harnessStateDirectory: request.harnessStateDirectory }), ...(request.harnessRuntimePath === undefined ? {} : { harnessRuntimePath: request.harnessRuntimePath }), requestId: request.requestId });

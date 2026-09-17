@@ -78,6 +78,10 @@
     "harnessPython": {
       "type": "string",
       "minLength": 1
+    },
+    "forkSessionId": {
+      "type": "string",
+      "minLength": 1
     }
   }
 }

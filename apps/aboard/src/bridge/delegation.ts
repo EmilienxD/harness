@@ -43,6 +43,7 @@ export interface LaunchIsolation {
 }
 
 export interface DelegationLaunchInput {
+  readonly forkSessionId?: SessionId;
   readonly harnessStateDirectory?: string;
   readonly harnessRuntimePath?: string;
   /** Stable Harness request identity for idempotency and child hook binding. */
@@ -507,8 +508,9 @@ export class DelegationCoordinator {
     ]);
     const platform = this.#platform(configured.platform);
     const createdSession = platform.createSession();
-    const sessionId = (input.harnessSessionId ?? createdSession.sessionId) as SessionId;
+    const sessionId = (input.forkSessionId === undefined ? input.harnessSessionId ?? createdSession.sessionId : createdSession.sessionId) as SessionId;
     const plan = platform.planLaunch({
+      ...(input.forkSessionId === undefined ? {} : { forkSessionId: input.forkSessionId }),
       agentId,
       sessionId,
       agentType,

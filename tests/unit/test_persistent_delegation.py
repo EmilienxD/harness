@@ -283,6 +283,40 @@ def _live_delegated_child(tmp_path, monkeypatch, provider="claude"):
     return started, inbox, first
 
 
+def test_live_chatgpt_continuation_uses_aboard_instead_of_external_terminal(tmp_path, monkeypatch):
+    import io
+    import json
+
+    started, inbox, first = _live_delegated_child(tmp_path, monkeypatch, "chatgpt")
+    with sessions._connect() as connection:
+        connection.execute("UPDATE executions SET aboard_agent_id='boarded-child',backend='aboard' WHERE request_id=?", (first.request_id,))
+    monkeypatch.setattr(sessions, "_discover_delegation_endpoint", lambda _: ("127.0.0.1", 4823, "token"))
+    requests = []
+
+    def urlopen(request, **kwargs):
+        body = json.loads(request.data)
+        requests.append(body)
+        from subagents_runtime.hooks import handle
+
+        with monkeypatch.context() as child_environment:
+            child_environment.setenv("HARNESS_SESSION_ID", body["harnessSessionId"])
+            child_environment.setenv("HARNESS_EXECUTION_ID", body["executionId"])
+            child_environment.setenv("HARNESS_EXECUTION_MODE", "interactive")
+            handle({"session_id": "forked-conversation", "cwd": str(tmp_path), "hook_event_name": "SessionStart", "source": "startup"}, provider="chatgpt")
+            assert sessions.resolve_session("agent-1", "parent") == body["harnessSessionId"]
+            assert sessions.bind_observed("forked-conversation", tmp_path, "chatgpt") == body["harnessSessionId"]
+        return io.BytesIO(b'{"agentId":"boarded-fork","sessionId":"forked-conversation","terminalId":"vscode-terminal"}')
+
+    monkeypatch.setattr(sessions.urllib.request, "urlopen", urlopen)
+    (inbox / "continue.md").write_text("---\nresume: agent-1\n---\nNext task.", encoding="utf-8")
+    [result] = process_inbox("parent", launch=sessions.launch_delegated)
+
+    assert result.status == "launched"
+    assert len(started) == 1
+    assert requests[0]["forkSessionId"] == "saved-conversation"
+    assert requests[0]["resumeAgentId"] == "boarded-child"
+
+
 def test_resume_command_forks_a_live_delegated_child(tmp_path, monkeypatch):
     started, _inbox, first = _live_delegated_child(tmp_path, monkeypatch)
     monkeypatch.setenv("HARNESS_SESSION_ID", "parent")

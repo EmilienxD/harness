@@ -480,11 +480,22 @@ def launch_delegated(request, request_id: str, agent_number: int, cwd: Path) -> 
             "HARNESS_PROVIDER": request.provider,
         }
     )
+    if request.provider == "claude" and request.mode == "interactive":
+        # Claude exports this marker to commands it starts. An interactive Harness
+        # child is a separately resumable conversation, so inheriting the marker
+        # would make Claude suppress its transcript and break the next --resume.
+        environment.pop("CLAUDE_CODE_CHILD_SESSION", None)
     # The supervisor itself is importable when executing directly from a checkout.
     runtime_root = str(Path(__file__).resolve().parent.parent)
     environment["PYTHONPATH"] = (
         runtime_root + os.pathsep + environment.get("PYTHONPATH", "")
     )
+    if aboard_session := _launch_through_aboard(request, request_id, cwd):
+        with _connect() as connection:
+            connection.execute("UPDATE sessions SET provider_session_id=? WHERE id=?", (aboard_session, child_id))
+            connection.execute("UPDATE executions SET backend='aboard' WHERE id=?", (execution_id,))
+        processes.confirm_startup(execution_id)
+        return child_id
     if fork_of:
         # The original session is still open and still owns its provider handle, so a
         # fork starts its own process here and takes over the child's identity.
@@ -515,17 +526,6 @@ def launch_delegated(request, request_id: str, agent_number: int, cwd: Path) -> 
             cwd,
             visible=request.mode == "interactive",
         )
-        return child_id
-    if aboard_session := _launch_through_aboard(request, request_id, cwd):
-        with _connect() as connection:
-            connection.execute(
-                "UPDATE sessions SET provider_session_id=? WHERE id=?",
-                (aboard_session, child_id),
-            )
-            connection.execute(
-                "UPDATE executions SET backend='aboard' WHERE id=?", (execution_id,)
-            )
-        processes.confirm_startup(execution_id)
         return child_id
     skill = {
         "prototype": "prototype",
@@ -687,7 +687,7 @@ def _launch_through_aboard(request, request_id: str, cwd: Path) -> str | None:
         return None
     with _connect() as connection:
         reservation = connection.execute(
-            "SELECT r.child_session_id,e.id,r.parent_session_id,s.provider_session_id FROM requests r JOIN executions e ON e.request_id=r.id JOIN sessions s ON s.id=r.child_session_id WHERE r.id=?",
+            "SELECT r.child_session_id,e.id,r.parent_session_id,s.provider_session_id,e.fork_of FROM requests r JOIN executions e ON e.request_id=r.id JOIN sessions s ON s.id=r.child_session_id WHERE r.id=?",
             (request_id,),
         ).fetchone()
         previous = (
@@ -716,8 +716,14 @@ def _launch_through_aboard(request, request_id: str, cwd: Path) -> str | None:
         identities.update(
             {"resumeAgentId": previous[0], "resumeSessionId": reservation[3]}
         )
+        if reservation[4]:
+            identities["forkSessionId"] = reservation[4]
     if reservation:
         with _connect() as connection:
+            if reservation[4]:
+                # The fork receives a new provider conversation ID in SessionStart.
+                # Release the old binding before its hooks attempt to bind that ID.
+                connection.execute("UPDATE sessions SET provider_session_id=NULL WHERE id=?", (reservation[0],))
             connection.execute(
                 "UPDATE executions SET state='starting',backend='aboard' WHERE id=?",
                 (reservation[1],),

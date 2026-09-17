@@ -93,6 +93,27 @@ def test_native_provider_adapter_uses_reserved_id_mode_and_cwd(provider,mode,tmp
         assert ('-p' in launches[-1][0]) if provider == 'claude' else ('exec' in launches[-1][0])
 
 
+def test_interactive_claude_child_does_not_inherit_nested_session_marker(
+    tmp_path, monkeypatch
+):
+    launches = []
+    configured(tmp_path / "state", monkeypatch, launches)
+    monkeypatch.setattr(sessions, "_discover_delegation_endpoint", lambda _: None)
+    monkeypatch.setenv("CLAUDE_CODE_CHILD_SESSION", "1")
+    from subagents_runtime.delegation import enable_delegation, process_inbox
+
+    sessions.register_observed("parent", tmp_path, "claude")
+    inbox = enable_delegation("parent", "work-with-agent").inbox
+    (inbox / "work.md").write_text(
+        "---\ntask: general\nmode: interactive\n---\nWork.", encoding="utf-8"
+    )
+
+    [result] = process_inbox("parent", launch=sessions.launch_delegated)
+
+    assert result.status == "launched"
+    assert "CLAUDE_CODE_CHILD_SESSION" not in launches[-1][1]
+
+
 def test_scoped_aboard_launch_refreshes_endpoint_after_unauthorized_response(tmp_path, monkeypatch):
     monkeypatch.setenv("HARNESS_STATE_DIR",str(tmp_path / "state"))
     endpoints = iter([

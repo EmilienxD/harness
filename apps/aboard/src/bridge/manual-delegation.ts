@@ -32,6 +32,7 @@ const SKILL_INVOCATION = /^[/\$][A-Za-z0-9_-]+(?:\s|$)/u;
 /** A claim whose launch never reported an outcome: callers must verify, not retry. */
 class StartupUncertain extends Error {}
 export interface ManualDelegationLaunch {
+  readonly forkSessionId?: string;
   readonly harnessPython?: string;
   readonly harnessStateDirectory?: string;
   readonly harnessRuntimePath?: string;
@@ -110,9 +111,10 @@ function parse(body: unknown): ManualDelegationLaunch | undefined {
   // so this boundary check intentionally remains local to the bridge.
   if (typeof body !== "object" || body === null || Array.isArray(body)) return undefined;
   const value = body as Record<string, unknown>;
-  const identities = ["harnessSessionId", "executionId", "parentSessionId", "resumeAgentId", "resumeSessionId", "harnessStateDirectory", "harnessRuntimePath", "harnessPython"] as const;
+  const identities = ["harnessSessionId", "executionId", "parentSessionId", "resumeAgentId", "resumeSessionId", "forkSessionId", "harnessStateDirectory", "harnessRuntimePath", "harnessPython"] as const;
   if (identities.some((key) => value[key] !== undefined && (typeof value[key] !== "string" || (value[key] as string).trim().length === 0))) return undefined;
   if ((value.resumeAgentId === undefined) !== (value.resumeSessionId === undefined)) return undefined;
+  if (value.forkSessionId !== undefined && value.forkSessionId !== value.resumeSessionId) return undefined;
   if (Object.keys(value).some((key) => !["requestId", "task", "provider", "mode", "prompt", "cwd", ...identities].includes(key))) return undefined;
   if (typeof value.requestId !== "string" || value.requestId.trim().length === 0) return undefined;
   if (typeof value.task !== "string" || !(value.task in TASKS)) return undefined;
