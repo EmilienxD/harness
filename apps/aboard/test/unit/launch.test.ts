@@ -118,6 +118,29 @@ test("plans Explore through Claude Code's builtin agent", () => {
   assert.equal(plan.requiresWriteLease, false);
 });
 
+test("Auto Run exploration is planned as a headless print-mode execution", () => {
+  const plan = planLaunch(request({
+    agentType: "Explore",
+    configuration: { shape: "builtin", agentName: "Explore" },
+    prompt: "Map the authentication flow.",
+    executionMode: "auto-run",
+  }));
+
+  assert.deepEqual(plan.args.slice(0, 4), ["-p", "--output-format", "stream-json", "--verbose"]);
+});
+
+for (const kind of ["launch", "resume"] as const) {
+  for (const type of ["implementer", "reviewer"] as const) {
+    test(`an Auto Run ${type} ${kind} keeps its interactive session instead of print mode`, () => {
+      const planned = request({ agentType: type, configuration: workerConfiguration(type), executionMode: "auto-run" });
+      const plan = kind === "launch" ? planLaunch(planned) : planSessionResume(planned);
+
+      assert.equal(plan.args.includes("-p"), false);
+      assert.equal(plan.args.includes("--output-format"), false);
+    });
+  }
+}
+
 for (const [type, invocation] of [
   ["implementer", "/address-this"],
   ["reviewer", "/review-this"],
@@ -233,12 +256,22 @@ test("spilled continuation prompts use short fresh names under the activation ro
   assert.match(plan.spill?.relativePath ?? "", /^C:\/Temp\/abd-K7M2Q1\/agent-1\/c-[0-9a-f]{16}\.md$/u);
 });
 
-test("Chrome is available only to implementers and is replayed on resume", () => {
+test("Chrome is available to both auto-run workers and is replayed on resume", () => {
+  const reviewer = request({
+    agentType: "reviewer",
+    configuration: workerConfiguration("reviewer"),
+    chrome: true,
+  });
+
   assert.equal(planLaunch(request({ chrome: true })).args.includes("--chrome"), true);
+  assert.equal(planLaunch(reviewer).args.includes("--chrome"), true);
+  assert.equal(planSessionResume(reviewer).args.includes("--chrome"), true);
+  // The label is an issue's property, so a session outside auto-run cannot ask
+  // for the browser by claiming it.
   assert.throws(
     () => planLaunch(request({
-      agentType: "reviewer",
-      configuration: workerConfiguration("reviewer"),
+      agentType: "interactive",
+      configuration: { shape: "default" },
       chrome: true,
     })),
     (error: unknown) => error instanceof LaunchPlanError && error.code === "shape-not-allowed",

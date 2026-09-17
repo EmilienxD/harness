@@ -19,7 +19,7 @@ export interface FrozenIssue {
   readonly branch: string;
   readonly disposition: IssueDisposition;
   readonly difficulty?: IssueDifficulty;
-  /** Whether this issue's implementer requires the Chrome browser capability. */
+  /** Whether this issue's workers require browser tooling. */
   readonly chrome?: true;
   readonly dependsOn: readonly number[];
 }

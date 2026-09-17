@@ -6,6 +6,7 @@ import { randomUUID } from "node:crypto";
 import { createBackgroundProcess } from "./background.js";
 
 import {
+  isHeadlessExecution,
   isInteractiveAgentType,
   type AgentId,
   type AgentPlatformId,
@@ -261,7 +262,7 @@ export class TerminalController {
       ...(request.shellPath === undefined ? {} : { shellPath: request.shellPath }),
       ...(request.shellArgs === undefined ? {} : { shellArgs: request.shellArgs }),
     };
-    const headless = request.executionMode === "auto" || request.executionMode === "auto-run";
+    const headless = isHeadlessExecution(request.agentType, request.executionMode);
     const handle = headless
       ? this.options.host.createBackgroundProcess?.(creationOptions)
         ?? createBackgroundProcess(creationOptions, this.options.shell, (closed) => this.#onClosed(closed))

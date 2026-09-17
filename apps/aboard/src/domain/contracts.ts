@@ -58,6 +58,17 @@ export function isAutomatedAgentType(type: AgentType): boolean {
   return type === "Explore" || isAutoRunWorkerType(type);
 }
 
+/**
+ * One-shot headless execution: a provider process with no terminal, no
+ * takeover, and no later resume. Manual delegations choose it explicitly with
+ * `auto`; inside Auto Run only exploration qualifies, because its report is
+ * read once and discarded. Auto Run workers stay in visible terminals even in
+ * AFK mode: the user takes them over, continues them, and accepts their work.
+ */
+export function isHeadlessExecution(type: AgentType, mode: ExecutionMode | undefined): boolean {
+  return mode === "auto" || (mode === "auto-run" && !isAutoRunWorkerType(type));
+}
+
 export type AgentId = string & { readonly __brand: "AgentId" };
 export type SessionId = string & { readonly __brand: "SessionId" };
 export type TerminalId = string & { readonly __brand: "TerminalId" };

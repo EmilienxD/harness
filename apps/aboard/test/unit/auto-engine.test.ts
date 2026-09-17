@@ -1202,7 +1202,7 @@ test("a target branch that is not on origin still leaves the work pushed and say
   assert.equal(context.createdPullRequests.filter((pr) => pr.head === SESSION).length, 0);
 });
 
-test("[AI]-chrome is frozen per issue and reaches that issue's implementer only", async () => {
+test("[AI]-chrome is frozen per issue and reaches both of that issue's workers", async () => {
   const context = harness({
     settings: { review: true },
     issues: [{ number: 34, title: "Add retry backoff", labels: ["[AI]-afk", "[AI]-chrome"], state: "open", openBlockedByNumbers: [] }],
@@ -1211,11 +1211,25 @@ test("[AI]-chrome is frozen per issue and reaches that issue's implementer only"
   assert.equal(result.started && result.issues[0]?.chrome, true);
   await context.engine.settle();
 
+  // The label describes the issue, so implementation and review of that issue
+  // get the same browser capability.
   assert.equal(context.launches[0]?.type, "implementer");
   assert.equal(context.launches[0]?.chrome, true);
   assert.equal(context.launches[1]?.type, "reviewer");
-  assert.equal(context.launches[1]?.chrome, undefined);
+  assert.equal(context.launches[1]?.chrome, true);
   assert.equal(context.saved.every((record) => record.plan[0]?.chrome === true), true);
+});
+
+test("an issue without [AI]-chrome gives neither of its workers the browser", async () => {
+  const context = harness({
+    settings: { review: true },
+    issues: [{ number: 34, title: "Add retry backoff", labels: ["[AI]-afk"], state: "open", openBlockedByNumbers: [] }],
+  });
+  await context.engine.start();
+  await context.engine.settle();
+
+  assert.deepEqual(context.launches.map((launch) => launch.type), ["implementer", "reviewer"]);
+  assert.equal(context.launches.every((launch) => launch.chrome === undefined), true);
 });
 
 test("configured and per-run guidance are persisted and reach every auto agent separately", async () => {
@@ -2203,21 +2217,17 @@ for (const branchMode of ["per-issue", "single-branch"] as const) {
     await context.engine.settle();
   });
 
-  test(`${branchMode}: background worker exit preserves HITL waiting until a user acceptance commit`, async () => {
+  test(`${branchMode}: closing the HITL terminal before acceptance stops without publishing`, async () => {
     const context = harness({ hitlUncommitted: true, settings: { branchMode },
       issues: [{ number: 35, title: "human gate", labels: ["[AI]-hitl"], state: "open", openBlockedByNumbers: [] }],
     });
     await context.engine.start();
     await waitForCommit(context);
     context.engine.terminalClosed("terminal-1" as TerminalId);
-    await new Promise<void>((resolve) => setImmediate(resolve));
-    assert.equal(context.engine.state()?.waiting, true);
+    await context.engine.settle();
+    assert.equal(context.record()?.outcome?.kind, "failed");
     assert.deepEqual(context.createdPullRequests, []);
     assert.deepEqual(context.commitCalls, []);
-    await context.git.commit("User accepts background work", "");
-    await context.engine.settle();
-    assert.equal(context.state.cleared, true, context.notifications.join("\n"));
-    assert.deepEqual(context.closures.map((entry) => entry.issue), [35]);
   });
 
   test(`${branchMode}: switching branches during HITL is a structural failure`, async () => {

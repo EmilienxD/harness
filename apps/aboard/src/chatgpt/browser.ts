@@ -1,3 +1,12 @@
+/**
+ * Codex `BROWSER_USE_AVAILABLE_BACKENDS` detection, currently unused.
+ *
+ * Nothing calls `ChatGptBrowserProbe.require` while
+ * `ENFORCE_CHROME_BACKEND` is false in `platform.ts`: declaring a `chrome`
+ * backend cannot be a launch requirement under the "skip it if you have no
+ * tool" policy that `[AI]-chrome` workers now follow. This module is kept
+ * intact and tested so that enforcement is one flag away.
+ */
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 

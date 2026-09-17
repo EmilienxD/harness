@@ -234,6 +234,8 @@ export class AutoRunEngine {
   #observationTail: Promise<void> = Promise.resolve();
   #generation = 0;
   readonly #issuePullRequests = new Map<number, number>();
+  /** The visible worker terminal a HITL acceptance is expected to happen next to. */
+  readonly #pending = new Map<number, TerminalId>();
   readonly #openTerminals = new Set<TerminalId>();
   readonly #now: () => Date;
   readonly #runId: () => string;
@@ -667,7 +669,9 @@ export class AutoRunEngine {
   /** Wake repository observation after a filesystem, lifecycle, focus, or refresh event. */
   public repositoryChanged(): void { this.#wake?.(); }
 
-  public terminalClosed(_terminalId: TerminalId): void {
+  readonly #closedTerminals = new Set<TerminalId>();
+  public terminalClosed(terminalId: TerminalId): void {
+    this.#closedTerminals.add(terminalId);
     this.repositoryChanged();
   }
 
@@ -1742,6 +1746,8 @@ export class AutoRunEngine {
           await this.#recordImplementation(issue, classified.sha);
           return classified.sha;
         }
+        const terminal = this.#pending.get(issue.number);
+        if (terminal !== undefined && this.#closedTerminals.has(terminal)) throw new Error("the HITL terminal closed before an acceptance commit; resume after reviewing the checkout");
         await this.#waitForRepositoryChange(signal);
       }
       throw new AutomatedWorkerCancelled();
@@ -1843,7 +1849,7 @@ export class AutoRunEngine {
     const continued = this.#takeContinuation("reviewer", issue.number);
     if (continued === undefined) await this.#requireCleanCheckout("review-this", issue);
     const startingSha = await this.#git.headSha(false);
-    const prompt = autoRunReviewerPrompt(issue, prNumber);
+    const prompt = autoRunReviewerPrompt(issue, prNumber, { chrome: issue.chrome === true });
     await this.#journal({ kind: "worker-turn", branch: this.#workingBranch(issue), parentSha: startingSha, role: "reviewer", completion: "commit" });
     const outcome = continued !== undefined && this.options.launcher.resumeAutomated !== undefined
       ? await this.options.launcher.resumeAutomated(continued, prompt, issue.difficulty, signal, startingSha)
@@ -1854,6 +1860,7 @@ export class AutoRunEngine {
       description: `review pull request ${prNumber}`,
       completionCommitStartingSha: startingSha,
       prompt,
+      ...(issue.chrome === true ? { chrome: true as const } : {}),
       ...guidance,
       ...this.#difficulty(issue),
       ...this.#isolation(),
@@ -1898,7 +1905,7 @@ export class AutoRunEngine {
     if (status.branch !== this.#workingBranch(issue) || startingSha !== progress.beforeSha || (continued === undefined && !await this.#git.workingTreeMatchesCommit(progress.implementerCommitSha))) {
       throw new StructuralError("the HITL reviewer handoff no longer matches its recorded implementation checkpoint");
     }
-    const prompt = autoRunHitlReviewerPrompt(issue, exactRange);
+    const prompt = autoRunHitlReviewerPrompt(issue, exactRange, { chrome: issue.chrome === true });
     await this.#save(withProgress(this.#current, issue.number, { ...progress, phase: "review" }));
     this.#publishIssuePhase(issue, "review");
     await this.#journal({ kind: "worker-turn", branch: this.#workingBranch(issue), parentSha: startingSha, role: "reviewer", completion: "uncommitted" });
@@ -1910,6 +1917,7 @@ export class AutoRunEngine {
           description: `review issue ${issue.number} before acceptance`,
           reviewRange: exactRange,
           prompt,
+          ...(issue.chrome === true ? { chrome: true as const } : {}),
           ...this.#guidance(),
           ...this.#difficulty(issue),
           ...this.#isolation(),
@@ -2192,6 +2200,7 @@ export class AutoRunEngine {
   }
 
   async #remember(issue: FrozenIssue, outcome: AutomatedLaunchOutcome, type: "implementer" | "reviewer"): Promise<void> {
+    this.#pending.set(issue.number, outcome.terminalId);
     await this.#save({ ...this.#current, workerSession: {
       agentId: outcome.agentId,
       sessionId: outcome.sessionId,

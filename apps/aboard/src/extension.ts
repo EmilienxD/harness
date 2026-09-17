@@ -68,7 +68,7 @@ import { FileSystemPromptSpillStore, createPromptSpillRoot } from "./platform/sp
 import { readFile, rm } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { homedir } from "node:os";
-import type { AgentId, AgentSession, AgentType, IsoTimestamp, SessionId, TerminalId as TerminalIdBrand } from "./domain/contracts.js";
+import { isHeadlessExecution, type AgentId, type AgentSession, type AgentType, type IsoTimestamp, type SessionId, type TerminalId as TerminalIdBrand } from "./domain/contracts.js";
 
 
 /** Generous worker proof-of-life window: cold starts include `uv` resolving the hook shim and the agent CLI boot. */
@@ -693,7 +693,7 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
     const openTerminalIds = new Set(terminals.list().filter((terminal) => terminal.status === "open").map((terminal) => terminal.terminalId));
     const stale = fleet.list().filter((session) => isLiveSession(session) && !openTerminalIds.has(session.terminal.terminalId));
     for (const session of stale) {
-      if (session.executionMode === "auto" || session.executionMode === "auto-run") {
+      if (isHeadlessExecution(session.identity.type, session.executionMode)) {
         // Detached wrappers outlive the extension. Restore observation without spawning.
         const lockFile = wrapperLayout.lockPathFor(session.identity.agentId);
         sessionMonitor.track({ agentId: session.identity.agentId, sessionId: session.sessionId, lockFile });

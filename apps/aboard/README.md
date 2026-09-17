@@ -1,12 +1,13 @@
 # Aboard
 
-Aboard is a VS Code extension for Claude Code and ChatGPT conversations. It opens interactive work in visible terminals and automatic delegations and AUTO RUN workers in background processes, with fleet and activity tracking for both.
+Aboard is a VS Code extension for Claude Code and ChatGPT conversations. It opens interactive work and AUTO RUN workers in visible terminals, and one-shot work you never take over — automatic delegations and AUTO RUN's read-only exploration — in background processes, with fleet and activity tracking for both.
 
 Install it through the [Harness catalogue](../../README.md#installation) by selecting `aboard`. Harness verifies the VSIX and installs the worker assets Aboard needs.
 
 ## At a glance
 
-Aboard launches interactive Claude Code or ChatGPT sessions through visible VS Code terminals. Automatic work uses detached processes with structured output and execution logs. Its Fleet shows live sessions,
+Aboard launches interactive Claude Code or ChatGPT sessions through visible VS Code terminals. One-shot
+work uses detached processes with structured output and execution logs. Its Fleet shows live sessions,
 Recent Activity records useful completed work, and AUTO RUN coordinates the local Git checkout with GitHub
 issues and pull requests. An authenticated loopback bridge carries lifecycle events back to the extension.
 
@@ -26,11 +27,12 @@ Reopening an ended session preserves its provider, execution mode, working direc
 background continuation requires a next message. If that conversation is
 no longer available, its activity remains visible but cannot be reopened.
 
-Interactive and manually delegated sessions inherit your native Claude Code or ChatGPT settings. Exploration sessions are read-only. AUTO RUN workers use stricter, extension-owned Git and GitHub restrictions.
+Interactive and manually delegated sessions inherit your native Claude Code or ChatGPT settings. Exploration sessions are read-only, run headlessly, and cannot be stopped, taken over, or resumed. AUTO RUN workers use stricter, extension-owned Git and GitHub restrictions.
 
 ## AUTO RUN
 
-AUTO RUN turns labelled GitHub issues into a recoverable queue of background workers. Review the forecast in the panel or run `/auto --dry`; start from the panel or run `/auto` when the plan looks right.
+AUTO RUN turns labelled GitHub issues into a recoverable queue of unattended workers, each in its own
+visible terminal. Review the forecast in the panel or run `/auto --dry`; start from the panel or run `/auto` when the plan looks right.
 
 ### Full Workflow
 
@@ -61,7 +63,7 @@ flowchart TD
 ```mermaid
 flowchart TD
     EXPLORE{Exploration enabled?}
-    EXPLORE -->|Yes| X[Run read-only exploration<br/>and pass its report]
+    EXPLORE -->|Yes| X[Run one-shot headless<br/>read-only exploration<br/>and pass its report]
     EXPLORE -->|No| MODE{4 modes}
     X --> MODE
 
@@ -98,7 +100,8 @@ flowchart TD
 - Aboard owns branch changes, publication, integration, and GitHub mutations. Workers may inspect, edit, stage, and commit within their assigned checkout.
 
 While HITL waits, inspect the worker's checkout and create the acceptance commit when the changes are ready.
-The background worker may exit after handing off; Aboard continues waiting for your commit. Stopping preserves recoverable state and the exact failed worker
+The worker that handed off keeps its terminal, so you can also ask it for changes before you accept; closing
+that terminal before the acceptance commit stops the run recoverably instead of waiting forever. Stopping preserves recoverable state and the exact failed worker
 conversation. Resume is for stopped or interrupted attempts; a normal acceptance commit advances without it.
 Discard follows the configured cleanup policy and never removes dirty or moved work it can no longer prove it owns.
 

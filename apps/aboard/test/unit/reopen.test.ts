@@ -80,3 +80,22 @@ test("interactive delegated continuations refuse a live terminal and require a n
   live = undefined;
   assert.deepEqual(await coordinator.reopen(candidate), { action: "unresumable", candidate, reason: "next-message-required" });
 });
+
+test("continuations are described by where the user will find them", async () => {
+  const coordinator = new ReopenCoordinator({
+    nextMessage: async () => "Finish the remaining review fix.",
+    activity: { entries: endedActivity }, fleet: new FleetRegistry(),
+    terminals: { isOpen: () => false, liveTerminalFor: () => undefined, show: () => undefined },
+    launcher: { reopen: async () => ({ agentId, sessionId, terminalId: "terminal-2" as TerminalId }) },
+    isResumable: async () => true,
+  });
+  const candidate = { platform: "claude" as const, agentId, sessionId, description: "worker", origin: "ended" as const, at };
+
+  const worker = await coordinator.reopen({ ...candidate, type: "implementer", executionMode: "auto-run" });
+  const delegated = await coordinator.reopen({ ...candidate, type: "General", executionMode: "auto" });
+
+  assert.equal(worker.action, "reopened");
+  assert.match(describeReopenOutcome(worker), /terminal/u);
+  assert.equal(delegated.action, "reopened");
+  assert.match(describeReopenOutcome(delegated), /background/u);
+});

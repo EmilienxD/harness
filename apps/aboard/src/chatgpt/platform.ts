@@ -11,6 +11,19 @@ import { ChatGptPolicyProbe } from "./policy.js";
 import { ChatGptCommandProbe, requirePermissionProfileVersion } from "./preflight.js";
 import { ChatGptSessionProbe } from "./sessions.js";
 
+/**
+ * Disabled on purpose, and retained rather than deleted.
+ *
+ * Browser tooling is user-configured and provider-neutral: an `[AI]-chrome`
+ * worker is told to use a real browser if it has a tool for it and to skip the
+ * step otherwise. Refusing to launch because no Codex tool server declares a
+ * `chrome` backend contradicts that policy, and it strands a worker whose
+ * browser tool is an MCP server this probe cannot see. `ChatGptBrowserProbe`
+ * stays wired and tested so enforcement can come back by flipping this flag,
+ * but every path guarded by it is currently dead code.
+ */
+const ENFORCE_CHROME_BACKEND = false;
+
 export class ChatGptAgentPlatform implements AgentPlatform {
   public readonly id = "chatgpt" as const;
   public readonly capabilities: AgentPlatformCapabilities = {
@@ -45,7 +58,8 @@ export class ChatGptAgentPlatform implements AgentPlatform {
     const command = await this.#commandProbe.require(plan.command);
     if (plan.permissionProfile !== undefined) requirePermissionProfileVersion(command.version);
     await this.#policyProbe.require(plan.agentType, plan.permissionProfile);
-    if (plan.chromeRequired === true) await this.#browserProbe.require(plan.agentType);
+    // Dead while ENFORCE_CHROME_BACKEND is false; see the note above it.
+    if (ENFORCE_CHROME_BACKEND && plan.chromeRequired === true) await this.#browserProbe.require(plan.agentType);
   }
   public async isResumable(sessionId: SessionId, cwd: string, command?: readonly string[]): Promise<boolean> {
     return (await this.#sessionProbe.inspect(sessionId, cwd, command)).state === "resumable";

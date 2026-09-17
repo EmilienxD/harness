@@ -2,7 +2,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import type { WriteCapability } from "../domain/capability.js";
-import { isAutoRunWorkerType, type AgentId, type AgentType, type SessionId } from "../domain/contracts.js";
+import { isAutoRunWorkerType, isHeadlessExecution, type AgentId, type AgentType, type SessionId } from "../domain/contracts.js";
 import { buildCommandLine, canQuoteArgument, type ShellKind } from "../platform/shell.js";
 import { promptFileReference, skillInvocation } from "../platform/prompts.js";
 import { BY_DIFFICULTY, MAX_COMMAND_LINE_CHARS, promptSpillRoot, requiresWriteLease, taskPromptPath, type LaunchPlan, LaunchPlanError, type PromptDelivery, type RuntimeFile, type SessionWrapperLayout } from "../platform/launch.js";
@@ -152,7 +152,7 @@ function planChatGptSession(request: PlatformLaunchRequest | PlatformResumeReque
         promptArgs = ["--", invocation === undefined ? reference : `${invocation} ${reference}`];
       }
     }
-    const background = request.executionMode === "auto" || request.executionMode === "auto-run";
+    const background = isHeadlessExecution(request.agentType, request.executionMode);
     const args = [...(background ? ["exec"] : []), ...(kind === "resume" ? ["resume", request.sessionId] : []), ...(background ? ["--json"] : []), ...fixed, ...promptArgs];
     const wrapped = wrap(command, args, request.wrapper, request.agentId, request.sessionId, runtimeRoot);
     return {
