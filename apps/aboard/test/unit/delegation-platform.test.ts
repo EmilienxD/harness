@@ -10,6 +10,7 @@ import { TerminalController, type StartupProofTracker, type TerminalCreationOpti
 import type { AgentId, IsoTimestamp, SessionId, TerminalId } from "../../src/domain/contracts.js";
 import { FleetRegistry } from "../../src/domain/fleet.js";
 import { WriteLease } from "../../src/domain/lease.js";
+import { parseFleetPersistenceDto } from "../../src/domain/validation.js";
 import type { AgentPlatform, ConfiguredLaunch, PlatformLaunchRequest } from "../../src/platform/agent-platform.js";
 
 const resolved = (text: string): ResolvedPrompt => ({ text, sources: [] });
@@ -545,4 +546,83 @@ test("an isolated auto-run ChatGPT continuation reapplies the original checkout 
     telemetry: { totalTokens: 0, totalDurationMs: 0, totalToolUseCount: 0, compactionCount: 0 },
   });
   assert.equal((await resumed).result.outcome, "succeeded");
+});
+
+test("a reviewer delegation carries [AI]-chrome to its adapter and survives persistence", async () => {
+  const planned: PlatformLaunchRequest[] = [];
+  const reviewerId = "agent-9" as AgentId;
+  const platform: AgentPlatform = {
+    id: "claude",
+    lifecycleAssets: { settings: "hooks.json", script: "hook.py" },
+    capabilities: {
+      sessionIdentity: "client-assigned",
+      promptDelivery: ["none", "inline", "spilled"],
+      lifecycle: ["start", "stop", "end"],
+      models: ["test-model"],
+      reasoningEfforts: ["test-effort"],
+    },
+    createSession: () => ({ sessionId: "6b1e3f7a-2c4d-4a8b-9f10-2c3d4e5f6071" as SessionId, binding: "bound" }),
+    bindSession: (current, observed) => current.sessionId === observed ? observed : undefined,
+    normalizeLifecycle: () => { throw new Error("not used"); },
+    requireEnforceableRestrictions: () => undefined,
+    planLaunch: (request) => {
+      planned.push(request);
+      return {
+        platform: "claude",
+        kind: "start",
+        agentId: request.agentId,
+        sessionId: request.sessionId,
+        agentType: request.agentType,
+        shell: request.shell,
+        command: ["runtime-wrapper", "profile"],
+        args: ["--start"],
+        commandLine: "runtime-wrapper profile --start",
+        writeCapability: "write-capable",
+        requiresWriteLease: false,
+        promptDelivery: "none",
+        runtimeDirectory: "C:/runtime/agents/agent-9",
+      };
+    },
+    planSessionResume: () => { throw new Error("not used"); },
+    preflight: async () => undefined,
+    isResumable: async () => false,
+  };
+  const host = new FakeTerminalHost();
+  const fleet = new FleetRegistry();
+  const terminals = new TerminalController({
+    host,
+    shell: "powershell",
+    environment: () => ({ port: 4823, token: "token", workspaceRoot: "C:\work" }),
+    terminalIdFactory: () => "terminal-1" as TerminalId,
+  });
+  const coordinator = new DelegationCoordinator({
+    workspaceRoot: "C:\work",
+    fleet,
+    lease: new WriteLease(),
+    terminals,
+    configurations: configurationSource(async () => ({ platform: "claude", settings: { ownedBy: "adapter" } })),
+    platforms: new Map([["claude", platform]]),
+    prompts: { resolve: async () => resolved("Review issue #34.") },
+    spills: { prepare: async () => undefined, write: async () => "unused" },
+    shell: "powershell",
+    agentIdFactory: () => reviewerId,
+    runtimeDirectory: "C:/runtime",
+  });
+
+  const run = coordinator.runAutomated({ type: "reviewer", description: "review issue 34", issues: [34], chrome: true });
+  while (fleet.get(reviewerId) === undefined) await new Promise((resolve) => setImmediate(resolve));
+
+  assert.equal(planned[0]?.chrome, true, "the adapter decides how to enable the browser, so the request must reach it");
+  assert.equal(fleet.get(reviewerId)?.chromeEnabled, true);
+  // A recorded capability the reloader rejects would strand the session on restart.
+  const serialized: unknown = JSON.parse(JSON.stringify(fleet.toPersistenceDto()));
+  assert.equal(parseFleetPersistenceDto(serialized).ok, true);
+
+  coordinator.complete(reviewerId, {
+    outcome: "succeeded",
+    exitCode: 0,
+    lastAssistantMessage: "Reviewed issue #34.",
+    telemetry: { totalTokens: 0, totalDurationMs: 0, totalToolUseCount: 0, compactionCount: 0 },
+  });
+  assert.equal((await run).result.outcome, "succeeded");
 });

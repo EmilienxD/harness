@@ -78,7 +78,7 @@ test("a planned issue carries the difficulty its label rates it at, and nothing 
   assert.deepEqual(planRun([candidate({ number: 13, labels: ["[AI]-expert-difficulty"] })]).issues, []);
 });
 
-test("[AI]-chrome configures one planned implementer without admitting work", () => {
+test("[AI]-chrome marks one planned issue without admitting work", () => {
   const plan = planRun([
     candidate({ number: 10, labels: ["[AI]-afk", "[ai]-CHROME"] }),
     candidate({ number: 11, labels: ["[AI]-hitl"] }),

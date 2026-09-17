@@ -155,19 +155,25 @@ export function autoRunReviewGuideline(issueNumber: number, exactRange: string):
 export function autoRunReviewerPrompt(
   issue: Pick<IssueSnapshot, "number" | "title">,
   pullRequestNumber: number,
+  options: { readonly chrome: boolean } = { chrome: false },
 ): string {
   return (
     `Review pull request #${pullRequestNumber} for issue #${issue.number}; ${issue.title}. ` +
     "On successful completion, create exactly one commit. If the review needs no fixes, create an empty commit. " +
-    "If blocked, do not commit."
+    "If blocked, do not commit." +
+    (options.chrome ? `\n\n${REAL_BROWSER_INSTRUCTION}` : "")
   );
 }
 
 export function autoRunHitlReviewerPrompt(
   issue: Pick<IssueSnapshot, "number" | "title">,
   exactRange: string,
+  options: { readonly chrome: boolean } = { chrome: false },
 ): string {
-  return `Review issue #${issue.number}; ${issue.title} in the exact range ${exactRange}. Leave the code and any review fixes uncommitted.`;
+  return (
+    `Review issue #${issue.number}; ${issue.title} in the exact range ${exactRange}. Leave the code and any review fixes uncommitted.` +
+    (options.chrome ? `\n\n${REAL_BROWSER_INSTRUCTION}` : "")
+  );
 }
 
 export type PromptResolutionErrorCode =

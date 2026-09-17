@@ -1202,7 +1202,7 @@ test("a target branch that is not on origin still leaves the work pushed and say
   assert.equal(context.createdPullRequests.filter((pr) => pr.head === SESSION).length, 0);
 });
 
-test("[AI]-chrome is frozen per issue and reaches that issue's implementer only", async () => {
+test("[AI]-chrome is frozen per issue and reaches both of that issue's workers", async () => {
   const context = harness({
     settings: { review: true },
     issues: [{ number: 34, title: "Add retry backoff", labels: ["[AI]-afk", "[AI]-chrome"], state: "open", openBlockedByNumbers: [] }],
@@ -1211,11 +1211,25 @@ test("[AI]-chrome is frozen per issue and reaches that issue's implementer only"
   assert.equal(result.started && result.issues[0]?.chrome, true);
   await context.engine.settle();
 
+  // The label describes the issue, so implementation and review of that issue
+  // get the same browser capability.
   assert.equal(context.launches[0]?.type, "implementer");
   assert.equal(context.launches[0]?.chrome, true);
   assert.equal(context.launches[1]?.type, "reviewer");
-  assert.equal(context.launches[1]?.chrome, undefined);
+  assert.equal(context.launches[1]?.chrome, true);
   assert.equal(context.saved.every((record) => record.plan[0]?.chrome === true), true);
+});
+
+test("an issue without [AI]-chrome gives neither of its workers the browser", async () => {
+  const context = harness({
+    settings: { review: true },
+    issues: [{ number: 34, title: "Add retry backoff", labels: ["[AI]-afk"], state: "open", openBlockedByNumbers: [] }],
+  });
+  await context.engine.start();
+  await context.engine.settle();
+
+  assert.deepEqual(context.launches.map((launch) => launch.type), ["implementer", "reviewer"]);
+  assert.equal(context.launches.every((launch) => launch.chrome === undefined), true);
 });
 
 test("configured and per-run guidance are persisted and reach every auto agent separately", async () => {

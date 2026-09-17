@@ -3,7 +3,7 @@ import { delimiter, dirname } from "node:path";
 import { existsSync } from "node:fs";
 import type { LaunchRestrictions, WriteCapability } from "../domain/capability.js";
 import {
-
+  isAutoRunWorkerType,
   isNonRestorablePersistedAgentType,
   type AgentId,
   type AgentSession,
@@ -63,7 +63,7 @@ export interface DelegationLaunchInput {
   /** Fresh bounded codebase evidence supplied only to an implementer. */
   readonly codebaseContext?: string;
   readonly pullRequest?: number;
-  /** Set only by auto-run when the implementer's frozen issue has `[AI]-chrome`. */
+  /** Set only by auto-run when the worker's frozen issue has `[AI]-chrome`. */
   readonly chrome?: true;
   /** Set only by the auto-run engine, and only when the run has its own checkout. */
   readonly isolation?: LaunchIsolation;
@@ -289,7 +289,7 @@ export class DelegationCoordinator {
       attended,
       executionMode,
       ...(target.autoRunRestricted === true ? { autoRunRestricted: true as const } : {}),
-      ...(target.type === "implementer" && target.chromeEnabled === true ? { chrome: true } : {}),
+      ...(isAutoRunWorkerType(target.type) && target.chromeEnabled === true ? { chrome: true } : {}),
       configuration: configured.settings,
       runtimeDirectory: this.options.runtimeDirectory ?? (this.options.wrapper === undefined ? undefined : dirname(dirname(this.options.wrapper.lockPathFor(target.agentId)))),
       ...(this.options.promptRoot === undefined ? {} : { promptRoot: this.options.promptRoot }),
@@ -509,7 +509,7 @@ export class DelegationCoordinator {
       attended,
       executionMode,
       ...(origin === "auto-run" ? { autoRunRestricted: true as const } : {}),
-      ...(agentType === "implementer" && input.chrome === true ? { chrome: true } : {}),
+      ...(isAutoRunWorkerType(agentType) && input.chrome === true ? { chrome: true } : {}),
       configuration: configured.settings,
       runtimeDirectory: this.options.runtimeDirectory ?? (this.options.wrapper === undefined ? undefined : dirname(dirname(this.options.wrapper.lockPathFor(agentId)))),
       ...(this.options.promptRoot === undefined ? {} : { promptRoot: this.options.promptRoot }),

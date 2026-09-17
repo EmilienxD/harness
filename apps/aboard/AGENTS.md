@@ -79,8 +79,11 @@ Difficulty routing:
 Interactive and manual sessions inherit the user's native Claude Code or Codex tool settings, including
 built-in subagents and web search. Auto Run workers deny those tools regardless of permissive launch-profile
 settings, with extension-owned Git/GitHub restrictions enforced by a guard hook. ChatGPT Explore must pass
-managed-policy checks for read-only sandboxing, `never` approval, and managed hooks. `[AI]-chrome` workers
-require `chrome` in `BROWSER_USE_AVAILABLE_BACKENDS` before launch.
+managed-policy checks for read-only sandboxing, `never` approval, and managed hooks. `[AI]-chrome` is an
+issue property, so both of that issue's workers are told to use browser tooling when they have a tool for it
+and to skip the step otherwise; Claude workers additionally launch with `--chrome`. Codex
+`BROWSER_USE_AVAILABLE_BACKENDS` enforcement is retained in `chatgpt/browser.ts` but disabled, because a
+backend requirement contradicts that skip-if-absent policy.
 
 Worktree runs copy ignored local `.claude`, `.agents`, `.codex`, and `.abd` configuration without
 overwriting checkout files or copying live session state. Refuse the run when a copied path is not ignored.

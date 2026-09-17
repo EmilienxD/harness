@@ -1849,7 +1849,7 @@ export class AutoRunEngine {
     const continued = this.#takeContinuation("reviewer", issue.number);
     if (continued === undefined) await this.#requireCleanCheckout("review-this", issue);
     const startingSha = await this.#git.headSha(false);
-    const prompt = autoRunReviewerPrompt(issue, prNumber);
+    const prompt = autoRunReviewerPrompt(issue, prNumber, { chrome: issue.chrome === true });
     await this.#journal({ kind: "worker-turn", branch: this.#workingBranch(issue), parentSha: startingSha, role: "reviewer", completion: "commit" });
     const outcome = continued !== undefined && this.options.launcher.resumeAutomated !== undefined
       ? await this.options.launcher.resumeAutomated(continued, prompt, issue.difficulty, signal, startingSha)
@@ -1860,6 +1860,7 @@ export class AutoRunEngine {
       description: `review pull request ${prNumber}`,
       completionCommitStartingSha: startingSha,
       prompt,
+      ...(issue.chrome === true ? { chrome: true as const } : {}),
       ...guidance,
       ...this.#difficulty(issue),
       ...this.#isolation(),
@@ -1904,7 +1905,7 @@ export class AutoRunEngine {
     if (status.branch !== this.#workingBranch(issue) || startingSha !== progress.beforeSha || (continued === undefined && !await this.#git.workingTreeMatchesCommit(progress.implementerCommitSha))) {
       throw new StructuralError("the HITL reviewer handoff no longer matches its recorded implementation checkpoint");
     }
-    const prompt = autoRunHitlReviewerPrompt(issue, exactRange);
+    const prompt = autoRunHitlReviewerPrompt(issue, exactRange, { chrome: issue.chrome === true });
     await this.#save(withProgress(this.#current, issue.number, { ...progress, phase: "review" }));
     this.#publishIssuePhase(issue, "review");
     await this.#journal({ kind: "worker-turn", branch: this.#workingBranch(issue), parentSha: startingSha, role: "reviewer", completion: "uncommitted" });
@@ -1916,6 +1917,7 @@ export class AutoRunEngine {
           description: `review issue ${issue.number} before acceptance`,
           reviewRange: exactRange,
           prompt,
+          ...(issue.chrome === true ? { chrome: true as const } : {}),
           ...this.#guidance(),
           ...this.#difficulty(issue),
           ...this.#isolation(),

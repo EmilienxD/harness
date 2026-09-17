@@ -3,6 +3,7 @@ import type { LaunchRestrictions, WriteCapability } from "../domain/capability.j
 import {
   agentLabel,
   isAutomatedAgentType,
+  isAutoRunWorkerType,
   isHeadlessExecution,
   isNamedBuiltinAgentType,
   type AgentId,
@@ -181,10 +182,10 @@ function effortArguments(effort: EffortLevel | undefined): readonly string[] {
 
 function chromeArguments(agentType: AgentType, enabled: true | undefined): readonly string[] {
   if (enabled !== true) return [];
-  if (agentType !== "implementer") {
+  if (!isAutoRunWorkerType(agentType)) {
     throw new LaunchPlanError(
       "shape-not-allowed",
-      `Claude in Chrome is available only to [AI]-chrome auto-run implementers: ${agentType}`,
+      `Claude in Chrome is available only to [AI]-chrome auto-run workers: ${agentType}`,
     );
   }
   return ["--chrome"];

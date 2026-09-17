@@ -448,7 +448,7 @@ test("an ordinary ChatGPT launch never mentions browser configuration", () => {
   assert.doesNotMatch(plan.args.join("\n"), /chrome/iu);
 });
 
-test("a browser-required ChatGPT launch needs its backend declared", async () => {
+test("a browser-required ChatGPT launch no longer needs its backend declared", async () => {
   const required: string[] = [];
   const platform = chatGpt({ browserProbe: { require: async (agentType) => { required.push(agentType); } } });
   const browserPrompt = "Address the issue.\n\nUse the available tools to take screenshots, test, and debug with a real browser.";
@@ -457,7 +457,9 @@ test("a browser-required ChatGPT launch needs its backend declared", async () =>
   assert.equal(plan.chromeRequired, true);
   assert.match(plan.args.at(-1) ?? "", /^\$address-this /u);
   await platform.preflight(plan);
-  assert.deepEqual(required, ["implementer"]);
+  // The worker is told to skip the step when it has no browser tool, so a
+  // missing Codex backend declaration must not hold up its launch.
+  assert.deepEqual(required, []);
 
   const resumed = platform.planSessionResume({ ...implementer, sessionId: actual, prompt: "Continue", chrome: true });
   assert.equal(resumed.chromeRequired, true);
@@ -473,11 +475,32 @@ test("a browser-required ChatGPT launch needs its backend declared", async () =>
   assert.equal(reopened.args.filter((argument) => argument.startsWith("$address-this")).length, 0);
 });
 
-test("a Chrome-required ChatGPT launch fails before the terminal when no backend declares Chrome", async () => {
+test("a browser-required ChatGPT reviewer is planned exactly like the implementer", async () => {
+  const required: string[] = [];
+  const platform = chatGpt({ browserProbe: { require: async (agentType) => { required.push(agentType); } } });
+  const plan = platform.planLaunch({
+    agentId: "reviewer-1" as AgentId,
+    sessionId: provisional,
+    agentType: "reviewer",
+    shell: "powershell",
+    runtimeDirectory: "C:/aboard/runtime",
+    configuration: { shape: "skill", skillName: "review-this", declaredCommand: ["codex"], declaredModel: "by-difficulty", declaredEffort: "by-difficulty", webSearch: "disabled", subagents: "denied" },
+    prompt: "Review pull request #42.",
+    chrome: true,
+  });
+
+  assert.equal(plan.chromeRequired, true);
+  await platform.preflight(plan);
+  assert.deepEqual(required, []);
+});
+
+test("a Chrome-required ChatGPT launch survives a backend probe that would refuse it", async () => {
   const platform = chatGpt({ browserProbe: { require: async () => { throw new Error("chrome is not declared"); } } });
   const plan = platform.planLaunch({ ...implementer, prompt: "Address the issue.", chrome: true });
 
-  await assert.rejects(platform.preflight(plan), /chrome is not declared/u);
+  // Backend enforcement is retained but disabled, so a refusing probe is never
+  // consulted and cannot block the worker.
+  await platform.preflight(plan);
   assert.throws(
     () => platform.planLaunch({ agentId, sessionId: provisional, agentType: "interactive", shell: "powershell", configuration: { shape: "default" }, prompt: "Hello.", chrome: true }),
     /available only to \[AI\]-chrome auto-run workers/u,
