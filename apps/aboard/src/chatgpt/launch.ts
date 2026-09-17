@@ -103,6 +103,7 @@ function planChatGptSession(request: PlatformLaunchRequest | PlatformResumeReque
     ? []
     : permissionProfileArguments(readOnlyFiles, explore, worker ? request.writableRoots ?? [] : []);
   const fixed = [
+    ...(autoRunRestricted ? ["--dangerously-bypass-hook-trust"] : []),
     "-c", "features.hooks=true",
     ...(explore && readOnlyFiles.length === 0 ? READ_ONLY_POLICY : []),
     ...permissionProfile,

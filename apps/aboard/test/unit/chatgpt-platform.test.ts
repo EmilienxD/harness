@@ -8,6 +8,48 @@ const agentId = "interactive-1" as AgentId;
 const provisional = "6b1e3f7a-2c4d-4a8b-9f10-2c3d4e5f6071" as SessionId;
 const actual = "af817a6c-cd41-41e2-a4db-44d3f43cd560" as SessionId;
 
+test("Auto Run preflight requires hook consent while interactive preflight does not", async () => {
+  const platform = new ChatGptAgentPlatform({
+    lifecycleAssets: { settings: "hooks.json", script: "hook.py" },
+    commandRunner: async () => ({ code: 0, stdout: "codex-cli 0.153.4", stderr: "" }),
+    policyProbe: { require: async () => {} },
+    approveAutoRunHooks: async () => false,
+  });
+  const request = {
+    agentId, sessionId: provisional, agentType: "address" as const, autoRunRestricted: true as const,
+    shell: "powershell" as const, configuration: { shape: "skill", skillName: "address-this" },
+    prompt: "Implement.",
+  };
+  await assert.rejects(platform.preflight(platform.planLaunch(request)), /hook consent/u);
+  await assert.rejects(platform.preflight(platform.planSessionResume(request)), /hook consent/u);
+  await platform.preflight(platform.planLaunch({
+    agentId, sessionId: provisional, agentType: "interactive", shell: "powershell",
+    configuration: { shape: "default" },
+  }));
+});
+
+test("Auto Run Codex launches and resumes bypass hook trust, including background exploration", () => {
+  const platform = new ChatGptAgentPlatform({
+    lifecycleAssets: { settings: "hooks.json", script: "hook.py" },
+    commandRunner: async () => ({ code: 0, stdout: "codex-cli 0.153.4", stderr: "" }),
+  });
+  for (const agentType of ["address", "review", "explore"] as const) {
+    const request = {
+      agentId, sessionId: provisional, agentType, autoRunRestricted: true as const,
+      executionMode: "auto-run" as const, shell: "powershell" as const,
+      configuration: agentType === "explore" ? { shape: "explore" } : { shape: "skill", skillName: agentType === "address" ? "address-this" : "review-this" },
+      prompt: "Work on the issue.", runtimeDirectory: "C:/aboard/runtime",
+    };
+    assert.ok(platform.planLaunch(request).args.includes("--dangerously-bypass-hook-trust"));
+    if (agentType !== "explore") assert.ok(platform.planSessionResume(request).args.includes("--dangerously-bypass-hook-trust"));
+  }
+  const manual = platform.planLaunch({
+    agentId, sessionId: provisional, agentType: "explore", executionMode: "auto",
+    shell: "powershell", configuration: { shape: "explore" }, prompt: "Explore.",
+  });
+  assert.equal(manual.args.includes("--dangerously-bypass-hook-trust"), false);
+});
+
 test("interactive ChatGPT forks preserve history and observe fork startup", () => {
   const platform = new ChatGptAgentPlatform({
     lifecycleAssets: { settings: "hooks.json", script: "hook.py" },

@@ -38,6 +38,11 @@ extension-owned Git and GitHub restrictions.
 AUTO RUN turns labelled GitHub issues into a recoverable queue of unattended workers, each in its own
 visible terminal. Review the forecast in the panel or run `/auto --dry`; start from the panel or run `/auto` when the plan looks right.
 
+The first Codex AUTO RUN asks permission to run configured hooks and remembers your choice for this
+workspace. This permits all enabled Codex hooks, including user and project hooks, during AUTO RUN
+implementation, review, exploration, and worker resumes/reopens. Ordinary interactive sessions retain
+Codex's native hook trust review. Cancelling leaves the new run unstarted; start again to reconsider.
+
 ### Full Workflow
 
 ```mermaid

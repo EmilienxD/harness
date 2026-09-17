@@ -39,7 +39,7 @@ export class ChatGptAgentPlatform implements AgentPlatform {
   readonly #policyProbe: Pick<ChatGptPolicyProbe, "require">;
   readonly #browserProbe: Pick<ChatGptBrowserProbe, "require">;
 
-  public constructor(private readonly options: { readonly commandRunner: CommandRunner; readonly lifecycleAssets: PlatformLifecycleAssets; readonly preflightTimeoutMs?: number; readonly sessionIdFactory?: () => SessionId; readonly sessionProbe?: Pick<ChatGptSessionProbe, "inspect">; readonly policyProbe?: Pick<ChatGptPolicyProbe, "require">; readonly browserProbe?: Pick<ChatGptBrowserProbe, "require"> }) {
+  public constructor(private readonly options: { readonly commandRunner: CommandRunner; readonly lifecycleAssets: PlatformLifecycleAssets; readonly approveAutoRunHooks?: () => Promise<boolean>; readonly preflightTimeoutMs?: number; readonly sessionIdFactory?: () => SessionId; readonly sessionProbe?: Pick<ChatGptSessionProbe, "inspect">; readonly policyProbe?: Pick<ChatGptPolicyProbe, "require">; readonly browserProbe?: Pick<ChatGptBrowserProbe, "require"> }) {
     this.lifecycleAssets = options.lifecycleAssets;
     this.#commandProbe = new ChatGptCommandProbe({ run: options.commandRunner, ...(options.preflightTimeoutMs === undefined ? {} : { timeoutMs: options.preflightTimeoutMs }) });
     this.#sessionProbe = options.sessionProbe ?? new ChatGptSessionProbe({ ...(options.preflightTimeoutMs === undefined ? {} : { timeoutMs: options.preflightTimeoutMs }) });
@@ -58,6 +58,10 @@ export class ChatGptAgentPlatform implements AgentPlatform {
     const command = await this.#commandProbe.require(plan.command);
     if (plan.permissionProfile !== undefined) requirePermissionProfileVersion(command.version);
     await this.#policyProbe.require(plan.agentType, plan.permissionProfile);
+    if (plan.args.includes("--dangerously-bypass-hook-trust") && this.options.approveAutoRunHooks !== undefined
+      && !await this.options.approveAutoRunHooks()) {
+      throw new Error("Codex Auto Run requires workspace hook consent. Start Auto Run again to allow configured hooks.");
+    }
     // Dead while ENFORCE_CHROME_BACKEND is false; see the note above it.
     if (ENFORCE_CHROME_BACKEND && plan.chromeRequired === true) await this.#browserProbe.require(plan.agentType);
   }
