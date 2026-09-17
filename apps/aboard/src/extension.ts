@@ -12,7 +12,7 @@ import {
 } from "./bridge/server.js";
 import { createTerminalRoutes } from "./bridge/terminal-routes.js";
 import { CommandTerminalService, createCommandRoutes, type CommandTerminalId } from "./bridge/command-terminals.js";
-import { createDelegationRoutes, readDelegationBinding } from "./bridge/manual-delegation.js";
+import { createDelegationRoutes, readDelegationBinding, resumeInOpenTerminal } from "./bridge/manual-delegation.js";
 import { FileCommandEndpointRegistry, commandEndpointDirectory } from "./bridge/command-endpoint.js";
 import { TerminalController } from "./platform/terminals.js";
 import type { TerminalId } from "./domain/contracts.js";
@@ -591,6 +591,21 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
         if (!request.harnessSessionId) throw new Error("Delegated resume requires its stable Harness identity");
         const binding = await readDelegationBinding(join(runtime.root,"delegations"),request.harnessSessionId);
         if (!binding || binding.agentId !== request.resumeAgentId || binding.sessionId !== request.resumeSessionId || binding.provider !== request.provider || binding.executionMode !== request.executionMode || binding.cwd !== request.cwd || binding.parentSessionId !== request.parentSessionId) throw new Error("Delegated session ownership or execution mode does not match");
+        const saved = fleet.get(binding.agentId as AgentId);
+        const lockPath = wrapperLayout.lockPathFor(binding.agentId as AgentId);
+        if (currentConfiguration.interactiveResumeMode === "reuse-terminal" && lockMarkerLive(lockPath)) {
+          const reused = await resumeInOpenTerminal(request, binding, saved, terminals, async (terminalId) => {
+            if (!request.executionId || !binding.harnessPython || !binding.harnessRuntimePath || !binding.harnessStateDirectory) throw new Error("Existing terminal's Harness runtime identity is unavailable; resume refused");
+            await promisify(execFile)(binding.harnessPython, ["-m", "subagents_runtime.terminal_resume", request.harnessSessionId as string, request.executionId, binding.agentId, terminalId, binding.sessionId], {
+              cwd: binding.cwd,
+              env: { ...process.env, HARNESS_STATE_DIR: binding.harnessStateDirectory, PYTHONPATH: [binding.harnessRuntimePath, process.env.PYTHONPATH].filter(Boolean).join(delimiter) },
+              windowsHide: true,
+              timeout: 15_000,
+            });
+            if (!lockMarkerLive(lockPath)) throw new Error("Delegated session ended before the resume message could be submitted");
+          });
+          if (reused !== undefined) return reused;
+        }
         if (request.forkSessionId !== undefined) {
           const configured = await launchFile.getDelegationFor(binding.provider, binding.task);
           return coordinator.launchManual({
@@ -605,8 +620,7 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
             executionMode: binding.executionMode, configuration: configured,
           }, binding.executionMode);
         }
-        if (lockMarkerLive(wrapperLayout.lockPathFor(binding.agentId as AgentId))) throw new Error("Delegated execution is running or uncertain; resume refused");
-        const saved = fleet.get(binding.agentId as AgentId);
+        if (lockMarkerLive(lockPath)) throw new Error("Delegated execution is running or uncertain; resume refused");
         return coordinator.reopen({ platform: binding.provider, agentId: binding.agentId as AgentId, type: binding.type, delegationTask: binding.task, sessionId: binding.sessionId as SessionId, terminalName: saved?.terminal.name ?? `aboard: ${binding.description}`, executionMode: binding.executionMode, cwd: binding.cwd, prompt: request.prompt, resultDelivery: saved?.resultDelivery ?? { mode:"none" }, harnessSessionId: request.harnessSessionId, ...(request.executionId === undefined ? {} : { executionId: request.executionId }), ...(request.harnessStateDirectory === undefined ? {} : { harnessStateDirectory: request.harnessStateDirectory }), ...(request.harnessRuntimePath === undefined ? {} : { harnessRuntimePath: request.harnessRuntimePath }), requestId: request.requestId });
       } }, {
         workspaceRoot,

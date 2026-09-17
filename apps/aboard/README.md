@@ -17,8 +17,8 @@ Initialize the project once, then use **Run Agent** to choose Claude or ChatGPT 
 terminal. The **Run Agent** view above the Fleet lists **Run Claude Code** and **Run Codex**; clicking either
 opens the same session with that provider already chosen. Each provider's command, model, and reasoning
 effort come from `.harness/launch.json`. Aboard reads
-that file for every new launch, resume, or reopen, so existing processes keep their configuration while
-future sessions use your latest choices.
+that file whenever a launch, resume, or reopen starts a new process, so existing processes keep their
+configuration while future sessions use your latest choices.
 
 The Fleet shows live sessions. Recent Activity keeps completed work available for inspection and supported reopen flows.
 
@@ -124,6 +124,8 @@ Discard follows the configured cleanup policy and never removes dirty or moved w
 
 Non-launch settings resolve from VS Code workspace settings, then `.abd/settings.json`, then user or profile settings and defaults. AUTO RUN freezes RUN-specific settings for recovery; it reads launch configuration again whenever it starts or resumes an agent.
 
+`aboard.sessions.interactiveResumeMode` controls interactive `resume-agent` continuations for Claude Code and ChatGPT. The default, `fork`, opens a new terminal with a copy of a live child's conversation. Set it to `reuse-terminal` to paste and submit the next message into the child's matching live terminal. Aboard focuses that terminal and preserves the conversation and reply tracking. If that session is no longer open or tracked, Aboard uses the existing fork/reopen flow. Reused processes retain their launch settings; auto execution is unaffected.
+
 The scaffold is intentionally sparse. Omitted settings use product defaults, including Claude as the AUTO RUN provider and the native `claude` and `codex` commands:
 
 ```json
@@ -170,4 +172,4 @@ Use `npm run test:integration` for unit and VS Code integration tests. `npm run 
 
 Aboard keeps its npm build and `aboard-v<version>` release history independent from the Python installer. The packaged VSIX includes this README and the extension runtime, never the Harness skill catalogue.
 
-Harness delegation uses persistent conversation inboxes outside the workspace. Children retain their Harness identities and execution modes across continuation. A caller-driven resume requires a next message and refuses running or uncertain executions, including interactive terminals that have already sent a reply. Delegation request IDs are stored in extension runtime storage so restarting Aboard cannot blindly launch a request twice; conflicting reuse of an ID is refused.
+Harness delegation uses persistent conversation inboxes outside the workspace. Children retain their Harness identities and execution modes across continuation. A caller-driven resume requires a next message. Live children normally continue in a fork; interactive children can instead receive the message in their existing terminal through `aboard.sessions.interactiveResumeMode`. Delegation request IDs are stored in extension runtime storage so restarting Aboard cannot blindly launch a request twice; conflicting reuse of an ID is refused.

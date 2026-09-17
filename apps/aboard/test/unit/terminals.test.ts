@@ -9,7 +9,8 @@ import {
   type TerminalHost,
   type TerminalLifecycleEvent,
 } from "../../src/platform/terminals.js";
-import type { AgentId, SessionId, TerminalId } from "../../src/domain/contracts.js";
+import type { AgentId, AgentSession, IsoTimestamp, SessionId, TerminalId } from "../../src/domain/contracts.js";
+import { resumeInOpenTerminal, type DelegationBinding, type ManualDelegationLaunch } from "../../src/bridge/manual-delegation.js";
 import { createTerminalRoutes } from "../../src/bridge/terminal-routes.js";
 import type { AuthenticatedBridgeRequest } from "../../src/bridge/protocol.js";
 import { SessionStartCancelledError, SessionStartTimeoutError } from "../../src/bridge/session-lifecycle.js";
@@ -78,6 +79,46 @@ function setup() {
   });
   return { controller, host, events };
 }
+
+test("resuming in an open terminal pastes a multiline message and submits it once", async () => {
+  const { controller, host } = setup();
+  const created = controller.create({ agentId: agent("child"), sessionId: session("conversation"), agentType: "general", executionMode: "interactive" });
+  host.created[0]!.terminal.sent.length = 0;
+  await controller.sendResumeMessage(created.terminalId, "First line\nSecond line");
+  assert.deepEqual(host.created[0]!.terminal.sent, [
+    { text: "\u001b[200~First line\nSecond line\u001b[201~", addNewLine: false },
+    { text: "\r", addNewLine: false },
+  ]);
+  assert.equal(controller.list().length, 1);
+});
+
+test("interactive delegation resumes use the matching live terminal and preserve its session", async () => {
+  for (const provider of ["claude", "chatgpt"] as const) {
+    const { controller, host } = setup();
+    const opened = controller.create({ agentId: agent("child"), sessionId: session("conversation"), agentType: "general", executionMode: "interactive", provider });
+    const binding: DelegationBinding = { agentId: "child", sessionId: "conversation", terminalId: opened.terminalId, provider, type: "general", task: "general", executionMode: "interactive", cwd: opened.cwd, description: "Child", harnessSessionId: "stable" };
+    const request: ManualDelegationLaunch = { ...binding, requestId: "next", resumeAgentId: "child", resumeSessionId: "conversation", forkSessionId: "conversation", executionId: "execution", prompt: "Continue" };
+    const saved: AgentSession = { platform: provider, identity: { agentId: agent("child"), type: "general" }, sessionId: session("conversation"), sessionBinding: "bound", terminal: { terminalId: opened.terminalId, name: opened.name }, lifecycle: { status: "awaiting-user", startedAt: opened.createdAt as IsoTimestamp }, executionMode: "interactive", resultDelivery: { mode: "none" }, telemetry: { totalTokens: 0, totalDurationMs: 0, totalToolUseCount: 0, compactionCount: 0 } };
+    host.created[0]!.terminal.sent.length = 0;
+    const prepare = async () => { assert.equal(host.created[0]!.terminal.sent.length, 0); };
+    const resumed = await resumeInOpenTerminal(request, binding, saved, controller, prepare);
+    assert.deepEqual(resumed, { agentId: "child", sessionId: "conversation", terminalId: opened.terminalId });
+    assert.equal(host.created.length, 1);
+    assert.equal(host.created[0]!.terminal.sent.length, 2);
+
+    const sentBeforeFailure = host.created[0]!.terminal.sent.length;
+    await assert.rejects(resumeInOpenTerminal(request, binding, saved, controller, async () => { throw new Error("Ownership could not be bound"); }), /Ownership could not be bound/u);
+    await assert.rejects(resumeInOpenTerminal({ ...request, prompt: "Text\u001b[201~\rcommand" }, binding, saved, controller, prepare), /control characters/u);
+    assert.equal(host.created[0]!.terminal.sent.length, sentBeforeFailure);
+
+    for (const changed of [{ ...saved, platform: provider === "claude" ? "chatgpt" as const : "claude" as const }, { ...saved, sessionId: session("other") }, { ...saved, lifecycle: { status: "completed" as const, startedAt: opened.createdAt as IsoTimestamp, finishedAt: opened.createdAt as IsoTimestamp, exitCode: 0, lastAssistantMessage: null } }]) {
+      assert.equal(await resumeInOpenTerminal(request, binding, changed, controller, prepare), undefined);
+    }
+    assert.equal(await resumeInOpenTerminal({ ...request, executionMode: "auto" }, binding, saved, controller, prepare), undefined);
+    host.close(host.created[0]!.terminal, 0);
+    assert.equal(await resumeInOpenTerminal(request, binding, saved, controller, prepare), undefined);
+  }
+});
 
 test("creates one real-terminal record with the complete aboard environment", () => {
   const { controller, host, events } = setup();

@@ -8,6 +8,7 @@ export interface AboardConfiguration {
   readonly bridgePort: number;
   readonly maxInlinePromptChars: number;
   readonly closeTerminalOnSessionEnd: boolean;
+  readonly interactiveResumeMode: "fork" | "reuse-terminal";
   readonly autoRun: AutoRunSettings;
 }
 export interface ConfigurationDiagnostic { readonly setting: string; readonly message: string; readonly severity: "warning" | "error"; }
@@ -18,6 +19,7 @@ export const ABOARD_SETTINGS = [
   "aboard.bridge.port",
   "aboard.launch.maxInlinePromptChars",
   "aboard.terminals.closeOnSessionEnd",
+  "aboard.sessions.interactiveResumeMode",
   "aboard.autoRun.review",
   "aboard.autoRun.branchMode",
   "aboard.autoRun.exploreBeforeAddress",
@@ -124,6 +126,7 @@ export function readAboardConfiguration(reader: ConfigurationReader): Configurat
     bridgePort: integer(reader, "aboard.bridge.port", DEFAULT_BRIDGE_PORT, 0, 65_535, diagnostics),
     maxInlinePromptChars: integer(reader, "aboard.launch.maxInlinePromptChars", DEFAULT_MAX_INLINE_PROMPT_CHARS, 0, 32_767, diagnostics),
     closeTerminalOnSessionEnd: flag(reader, "aboard.terminals.closeOnSessionEnd", false, diagnostics),
+    interactiveResumeMode: choice(reader, "aboard.sessions.interactiveResumeMode", ["fork", "reuse-terminal"] as const, "fork", diagnostics),
     autoRun: {
       branchMode: choice<AutoRunBranchMode>(reader, "aboard.autoRun.branchMode", AUTO_RUN_BRANCH_MODES, "per-issue", diagnostics),
       review: flag(reader, "aboard.autoRun.review", false, diagnostics),

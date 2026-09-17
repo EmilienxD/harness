@@ -1,5 +1,6 @@
 import type { AgentPlatformId } from "../platform/agent-platform.js";
-import type { AgentType, ExecutionMode } from "../domain/contracts.js";
+import type { AgentType, AgentSession, ExecutionMode, TerminalId } from "../domain/contracts.js";
+import { validateResumeMessage, type TerminalController } from "../platform/terminals.js";
 import type { DelegationTask } from "../platform/launch-configuration.js";
 import { isAbsolute, relative, resolve, sep } from "node:path";
 import { createHash } from "node:crypto";
@@ -73,6 +74,27 @@ export interface DelegationBinding {
   readonly cwd: string;
   readonly description: string;
   readonly parentSessionId?: string;
+}
+
+/** Only a live, bound interactive provider process can receive a continuation as input. */
+export async function resumeInOpenTerminal(
+  request: ManualDelegationLaunch,
+  binding: DelegationBinding,
+  saved: AgentSession | undefined,
+  terminals: TerminalController,
+  prepare: (terminalId: TerminalId) => Promise<void>,
+): Promise<{ readonly agentId: string; readonly sessionId: string; readonly terminalId: string } | undefined> {
+  if (request.executionMode !== "interactive" || binding.executionMode !== "interactive" || saved?.executionMode !== "interactive") return undefined;
+  if (saved.platform !== binding.provider || saved.sessionBinding !== "bound" || saved.sessionId !== binding.sessionId || saved.identity.agentId !== binding.agentId) return undefined;
+  if (saved.lifecycle.status !== "running" && saved.lifecycle.status !== "awaiting-user") return undefined;
+  const terminalId = terminals.liveTerminalForAgent(saved.identity.agentId);
+  if (terminalId === undefined || terminalId !== saved.terminal.terminalId || terminalId !== binding.terminalId) return undefined;
+  const terminal = terminals.get(terminalId);
+  if (terminal.backend === "process" || terminal.sessionId !== binding.sessionId || terminal.cwd !== binding.cwd) return undefined;
+  validateResumeMessage(request.prompt);
+  await prepare(terminalId);
+  await terminals.sendResumeMessage(terminalId, request.prompt);
+  return { agentId: binding.agentId, sessionId: binding.sessionId, terminalId };
 }
 
 function bindingPath(directory: string, sessionId: string): string {

@@ -62,6 +62,11 @@ export interface TerminalHandle {
   dispose(): void;
 }
 
+export function validateResumeMessage(message: string): void {
+  if (!message.trim()) throw new Error("Resume message must not be empty");
+  if (/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/u.test(message)) throw new Error("Resume message contains terminal control characters");
+}
+
 export interface TerminalCreationOptions {
   readonly cwd: string;
   readonly provider?: AgentPlatformId;
@@ -394,8 +399,18 @@ export class TerminalController {
     handle.dispose();
   }
 
-  // These methods are intentionally takeover-specific. Automated prompt delivery
-  // belongs in provider launch/resume arguments, never in terminal input.
+  /** Paste into the provider composer, then allow paste detection to finish before Enter. */
+  public async sendResumeMessage(terminalId: TerminalId, message: string): Promise<void> {
+    const record = this.#requireRecord(terminalId);
+    if (record.backend === "process") throw new Error("Resume messages require an interactive terminal");
+    validateResumeMessage(message);
+    this.#requireOpenHandle(terminalId).sendText(`\u001b[200~${message.replace(/\r\n?/gu, "\n")}\u001b[201~`, false);
+    await this.#sleep(100);
+    this.#requireOpenHandle(terminalId).sendText("\r", false);
+    this.show(terminalId);
+  }
+
+  // Explicit user takeover remains separate from resume delivery.
   public sendUserTakeoverText(terminalId: TerminalId, text: string, addNewLine = true): void {
     this.#requireOpenHandle(terminalId).sendText(text, addNewLine);
   }

@@ -488,6 +488,16 @@
           "default": false,
           "description": "Close an agent's terminal when its session ends. Off by default: exiting the session and closing the terminal are separate gestures, so the terminal is left at a shell prompt for you to reuse or close. The agent leaves the fleet either way, and relaunching it is never blocked by the leftover terminal."
         },
+        "aboard.sessions.interactiveResumeMode": {
+          "type": "string",
+          "enum": ["fork", "reuse-terminal"],
+          "default": "fork",
+          "enumDescriptions": [
+            "Continue a live delegated conversation in a fork in a new terminal.",
+            "Send the next message into the matching live interactive agent terminal. Fall back to a new terminal when it is unavailable."
+          ],
+          "description": "How resume-agent continues interactive Claude Code and ChatGPT delegations. Existing terminals retain their launch configuration. Auto execution is unaffected."
+        },
         "aboard.autoRun.review": {
           "type": "boolean",
           "default": false,

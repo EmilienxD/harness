@@ -58,8 +58,9 @@ both launch adapters ask, so a mode never means headless in one of them and visi
 `.abd/scaffold.json` is the initialized-project marker; when absent, runtime surfaces and the command
 endpoint are closed. Mutable runtime state belongs in VS Code storage, not the workspace.
 
-`.harness/launch.json` is a sparse launch authority and is re-read for every new launch, resume, and
-reopen. Omitted fields use code-owned defaults. `providers.claude` and `providers.chatgpt` are equal,
+`.harness/launch.json` is a sparse launch authority and is re-read whenever launch, resume, or reopen
+starts a new process. Resuming into an existing terminal retains that process's configuration.
+Omitted fields use code-owned defaults. `providers.claude` and `providers.chatgpt` are equal,
 independently validated configurations; neither is inferred from the wrapper-friendly `command` array. **Run Agent** asks which provider to launch,
 the Run Agent view above the fleet offers one row per provider that launches the same interactive session
 without the prompt, and `autoRun.provider` selects the Auto Run default and is scaffolded as `claude`. Reopen always uses the
@@ -103,6 +104,7 @@ user/profile/default settings. `.abd/settings.json` accepts flat or nested keys,
 | `aboard.bridge.port` | `4823` | Preferred loopback bridge port. |
 | `aboard.launch.maxInlinePromptChars` | `4000` | Spill longer prompts to one-use temporary files. |
 | `aboard.terminals.closeOnSessionEnd` | `false` | Leave exited session terminals available. |
+| `aboard.sessions.interactiveResumeMode` | `fork` | Fork live interactive delegations, or use `reuse-terminal` to send the next message into their tracked live terminal. |
 | `aboard.autoRun.review` | `false` | Add the mode-specific automated review turn. |
 | `aboard.autoRun.branchMode` | `per-issue` | Per-issue PRs or one cumulative branch. |
 | `aboard.autoRun.exploreBeforeAddress` | `false` | Run read-only explore before a fresh worker. |
@@ -185,6 +187,9 @@ are outside workspaces, permissioned `0600`, and removed on window close.
   its checkout behind.
 - Keep TypeScript strict, preserve Windows path behavior, and place cross-platform rules in `domain/` or
   `platform/` rather than duplicating them in adapters.
+- Interactive delegation resumes may submit input to a matching live provider terminal when
+  `sessions.interactiveResumeMode` is `reuse-terminal`. Bind Harness reply ownership before submitting
+  the message. When no live session matches, use the existing fork/reopen path.
 
 ## Commands and Tests
 
