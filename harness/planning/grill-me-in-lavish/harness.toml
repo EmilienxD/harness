@@ -1,0 +1,22 @@
+name = "grill-me-in-lavish"
+version = "1.0.1"
+description = "Runs visual, interactive design interviews in Lavish"
+docs = "https://github.com/EmilienxD/harness/blob/main/harness/planning/grill-me-in-lavish/SKILL.md"
+requires = ["npx"]
+
+[platforms.claude]
+status = "supported"
+
+[platforms.chatgpt]
+status = "supported"
+
+[[files]]
+src = "SKILL.md"
+dest = "grill-me-in-lavish/SKILL.md"
+root = "skills"
+
+[[files]]
+src = "chatgpt/openai.yaml"
+dest = "grill-me-in-lavish/agents/openai.yaml"
+root = "skills"
+platforms = ["chatgpt"]
