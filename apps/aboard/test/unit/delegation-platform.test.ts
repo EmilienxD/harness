@@ -451,7 +451,7 @@ test("a ChatGPT reopen uses ChatGPT configuration even when Claude is the Auto R
 
   let settled = false;
   const reopened = coordinator.reopen({
-    platform: "chatgpt", agentId, type: "interactive", sessionId, terminalName: "aboard: ChatGPT", cwd: "C:/work",
+    platform: "chatgpt", agentId, type: "interactive", sessionId, cwd: "C:/work",
   }).then((value) => { settled = true; return value; });
   await new Promise((resolve) => setImmediate(resolve));
   assert.equal(settled, false);

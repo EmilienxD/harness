@@ -116,7 +116,6 @@ export class ReopenCoordinator {
       agentId: candidate.agentId,
       type: candidate.type,
       sessionId: candidate.sessionId,
-      terminalName: `aboard: ${candidate.description}`,
       ...(candidate.issueNumbers === undefined ? {} : { issueNumbers: candidate.issueNumbers }),
       ...(candidate.chromeEnabled === true ? { chromeEnabled: true as const } : {}),
       ...(candidate.cwd === undefined ? {} : { cwd: candidate.cwd }),

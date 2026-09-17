@@ -239,16 +239,15 @@ test("several bound issues reach the session as one comma-separated variable, an
   assert.equal("ABOARD_ISSUE_NUMBERS" in (host.created[1]?.options.env ?? {}), false);
 });
 
-test("the terminal leaves title policy to VS Code; the aboard label stays on the record", () => {
-  // A static role title outlives the session and then lies about it.
+test("the terminal uses its agent label as the VS Code terminal name", () => {
   const { controller, host } = setup();
   const created = controller.create({ agentId: agent("agent-6"), sessionId: session("4db0ed4c-5d9e-4ab5-a493-2b8575ab19ee"), agentType: "address", issueNumbers: [6] });
-  assert.equal("name" in (host.created[0]?.options ?? {}), false);
+  assert.equal(host.created[0]?.options.name, "aboard-address-agent-6");
   assert.equal("titleTemplate" in (host.created[0]?.options ?? {}), false);
-  assert.equal(created.name, "aboard: address");
+  assert.equal(created.name, "aboard-address-agent-6");
 });
 
-test("a visible agent exposes its provider to the terminal host without taking over the title", () => {
+test("a visible agent exposes its provider and agent label to the terminal host", () => {
   const { controller, host } = setup();
   controller.create({
     agentId: agent("agent-codex"),
@@ -259,7 +258,7 @@ test("a visible agent exposes its provider to the terminal host without taking o
   });
 
   assert.equal(host.created[0]?.options.provider, "chatgpt");
-  assert.equal("name" in (host.created[0]?.options ?? {}), false);
+  assert.equal(host.created[0]?.options.name, "aboard-interactive-agent-codex");
 });
 
 test("a closed terminal frees the agent for relaunch but keeps session identity fixed", async () => {

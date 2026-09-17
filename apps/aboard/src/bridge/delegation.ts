@@ -3,6 +3,7 @@ import { delimiter, dirname } from "node:path";
 import { existsSync } from "node:fs";
 import type { LaunchRestrictions, WriteCapability } from "../domain/capability.js";
 import {
+  agentLabel,
   isAutoRunWorkerType,
   isNonRestorablePersistedAgentType,
   type AgentId,
@@ -100,8 +101,6 @@ export interface ReopenTarget {
   readonly delegationTask?: DelegationTask;
   readonly sessionId: SessionId;
   readonly resultDelivery?: AgentSession["resultDelivery"]; 
-  /** The terminal name, already carrying aboard's own prefix. */
-  readonly terminalName: string;
   readonly issueNumbers?: readonly number[];
   readonly difficulty?: IssueDifficulty;
   readonly chromeEnabled?: true;
@@ -259,7 +258,6 @@ export class DelegationCoordinator {
       type: session.identity.type,
       sessionId: session.sessionId,
 
-      terminalName: session.terminal.name,
       ...(session.issueNumbers === undefined ? {} : { issueNumbers: session.issueNumbers }),
       ...(session.chromeEnabled === true ? { chromeEnabled: true as const } : {}),
       ...(session.cwd === undefined ? {} : { cwd: session.cwd }),
@@ -352,7 +350,7 @@ export class DelegationCoordinator {
         ...(target.completionCommitStartingSha === undefined ? {} : { completionCommitStartingSha: target.completionCommitStartingSha }),
         ...(target.reviewRange === undefined ? {} : { reviewRange: target.reviewRange }),
         ...(target.workerContinuation === true ? { workerContinuation: true as const } : {}),
-        name: target.terminalName,
+        name: agentLabel({ agentId: target.agentId, type: target.type }),
         ...(target.cwd === undefined ? {} : { cwd: target.cwd }),
         initialCommand: plan.commandLine,
         attended,
@@ -440,7 +438,6 @@ export class DelegationCoordinator {
       agentId: session.identity.agentId,
       type: session.identity.type,
       sessionId: session.sessionId,
-      terminalName: session.terminal.name,
       ...(session.issueNumbers === undefined ? {} : { issueNumbers: session.issueNumbers }),
       ...(difficulty === undefined ? {} : { difficulty }),
       ...(session.chromeEnabled === true ? { chromeEnabled: true as const } : {}),
@@ -558,7 +555,7 @@ export class DelegationCoordinator {
         ...(input.issues === undefined ? {} : { issueNumbers: input.issues }),
         ...(input.completionCommitStartingSha === undefined ? {} : { completionCommitStartingSha: input.completionCommitStartingSha }),
         ...(input.reviewRange === undefined ? {} : { reviewRange: input.reviewRange }),
-        name: `aboard: ${input.description}`,
+        name: agentLabel({ agentId, type: agentType }),
         ...(cwd === undefined ? {} : { cwd }),
         initialCommand: plan.commandLine,
         attended,

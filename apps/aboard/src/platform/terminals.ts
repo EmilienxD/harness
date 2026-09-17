@@ -6,6 +6,7 @@ import { randomUUID } from "node:crypto";
 import { createBackgroundProcess } from "./background.js";
 
 import {
+  agentLabel,
   isHeadlessExecution,
   isInteractiveAgentType,
   type AgentId,
@@ -237,7 +238,7 @@ export class TerminalController {
 
     const environment = this.options.environment();
     const terminalId = this.options.terminalIdFactory();
-    const name = request.name ?? `aboard: ${request.agentType}`;
+    const name = request.name ?? agentLabel({ agentId: request.agentId, type: request.agentType });
     const cwd = request.cwd ?? environment.workspaceRoot;
     const env: Record<string, string> = {
       ABOARD_BRIDGE_PORT: String(environment.port),
@@ -264,6 +265,7 @@ export class TerminalController {
       cwd,
       env,
       ...(request.provider === undefined ? {} : { provider: request.provider }),
+      name,
       ...(request.shellPath === undefined ? {} : { shellPath: request.shellPath }),
       ...(request.shellArgs === undefined ? {} : { shellArgs: request.shellArgs }),
     };
