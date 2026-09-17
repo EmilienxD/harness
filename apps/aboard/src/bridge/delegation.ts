@@ -166,6 +166,8 @@ export interface DelegationCoordinatorOptions {
   readonly maxInlinePromptChars?: number;
   readonly startupTimeoutMs?: number;
   readonly wrapper?: SessionWrapperLayout;
+  /** Whether a wrapper marker still stands for a live process; a bare file by default. */
+  readonly lockProbe?: (lockFile: string) => boolean;
   readonly resolveWorktreeGitMetadataRoots?: (worktreeRoot: string, projectRoot: string) => Promise<readonly string[]>;
 }
 
@@ -265,7 +267,7 @@ export class DelegationCoordinator {
   }
 
   public async reopen(target: ReopenTarget): Promise<InteractiveLaunchHandles> {
-    if (this.options.terminals.liveTerminalForAgent(target.agentId) !== undefined || this.options.sessions?.observe(target.agentId) === "live" || (this.options.wrapper !== undefined && existsSync(this.options.wrapper.lockPathFor(target.agentId)))) {
+    if (this.options.terminals.liveTerminalForAgent(target.agentId) !== undefined || this.options.sessions?.observe(target.agentId) === "live" || (this.options.wrapper !== undefined && (this.options.lockProbe ?? existsSync)(this.options.wrapper.lockPathFor(target.agentId)))) {
       throw new DelegationError("agent-active", `Agent ${target.agentId} still has a live or uncertain execution`);
     }
     const saved = this.options.fleet.get(target.agentId);

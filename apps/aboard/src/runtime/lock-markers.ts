@@ -6,6 +6,35 @@ import type { SessionWrapperLayout } from "../platform/agent-platform.js";
 
 export const lockMarkerPresent: LockMarkerProbe = (lockFile) => existsSync(lockFile);
 
+function processAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    // A process owned by another user answers EPERM: it exists, and it is not ours to judge.
+    return (error as NodeJS.ErrnoException).code === "EPERM";
+  }
+}
+
+/**
+ * Whether a marker still stands for a running execution. A wrapper killed outright
+ * (terminal closed from the title bar, machine reset) leaves its marker behind, and
+ * that stale file must not refuse a continuation forever. The recorded identities
+ * settle it; without them the marker itself is the only evidence available.
+ */
+export function lockMarkerLive(lockFile: string): boolean {
+  let raw: string;
+  try { raw = readFileSync(lockFile, "utf8"); } catch { return false; }
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    const value = (typeof parsed === "object" && parsed !== null ? parsed : {}) as { wrapperPid?: unknown; childPid?: unknown };
+    const pids = [value.wrapperPid, value.childPid].filter((pid): pid is number => typeof pid === "number" && pid > 0);
+    return pids.length === 0 || pids.some(processAlive);
+  } catch {
+    return true;
+  }
+}
+
 /** The extension-owned wrapper and its markers live outside the user's repository. */
 export function sessionWrapperLayout(runtimeRoot: string, wrapperScript: string): SessionWrapperLayout {
   return {

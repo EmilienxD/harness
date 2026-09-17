@@ -5,7 +5,7 @@ import { delimiter, join } from "node:path";
 import { spawn, spawnSync } from "node:child_process";
 import test from "node:test";
 
-import { lockMarkerDirectory, lockMarkerPresent, sessionExitFailure, sessionLaunchFailure, sessionWrapperLayout, takeSessionExitRecord, watchLockMarkers } from "../../src/runtime/lock-markers.js";
+import { lockMarkerDirectory, lockMarkerLive, lockMarkerPresent, sessionExitFailure, sessionLaunchFailure, sessionWrapperLayout, takeSessionExitRecord, watchLockMarkers } from "../../src/runtime/lock-markers.js";
 
 const WRAPPER = join(process.cwd(), "assets", "runtime", "abd_wrapper.py");
 
@@ -55,6 +55,30 @@ test("wrapper owns the marker for exactly the child's lifetime", async () => {
     assert.equal(takeSessionExitRecord(lock), undefined, "the record is consumed");
   } finally {
     child.kill();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("a marker left by a killed wrapper is no longer evidence of a live execution", () => {
+  const root = mkdtempSync(join(tmpdir(), "aboard-markers-"));
+  const directory = lockMarkerDirectory(root);
+  mkdirSync(directory, { recursive: true });
+  const lock = join(directory, "a1.lock");
+  try {
+    // A terminal closed from the title bar kills the wrapper before its cleanup runs.
+    writeFileSync(lock, JSON.stringify({ agentId: "a1", wrapperPid: 0x7fff_ffff, childPid: 0x7fff_fffe }));
+    assert.equal(lockMarkerPresent(lock), true);
+    assert.equal(lockMarkerLive(lock), false);
+
+    writeFileSync(lock, JSON.stringify({ agentId: "a1", wrapperPid: process.pid, childPid: 0x7fff_fffe }));
+    assert.equal(lockMarkerLive(lock), true);
+
+    // Without recorded identities the marker is all the evidence there is.
+    writeFileSync(lock, "{}");
+    assert.equal(lockMarkerLive(lock), true);
+    rmSync(lock);
+    assert.equal(lockMarkerLive(lock), false);
+  } finally {
     rmSync(root, { recursive: true, force: true });
   }
 });

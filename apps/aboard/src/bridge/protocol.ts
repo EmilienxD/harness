@@ -6,6 +6,8 @@ export type BridgeErrorCode =
   | "malformed-request"
   | "invalid-request"
   | "conflict"
+  /** A claimed launch whose outcome is unknown: retrying it could duplicate a live agent. */
+  | "startup-uncertain"
   | "terminal-closed"
   | "not-found"
   | "internal-error";

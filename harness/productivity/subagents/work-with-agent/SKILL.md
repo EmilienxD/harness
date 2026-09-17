@@ -10,8 +10,11 @@ disable-model-invocation: true
 
 # Work with an Agent
 
-Follow the delegation workflow injected by the hook, using the persistent conversation inbox. Launch only after the user explicitly requests delegation.
+Follow the shared delegation workflow and inbox supplied by the hook. If no hook supplied them, stop immediately and notify the user without looking for a workaround.
 
-Request parameters: `task: general`; mode: interactive or auto (default auto); optional provider: `claude` or `chatgpt`.
+Request parameters:
+- task: general
+- mode: interactive or auto (default auto)
+- provider (Optional): `claude` or `chatgpt`
 
 Give the child a bounded task and the relevant project context.

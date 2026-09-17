@@ -27,6 +27,9 @@ const DESCRIPTIONS: Readonly<Record<string, string>> = {
   review: "Issue Review",
 };
 const SKILL_INVOCATION = /^[/\$][A-Za-z0-9_-]+(?:\s|$)/u;
+
+/** A claim whose launch never reported an outcome: callers must verify, not retry. */
+class StartupUncertain extends Error {}
 export interface ManualDelegationLaunch {
   readonly harnessPython?: string;
   readonly harnessStateDirectory?: string;
@@ -138,13 +141,39 @@ function contains(root: string, candidate: string): boolean {
 
 export function createDelegationRoutes(
   launcher: ManualDelegationLauncher,
-  options: { readonly workspaceRoot?: string; readonly stateDirectory?: string } = {},
+  options: {
+    readonly workspaceRoot?: string;
+    readonly stateDirectory?: string;
+    readonly focusParent?: (sessionId: string) => boolean;
+  } = {},
 ): BridgeRequestHandler {
   const launches = new Map<string, {
     readonly fingerprint: string;
     readonly outcome: Promise<{ readonly agentId: string; readonly sessionId: string; readonly terminalId: string }>;
   }>();
   return async (request) => {
+    if (request.url.pathname === "/delegations/focus-parent") {
+      if (request.method !== "POST") return protocolError(404, "not-found", "Route not found");
+      if (request.authorizationScope !== undefined && request.authorizationScope !== "full") {
+        return protocolError(403, "forbidden", "Only an Aboard-launched agent can focus its parent");
+      }
+      if (typeof request.body !== "object" || request.body === null || Array.isArray(request.body)) {
+        return protocolError(400, "invalid-request", "Parent focus request is invalid");
+      }
+      const focusBody = request.body as Record<string, unknown>;
+      const childSessionId = focusBody.childSessionId;
+      if (Object.keys(focusBody).length !== 1 || typeof childSessionId !== "string" || !childSessionId.trim()) {
+        return protocolError(400, "invalid-request", "Parent focus request is invalid");
+      }
+      if (options.stateDirectory === undefined || options.focusParent === undefined) {
+        return protocolError(404, "not-found", "Delegation binding is unavailable");
+      }
+      const child = await readDelegationBinding(options.stateDirectory, childSessionId);
+      if (child?.parentSessionId === undefined) return protocolError(404, "not-found", "Delegation parent is unavailable");
+      const parent = await readDelegationBinding(options.stateDirectory, child.parentSessionId);
+      options.focusParent(parent?.sessionId ?? child.parentSessionId);
+      return { status: 204 };
+    }
     if (request.url.pathname !== "/delegations") return protocolError(404, "not-found", "Route not found");
     if (request.method !== "POST") return protocolError(404, "not-found", "Route not found");
     const parsed = parse(request.body);
@@ -174,7 +203,7 @@ export function createDelegationRoutes(
             const saved = JSON.parse(await readFile(recordPath, "utf8")) as { fingerprint: string; outcome?: { agentId: string; sessionId: string; terminalId: string } };
             if (saved.fingerprint !== fingerprint) throw new Error("Delegation request ID was already used for different input");
             if (saved.outcome !== undefined) return saved.outcome;
-            throw new Error("Delegation startup is uncertain; verify the existing execution before retrying");
+            throw new StartupUncertain("Delegation startup is uncertain; verify the existing execution before retrying");
           }
         }
         const launched = await (parsed.resumeAgentId === undefined ? launcher.launch(parsed)
@@ -197,6 +226,7 @@ export function createDelegationRoutes(
       const launched = await outcome;
       return { status: 201, body: { ok: true, ...launched } };
     } catch (error) {
+      if (error instanceof StartupUncertain) return protocolError(409, "startup-uncertain", error.message);
       return protocolError(409, "conflict", error instanceof Error ? error.message : "Delegation launch failed");
     }
   };

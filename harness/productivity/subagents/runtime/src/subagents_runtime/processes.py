@@ -101,17 +101,16 @@ def process_alive(pid: int) -> bool:
         return False
 
 
-def require_exited(session_id: str) -> None:
-    from subagents_runtime.sessions import SessionError
-
+def live_executions(session_id: str) -> list[str]:
+    """Settle every verifiably dead execution and report the ones still running."""
     with connect() as connection:
         rows = connection.execute(
-            "SELECT id,state,supervisor_pid,supervisor_birth,provider_pid,provider_birth FROM executions WHERE session_id=? AND state IN ('prepared','starting','running','uncertain')",
+            "SELECT id,supervisor_pid,supervisor_birth,provider_pid,provider_birth FROM executions WHERE session_id=? AND superseded_at IS NULL AND state IN ('prepared','starting','running','uncertain')",
             (session_id,),
         ).fetchall()
+    live = []
     for (
         execution_id,
-        state,
         supervisor,
         supervisor_birth,
         provider,
@@ -130,9 +129,8 @@ def require_exited(session_id: str) -> None:
             or ((birth is None or birth_identity(pid) is None) and process_alive(pid))
             for pid, birth in identities
         ):
-            raise SessionError(
-                f"{session_id} still has a running or uncertain execution; resume refused"
-            )
+            live.append(execution_id)
+            continue
         with connect() as connection:
             connection.execute(
                 "UPDATE executions SET state='exited',exited_at=CURRENT_TIMESTAMP WHERE id=?",
@@ -146,6 +144,17 @@ def require_exited(session_id: str) -> None:
             success=False,
             reason="execution ended before delivering a result",
             cancelled=True,
+            execution_id=execution_id,
+        )
+    return live
+
+
+def require_exited(session_id: str) -> None:
+    from subagents_runtime.sessions import SessionError
+
+    if live_executions(session_id):
+        raise SessionError(
+            f"{session_id} still has a running or uncertain execution; resume refused"
         )
 
 
@@ -314,6 +323,11 @@ def supervise(execution_id: str, specification: Path) -> int:
     process = None
     try:
         with (root / "stderr.log").open("wb") as errors:
+            options = (
+                {"creationflags": subprocess.CREATE_NO_WINDOW}
+                if os.name == "nt" and not value["visible"]
+                else {}
+            )
             process = subprocess.Popen(
                 native_command(value["argv"]),
                 cwd=value["cwd"],
@@ -321,6 +335,7 @@ def supervise(execution_id: str, specification: Path) -> int:
                 stdin=None if value["visible"] else subprocess.DEVNULL,
                 stdout=None if value["visible"] else subprocess.PIPE,
                 stderr=None if value["visible"] else errors,
+                **options,
             )
             with connect() as connection:
                 connection.execute(
@@ -372,6 +387,7 @@ def supervise(execution_id: str, specification: Path) -> int:
                 success=False,
                 reason="Provider process exited",
                 cancelled=True,
+                execution_id=execution_id,
             )
         else:
             report_child_stop(
@@ -379,6 +395,7 @@ def supervise(execution_id: str, specification: Path) -> int:
                 message,
                 success=code == 0 and bool(message),
                 reason=None if code == 0 else f"Provider exit {code}",
+                execution_id=execution_id,
             )
         return code
     except Exception as exc:  # noqa: BLE001 - Record any supervisor failure before exiting.

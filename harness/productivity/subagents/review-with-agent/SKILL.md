@@ -1,6 +1,6 @@
 ---
 name: review-with-agent
-description: Launch a agent to review a pinned change. Use when the user wants a separate agent to inspect and validate a target.
+description: Launch an agent to review a pinned change. Use when the user wants a separate agent to inspect and validate a target.
 argument-hint: "[review target or expectations]"
 license: MIT
 metadata:
@@ -10,8 +10,11 @@ disable-model-invocation: true
 
 # Review with an Agent
 
-Follow the delegation workflow injected by the hook, using the persistent conversation inbox. Launch only after the user explicitly requests delegation.
+Follow the shared delegation workflow and inbox supplied by the hook. If no hook supplied them, stop immediately and notify the user without looking for a workaround.
 
-Request parameters: `task: review`; mode: interactive or auto (default auto); optional provider: `claude` or `chatgpt`.
+Request parameters:
+- task: review
+- mode: interactive or auto (default auto)
+- provider (Optional): `claude` or `chatgpt`
 
-State the review scope, relevant changes, and validation expectations. The runtime selects the review-this workflow.
+State the review scope, relevant changes, and validation expectations. The task param already tells the agent how to review, not what to review.

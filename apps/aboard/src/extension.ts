@@ -60,7 +60,7 @@ import {
   SessionStartupProofs,
   type SessionEndReason,
 } from "./bridge/session-lifecycle.js";
-import { lockMarkerDirectory, lockMarkerPresent, sessionExitFailure, sessionLaunchFailure, sessionWrapperLayout, takeSessionExitRecord, watchLockMarkers, type SessionExitRecord } from "./runtime/lock-markers.js";
+import { lockMarkerDirectory, lockMarkerLive, lockMarkerPresent, sessionExitFailure, sessionLaunchFailure, sessionWrapperLayout, takeSessionExitRecord, watchLockMarkers, type SessionExitRecord } from "./runtime/lock-markers.js";
 import { WorkspaceAgentIdCounter } from "./runtime/agent-id-counter.js";
 import { PromptResolver } from "./platform/prompts.js";
 import { GitHubDelegationPromptResolver } from "./github/prompt-adapter.js";
@@ -336,7 +336,7 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
   const wrapperLayout = sessionWrapperLayout(runtime.root, join(context.extensionPath, "assets", "runtime", "abd_wrapper.py"));
   // `sessionMonitor` is constructed below, after the settlement callbacks it
   // needs; the observer is only ever called from a launch, long after that.
-  const coordinator = new DelegationCoordinator({ admission: () => initialized, workspaceRoot, promptRoot, fleet, lease, terminals, sessions: { observe: (agentId) => sessionMonitor.observe(agentId) }, onStaleLeaseRecovered: (holder, observation) => { output.appendLine(`Reclaimed the write lease from ${holder.agentId} (held since ${holder.acquiredAt}): terminal ${observation.terminal}, session ${observation.session}.`); void window.showWarningMessage(`aboard reclaimed the write lease from ${holder.agentId}: its terminal and session are both gone.`); }, configurations: launchConfigurations, platforms, prompts: new GitHubDelegationPromptResolver(new PromptResolver({ github })), spills: runtimeFiles, shell: process.platform === "win32" ? "powershell" : "git-bash", maxInlinePromptChars: currentConfiguration.maxInlinePromptChars, agentIdFactory: () => agentIdCounter.next(), startupTimeoutMs: STARTUP_PROOF_TIMEOUT_MS, wrapper: wrapperLayout });
+  const coordinator = new DelegationCoordinator({ admission: () => initialized, workspaceRoot, promptRoot, fleet, lease, terminals, sessions: { observe: (agentId) => sessionMonitor.observe(agentId) }, onStaleLeaseRecovered: (holder, observation) => { output.appendLine(`Reclaimed the write lease from ${holder.agentId} (held since ${holder.acquiredAt}): terminal ${observation.terminal}, session ${observation.session}.`); void window.showWarningMessage(`aboard reclaimed the write lease from ${holder.agentId}: its terminal and session are both gone.`); }, configurations: launchConfigurations, platforms, prompts: new GitHubDelegationPromptResolver(new PromptResolver({ github })), spills: runtimeFiles, shell: process.platform === "win32" ? "powershell" : "git-bash", maxInlinePromptChars: currentConfiguration.maxInlinePromptChars, agentIdFactory: () => agentIdCounter.next(), startupTimeoutMs: STARTUP_PROOF_TIMEOUT_MS, wrapper: wrapperLayout, lockProbe: lockMarkerLive });
   lifecycle = new WorkerLifecycleReconciler({
     fleet,
     lease,
@@ -582,10 +582,21 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
         if (!request.harnessSessionId) throw new Error("Delegated resume requires its stable Harness identity");
         const binding = await readDelegationBinding(join(runtime.root,"delegations"),request.harnessSessionId);
         if (!binding || binding.agentId !== request.resumeAgentId || binding.sessionId !== request.resumeSessionId || binding.provider !== request.provider || binding.executionMode !== request.executionMode || binding.cwd !== request.cwd || binding.parentSessionId !== request.parentSessionId) throw new Error("Delegated session ownership or execution mode does not match");
-        if (lockMarkerPresent(wrapperLayout.lockPathFor(binding.agentId as AgentId))) throw new Error("Delegated execution is running or uncertain; resume refused");
+        if (lockMarkerLive(wrapperLayout.lockPathFor(binding.agentId as AgentId))) throw new Error("Delegated execution is running or uncertain; resume refused");
         const saved = fleet.get(binding.agentId as AgentId);
         return coordinator.reopen({ platform: binding.provider, agentId: binding.agentId as AgentId, type: binding.type, sessionId: binding.sessionId as SessionId, terminalName: saved?.terminal.name ?? `aboard: ${binding.description}`, executionMode: binding.executionMode, cwd: binding.cwd, prompt: request.prompt, resultDelivery: saved?.resultDelivery ?? { mode:"none" }, harnessSessionId: request.harnessSessionId, ...(request.executionId === undefined ? {} : { executionId: request.executionId }), ...(request.harnessStateDirectory === undefined ? {} : { harnessStateDirectory: request.harnessStateDirectory }), ...(request.harnessRuntimePath === undefined ? {} : { harnessRuntimePath: request.harnessRuntimePath }), requestId: request.requestId });
-      } }, { workspaceRoot, stateDirectory: join(runtime.root, "delegations") }),
+      } }, {
+        workspaceRoot,
+        stateDirectory: join(runtime.root, "delegations"),
+        focusParent: (sessionId) => {
+          const parent = fleet.getBySession(sessionId as SessionId);
+          if (parent === undefined) return false;
+          const terminalId = terminals.liveTerminalForAgent(parent.identity.agentId);
+          if (terminalId === undefined) return false;
+          terminals.show(terminalId);
+          return true;
+        },
+      }),
     ),
     logger: { info: (message) => output.appendLine(message), error: (message) => output.appendLine(`Error: ${message}`) },
     });

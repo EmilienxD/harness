@@ -1,6 +1,6 @@
 ---
 name: websearch-with-agent
-description: Launch a agent to research the web and report sourced findings. Use when the user wants a separate agent to investigate current or externally documented information.
+description: Launch an agent to research the web and report sourced findings. Use when the user wants a separate agent to investigate current or externally documented information.
 argument-hint: "[research task]"
 license: MIT
 metadata:
@@ -10,8 +10,11 @@ disable-model-invocation: true
 
 # Websearch with an Agent
 
-Follow the delegation workflow injected by the hook, using the persistent conversation inbox. Launch only after the user explicitly requests delegation.
+Follow the shared delegation workflow and inbox supplied by the hook. If no hook supplied them, stop immediately and notify the user without looking for a workaround.
 
-Request parameters: `task: websearch`; mode: interactive or auto (default auto); optional provider: `claude` or `chatgpt`.
+Request parameters:
+- task: websearch
+- mode: interactive or auto (default auto)
+- provider (Optional): `claude` or `chatgpt`
 
-State the research question, source requirements, and requested output. The runtime selects the websearch workflow.
+State the research question, source requirements, and requested output. The task param already tells the agent how to websearch, not what to websearch.
