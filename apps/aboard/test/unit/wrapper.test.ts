@@ -4,10 +4,29 @@ import { tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
 import { spawn, spawnSync } from "node:child_process";
 import test from "node:test";
+import { createBackgroundProcess } from "../../src/platform/background.js";
 
 import { lockMarkerDirectory, lockMarkerLive, lockMarkerPresent, sessionExitFailure, sessionLaunchFailure, sessionWrapperLayout, takeSessionExitRecord, watchLockMarkers } from "../../src/runtime/lock-markers.js";
 
 const WRAPPER = join(process.cwd(), "assets", "runtime", "abd_wrapper.py");
+
+test("Windows headless provider has no console window", { skip: process.platform !== "win32", timeout: 10_000 }, async () => {
+  const root = mkdtempSync(join(tmpdir(), "aboard-headless-console-"));
+  try {
+    let done!: () => void;
+    const exited = new Promise<void>((resolve) => { done = resolve; });
+    const handle = createBackgroundProcess({ cwd: root, env: {
+      ABOARD_RUNTIME_ROOT: root, ABOARD_AGENT_ID: "probe", HARNESS_EXECUTION_ID: "", ABOARD_HEADLESS_CHATGPT: "",
+    } }, "powershell", () => done());
+    const quote = (value: string) => `'${value.replaceAll("'", "''")}'`;
+    handle.sendText(`& uv run --no-project python ${quote(WRAPPER)} ${quote(join(root, "agent.lock"))} -- uv run --no-project python -c ${quote("import ctypes; print(ctypes.windll.kernel32.GetConsoleWindow())")}`, true);
+    await exited;
+    assert.equal(handle.exitStatus?.code, 0, readFileSync(join(root, "executions", "stderr.log"), "utf8"));
+    assert.equal(readFileSync(join(root, "executions", "stdout.jsonl"), "utf8").trim(), "0", "headless provider must not allocate a console");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
 
 test("headless ChatGPT wrapper reports native stream startup and completion without CLI hooks", async () => {
   const { createServer } = await import("node:http");
@@ -30,7 +49,7 @@ test("headless ChatGPT wrapper reports native stream startup and completion with
     { type: "turn.completed" },
   ].map((event) => JSON.stringify(event)).join("\n") + "\n";
   const child = spawn("uv", ["run", "--no-project", "python", WRAPPER, join(root, "agent.lock"), "--", process.execPath, "-e", `process.stdout.write(${JSON.stringify(stream)})`], {
-    env: { ...process.env, HARNESS_EXECUTION_ID: "", HARNESS_EXECUTION_MODE: "auto", ABOARD_HEADLESS_CHATGPT: "1", ABOARD_AGENT_ID: "7", ABOARD_SESSION_ID: "provisional", ABOARD_BRIDGE_PORT: String(port), ABOARD_BRIDGE_TOKEN: "dummy" },
+    env: { ...process.env, HARNESS_EXECUTION_ID: "", HARNESS_EXECUTION_MODE: "auto", ABOARD_HEADLESS: "1", ABOARD_HEADLESS_CHATGPT: "1", ABOARD_AGENT_ID: "7", ABOARD_SESSION_ID: "provisional", ABOARD_BRIDGE_PORT: String(port), ABOARD_BRIDGE_TOKEN: "dummy" },
     stdio: "ignore",
   });
   try {
@@ -55,7 +74,7 @@ test("each Aboard launch gets a fresh one-time code", () => {
 });
 
 function uv(args: readonly string[], options: { readonly input?: string; readonly env?: NodeJS.ProcessEnv } = {}) {
-  return spawnSync("uv", ["run", "--no-project", "python", ...args], { input: options.input, encoding: "utf8", env: options.env });
+  return spawnSync("uv", ["run", "--no-project", "python", ...args], { input: options.input, encoding: "utf8", env: options.env, windowsHide: true });
 }
 
 test("wrapper owns the marker for exactly the child's lifetime", async () => {

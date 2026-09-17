@@ -61,7 +61,7 @@ import {
   SessionStartupProofs,
   type SessionEndReason,
 } from "./bridge/session-lifecycle.js";
-import { lockMarkerDirectory, lockMarkerLive, lockMarkerPresent, sessionExitFailure, sessionLaunchFailure, sessionWrapperLayout, takeSessionExitRecord, watchLockMarkers, type SessionExitRecord } from "./runtime/lock-markers.js";
+import { lockMarkerDirectory, lockMarkerLive, sessionExitFailure, sessionLaunchFailure, sessionWrapperLayout, takeSessionExitRecord, watchLockMarkers, type SessionExitRecord } from "./runtime/lock-markers.js";
 import { WorkspaceAgentIdCounter } from "./runtime/agent-id-counter.js";
 import { PromptResolver } from "./platform/prompts.js";
 import { GitHubDelegationPromptResolver } from "./github/prompt-adapter.js";
@@ -410,7 +410,7 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
     void window.showWarningMessage(`aboard could not start the configured agent: it ${cause}. Check the terminal for the error.`);
   };
   const sessionMonitor = new SessionProcessMonitor({
-    probe: lockMarkerPresent,
+    probe: lockMarkerLive,
     debug: (message) => output.appendLine(`[liveness] ${message}`),
     onProcessEnded: (observation) => {
       // The exit record is consumed either way, so a spent one can never be
