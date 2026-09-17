@@ -605,13 +605,13 @@ def _active_request(
 ):
     """The request this execution answers for.
 
-    A fork leaves an older execution running against the same child, and that execution
-    must never resolve the continuation's request. Its own request settles it; a session
-    with no execution of its own falls back to the child's single active request.
+    A reused terminal keeps its original hook environment. Explicit input ownership
+    routes those hooks to its current continuation; a fork keeps separate ownership.
     """
     scoped = (
         connection.execute(
-            "SELECT request_id FROM executions WHERE id=?", (execution_id,)
+            "SELECT request_id FROM executions WHERE session_id=? AND (id=? OR input_execution_id=?) ORDER BY (superseded_at IS NULL) DESC, rowid DESC LIMIT 1",
+            (child_session_id, execution_id, execution_id),
         ).fetchone()
         if execution_id
         else None

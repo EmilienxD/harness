@@ -7,7 +7,7 @@ import sqlite3
 import uuid
 from pathlib import Path
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 
 
 def state_dir() -> Path:
@@ -54,6 +54,11 @@ def _migrate(connection):
     try:
         version = connection.execute("PRAGMA user_version").fetchone()[0]
         if version >= SCHEMA_VERSION:
+            connection.commit()
+            return
+        if version == 3:
+            connection.execute("ALTER TABLE executions ADD COLUMN input_execution_id TEXT REFERENCES executions(id)")
+            connection.execute(f"PRAGMA user_version={SCHEMA_VERSION}")
             connection.commit()
             return
         if version in (1, 2):

@@ -283,6 +283,40 @@ def _live_delegated_child(tmp_path, monkeypatch, provider="claude"):
     return started, inbox, first
 
 
+@pytest.mark.parametrize("provider", ["claude", "chatgpt"])
+@pytest.mark.parametrize("schema_version", [3, 4])
+def test_terminal_continuations_reply_through_the_original_process_hooks(tmp_path, monkeypatch, provider, schema_version):
+    from subagents_runtime.delegation import arm_reply, report_child_stop, claim_parent_delivery, observe_parent_event
+    from subagents_runtime.terminal_resume import prepare_terminal_resume
+
+    _, inbox, first = _live_delegated_child(tmp_path, monkeypatch, provider)
+    with sessions._connect() as connection:
+        original = connection.execute("SELECT id FROM executions WHERE request_id=?", (first.request_id,)).fetchone()[0]
+        connection.execute("UPDATE executions SET backend='aboard',aboard_agent_id='child',aboard_handle='terminal' WHERE id=?", (original,))
+        if schema_version == 3:
+            connection.execute("ALTER TABLE executions DROP COLUMN input_execution_id")
+            connection.execute("PRAGMA user_version=3")
+
+    def reuse(request, request_id, *_):
+        with sessions._connect() as connection:
+            execution = connection.execute("SELECT id FROM executions WHERE request_id=?", (request_id,)).fetchone()[0]
+            connection.execute("UPDATE executions SET backend='aboard',state='starting' WHERE id=?", (execution,))
+            connection.execute("UPDATE sessions SET provider_session_id=NULL WHERE id=?", (first.child_session_id,))
+        prepare_terminal_resume(first.child_session_id, execution, "child", "terminal", "saved-conversation")
+        return "saved-conversation"
+
+    for index in range(2):
+        (inbox / f"next-{index}.md").write_text("---\nresume: agent-1\n---\nNext task.", encoding="utf-8")
+        [continued] = process_inbox("parent", launch=reuse)
+        assert continued.status == "launched"
+        arm_reply(first.child_session_id, original)
+        assert report_child_stop(first.child_session_id, f"Result {index}", success=True, execution_id=original)
+        delivered = claim_parent_delivery("parent", "SessionStart")
+        assert delivered is not None
+        assert f"Result {index}" in delivered.text
+        observe_parent_event("parent", "PostToolUse")
+
+
 def test_live_chatgpt_continuation_uses_aboard_instead_of_external_terminal(tmp_path, monkeypatch):
     import io
     import json
