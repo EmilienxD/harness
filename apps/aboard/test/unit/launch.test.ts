@@ -118,6 +118,29 @@ test("plans Explore through Claude Code's builtin agent", () => {
   assert.equal(plan.requiresWriteLease, false);
 });
 
+test("Auto Run exploration is planned as a headless print-mode execution", () => {
+  const plan = planLaunch(request({
+    agentType: "Explore",
+    configuration: { shape: "builtin", agentName: "Explore" },
+    prompt: "Map the authentication flow.",
+    executionMode: "auto-run",
+  }));
+
+  assert.deepEqual(plan.args.slice(0, 4), ["-p", "--output-format", "stream-json", "--verbose"]);
+});
+
+for (const kind of ["launch", "resume"] as const) {
+  for (const type of ["implementer", "reviewer"] as const) {
+    test(`an Auto Run ${type} ${kind} keeps its interactive session instead of print mode`, () => {
+      const planned = request({ agentType: type, configuration: workerConfiguration(type), executionMode: "auto-run" });
+      const plan = kind === "launch" ? planLaunch(planned) : planSessionResume(planned);
+
+      assert.equal(plan.args.includes("-p"), false);
+      assert.equal(plan.args.includes("--output-format"), false);
+    });
+  }
+}
+
 for (const [type, invocation] of [
   ["implementer", "/address-this"],
   ["reviewer", "/review-this"],

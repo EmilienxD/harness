@@ -49,6 +49,12 @@ points.
 - `reviewer`: Auto Run worker invoking `/review-this` on Claude or `$review-this` on ChatGPT. AFK and
   HITL are orchestration modes, not separate skills.
 
+Headless execution is one-shot: a detached provider process with no terminal, no takeover, and no resume.
+It covers `auto` delegations and Auto Run exploration, whose report is read once. Auto Run workers keep an
+unfocused visible terminal even in AFK mode, because the user takes them over, continues them, and accepts
+their work. `isHeadlessExecution` in `domain/contracts.ts` is the one decision the terminal controller and
+both launch adapters ask, so a mode never means headless in one of them and visible in another.
+
 `.abd/scaffold.json` is the initialized-project marker; when absent, runtime surfaces and the command
 endpoint are closed. Mutable runtime state belongs in VS Code storage, not the workspace.
 
@@ -153,7 +159,8 @@ are outside workspaces, permissioned `0600`, and removed on window close.
 - Workers receive read-only Git commands plus `git add` and `git commit`; Aboard owns every other
   Auto Run Git and GitHub mutation. Aboard observes acceptance commits and never creates them.
 - HITL waits in `await-commit` on its recorded branch and `beforeSha`. No commit is ordinary waiting; a dirty
-  partial acceptance commit is a recoverable failure that must be amended before explicit resume. Per-issue
+  partial acceptance commit is a recoverable failure that must be amended before explicit resume, and so is
+  closing the terminal of the worker the user is expected to accept. Per-issue
   runs automatically integrate their internal issue PRs after acceptance. Single-branch runs publish each
   accepted commit directly to the run branch and update the cumulative PR. Only the final run PR into the
   original target may need manual merging; `mergeRunPullRequest` controls its automatic merge.

@@ -31,7 +31,7 @@ async function diagnostics(): Promise<Diagnostics | undefined> {
 }
 
 async function submitHitlAcceptance(cwd: string): Promise<void> {
-  // The fixture acts as the user accepting the background worker's unstaged edits.
+  // The fixture acts as the user accepting the handed-off worker's unstaged edits.
   await execFileAsync("git", ["add", "--", "deterministic.txt"], { cwd, windowsHide: true });
   await execFileAsync("git", ["-c", "commit.gpgSign=false", "commit", "-m", "Accept deterministic worker change"], { cwd, windowsHide: true });
 }
@@ -79,13 +79,20 @@ export async function run(): Promise<void> {
     const terminalListener = window.onDidOpenTerminal((terminal) => opened.push(terminal));
     await commands.executeCommand("aboard.autoRun.refresh");
     await commands.executeCommand("aboard.startAutoRun");
+    const implementer = await eventually(
+      () => opened.find((terminal) => terminal.name.startsWith("aboard:")),
+      "auto-run did not launch a visible implementer terminal",
+    );
+    assert.ok(await implementer.processId);
 
     const completed = await eventually(async () => {
       const value = await diagnostics();
       return value?.observations.some((item) => item.checkpoint === "auto-review-complete") ? value : undefined;
     }, "auto-run workers did not complete", 480);
     terminalListener.dispose();
-    assert.equal(opened.length, 0, "automatic workers create no visible terminals");
+    const workerTerminals = opened.filter((terminal) => terminal.name.startsWith("aboard:"));
+    assert.equal(workerTerminals.length, 2, "the implementer and the reviewer each ran in a visible terminal");
+    assert.equal(workerTerminals.some((terminal) => /explore/iu.test(terminal.name)), false, "exploration runs headless without a terminal");
     assert.equal(completed.upstreamMode, "forbidden");
     const rows = completed.observations.filter((item) => item.scenario === "auto-run-afk" && item.result === "success");
     assert.deepEqual(rows.map((item) => item.checkpoint), [
@@ -140,6 +147,7 @@ export async function run(): Promise<void> {
     const terminalListener = window.onDidOpenTerminal((terminal) => opened.push(terminal));
     await commands.executeCommand("aboard.autoRun.refresh");
     await commands.executeCommand("aboard.startAutoRun");
+    await eventually(() => opened[0], "HITL auto-run did not launch its first visible terminal");
 
     const handoffCheckpoint = review ? "auto-hitl-review-complete" : "auto-hitl-handoff";
     await eventually(async () => {
@@ -153,6 +161,10 @@ export async function run(): Promise<void> {
     assert.notEqual(worktree.toLowerCase(), root.toLowerCase());
     assert.equal(await readFile(join(root, "deterministic.txt"), "utf8"), "harness e2e fixture: before\n");
 
+    // The user is expected to be able to talk to the worker they must accept,
+    // and closing that terminal before acceptance stops the run instead.
+    const handoffTerminal = review ? opened[1] : opened[0];
+    assert.ok(handoffTerminal && window.terminals.includes(handoffTerminal), "HITL keeps its handoff terminal visible");
     const dirty = (await execFileAsync("git", ["status", "--porcelain=v1"], { cwd: worktree, encoding: "utf8" })).stdout;
     assert.match(dirty, /^ M deterministic\.txt\s*$/u, "the acceptance handoff is wholly unstaged");
     const rootHead = (await execFileAsync("git", ["rev-parse", "HEAD"], { cwd: root, encoding: "utf8" })).stdout.trim();
@@ -160,7 +172,8 @@ export async function run(): Promise<void> {
     assert.equal(handoffHead, rootHead, "the temporary implementer checkpoint is reset before acceptance");
     const beforeAcceptance = (await execFileAsync("gh", ["pr", "list", "--repo", repository, "--state", "open", "--json", "number"], { encoding: "utf8" })).stdout;
     assert.deepEqual(JSON.parse(beforeAcceptance), [], "no PR exists before acceptance");
-    // Allow the provider process to exit and the handoff to settle before acceptance.
+    // Let the handoff settle so acceptance models a deliberate user follow-up
+    // instead of racing the worker's own task settlement.
     await new Promise((resolve) => setTimeout(resolve, 1500));
     await submitHitlAcceptance(worktree);
 
@@ -209,7 +222,7 @@ export async function run(): Promise<void> {
     assert.equal(await readFile(join(root, "deterministic.txt"), "utf8"), "harness e2e fixture: before\n");
     const status = (await execFileAsync("git", ["status", "--porcelain=v1", "--branch"], { cwd: root, encoding: "utf8" })).stdout;
     assert.match(status, /^## main\.\.\.origin\/main\s*$/u);
-    assert.equal(opened.length, 0, "HITL workers create no visible terminals");
+    assert.ok(opened.length >= 2, review ? "the implementer and reviewer launched in visible terminals" : "both HITL run implementers launched in visible terminals");
     terminalListener.dispose();
     return;
   }

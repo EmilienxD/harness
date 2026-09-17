@@ -1,6 +1,6 @@
 
 import type { InteractiveLaunchHandles, ReopenTarget } from "../bridge/delegation.js";
-import type { AgentId, AgentPlatformId, AgentType, SessionId, TerminalId } from "../domain/contracts.js";
+import { isHeadlessExecution, type AgentId, type AgentPlatformId, type AgentType, type SessionId, type TerminalId } from "../domain/contracts.js";
 import type { FleetRegistry } from "../domain/fleet.js";
 import {
   reopenCandidates,
@@ -59,7 +59,7 @@ const TYPE_SELECTORS: Readonly<Record<string, AgentType>> = {
 };
 
 function requiresNextMessage(candidate: ReopenCandidate): boolean {
-  return candidate.type !== "interactive" || candidate.executionMode === "auto" || candidate.executionMode === "auto-run";
+  return candidate.type !== "interactive" || isHeadlessExecution(candidate.type, candidate.executionMode);
 }
 
 export class ReopenCoordinator {
@@ -173,8 +173,11 @@ export function describeReopenOutcome(outcome: ReopenOutcome): string {
     case "focused":
       return `Focused the running ${outcome.candidate.type} terminal (agent ${outcome.candidate.agentId}).`;
     case "reopened":
-      return outcome.candidate.executionMode === "auto" || outcome.candidate.executionMode === "auto-run"
-        ? `Continued the ${outcome.candidate.type} conversation in the background (agent ${outcome.candidate.agentId}).`
+      if (isHeadlessExecution(outcome.candidate.type, outcome.candidate.executionMode)) {
+        return `Continued the ${outcome.candidate.type} conversation in the background (agent ${outcome.candidate.agentId}).`;
+      }
+      return requiresNextMessage(outcome.candidate)
+        ? `Continued the ${outcome.candidate.type} conversation in its terminal (agent ${outcome.candidate.agentId}).`
         : `Reopened the ${outcome.candidate.type} session (agent ${outcome.candidate.agentId}) and handed it back to you.`;
     case "unresumable":
       if (outcome.reason === "execution-active") return `Agent ${outcome.candidate.agentId} has a running or uncertain execution; resume refused.`;

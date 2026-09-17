@@ -186,6 +186,38 @@ test("a ChatGPT Explore session preserves its shared prompt while Codex cannot l
   assert.equal(plan.args.at(-1), "Report the implementation context for issue #14.");
 });
 
+test("Auto Run gives ChatGPT exploration a headless exec run and its workers an interactive session", () => {
+  const platform = new ChatGptAgentPlatform({
+    lifecycleAssets: { settings: "hooks.json", script: "hook.py" },
+    commandRunner: async () => ({ code: 0, stdout: "codex-cli 0.153.4", stderr: "" }),
+    sessionIdFactory: () => provisional,
+  });
+  const common = {
+    agentId,
+    sessionId: provisional,
+    shell: "powershell",
+    executionMode: "auto-run",
+    runtimeDirectory: "C:/aboard/runtime",
+  } as const;
+
+  const explore = platform.planLaunch({
+    ...common,
+    agentType: "Explore",
+    configuration: { shape: "explore", declaredCommand: ["codex"] },
+    prompt: "Report the implementation context for issue #14.",
+  });
+  const implementer = platform.planLaunch({
+    ...common,
+    agentType: "implementer",
+    configuration: { shape: "skill", skillName: "address-this", declaredCommand: ["codex"] },
+    prompt: "Address issue #14.",
+  });
+
+  assert.deepEqual(explore.args.slice(0, 2), ["exec", "--json"]);
+  assert.equal(implementer.args.includes("exec"), false);
+  assert.equal(implementer.args.includes("--json"), false);
+});
+
 test("a ChatGPT Explore session refuses to launch without an exploration task or as another shape", () => {
   const platform = new ChatGptAgentPlatform({
     lifecycleAssets: { settings: "hooks.json", script: "hook.py" },

@@ -516,3 +516,19 @@ test("automatic executions use a process handle without creating or showing a te
   assert.deepEqual(background.shows, []);
   assert.deepEqual(background.sent, [{ text: "provider task", addNewLine: true }]);
 });
+
+test("auto-run exploration is a background process while auto-run workers keep an unfocused terminal", () => {
+  const { controller, host } = setup();
+  const background = new FakeTerminal();
+  Object.assign(host, { createBackgroundProcess: () => background });
+
+  const explore = controller.create({ agentId: agent("agent-explore"), sessionId: session("explore-session"), agentType: "Explore", executionMode: "auto-run", attended: false, initialCommand: "claude --agent Explore" });
+  assert.equal(explore.backend, "process");
+  assert.equal(host.created.length, 0);
+
+  const implementer = controller.create({ agentId: agent("agent-implementer"), sessionId: session("implementer-session"), agentType: "implementer", executionMode: "auto-run", attended: false, initialCommand: "claude \"/address-this\"" });
+  assert.equal(implementer.backend, "terminal");
+  const created = host.created.at(-1)?.terminal;
+  assert.deepEqual(created?.shows, []);
+  assert.deepEqual(created?.sent.map((entry) => entry.text), ["cd -LiteralPath 'C:\\work\\aboard'", "claude \"/address-this\""]);
+});

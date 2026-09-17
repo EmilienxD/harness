@@ -270,7 +270,7 @@ export class DelegationCoordinator {
     }
     const saved = this.options.fleet.get(target.agentId);
     const executionMode = saved?.executionMode ?? target.executionMode ?? "interactive";
-    if (executionMode !== "interactive" && !target.prompt?.trim()) throw new DelegationError("unresumable-session", "Background continuation requires a next message");
+    if (executionMode !== "interactive" && !target.prompt?.trim()) throw new DelegationError("unresumable-session", "Unattended continuation requires a next message");
     const configured = await this.options.configurations.getFor(target.platform, target.type);
     const platform = this.#platform(target.platform);
     // Where the session ran is where its conversation is: a session that ran in

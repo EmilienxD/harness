@@ -1,4 +1,4 @@
-import { agentLabel, type AgentId, type AgentSession, type IsoTimestamp, type TerminalId, type WorkerFailureType } from "../domain/contracts.js";
+import { agentLabel, isHeadlessExecution, type AgentId, type AgentSession, type IsoTimestamp, type TerminalId, type WorkerFailureType } from "../domain/contracts.js";
 import type { FleetEvent, FleetRegistry } from "../domain/fleet.js";
 import type { LeaseAuditEvent, WriteLease } from "../domain/lease.js";
 import type { AutoRunState } from "../auto/engine.js";
@@ -110,7 +110,7 @@ function agentIcon(session: AgentSession): string {
 }
 
 function isBackground(session: AgentSession): boolean {
-  return session.executionMode === "auto" || session.executionMode === "auto-run";
+  return isHeadlessExecution(session.identity.type, session.executionMode);
 }
 
 function providerLabel(platform: AgentSession["platform"]): "Claude" | "Codex" {

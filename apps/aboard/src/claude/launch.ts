@@ -3,6 +3,7 @@ import type { LaunchRestrictions, WriteCapability } from "../domain/capability.j
 import {
   agentLabel,
   isAutomatedAgentType,
+  isHeadlessExecution,
   isNamedBuiltinAgentType,
   type AgentId,
   type AgentType,
@@ -43,6 +44,8 @@ import {
 
 export const DEFAULT_CLAUDE_COMMAND = ["claude"] as const;
 const CLAUDE_ENVIRONMENT = { CLAUDE_CODE_STOP_HOOK_BLOCK_CAP: "1000000" } as const;
+/** Print mode: one headless turn, streamed for a machine reader instead of a TUI. */
+const PRINT_MODE_ARGUMENTS = ["-p", "--output-format", "stream-json", "--verbose"] as const;
 
 export interface DifficultyLaunchPolicy {
   readonly model: string;
@@ -463,7 +466,7 @@ export function planLaunch(request: LaunchPlanRequest): LaunchPlan {
         ? { invocation: skillInvocation("/", configuration.skillName) }
         : request.skill === undefined ? {} : { invocation: skillInvocation("/", request.skill) }),
     });
-    const args = [...(request.executionMode === "auto" || request.executionMode === "auto-run" ? ["-p", "--output-format", "stream-json", "--verbose"] : []), ...fixedArguments, ...plan.args];
+    const args = [...(isHeadlessExecution(agentType, request.executionMode) ? PRINT_MODE_ARGUMENTS : []), ...fixedArguments, ...plan.args];
     const wrapped = wrapCommand(command, args, wrapper, request.agentId, runtimeDirectory, launchCode);
     return {
       plan,
@@ -542,7 +545,7 @@ export function planSessionResume(request: SessionResumePlanRequest): LaunchPlan
       stem: "continue",
       ...(request.promptRoot === undefined ? {} : { promptRoot: request.promptRoot }),
     });
-    const args = [...(request.executionMode === "auto" || request.executionMode === "auto-run" ? ["-p", "--output-format", "stream-json", "--verbose"] : []), ...fixedArguments, ...promptPlan.args];
+    const args = [...(isHeadlessExecution(request.agentType, request.executionMode) ? PRINT_MODE_ARGUMENTS : []), ...fixedArguments, ...promptPlan.args];
     const wrapped = wrapCommand(command, args, wrapper, request.agentId, runtimeDirectory, launchCode);
     return {
       promptPlan,

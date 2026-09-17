@@ -15,10 +15,11 @@ function liveSession(
   agentId: AgentId,
   platform: AgentSession["platform"],
   executionMode: NonNullable<AgentSession["executionMode"]>,
+  type: AgentSession["identity"]["type"] = executionMode === "interactive" ? "interactive" : "General",
 ): AgentSession {
   return {
     platform,
-    identity: { agentId, type: executionMode === "interactive" ? "interactive" : "General" },
+    identity: { agentId, type },
     sessionId: session(`session-${agentId}`),
     sessionBinding: "bound",
     terminal: { terminalId: terminal(`terminal-${agentId}`), name: `aboard: ${agentId}` },
@@ -82,5 +83,25 @@ test("only interactive fleet rows offer terminal focus", () => {
   assert.equal(rows.get(interactiveId)?.command?.command, "aboard.focusAgent");
   assert.equal(rows.get(backgroundId)?.contextValue, "aboard.agent.background");
   assert.equal(rows.get(backgroundId)?.command, undefined);
+  model.dispose();
+});
+
+test("an Auto Run worker row stays focusable while its exploration row does not", () => {
+  const implementerId = agent("auto-run-implementer");
+  const exploreId = agent("auto-run-explore");
+  const fleet = new FleetRegistry();
+  fleet.register(liveSession(implementerId, "claude", "auto-run", "implementer"), timestamp);
+  fleet.register(liveSession(exploreId, "claude", "auto-run", "Explore"), timestamp);
+  fleet.transition(implementerId, { status: "running", startedAt: timestamp }, timestamp);
+  fleet.transition(exploreId, { status: "running", startedAt: timestamp }, timestamp);
+  const model = new FleetTreeModel(fleet, new WriteLease(), { refresh() {} }, () => true);
+  const rows = new Map(model.roots().map((node) => [node.session.identity.agentId, model.item(node)]));
+
+  assert.equal(rows.get(implementerId)?.icon, "sparkle-filled");
+  assert.equal(rows.get(implementerId)?.contextValue, "aboard.agent.interactive");
+  assert.equal(rows.get(implementerId)?.command?.command, "aboard.focusAgent");
+  assert.equal(rows.get(exploreId)?.icon, "lock");
+  assert.equal(rows.get(exploreId)?.contextValue, "aboard.agent.background");
+  assert.equal(rows.get(exploreId)?.command, undefined);
   model.dispose();
 });
