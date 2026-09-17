@@ -3,7 +3,7 @@ import type { PromptAuthority } from "../domain/contracts.js";
 import {
   appendAutoRunGuidance,
   DEFAULT_CONTINUATION_INSTRUCTION,
-  DEFAULT_IMPLEMENTATION_INSTRUCTION,
+  DEFAULT_ADDRESS_INSTRUCTION,
   DEFAULT_REVIEW_CHANGE_INSTRUCTION,
   PromptResolver,
   type ResolvedPrompt,
@@ -21,7 +21,7 @@ export class GitHubDelegationPromptResolver implements DelegationPromptResolver 
       }
       return this.prompts.resolve({ kind: "free-form", instruction });
     }
-    if (input.type === "reviewer") {
+    if (input.type === "review") {
       if (input.pullRequest === undefined) {
         return appendAutoRunGuidance(
           await this.prompts.resolve({ kind: "free-form", instruction: input.prompt ?? DEFAULT_REVIEW_CHANGE_INSTRUCTION }),
@@ -30,7 +30,7 @@ export class GitHubDelegationPromptResolver implements DelegationPromptResolver 
         );
       }
       if (input.prompt === undefined) {
-        throw new Error("A pull-request reviewer requires an explicit prompt");
+        throw new Error("A pull-request review requires an explicit prompt");
       }
       return appendAutoRunGuidance(await this.prompts.resolve({
         kind: "review",
@@ -38,10 +38,10 @@ export class GitHubDelegationPromptResolver implements DelegationPromptResolver 
         pullRequestNumber: input.pullRequest,
       }), input.permanentPrompt, input.additionalGuideline);
     }
-    if (input.type === "Explore") {
+    if (input.type === "explore") {
       const instruction = input.prompt;
       if (instruction === undefined || instruction.trim().length === 0) {
-        throw new Error("Explore requires an explicit prompt");
+        throw new Error("explore requires an explicit prompt");
       }
       if (input.issues === undefined) {
         return appendAutoRunGuidance(
@@ -61,11 +61,11 @@ export class GitHubDelegationPromptResolver implements DelegationPromptResolver 
         input.additionalGuideline,
       );
     }
-    if (input.type === "implementer" && input.issues !== undefined) {
+    if (input.type === "address" && input.issues !== undefined) {
       return appendAutoRunGuidance(
         await this.prompts.resolve({
-          kind: "implementation",
-          instruction: input.prompt ?? DEFAULT_IMPLEMENTATION_INSTRUCTION,
+          kind: "address",
+          instruction: input.prompt ?? DEFAULT_ADDRESS_INSTRUCTION,
           issueNumbers: input.issues,
           ...(input.codebaseContext === undefined ? {} : { codebaseContext: input.codebaseContext }),
           ...(input.issueContextDepth === undefined ? {} : { issueContextDepth: input.issueContextDepth }),

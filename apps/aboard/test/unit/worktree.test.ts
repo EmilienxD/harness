@@ -327,7 +327,7 @@ test("a resumed run re-attaches to its checkout without setting it up again", as
     setupFile: "npm ci\n",
     // Spelled as git reports it on Windows, which is not how Node spells it.
     git: { worktrees: [{ path: path.split(sep).join("/"), branch: "run/test" }] },
-    // A resumed run's checkout legitimately holds an implementer's work.
+    // A resumed run's checkout legitimately holds an address's work.
     ...{},
   });
   const workspace = await provider.prepare({ ...REQUEST, prepared: true });
@@ -452,12 +452,12 @@ test("the project overlay carries ChatGPT project instructions and configuration
   context.after(async () => { await rm(root, { recursive: true, force: true }); });
   const project = join(root, "project");
   const checkout = join(root, "checkout");
-  await mkdir(join(project, ".agents", "skills", "implement"), { recursive: true });
+  await mkdir(join(project, ".agents", "skills", "address"), { recursive: true });
   await mkdir(join(project, ".codex", "hooks"), { recursive: true });
   await mkdir(join(project, ".codex", "sessions", "2026"), { recursive: true });
   await mkdir(join(project, ".abd"), { recursive: true });
   await mkdir(join(checkout, ".abd"), { recursive: true });
-  await writeFile(join(project, ".agents", "skills", "implement", "SKILL.md"), "implement\n");
+  await writeFile(join(project, ".agents", "skills", "address", "SKILL.md"), "address\n");
   await writeFile(join(project, ".codex", "config.toml"), "project config\n");
   await writeFile(join(project, ".codex", "hooks", "local.py"), "hook\n");
   await writeFile(join(project, ".codex", "history.jsonl"), "{\"live\":true}\n");
@@ -469,7 +469,7 @@ test("the project overlay carries ChatGPT project instructions and configuration
   } as Pick<GitClient, "ignoredPaths"> as GitClient;
 
   await overlayProjectConfiguration({ workspaceRoot: project, worktreeRoot: checkout, git });
-  assert.equal(await readFile(join(checkout, ".agents", "skills", "implement", "SKILL.md"), "utf8"), "implement\n");
+  assert.equal(await readFile(join(checkout, ".agents", "skills", "address", "SKILL.md"), "utf8"), "address\n");
   assert.equal(await readFile(join(checkout, ".codex", "config.toml"), "utf8"), "project config\n");
   assert.equal(await readFile(join(checkout, ".codex", "hooks", "local.py"), "utf8"), "hook\n");
   await assert.rejects(readFile(join(checkout, ".codex", "history.jsonl")), { code: "ENOENT" });

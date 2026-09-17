@@ -6,6 +6,9 @@ import { parseChatGptLaunchFile } from "../chatgpt/launch-configuration.js";
 import type { AgentType } from "../domain/contracts.js";
 import type { AgentPlatformId, ConfiguredLaunch } from "./agent-platform.js";
 
+export const DELEGATION_TASKS = ["explore", "prototype", "websearch", "brainstorm", "address", "review", "general"] as const;
+export type DelegationTask = (typeof DELEGATION_TASKS)[number];
+
 export interface LaunchFileDiagnostic { readonly severity: "warning"; readonly message: string; }
 export class LaunchFileError extends Error {
   public constructor(message: string, public readonly cause?: unknown) { super(message); }
@@ -14,11 +17,13 @@ export class LaunchFileError extends Error {
 export interface PlatformLaunchFile {
   readonly platform: AgentPlatformId;
   configuration(type: AgentType): ConfiguredLaunch;
+  delegationConfiguration(task: DelegationTask): ConfiguredLaunch;
 }
 
 export interface LaunchFile {
   readonly autoRunProvider: AgentPlatformId;
   configurationFor(platform: AgentPlatformId, type: AgentType): ConfiguredLaunch;
+  delegationConfigurationFor(platform: AgentPlatformId, task: DelegationTask): ConfiguredLaunch;
 }
 
 export interface ParsedLaunchFile {
@@ -31,9 +36,8 @@ function object(value: unknown, path: string): Record<string, unknown> {
   return value as Record<string, unknown>;
 }
 
-/** Both providers are configured independently, so neither may be left out. */
 function providerSection(value: unknown, name: AgentPlatformId): Record<string, unknown> {
-  if (value === undefined) throw new LaunchFileError(`launch.json providers.${name} is required; configure every provider, using {} to accept its defaults`);
+  if (value === undefined) return {};
   return object(value, `launch.json providers.${name}`);
 }
 
@@ -64,6 +68,11 @@ class ConfiguredLaunchFile implements LaunchFile {
     if (configured === undefined) throw new LaunchFileError(`launch.json has no configuration for provider ${platform}`);
     return configured.configuration(type);
   }
+  public delegationConfigurationFor(platform: AgentPlatformId, task: DelegationTask): ConfiguredLaunch {
+    const configured = this.providers.get(platform);
+    if (configured === undefined) throw new LaunchFileError(`launch.json has no configuration for provider ${platform}`);
+    return configured.delegationConfiguration(task);
+  }
 }
 
 export function parseLaunchFile(text: string): ParsedLaunchFile {
@@ -73,12 +82,12 @@ export function parseLaunchFile(text: string): ParsedLaunchFile {
   const root = object(parsed, "launch.json");
   if (root.version !== 1) {
     throw new LaunchFileError(
-      `launch.json version must be 1: {"version": 1, "autoRun": {"provider": "claude"}, "providers": {"claude": {}, "chatgpt": {}}}; received ${JSON.stringify(root.version)}`,
+      `launch.json version must be 1: {"version": 1}; received ${JSON.stringify(root.version)}`,
     );
   }
-  const autoRun = object(root.autoRun, "launch.json autoRun");
-  const autoRunProvider = platform(autoRun.provider, "launch.json autoRun.provider");
-  const providerValues = object(root.providers, "launch.json providers");
+  const autoRun = root.autoRun === undefined ? {} : object(root.autoRun, "launch.json autoRun");
+  const autoRunProvider = root.autoRun === undefined || autoRun.provider === undefined ? "claude" : platform(autoRun.provider, "launch.json autoRun.provider");
+  const providerValues = root.providers === undefined ? {} : object(root.providers, "launch.json providers");
   const session = sessionSettings(root.session);
   const claude = parseClaudeLaunchFile(providerSection(providerValues.claude, "claude"));
   const chatgpt = parseChatGptLaunchFile(providerSection(providerValues.chatgpt, "chatgpt"));
@@ -120,7 +129,7 @@ export interface LaunchConfigurationPaths {
 }
 
 export function defaultLaunchFile(platform: AgentPlatformId = "claude"): ParsedLaunchFile {
-  return parseLaunchFile(JSON.stringify({ version: 1, autoRun: { provider: platform }, providers: { claude: {}, chatgpt: {} } }));
+  return parseLaunchFile(JSON.stringify(platform === "claude" ? { version: 1 } : { version: 1, autoRun: { provider: platform } }));
 }
 
 export class FileLaunchConfigurationSource implements DelegationConfigurationSource {
@@ -146,5 +155,8 @@ export class FileLaunchConfigurationSource implements DelegationConfigurationSou
 
   public async getFor(platform: AgentPlatformId, type: AgentType): Promise<ConfiguredLaunch> {
     return (await this.load()).value.configurationFor(platform, type);
+  }
+  public async getDelegationFor(platform: AgentPlatformId, task: DelegationTask): Promise<ConfiguredLaunch> {
+    return (await this.load()).value.delegationConfigurationFor(platform, task);
   }
 }

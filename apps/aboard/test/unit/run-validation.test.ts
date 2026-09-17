@@ -23,7 +23,7 @@ function record(overrides: Partial<AutoRunRecord> = {}): AutoRunRecord {
     settings: {
       branchMode: "per-issue",
       review: false,
-      exploreBeforeImplement: false,
+      exploreBeforeAddress: false,
       issueContextDepth: 1,
       mergeStrategy: "squash",
       mergeRunPullRequest: false,
@@ -313,7 +313,7 @@ test("the run's own pull request may not be merged or closed by anybody else", (
 
 
 test("uncommitted work leaves a run resumable only on the branch its current issue belongs to", () => {
-  const current = working({ state: "current", phase: "implement" });
+  const current = working({ state: "current", phase: "address" });
   const observed = withIssueBranch();
 
   const onIssueBranch = { ...observed, workingTree: { branch: "issue/34-add-retry-backoff", dirtyPaths: ["src/a.ts"] } };
@@ -334,7 +334,7 @@ test("the recorded local HITL checkpoint is a valid pre-reset recovery head", ()
     state: "current",
     phase: "review",
     beforeSha: "a".repeat(40),
-    implementerCommitSha: checkpoint,
+    addressCommitSha: checkpoint,
     expectedBranch: "issue/34-add-retry-backoff",
   });
   const observed = withIssueBranch();

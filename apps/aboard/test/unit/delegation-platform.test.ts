@@ -178,7 +178,7 @@ test("shared delegation does not report a runtime-assigned session until its act
   assert.equal(fleet.get("agent-1" as AgentId)?.lifecycle.status, "running");
 });
 
-test("an auto-run ChatGPT Explore runs read-only and reports through the shared completion contract", async () => {
+test("an auto-run ChatGPT explore runs read-only and reports through the shared completion contract", async () => {
   const agentId = "agent-1" as AgentId;
   const delivered: string[] = [];
   const platform = new ChatGptAgentPlatform({
@@ -203,7 +203,7 @@ test("an auto-run ChatGPT Explore runs read-only and reports through the shared 
     agentIdFactory: () => agentId, runtimeDirectory: "C:/runtime",
   });
 
-  const run = coordinator.runAutomated({ type: "Explore", description: "explore issue 14", issues: [14] });
+  const run = coordinator.runAutomated({ type: "explore", description: "explore issue 14", issues: [14] });
   while (fleet.get(agentId) === undefined) await new Promise((resolve) => setImmediate(resolve));
   const command = host.terminals[0]?.sent.at(-1) ?? "";
   assert.match(command, /--sandbox read-only/u);
@@ -223,7 +223,7 @@ test("an auto-run ChatGPT Explore runs read-only and reports through the shared 
   assert.equal(fleet.get(agentId)?.lifecycle.status, "completed");
 });
 
-test("an auto-run ChatGPT implementer invokes the implement skill under the run's write lease and restrictions", async () => {
+test("an auto-run ChatGPT address invokes the address skill under the run's write lease and restrictions", async () => {
   const agentId = "agent-1" as AgentId;
   const sessionId = "6b1e3f7a-2c4d-4a8b-9f10-2c3d4e5f6071" as SessionId;
   const delivered: string[] = [];
@@ -254,7 +254,7 @@ test("an auto-run ChatGPT implementer invokes the implement skill under the run'
   });
 
   const run = coordinator.runAutomated({
-    type: "implementer",
+    type: "address",
     description: "address issue 15",
     issues: [15],
     difficulty: "expert",
@@ -292,7 +292,7 @@ test("an auto-run ChatGPT implementer invokes the implement skill under the run'
   assert.equal(lease.current(), undefined);
 });
 
-test("an auto-run ChatGPT reviewer invokes the review skill its mode selects and settles through the shared contract", async () => {
+test("an auto-run ChatGPT review invokes the review skill its mode selects and settles through the shared contract", async () => {
   const agentId = "agent-1" as AgentId;
   const sessionId = "6b1e3f7a-2c4d-4a8b-9f10-2c3d4e5f6071" as SessionId;
   const requested: (string | undefined)[] = [];
@@ -324,10 +324,10 @@ test("an auto-run ChatGPT reviewer invokes the review skill its mode selects and
     shell: "powershell", agentIdFactory: () => agentId, runtimeDirectory: "C:/runtime",
   });
 
-  const run = coordinator.runAutomated({ type: "reviewer", description: "review pull request 42", issues: [15], pullRequest: 42, difficulty: "advanced" });
+  const run = coordinator.runAutomated({ type: "review", description: "review pull request 42", issues: [15], pullRequest: 42, difficulty: "advanced" });
   while (fleet.get(agentId) === undefined) await new Promise((resolve) => setImmediate(resolve));
   const command = host.terminals[0]?.sent.at(-1) ?? "";
-  assert.deepEqual(requested, ["reviewer"]);
+  assert.deepEqual(requested, ["review"]);
   assert.match(command, /\$review-this/u);
   assert.match(command, /web_search="disabled"/u);
   assert.equal(lease.current()?.agentId, agentId);
@@ -345,7 +345,7 @@ test("an auto-run ChatGPT reviewer invokes the review skill its mode selects and
   assert.equal(lease.current(), undefined);
 });
 
-test("an explicitly interactive ChatGPT reviewer remains attended", async () => {
+test("an explicitly interactive ChatGPT review remains attended", async () => {
   const agentId = "agent-1" as AgentId;
   const sessionId = "6b1e3f7a-2c4d-4a8b-9f10-2c3d4e5f6071" as SessionId;
   const requested: (string | undefined)[] = [];
@@ -377,9 +377,9 @@ test("an explicitly interactive ChatGPT reviewer remains attended", async () => 
     shell: "powershell", agentIdFactory: () => agentId, runtimeDirectory: "C:/runtime",
   });
 
-  const handles = await coordinator.launchInteractive({ type: "reviewer", description: "review pull request 42", issues: [15], pullRequest: 42 }, "auto-run");
+  const handles = await coordinator.launchInteractive({ type: "review", description: "review pull request 42", issues: [15], pullRequest: 42 }, "auto-run");
 
-  assert.deepEqual(requested, ["reviewer"]);
+  assert.deepEqual(requested, ["review"]);
   const command = host.terminals[0]?.sent.at(-1) ?? "";
   assert.match(command, /\$review-this/u);
   assert.match(command, /web_search="disabled"/u);
@@ -482,7 +482,7 @@ test("an isolated auto-run ChatGPT continuation reapplies the original checkout 
   const metadataRoots = [join(workspaceRoot, ".git", "worktrees", "work"), join(workspaceRoot, ".git", "objects")];
   fleet.register({
     platform: "chatgpt",
-    identity: { agentId, type: "implementer" },
+    identity: { agentId, type: "address" },
     sessionId,
     sessionBinding: "bound",
     terminal: { terminalId: "old-terminal" as TerminalId, name: "aboard: address issue 15" },
@@ -548,7 +548,7 @@ test("an isolated auto-run ChatGPT continuation reapplies the original checkout 
   assert.equal((await resumed).result.outcome, "succeeded");
 });
 
-test("a reviewer delegation carries [AI]-chrome to its adapter and survives persistence", async () => {
+test("a review delegation carries [AI]-chrome to its adapter and survives persistence", async () => {
   const planned: PlatformLaunchRequest[] = [];
   const reviewerId = "agent-9" as AgentId;
   const platform: AgentPlatform = {
@@ -609,7 +609,7 @@ test("a reviewer delegation carries [AI]-chrome to its adapter and survives pers
     runtimeDirectory: "C:/runtime",
   });
 
-  const run = coordinator.runAutomated({ type: "reviewer", description: "review issue 34", issues: [34], chrome: true });
+  const run = coordinator.runAutomated({ type: "review", description: "review issue 34", issues: [34], chrome: true });
   while (fleet.get(reviewerId) === undefined) await new Promise((resolve) => setImmediate(resolve));
 
   assert.equal(planned[0]?.chrome, true, "the adapter decides how to enable the browser, so the request must reach it");

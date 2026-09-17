@@ -514,7 +514,7 @@ export class WorktreeRunWorkspaces implements RunWorkspaceProvider {
 
   async #requireCleanCheckout(path: string, created: boolean): Promise<void> {
     // Only a checkout this attempt created has to be clean. A resumed run's may
-    // legitimately hold an implementer's uncommitted work.
+    // legitimately hold an address worker's uncommitted work.
     if (!created) return;
     const status = await this.options.gitFor(path).status();
     if (status.entries.length === 0) return;

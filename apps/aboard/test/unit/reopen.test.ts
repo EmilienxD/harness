@@ -74,8 +74,8 @@ test("interactive delegated continuations refuse a live terminal and require a n
     launcher: { reopen: async () => { throw new Error("must not launch without a message"); } },
     isResumable: async () => true,
   });
-  const candidate = { platform: "claude" as const, agentId, type: "General" as const,
-    executionMode: "interactive" as const, sessionId, description: "General", origin: "ended" as const, at };
+  const candidate = { platform: "claude" as const, agentId, type: "general" as const,
+    executionMode: "interactive" as const, sessionId, description: "general", origin: "ended" as const, at };
   assert.deepEqual(await coordinator.reopen(candidate), { action: "unresumable", candidate, reason: "execution-active" });
   live = undefined;
   assert.deepEqual(await coordinator.reopen(candidate), { action: "unresumable", candidate, reason: "next-message-required" });
@@ -91,8 +91,8 @@ test("continuations are described by where the user will find them", async () =>
   });
   const candidate = { platform: "claude" as const, agentId, sessionId, description: "worker", origin: "ended" as const, at };
 
-  const worker = await coordinator.reopen({ ...candidate, type: "implementer", executionMode: "auto-run" });
-  const delegated = await coordinator.reopen({ ...candidate, type: "General", executionMode: "auto" });
+  const worker = await coordinator.reopen({ ...candidate, type: "address", executionMode: "auto-run" });
+  const delegated = await coordinator.reopen({ ...candidate, type: "general", executionMode: "auto" });
 
   assert.equal(worker.action, "reopened");
   assert.match(describeReopenOutcome(worker), /terminal/u);

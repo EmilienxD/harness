@@ -1,6 +1,6 @@
 ---
 name: prototype-with-agent
-description: Launch a agent to build a focused prototype. Use when the user wants a separate agent to test an idea through a disposable implementation.
+description: Launch an agent to build a focused prototype. Use when the user wants a separate agent to test an idea through a disposable implementation.
 argument-hint: "[prototype task]"
 license: MIT
 metadata:
@@ -10,8 +10,11 @@ disable-model-invocation: true
 
 # Prototype with an Agent
 
-Follow the delegation workflow injected by the hook, using the persistent conversation inbox. Launch only after the user explicitly requests delegation.
+Follow the shared delegation workflow and inbox supplied by the hook. If no hook supplied them, stop immediately and notify the user without looking for a workaround.
 
-Request parameters: `task: prototype`; mode: interactive or auto (default auto); optional provider: `claude` or `chatgpt`.
+Request parameters:
+- task: prototype
+- mode: interactive
+- provider (Optional): `claude` or `chatgpt`
 
-Describe the disposable experiment and its success criteria. The runtime selects the prototype workflow.
+Describe the disposable experiment and its success criteria. The task param already tells the agent how to prototype, not what to prototype.

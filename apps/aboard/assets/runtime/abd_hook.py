@@ -25,13 +25,13 @@ ROUTES: dict[str, str] = {
     "session-end": "/hooks/session-end",
 }
 
-RESULT_REPORTING_TYPES: frozenset[str] = frozenset({"Explore", "implementer", "reviewer"})
-IMPLEMENTER_COMMIT_REMINDER = (
+RESULT_REPORTING_TYPES: frozenset[str] = frozenset({"explore", "address", "review"})
+ADDRESS_COMMIT_REMINDER = (
     'You have modified files without committing them. Is there a real reason for this? '
     'Did you discover any blockers along the way? If so, immediatly answer '
     '"Yes, there is blockers, as described above". Otherwise if the task is complete: Commit the changes.'
 )
-REVIEWER_COMMIT_REMINDER = (
+REVIEW_COMMIT_REMINDER = (
     "You have not modified any files or created a review commit. If the review is complete and approved, "
     "create an empty commit; otherwise report the blockers and leave the repository unchanged."
 )
@@ -138,7 +138,7 @@ def stop_reminder(payload: dict[str, Any]) -> str | None:
     if payload.get("stop_hook_active") is True or not starting_sha:
         return None
     role = os.environ.get("ABOARD_AGENT_TYPE")
-    if role not in {"implementer", "reviewer"}:
+    if role not in {"address", "review"}:
         return None
     cwd = payload.get("cwd")
     if not isinstance(cwd, str) or not cwd:
@@ -156,8 +156,8 @@ def stop_reminder(payload: dict[str, Any]) -> str | None:
         return None
     if status.returncode != 0:
         return None
-    if role == "implementer":
-        return IMPLEMENTER_COMMIT_REMINDER if status.stdout else None
+    if role == "address":
+        return ADDRESS_COMMIT_REMINDER if status.stdout else None
     if status.stdout:
         return None
     try:
@@ -171,7 +171,7 @@ def stop_reminder(payload: dict[str, Any]) -> str | None:
         )
     except (OSError, subprocess.SubprocessError):
         return None
-    return REVIEWER_COMMIT_REMINDER if head.returncode == 0 and head.stdout.strip() == starting_sha else None
+    return REVIEW_COMMIT_REMINDER if head.returncode == 0 and head.stdout.strip() == starting_sha else None
 
 
 def main() -> int:

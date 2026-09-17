@@ -64,7 +64,7 @@ export function planChatGptSessionResume(request: PlatformResumeRequest): Platfo
 
 function planChatGptSession(request: PlatformLaunchRequest | PlatformResumeRequest, kind: "start" | "resume"): PlatformLaunchPlan {
   const configuration = request.configuration as ChatGptLaunchConfiguration;
-  const explore = request.agentType === "Explore";
+  const explore = request.agentType === "explore";
   const worker = isAutoRunWorkerType(request.agentType);
   const autoRunRestricted = request.autoRunRestricted === true;
   assertShape(request.agentType, configuration);
@@ -119,7 +119,7 @@ function planChatGptSession(request: PlatformLaunchRequest | PlatformResumeReque
     ...(policy.effort === undefined ? [] : ["-c", `model_reasoning_effort=${JSON.stringify(policy.effort)}`]),
   ];
   const task = typeof request.prompt === "string" ? request.prompt : request.prompt?.text;
-  if (explore && (task === undefined || task.length === 0)) throw new LaunchPlanError("missing-prompt", "Explore cannot launch without its exploration task");
+  if (explore && (task === undefined || task.length === 0)) throw new LaunchPlanError("missing-prompt", "explore cannot launch without its exploration task");
   if (worker && kind === "start" && (task === undefined || task.length === 0)) throw new LaunchPlanError("missing-prompt", `${request.agentType} cannot launch without its initial prompt`);
   const text = task === undefined || task.trim().length === 0 ? undefined : task;
   // Only a launch owns the frozen task; a resume message must not replace the
@@ -194,24 +194,24 @@ function planChatGptSession(request: PlatformLaunchRequest | PlatformResumeReque
 function assertShape(agentType: AgentType, configuration: ChatGptLaunchConfiguration): void {
   switch (agentType) {
     case "interactive":
-    case "Prototype":
-    case "Web Search":
-    case "Brainstorm":
-    case "General":
+    case "prototype":
+    case "websearch":
+    case "brainstorm":
+    case "general":
       if (configuration.shape !== "default") throw new LaunchPlanError("shape-not-allowed", "interactive launches as Codex's default session");
       return;
-    case "Explore":
-      if (configuration.shape !== "explore") throw new LaunchPlanError("shape-not-allowed", "Explore launches as a read-only Codex session");
+    case "explore":
+      if (configuration.shape !== "explore") throw new LaunchPlanError("shape-not-allowed", "explore launches as a read-only Codex session");
       return;
-    case "implementer":
+    case "address":
       if (configuration.shape !== "skill" || configuration.skillName !== "address-this") {
-        throw new LaunchPlanError("shape-not-allowed", "implementer must launch through $address-this");
+        throw new LaunchPlanError("shape-not-allowed", "address must launch through $address-this");
       }
       return;
-    case "reviewer":
+    case "review":
       // One skill for both dispositions: AFK and HITL differ in orchestration.
       if (configuration.shape !== "skill" || configuration.skillName !== "review-this") {
-        throw new LaunchPlanError("shape-not-allowed", "reviewer must launch through $review-this");
+        throw new LaunchPlanError("shape-not-allowed", "review must launch through $review-this");
       }
       return;
   }

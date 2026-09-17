@@ -11,19 +11,13 @@
         "effort": "inherit",
         "deniedTools": ["Agent", "WebSearch", "WebFetch"]
       },
-      "explore": {
-        "model": "haiku",
-        "effort": "low"
-      },
-      "implementer": {
-        "model": "by-difficulty",
-        "effort": "by-difficulty",
-        "deniedTools": ["Agent", "WebSearch", "WebFetch"]
-      },
-      "reviewer": {
-        "model": "by-difficulty",
-        "effort": "by-difficulty",
-        "deniedTools": ["Agent", "WebSearch", "WebFetch"]
+      "autoRun": {
+        "address": {
+          "deniedTools": ["Agent", "WebSearch", "WebFetch"]
+        },
+        "review": {
+          "deniedTools": ["Agent", "WebSearch", "WebFetch"]
+        }
       }
     },
     "chatgpt": {
@@ -32,18 +26,7 @@
         "model": "inherit",
         "effort": "inherit"
       },
-      "explore": {
-        "model": "inherit",
-        "effort": "inherit"
-      },
-      "implementer": {
-        "model": "by-difficulty",
-        "effort": "by-difficulty"
-      },
-      "reviewer": {
-        "model": "by-difficulty",
-        "effort": "by-difficulty"
-      }
+      "delegations": {}
     }
   }
 }

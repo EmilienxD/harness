@@ -124,7 +124,7 @@ function fixedPlanRecord(): AutoRunRecord {
     settings: {
       branchMode: "per-issue",
       review: true,
-      exploreBeforeImplement: true,
+      exploreBeforeAddress: true,
       issueContextDepth: 2,
       mergeStrategy: "merge",
       mergeRunPullRequest: true,
@@ -139,7 +139,7 @@ function fixedPlanRecord(): AutoRunRecord {
     ],
     progress: {
       "34": { state: "done", result: "landed", prNumber: 56, issueClosed: true, beforeSha: "8".repeat(40), implementationSha: "9".repeat(40) },
-      "35": { state: "current", phase: "await-commit", beforeSha: "a".repeat(40), implementerCommitSha: "b".repeat(40), resetCompleted: true, hitlReviewCompleted: true, expectedBranch: "issue/35-migrate-the-queue" },
+      "35": { state: "current", phase: "await-commit", beforeSha: "a".repeat(40), addressCommitSha: "b".repeat(40), resetCompleted: true, hitlReviewCompleted: true, expectedBranch: "issue/35-migrate-the-queue" },
     },
     sessionBranch: "run/return",
     targetBranch: "feature/wip",
@@ -166,7 +166,7 @@ test("an Auto Run record round-trips every HITL checkpoint it can hold", async (
   assert.deepEqual(await store.load(), record);
   const raw = await readFile(runtime.state("auto-run.json"), "utf8");
   assert.match(raw, /"permanentPrompt": "run browser tests"/);
-  assert.match(raw, /"exploreBeforeImplement": true/);
+  assert.match(raw, /"exploreBeforeAddress": true/);
   assert.match(raw, /"additionalGuideline": "keep fixtures small"/);
   await store.clear();
   assert.equal(await store.load(), undefined);
@@ -180,7 +180,7 @@ test("a landed HITL issue retains temporary checkpoint and final acceptance iden
     prNumber: 57,
     issueClosed: true,
     beforeSha: "a".repeat(40),
-    implementerCommitSha: "b".repeat(40),
+    addressCommitSha: "b".repeat(40),
     resetCompleted: true,
     hitlReviewCompleted: true,
     implementationSha: "c".repeat(40),
@@ -220,7 +220,7 @@ test("a failed worker session reference survives runtime parsing", () => {
   const workerSession = {
     agentId: "worker-19",
     sessionId: "c15badb6-d6c8-45a6-a59f-e931cd364332",
-    type: "implementer",
+    type: "address",
     issueNumber: 35,
     continuable: true,
   } as const;
@@ -234,8 +234,8 @@ test("every pending-action and progress shape survives a round trip", async () =
   const store = new FileAutoRunStore(new RuntimeLayout(root));
   const actions = [
     { kind: "create-branch", branch: "issue/34-x", base: "run/return", baseSha: "c".repeat(40) },
-    { kind: "worker-turn", branch: "issue/34-x", parentSha: "d".repeat(40), role: "implementer", completion: "commit", outcome: "succeeded" },
-    { kind: "reset-implementation", branch: "issue/34-x", beforeSha: "d".repeat(40), implementerCommitSha: "e".repeat(40) },
+    { kind: "worker-turn", branch: "issue/34-x", parentSha: "d".repeat(40), role: "address", completion: "commit", outcome: "succeeded" },
+    { kind: "reset-implementation", branch: "issue/34-x", beforeSha: "d".repeat(40), addressCommitSha: "e".repeat(40) },
     { kind: "close-issue", issue: 34, prNumber: 56, comment: "Accepted" },
     { kind: "cleanup-issue", issue: 34, branch: "issue/34-x", sha: "e".repeat(40) },
     { kind: "push", branch: "issue/34-x", sha: "e".repeat(40) },
@@ -272,26 +272,26 @@ test("an unusable auto-run record degrades to nothing to recover", () => {
     { ...valid, checkpoint: "publishing" },
     { ...valid, attempt: 0 },
     { ...valid, settings: { ...valid.settings, mergeStrategy: "fast-forward" } },
-    { ...valid, settings: { ...valid.settings, exploreBeforeImplement: "yes" } },
+    { ...valid, settings: { ...valid.settings, exploreBeforeAddress: "yes" } },
     { ...valid, settings: { ...valid.settings, issueContextDepth: "deep" } },
-    { ...valid, workerSession: { agentId: "worker-20", sessionId: "session", type: "Explore", issueNumber: 35, continuable: true } },
+    { ...valid, workerSession: { agentId: "worker-20", sessionId: "session", type: "explore", issueNumber: 35, continuable: true } },
     { ...valid, settings: undefined },
     { ...valid, plan: [{ number: 34 }] },
     { ...valid, branchShas: { "run/return": "short" } },
     { ...valid, pendingAction: { kind: "push", branch: "run/return", sha: "short" } },
     { ...valid, pendingAction: { kind: "worker-turn", branch: "run/return", parentSha: "a".repeat(40) } },
     { ...valid, pendingAction: { kind: "worker-turn", branch: "run/return", parentSha: "a".repeat(40), role: "explorer", completion: "commit" } },
-    { ...valid, pendingAction: { kind: "worker-turn", branch: "run/return", parentSha: "a".repeat(40), role: "implementer", completion: "commit", outcome: "unknown" } },
-    { ...valid, pendingAction: { kind: "reset-implementation", branch: "run/return", beforeSha: "short", implementerCommitSha: "b".repeat(40) } },
+    { ...valid, pendingAction: { kind: "worker-turn", branch: "run/return", parentSha: "a".repeat(40), role: "address", completion: "commit", outcome: "unknown" } },
+    { ...valid, pendingAction: { kind: "reset-implementation", branch: "run/return", beforeSha: "short", addressCommitSha: "b".repeat(40) } },
     { ...valid, progress: { ...valid.progress, "35": { state: "current", phase: "commit", headSha: "short" } } },
     { ...valid, outcome: { kind: "failed" } },
-    { ...valid, workerSession: { agentId: "worker-19", sessionId: "session", type: "implementer", issueNumber: 35, continuable: false } },
+    { ...valid, workerSession: { agentId: "worker-19", sessionId: "session", type: "address", issueNumber: 35, continuable: false } },
   ]) {
     assert.equal(parseAutoRunRecord(broken), undefined, JSON.stringify(broken));
   }
   assert.equal(parseAutoRunRecord({
     ...valid,
-    workerSession: { agentId: "worker-20", sessionId: "session", type: "Explore", issueNumber: 35 },
+    workerSession: { agentId: "worker-20", sessionId: "session", type: "explore", issueNumber: 35 },
   })?.version, 1);
   // An authoritative record is all-or-nothing: silently turning damaged
   // progress into pending work could repeat an issue or a side effect.

@@ -175,7 +175,7 @@ function record(overrides: Partial<AutoRunRecord> = {}): AutoRunRecord {
     settings: {
       branchMode: "per-issue",
       review: false,
-      exploreBeforeImplement: false,
+      exploreBeforeAddress: false,
       issueContextDepth: 1,
       mergeStrategy: "squash",
       mergeRunPullRequest: false,

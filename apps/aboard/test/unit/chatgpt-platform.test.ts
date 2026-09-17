@@ -148,7 +148,7 @@ test("the ChatGPT adapter preflights the complete configured command and the ses
   const plan = platform.planLaunch({
     agentId,
     sessionId: provisional,
-    agentType: "Explore",
+    agentType: "explore",
     shell: "powershell",
     configuration: { shape: "explore", declaredCommand: ["wrapper", "run", "codex"] },
     prompt: "Report the implementation context for issue #14.",
@@ -156,10 +156,10 @@ test("the ChatGPT adapter preflights the complete configured command and the ses
   });
   await platform.preflight(plan);
   assert.deepEqual(calls, [["wrapper", "run", "codex", "--version"]]);
-  assert.deepEqual(required, ["Explore"]);
+  assert.deepEqual(required, ["explore"]);
 });
 
-test("a ChatGPT Explore session preserves its shared prompt while Codex cannot let it write", () => {
+test("a ChatGPT explore session preserves its shared prompt while Codex cannot let it write", () => {
   const platform = new ChatGptAgentPlatform({
     lifecycleAssets: { settings: "hooks.json", script: "hook.py" },
     commandRunner: async () => ({ code: 0, stdout: "codex-cli 0.153.4", stderr: "" }),
@@ -169,14 +169,14 @@ test("a ChatGPT Explore session preserves its shared prompt while Codex cannot l
   const plan = platform.planLaunch({
     agentId,
     sessionId: provisional,
-    agentType: "Explore",
+    agentType: "explore",
     shell: "powershell",
     configuration: { shape: "explore", declaredCommand: ["codex"], declaredModel: "gpt-test", declaredEffort: "low" },
     prompt: "Report the implementation context for issue #14.",
     runtimeDirectory: "C:/aboard/runtime",
   });
 
-  assert.equal(plan.agentType, "Explore");
+  assert.equal(plan.agentType, "explore");
   assert.equal(plan.writeCapability, "read-only");
   assert.equal(plan.requiresWriteLease, false);
   assert.deepEqual(plan.args.slice(plan.args.indexOf("--sandbox"), plan.args.indexOf("--sandbox") + 2), ["--sandbox", "read-only"]);
@@ -202,23 +202,23 @@ test("Auto Run gives ChatGPT exploration a headless exec run and its workers an 
 
   const explore = platform.planLaunch({
     ...common,
-    agentType: "Explore",
+    agentType: "explore",
     configuration: { shape: "explore", declaredCommand: ["codex"] },
     prompt: "Report the implementation context for issue #14.",
   });
-  const implementer = platform.planLaunch({
+  const address = platform.planLaunch({
     ...common,
-    agentType: "implementer",
+    agentType: "address",
     configuration: { shape: "skill", skillName: "address-this", declaredCommand: ["codex"] },
     prompt: "Address issue #14.",
   });
 
   assert.deepEqual(explore.args.slice(0, 2), ["exec", "--json"]);
-  assert.equal(implementer.args.includes("exec"), false);
-  assert.equal(implementer.args.includes("--json"), false);
+  assert.equal(address.args.includes("exec"), false);
+  assert.equal(address.args.includes("--json"), false);
 });
 
-test("a ChatGPT Explore session refuses to launch without an exploration task or as another shape", () => {
+test("a ChatGPT explore session refuses to launch without an exploration task or as another shape", () => {
   const platform = new ChatGptAgentPlatform({
     lifecycleAssets: { settings: "hooks.json", script: "hook.py" },
     commandRunner: async () => ({ code: 0, stdout: "codex-cli 0.153.4", stderr: "" }),
@@ -226,26 +226,26 @@ test("a ChatGPT Explore session refuses to launch without an exploration task or
   const request = {
     agentId,
     sessionId: provisional,
-    agentType: "Explore",
+    agentType: "explore",
     shell: "powershell",
     runtimeDirectory: "C:/aboard/runtime",
   } as const;
 
   assert.throws(
     () => platform.planLaunch({ ...request, configuration: { shape: "explore", declaredCommand: ["codex"] } }),
-    /Explore cannot launch without its exploration task/u,
+    /explore cannot launch without its exploration task/u,
   );
   assert.throws(
     () => platform.planLaunch({ ...request, configuration: { shape: "default", declaredCommand: ["codex"] }, prompt: "Report the context." }),
-    /Explore launches as a read-only Codex session/u,
+    /explore launches as a read-only Codex session/u,
   );
   assert.throws(
-    () => platform.planLaunch({ ...request, agentType: "reviewer", configuration: { shape: "explore", declaredCommand: ["codex"] }, prompt: "Review the change." }),
-    /reviewer must launch through \$review-this/u,
+    () => platform.planLaunch({ ...request, agentType: "review", configuration: { shape: "explore", declaredCommand: ["codex"] }, prompt: "Review the change." }),
+    /review must launch through \$review-this/u,
   );
 });
 
-test("a large ChatGPT Explore task uses spilled delivery", () => {
+test("a large ChatGPT explore task uses spilled delivery", () => {
   const platform = new ChatGptAgentPlatform({
     lifecycleAssets: { settings: "hooks.json", script: "hook.py" },
     commandRunner: async () => ({ code: 0, stdout: "codex-cli 0.153.4", stderr: "" }),
@@ -253,7 +253,7 @@ test("a large ChatGPT Explore task uses spilled delivery", () => {
   const plan = platform.planLaunch({
     agentId,
     sessionId: provisional,
-    agentType: "Explore",
+    agentType: "explore",
     shell: "powershell",
     configuration: { shape: "explore", declaredCommand: ["codex"] },
     prompt: "exploration task ".repeat(100),
@@ -296,10 +296,10 @@ test("the ChatGPT adapter resumes the exact Codex conversation with current laun
   assert.match(plan.args.join("\n"), /worker-reground/u);
 });
 
-const implementer = {
-  agentId: "implementer-1" as AgentId,
+const address = {
+  agentId: "address-1" as AgentId,
   sessionId: provisional,
-  agentType: "implementer",
+  agentType: "address",
   shell: "powershell",
   configuration: { shape: "skill", skillName: "address-this", declaredCommand: ["codex"], declaredModel: "by-difficulty", declaredEffort: "by-difficulty", webSearch: "disabled", subagents: "denied" },
   runtimeDirectory: "C:/aboard/runtime",
@@ -314,15 +314,15 @@ function chatGpt(options: Partial<ConstructorParameters<typeof ChatGptAgentPlatf
   });
 }
 
-test("a ChatGPT implementer invokes the installed implement skill with the frozen issue context", () => {
+test("a ChatGPT address invokes the installed address skill with the frozen issue context", () => {
   const plan = chatGpt().planLaunch({
-    ...implementer,
+    ...address,
     prompt: "The checked-out branch is for issue #15.",
     difficulty: "basic",
     restrictions: { deniedCommands: ["git commit*", "gh pr create*"], denySubagents: true, denyWeb: true },
   });
 
-  assert.equal(plan.agentType, "implementer");
+  assert.equal(plan.agentType, "address");
   assert.equal(plan.writeCapability, "write-capable");
   assert.equal(plan.requiresWriteLease, true);
   assert.deepEqual(plan.args.slice(-2), ["--", "$address-this The checked-out branch is for issue #15."]);
@@ -331,10 +331,10 @@ test("a ChatGPT implementer invokes the installed implement skill with the froze
   assert.equal(plan.args.includes('model_reasoning_effort="high"'), true);
 });
 
-test("a ChatGPT implementer keeps its skill invocation when the frozen contract spills to a file", () => {
+test("a ChatGPT address keeps its skill invocation when the frozen contract spills to a file", () => {
   const promptRoot = "C:/Temp/abd-K7M2Q1";
   const plan = chatGpt().planLaunch({
-    ...implementer,
+    ...address,
     prompt: "frozen issue contract ".repeat(200),
     promptRoot,
     maxInlinePromptChars: 40,
@@ -342,13 +342,13 @@ test("a ChatGPT implementer keeps its skill invocation when the frozen contract 
 
   assert.equal(plan.promptDelivery, "spilled");
   assert.match(plan.args.at(-1) ?? "", /^\$address-this Perform the task described in @/u);
-  assert.equal(plan.spill?.relativePath, "C:/Temp/abd-K7M2Q1/implementer-1/task.md");
+  assert.equal(plan.spill?.relativePath, "C:/Temp/abd-K7M2Q1/address-1/task.md");
   assert.equal(plan.task?.relativePath, plan.spill?.relativePath);
 });
 
-test("a ChatGPT implementer cannot spawn subagents, search the web, or mutate Aboard-owned Git state", () => {
+test("a ChatGPT address cannot spawn subagents, search the web, or mutate Aboard-owned Git state", () => {
   const plan = chatGpt().planLaunch({
-    ...implementer,
+    ...address,
     autoRunRestricted: true,
     prompt: "Address the issue.",
     restrictions: { denySubagents: true, denyWeb: true, deniedCommands: ["git commit*", "gh pr merge*", "git commit*"], protectedPaths: ["C:/project"] },
@@ -358,7 +358,7 @@ test("a ChatGPT implementer cannot spawn subagents, search the web, or mutate Ab
   assert.equal(plan.args.includes("features.multi_agent=false"), true);
   assert.equal(plan.args.includes("agents.enabled=false"), true);
   assert.match(plan.args.join("\n"), /hooks\.PreToolUse=\[\{matcher="Bash\|Agent"/u);
-  assert.equal(plan.guard?.relativePath, "C:/aboard/runtime/agents/implementer-1/guard.json");
+  assert.equal(plan.guard?.relativePath, "C:/aboard/runtime/agents/address-1/guard.json");
   assert.deepEqual(JSON.parse(plan.guard?.contents ?? "{}"), {
     denySubagents: true,
     denyCommands: ["git commit*", "gh pr merge*"],
@@ -371,7 +371,7 @@ test("an isolated ChatGPT worker requires a Codex version with permission profil
     policyProbe: { require: async () => undefined },
   });
   const plan = platform.planLaunch({
-    ...implementer,
+    ...address,
     prompt: "Address the issue.",
     restrictions: { protectedPaths: ["C:/project"] },
   });
@@ -381,7 +381,7 @@ test("an isolated ChatGPT worker requires a Codex version with permission profil
 
 test("an isolated ChatGPT worker denies writes to the original checkout without denying reads", () => {
   const plan = chatGpt().planLaunch({
-    ...implementer,
+    ...address,
     prompt: "Address the issue.",
     restrictions: { protectedPaths: ["C:/project"] },
     writableRoots: ["C:\\project\\.git\\worktrees\\work", "C:\\project\\.git\\objects"],
@@ -400,7 +400,7 @@ test("an isolated ChatGPT worker denies writes to the original checkout without 
 
 test("a POSIX checkout keeps its own separators in the ChatGPT read subtree", () => {
   const plan = chatGpt().planLaunch({
-    ...implementer,
+    ...address,
     prompt: "Address the issue.",
     restrictions: { protectedPaths: ["/home/dev/project/"] },
   });
@@ -409,15 +409,15 @@ test("a POSIX checkout keeps its own separators in the ChatGPT read subtree", ()
   assert.ok(profile.includes(`${JSON.stringify("/home/dev/project/**")}="read"`), profile);
 });
 
-test("a manual ChatGPT implementer can inherit or explicitly configure native tool settings", () => {
+test("a manual ChatGPT address can inherit or explicitly configure native tool settings", () => {
   const inherited = chatGpt().planLaunch({
-    ...implementer,
-    configuration: { ...implementer.configuration, webSearch: undefined, subagents: undefined },
+    ...address,
+    configuration: { ...address.configuration, webSearch: undefined, subagents: undefined },
     prompt: "Address the issue.",
   });
   const plan = chatGpt().planLaunch({
-    ...implementer,
-    configuration: { ...implementer.configuration, webSearch: "live", subagents: "allowed" },
+    ...address,
+    configuration: { ...address.configuration, webSearch: "live", subagents: "allowed" },
     prompt: "Address the issue.",
   });
 
@@ -429,9 +429,9 @@ test("a manual ChatGPT implementer can inherit or explicitly configure native to
 
 test("Auto Run overrides permissive ChatGPT worker tool settings", () => {
   const plan = chatGpt().planLaunch({
-    ...implementer,
+    ...address,
     autoRunRestricted: true,
-    configuration: { ...implementer.configuration, webSearch: "live", subagents: "allowed" },
+    configuration: { ...address.configuration, webSearch: "live", subagents: "allowed" },
     prompt: "Address the issue.",
     restrictions: { denyWeb: true, denySubagents: true },
   });
@@ -442,7 +442,7 @@ test("Auto Run overrides permissive ChatGPT worker tool settings", () => {
 });
 
 test("an ordinary ChatGPT launch never mentions browser configuration", () => {
-  const plan = chatGpt().planLaunch({ ...implementer, prompt: "Address the issue." });
+  const plan = chatGpt().planLaunch({ ...address, prompt: "Address the issue." });
 
   assert.equal(plan.chromeRequired, undefined);
   assert.doesNotMatch(plan.args.join("\n"), /chrome/iu);
@@ -452,7 +452,7 @@ test("a browser-required ChatGPT launch no longer needs its backend declared", a
   const required: string[] = [];
   const platform = chatGpt({ browserProbe: { require: async (agentType) => { required.push(agentType); } } });
   const browserPrompt = "Address the issue.\n\nUse the available tools to take screenshots, test, and debug with a real browser.";
-  const plan = platform.planLaunch({ ...implementer, prompt: browserPrompt, chrome: true });
+  const plan = platform.planLaunch({ ...address, prompt: browserPrompt, chrome: true });
 
   assert.equal(plan.chromeRequired, true);
   assert.match(plan.args.at(-1) ?? "", /^\$address-this /u);
@@ -461,7 +461,7 @@ test("a browser-required ChatGPT launch no longer needs its backend declared", a
   // missing Codex backend declaration must not hold up its launch.
   assert.deepEqual(required, []);
 
-  const resumed = platform.planSessionResume({ ...implementer, sessionId: actual, prompt: "Continue", chrome: true });
+  const resumed = platform.planSessionResume({ ...address, sessionId: actual, prompt: "Continue", chrome: true });
   assert.equal(resumed.chromeRequired, true);
   assert.equal(resumed.args.at(-1), "Continue");
   // The resume message must not replace the frozen task the reground hook restores.
@@ -469,19 +469,19 @@ test("a browser-required ChatGPT launch no longer needs its backend declared", a
   assert.equal(resumed.args.includes('web_search="disabled"'), true);
   assert.equal(resumed.args.filter((argument) => argument.startsWith("$address-this")).length, 0);
 
-  const reopened = platform.planSessionResume({ ...implementer, sessionId: actual, chrome: true });
+  const reopened = platform.planSessionResume({ ...address, sessionId: actual, chrome: true });
   assert.equal(reopened.promptDelivery, "none");
   assert.ok(reopened.args.at(-1), "reopened args should have content");
   assert.equal(reopened.args.filter((argument) => argument.startsWith("$address-this")).length, 0);
 });
 
-test("a browser-required ChatGPT reviewer is planned exactly like the implementer", async () => {
+test("a browser-required ChatGPT review is planned exactly like the address worker", async () => {
   const required: string[] = [];
   const platform = chatGpt({ browserProbe: { require: async (agentType) => { required.push(agentType); } } });
   const plan = platform.planLaunch({
-    agentId: "reviewer-1" as AgentId,
+    agentId: "review-1" as AgentId,
     sessionId: provisional,
-    agentType: "reviewer",
+    agentType: "review",
     shell: "powershell",
     runtimeDirectory: "C:/aboard/runtime",
     configuration: { shape: "skill", skillName: "review-this", declaredCommand: ["codex"], declaredModel: "by-difficulty", declaredEffort: "by-difficulty", webSearch: "disabled", subagents: "denied" },
@@ -496,7 +496,7 @@ test("a browser-required ChatGPT reviewer is planned exactly like the implemente
 
 test("a Chrome-required ChatGPT launch survives a backend probe that would refuse it", async () => {
   const platform = chatGpt({ browserProbe: { require: async () => { throw new Error("chrome is not declared"); } } });
-  const plan = platform.planLaunch({ ...implementer, prompt: "Address the issue.", chrome: true });
+  const plan = platform.planLaunch({ ...address, prompt: "Address the issue.", chrome: true });
 
   // Backend enforcement is retained but disabled, so a refusing probe is never
   // consulted and cannot block the worker.
@@ -507,11 +507,11 @@ test("a Chrome-required ChatGPT launch survives a backend probe that would refus
   );
 });
 
-test("a ChatGPT reviewer invokes the review skill its disposition selects and inherits the worker boundary", () => {
-  const reviewer = {
-    agentId: "reviewer-1" as AgentId,
+test("a ChatGPT review invokes the review skill its disposition selects and inherits the worker boundary", () => {
+  const review = {
+    agentId: "review-1" as AgentId,
     sessionId: provisional,
-    agentType: "reviewer",
+    agentType: "review",
     autoRunRestricted: true,
     shell: "powershell",
     runtimeDirectory: "C:/aboard/runtime",
@@ -521,7 +521,7 @@ test("a ChatGPT reviewer invokes the review skill its disposition selects and in
   const settings = { declaredCommand: ["codex"], declaredModel: "by-difficulty", declaredEffort: "by-difficulty", webSearch: "disabled", subagents: "denied" } as const;
 
   const afk = chatGpt().planLaunch({
-    ...reviewer,
+    ...review,
     configuration: { shape: "skill", skillName: "review-this", ...settings },
     prompt: "Review pull request #42.",
   });
@@ -535,7 +535,7 @@ test("a ChatGPT reviewer invokes the review skill its disposition selects and in
   assert.equal(afk.args.includes('model_reasoning_effort="medium"'), true);
 
   const hitl = chatGpt().planLaunch({
-    ...reviewer,
+    ...review,
     configuration: { shape: "skill", skillName: "review-this", ...settings },
     prompt: "Review pull request #42.",
     attended: true,
@@ -544,11 +544,11 @@ test("a ChatGPT reviewer invokes the review skill its disposition selects and in
   assert.equal(hitl.requiresWriteLease, true);
 });
 
-test("a resumed ChatGPT reviewer keeps its restrictions and does not re-invoke its skill", () => {
+test("a resumed ChatGPT review keeps its restrictions and does not re-invoke its skill", () => {
   const resumed = chatGpt().planSessionResume({
-    agentId: "reviewer-1" as AgentId,
+    agentId: "review-1" as AgentId,
     sessionId: actual,
-    agentType: "reviewer",
+    agentType: "review",
     autoRunRestricted: true,
     shell: "powershell",
     configuration: { shape: "skill", skillName: "review-this", declaredCommand: ["codex"], declaredModel: "by-difficulty", declaredEffort: "by-difficulty", webSearch: "disabled", subagents: "denied" },
@@ -567,11 +567,11 @@ test("a resumed ChatGPT reviewer keeps its restrictions and does not re-invoke i
   assert.equal(resumed.task, undefined);
 });
 
-test("a ChatGPT reviewer refuses a skill that is not its review mode", () => {
+test("a ChatGPT review refuses a skill that is not its review mode", () => {
   const request = {
-    agentId: "reviewer-1" as AgentId,
+    agentId: "review-1" as AgentId,
     sessionId: provisional,
-    agentType: "reviewer",
+    agentType: "review",
     shell: "powershell",
     runtimeDirectory: "C:/aboard/runtime",
     prompt: "Review pull request #42.",
@@ -579,15 +579,15 @@ test("a ChatGPT reviewer refuses a skill that is not its review mode", () => {
 
   assert.throws(
     () => chatGpt().planLaunch({ ...request, configuration: { shape: "skill", skillName: "address-this", declaredCommand: ["codex"] } }),
-    /reviewer must launch through \$review-this/u,
+    /review must launch through \$review-this/u,
   );
   assert.throws(
     () => chatGpt().planLaunch({ ...request, configuration: { shape: "default", declaredCommand: ["codex"] } }),
-    /reviewer must launch through \$review-this/u,
+    /review must launch through \$review-this/u,
   );
   assert.throws(
-    () => chatGpt().planLaunch({ ...request, agentType: "implementer", configuration: { shape: "skill", skillName: "review-this", declaredCommand: ["codex"] } }),
-    /implementer must launch through \$address-this/u,
+    () => chatGpt().planLaunch({ ...request, agentType: "address", configuration: { shape: "skill", skillName: "review-this", declaredCommand: ["codex"] } }),
+    /address must launch through \$address-this/u,
   );
 });
 

@@ -45,7 +45,7 @@ def repository(tmp_path, commits=2):
         (root / "new.py").write_text("new\n", encoding="utf-8")
         (root / "old.py").unlink()
         git(root, "add", "-A")
-        git(root, "commit", "-m", "implement the feature")
+        git(root, "commit", "-m", "address the feature")
     return root
 
 
@@ -73,7 +73,7 @@ def blocked(prompt, cwd, monkeypatch, capsys):
 
 @pytest.mark.parametrize("prompt", [
     "Review the last commit",
-    "/reviewer",
+    "/review",
     "Explain what `/review-this` does",
 ])
 def test_unrelated_prompts_are_ignored(prompt, tmp_path, monkeypatch, capsys):
@@ -142,7 +142,7 @@ def test_aboard_pinned_range_allows_the_uncommitted_hitl_handoff(
     assert context
 
 
-def test_aboard_continuation_keeps_the_exact_dirty_reviewer_handoff(
+def test_aboard_continuation_keeps_the_exact_dirty_review_handoff(
     tmp_path, monkeypatch, capsys,
 ):
     root = repository(tmp_path)

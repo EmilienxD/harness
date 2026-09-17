@@ -30,11 +30,12 @@ CREATE TABLE executions (
  reservation_pid INTEGER, reservation_birth TEXT,
  supervisor_pid INTEGER, supervisor_birth TEXT, provider_pid INTEGER, provider_birth TEXT,
  aboard_agent_id TEXT, aboard_handle TEXT, exit_code INTEGER,
+ fork_of TEXT, superseded_at TEXT,
  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, started_at TEXT, exited_at TEXT,
  FOREIGN KEY(request_id,session_id) REFERENCES requests(id,child_session_id)
 );
 CREATE UNIQUE INDEX executions_session_active ON executions(session_id)
- WHERE state IN ('prepared','starting','running','uncertain');
+ WHERE state IN ('prepared','starting','running','uncertain') AND superseded_at IS NULL;
 CREATE TABLE reply_authorizations (
  request_id TEXT PRIMARY KEY REFERENCES requests(id) ON DELETE CASCADE,
  child_session_id TEXT NOT NULL UNIQUE REFERENCES sessions(id), armed_sequence INTEGER NOT NULL,

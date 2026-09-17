@@ -27,6 +27,7 @@ import {
 import { AUTO_RUN_RESTRICTIONS } from "../auto/permissions.js";
 import { isolationProtectedPaths, worktreeGitMetadataRoots } from "../auto/worktree.js";
 import type { IssueDifficulty } from "../shared/labels.js";
+import type { DelegationTask } from "../platform/launch-configuration.js";
 
 function harnessEnvironment(input: { readonly harnessStateDirectory?: string; readonly harnessRuntimePath?: string }): Record<string, string> {
   return {
@@ -60,7 +61,7 @@ export interface DelegationLaunchInput {
   readonly issues?: readonly number[];
   /** How many relation levels of issue context the resolved prompt preloads. */
   readonly issueContextDepth?: number;
-  /** Fresh bounded codebase evidence supplied only to an implementer. */
+  /** Fresh bounded codebase evidence supplied only to an address. */
   readonly codebaseContext?: string;
   readonly pullRequest?: number;
   /** Set only by auto-run when the worker's frozen issue has `[AI]-chrome`. */
@@ -71,7 +72,7 @@ export interface DelegationLaunchInput {
   readonly executionMode?: ExecutionMode;
   /** Pinned parent for a worker whose successful turn must add exactly one commit. */
   readonly completionCommitStartingSha?: string;
-  /** Immutable implementation range for a reviewer working from an uncommitted HITL handoff. */
+  /** Immutable implementation range for a review working from an uncommitted HITL handoff. */
   readonly reviewRange?: string;
   /** A provider-explicit manual launch may bypass the project's default provider. */
   readonly configuration?: ConfiguredLaunch;
@@ -95,6 +96,7 @@ export interface ReopenTarget {
   readonly platform: AgentPlatformId;
   readonly agentId: AgentId;
   readonly type: AgentType;
+  readonly delegationTask?: DelegationTask;
   readonly sessionId: SessionId;
   readonly resultDelivery?: AgentSession["resultDelivery"]; 
   /** The terminal name, already carrying aboard's own prefix. */
@@ -131,6 +133,7 @@ export interface DelegationConfigurationSource {
   get(type: AgentType): Promise<ConfiguredLaunch>;
   /** Resolves one explicit or session-owned provider without consulting the Auto Run default. */
   getFor(platform: AgentPlatformId, type: AgentType): Promise<ConfiguredLaunch>;
+  getDelegationFor?(platform: AgentPlatformId, task: DelegationTask): Promise<ConfiguredLaunch>;
 }
 
 export interface DelegationPromptResolver {
@@ -166,6 +169,8 @@ export interface DelegationCoordinatorOptions {
   readonly maxInlinePromptChars?: number;
   readonly startupTimeoutMs?: number;
   readonly wrapper?: SessionWrapperLayout;
+  /** Whether a wrapper marker still stands for a live process; a bare file by default. */
+  readonly lockProbe?: (lockFile: string) => boolean;
   readonly resolveWorktreeGitMetadataRoots?: (worktreeRoot: string, projectRoot: string) => Promise<readonly string[]>;
 }
 
@@ -265,13 +270,15 @@ export class DelegationCoordinator {
   }
 
   public async reopen(target: ReopenTarget): Promise<InteractiveLaunchHandles> {
-    if (this.options.terminals.liveTerminalForAgent(target.agentId) !== undefined || this.options.sessions?.observe(target.agentId) === "live" || (this.options.wrapper !== undefined && existsSync(this.options.wrapper.lockPathFor(target.agentId)))) {
+    if (this.options.terminals.liveTerminalForAgent(target.agentId) !== undefined || this.options.sessions?.observe(target.agentId) === "live" || (this.options.wrapper !== undefined && (this.options.lockProbe ?? existsSync)(this.options.wrapper.lockPathFor(target.agentId)))) {
       throw new DelegationError("agent-active", `Agent ${target.agentId} still has a live or uncertain execution`);
     }
     const saved = this.options.fleet.get(target.agentId);
     const executionMode = saved?.executionMode ?? target.executionMode ?? "interactive";
-    if (executionMode !== "interactive" && !target.prompt?.trim()) throw new DelegationError("unresumable-session", "Unattended continuation requires a next message");
-    const configured = await this.options.configurations.getFor(target.platform, target.type);
+    if (executionMode !== "interactive" && !target.prompt?.trim()) throw new DelegationError("unresumable-session", "Background continuation requires a next message");
+    const configured = target.delegationTask === undefined || this.options.configurations.getDelegationFor === undefined
+      ? await this.options.configurations.getFor(target.platform, target.type)
+      : await this.options.configurations.getDelegationFor(target.platform, target.delegationTask);
     const platform = this.#platform(target.platform);
     // Where the session ran is where its conversation is: a session that ran in
     // an auto-run's own checkout has no transcript under the workspace at all.
@@ -571,7 +578,7 @@ export class DelegationCoordinator {
           telemetry: EMPTY_TELEMETRY,
           ...(input.chrome === true ? { chromeEnabled: true as const } : {}),
           ...(input.issues === undefined ? {} : { issueNumbers: input.issues }),
-          // This policy is not derivable from the stable reviewer identity: a
+          // This policy is not derivable from the stable review identity: a
           // manual review is user-driven and deliberately unrestricted.
           ...(origin === "auto-run" ? { autoRunRestricted: true as const } : {}),
           ...(cwd === undefined ? {} : { cwd }),

@@ -52,21 +52,21 @@ export async function runChatGptSmoke(config: HarnessConfig): Promise<void> {
     await runScenario(root, { prompt: "Continue", expectedExit: 0, resume: attended });
     await runScenario(root, { prompt: `${"large deterministic prompt ".repeat(300)}[E2E:chatgpt-process-failure]`, expectedExit: 1 });
     await runScenario(root, { prompt: "[E2E:chatgpt-explore] report the implementation context for this checkout.", expectedExit: 0, explore: true });
-    const implementer = await runScenario(root, { prompt: "[E2E:chatgpt-implement] address the deterministic issue.", expectedExit: 0, implement: true });
-    await runScenario(root, { prompt: "Continue", expectedExit: 0, implement: true, resume: implementer });
-    await runScenario(root, { prompt: "[E2E:chatgpt-implement] address the deterministic issue with Chrome.", expectedExit: 0, implement: true, chrome: "declared" });
+    const address = await runScenario(root, { prompt: "[E2E:chatgpt-address] address the deterministic issue.", expectedExit: 0, address: true });
+    await runScenario(root, { prompt: "Continue", expectedExit: 0, address: true, resume: address });
+    await runScenario(root, { prompt: "[E2E:chatgpt-address] address the deterministic issue with Chrome.", expectedExit: 0, address: true, chrome: "declared" });
     await runChromeRefusal(root);
     await runScenario(root, { prompt: "[E2E:chatgpt-review-approve] review the deterministic pull request.", expectedExit: 0, review: "afk" });
     await runScenario(root, { prompt: "[E2E:chatgpt-review-changes] review the deterministic pull request.", expectedExit: 0, review: "afk" });
     await runScenario(root, { prompt: `${"large deterministic review ".repeat(300)}[E2E:chatgpt-process-failure]`, expectedExit: 1, review: "afk" });
     await runScenario(root, { prompt: "[E2E:chatgpt-review-approve] review the deterministic pull request with a human.", expectedExit: 0, review: "hitl" });
     const assertions = server.assertions();
-    for (const checkpoint of ["prompt:spilled", "attended:tool", "attended:complete", "explore:tool", "explore:complete", "implement:guard", "implement:tool", "implement:complete", "review-approve:complete", "review-changes:complete", "process-failure:failed"]) {
+    for (const checkpoint of ["prompt:spilled", "attended:tool", "attended:complete", "explore:tool", "explore:complete", "address:guard", "address:tool", "address:complete", "review-approve:complete", "review-changes:complete", "process-failure:failed"]) {
       if (!assertions.checkpoints.includes(checkpoint)) throw new Error(`Codex Responses scenario did not reach ${checkpoint}`);
     }
     if (assertions.unexpectedRequests !== 0) throw new Error(`Codex made ${assertions.unexpectedRequests} structurally invalid Responses requests`);
     const diagnostics = await readFile(diagnosticsPath, "utf8");
-    if (/chatgpt-success|chatgpt-implement|chatgpt-review|chatgpt-explore|aboard-e2e-/u.test(diagnostics)) throw new Error("Codex Responses diagnostics persisted prompt or credential material");
+    if (/chatgpt-success|chatgpt-address|chatgpt-review|chatgpt-explore|aboard-e2e-/u.test(diagnostics)) throw new Error("Codex Responses diagnostics persisted prompt or credential material");
   } finally {
     if (previousHome === undefined) delete process.env.CODEX_HOME; else process.env.CODEX_HOME = previousHome;
     if (previousKey === undefined) delete process.env[OPENAI_KEY_ENV]; else process.env[OPENAI_KEY_ENV] = previousKey;
@@ -79,7 +79,7 @@ interface Scenario {
   readonly expectedExit: number;
   readonly resume?: SessionId;
   readonly explore?: boolean;
-  readonly implement?: boolean;
+  readonly address?: boolean;
   readonly review?: "afk" | "hitl";
   readonly chrome?: "declared" | "absent";
 }
@@ -90,13 +90,13 @@ const LIFECYCLE_ASSETS = {
 } as const;
 
 function scenarioAgentType(scenario: Scenario): AgentType {
-  if (scenario.explore === true) return "Explore";
-  if (scenario.implement === true) return "implementer";
-  return scenario.review === undefined ? "interactive" : "reviewer";
+  if (scenario.explore === true) return "explore";
+  if (scenario.address === true) return "address";
+  return scenario.review === undefined ? "interactive" : "review";
 }
 
 function scenarioConfiguration(scenario: Scenario, command: readonly string[]): Record<string, unknown> {
-  if (scenario.implement === true) return { shape: "skill", skillName: "address-this", declaredCommand: command };
+  if (scenario.address === true) return { shape: "skill", skillName: "address-this", declaredCommand: command };
   if (scenario.review !== undefined) return { shape: "skill", skillName: "review-this", declaredCommand: command };
   return { shape: scenario.explore === true ? "explore" : "default", declaredCommand: command };
 }
@@ -104,7 +104,7 @@ function scenarioConfiguration(scenario: Scenario, command: readonly string[]): 
 /** One runtime directory per session kind; a resume deliberately reuses its launch's. */
 function scenarioName(scenario: Scenario): string {
   if (scenario.explore === true) return "explore";
-  if (scenario.implement === true) return `implement-${scenario.chrome ?? "plain"}`;
+  if (scenario.address === true) return `address-${scenario.chrome ?? "plain"}`;
   if (scenario.review !== undefined) return `review-${scenario.review}-${scenario.expectedExit}`;
   return `${scenario.expectedExit}`;
 }
@@ -124,8 +124,8 @@ async function writeSkill(home: string, name: string, instruction: string): Prom
 
 /** The deterministic final message each scenario's session reports on Stop. */
 function expectedFinalMessage(scenario: Scenario): string {
-  if (scenario.explore === true) return "Explore report: the deterministic checkout keeps its launch plan in src/chatgpt/launch.ts.";
-  if (scenario.implement === true) return "Implemented the deterministic issue; the work is uncommitted.";
+  if (scenario.explore === true) return "explore report: the deterministic checkout keeps its launch plan in src/chatgpt/launch.ts.";
+  if (scenario.address === true) return "Implemented the deterministic issue; the work is uncommitted.";
   if (scenario.review !== undefined) {
     return scenario.prompt.includes("[E2E:chatgpt-review-changes]")
       ? "Review complete: requested changes before this can merge."
@@ -152,7 +152,7 @@ async function browserProbeFor(root: string, scenario: Scenario): Promise<{ read
 async function runChromeRefusal(root: string): Promise<void> {
   const agentId = "chatgpt-chrome-absent" as AgentId;
   const runtimeRoot = join(root, agentId);
-  const scenario: Scenario = { prompt: "[E2E:chatgpt-implement] address it.", expectedExit: 0, implement: true, chrome: "absent" };
+  const scenario: Scenario = { prompt: "[E2E:chatgpt-address] address it.", expectedExit: 0, address: true, chrome: "absent" };
   const platform = new ChatGptAgentPlatform({
     commandRunner: spawnCommandRunner(root),
     lifecycleAssets: LIFECYCLE_ASSETS,
@@ -160,7 +160,7 @@ async function runChromeRefusal(root: string): Promise<void> {
     ...(await browserProbeFor(root, scenario)),
   });
   const plan = platform.planLaunch({
-    agentId, sessionId: PROVISIONAL, agentType: "implementer", shell: process.platform === "win32" ? "powershell" : "git-bash",
+    agentId, sessionId: PROVISIONAL, agentType: "address", shell: process.platform === "win32" ? "powershell" : "git-bash",
     configuration: scenarioConfiguration(scenario, CODEX_COMMAND),
     prompt: scenario.prompt, runtimeDirectory: runtimeRoot, chrome: true,
   });
@@ -173,9 +173,9 @@ async function runChromeRefusal(root: string): Promise<void> {
 }
 
 async function runScenario(root: string, scenario: Scenario): Promise<SessionId> {
-  const { prompt, expectedExit, resume, explore = false, implement = false } = scenario;
+  const { prompt, expectedExit, resume, explore = false, address = false } = scenario;
   const agentType = scenarioAgentType(scenario);
-  const worker = implement || scenario.review !== undefined;
+  const worker = address || scenario.review !== undefined;
   const agentId = `chatgpt-${scenarioName(scenario)}` as AgentId;
   const runtimeRoot = join(root, agentId);
   const wrapper = sessionWrapperLayout(runtimeRoot, resolve(process.cwd(), "assets", "runtime", "abd_wrapper.py"));
@@ -274,7 +274,7 @@ async function runScenario(root: string, scenario: Scenario): Promise<SessionId>
     if (expectedExit === 0 && final !== expectedFinalMessage(scenario)) throw new Error(`ChatGPT E2E lost final assistant output: ${String(final)}`);
     if (expectedExit !== 0 && final !== undefined) throw new Error("ChatGPT E2E manufactured output for a failed process");
     const attempted = existsSync(join(root, `write-attempt-${scenarioArtifact(scenario)}.txt`));
-    if (explore && await readFile(join(root, "sandbox-target.txt"), "utf8") !== "sandbox baseline\n") throw new Error("ChatGPT E2E Explore session modified the checkout");
+    if (explore && await readFile(join(root, "sandbox-target.txt"), "utf8") !== "sandbox baseline\n") throw new Error("ChatGPT E2E explore session modified the checkout");
     if (!explore && resume === undefined && expectedExit === 0 && !attempted) throw new Error("ChatGPT E2E never proved a write-capable session can execute a real Codex tool");
     return actualSessionId;
   } finally {
@@ -285,7 +285,7 @@ async function runScenario(root: string, scenario: Scenario): Promise<SessionId>
 }
 
 function scenarioArtifact(scenario: Scenario): string {
-  if (scenario.implement === true) return "implement";
+  if (scenario.address === true) return "address";
   if (scenario.review === "afk" && scenario.prompt.includes("review-changes")) return "review-changes";
   if (scenario.review !== undefined) return "review-approve";
   return "attended";

@@ -233,7 +233,8 @@ def main() -> int:
                 from subagents_runtime.delegation import report_child_stop
                 report_child_stop(session[0], "", success=False,
                                   reason=spawn_error or "Provider process exited without delivering a result",
-                                  cancelled=not spawn_error and os.environ.get("HARNESS_EXECUTION_MODE") == "interactive")
+                                  cancelled=not spawn_error and os.environ.get("HARNESS_EXECUTION_MODE") == "interactive",
+                                  execution_id=execution_id)
         if provider_alive:
             # A broken wrapper is no proof that its provider exited. Keep the marker.
             return 1

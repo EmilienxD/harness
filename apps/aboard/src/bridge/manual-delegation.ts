@@ -1,5 +1,6 @@
 import type { AgentPlatformId } from "../platform/agent-platform.js";
 import type { AgentType, ExecutionMode } from "../domain/contracts.js";
+import type { DelegationTask } from "../platform/launch-configuration.js";
 import { isAbsolute, relative, resolve, sep } from "node:path";
 import { createHash } from "node:crypto";
 import { mkdir, open, readFile, readdir, rename, writeFile } from "node:fs/promises";
@@ -7,26 +8,29 @@ import { join } from "node:path";
 import { protocolError, type BridgeRequestHandler } from "./protocol.js";
 
 const TASKS = {
-  explore: { type: "Explore", modes: ["auto"] },
-  prototype: { type: "Prototype", modes: ["interactive", "auto"] },
-  websearch: { type: "Web Search", modes: ["interactive", "auto"] },
-  brainstorm: { type: "Brainstorm", modes: ["interactive"] },
-  implement: { type: "General", modes: ["interactive", "auto"] },
-  review: { type: "General", modes: ["interactive", "auto"] },
-  general: { type: "General", modes: ["interactive", "auto"] },
+  explore: { type: "explore", modes: ["auto"] },
+  prototype: { type: "prototype", modes: ["interactive", "auto"] },
+  websearch: { type: "websearch", modes: ["interactive", "auto"] },
+  brainstorm: { type: "brainstorm", modes: ["interactive"] },
+  address: { type: "general", modes: ["interactive", "auto"] },
+  review: { type: "general", modes: ["interactive", "auto"] },
+  general: { type: "general", modes: ["interactive", "auto"] },
 } as const;
 const SKILLS: Readonly<Record<string, string>> = {
   prototype: "prototype",
   websearch: "websearch",
   brainstorm: "grill-me",
-  implement: "address-this",
+  address: "address-this",
   review: "review-this",
 };
 const DESCRIPTIONS: Readonly<Record<string, string>> = {
-  implement: "Issue Implementation",
-  review: "Issue Review",
+  address: "Address",
+  review: "Review",
 };
 const SKILL_INVOCATION = /^[/\$][A-Za-z0-9_-]+(?:\s|$)/u;
+
+/** A claim whose launch never reported an outcome: callers must verify, not retry. */
+class StartupUncertain extends Error {}
 export interface ManualDelegationLaunch {
   readonly harnessPython?: string;
   readonly harnessStateDirectory?: string;
@@ -38,6 +42,7 @@ export interface ManualDelegationLaunch {
   readonly resumeSessionId?: string;
   readonly requestId: string;
   readonly type: AgentType;
+  readonly task: DelegationTask;
   readonly provider: AgentPlatformId;
   readonly executionMode: Exclude<ExecutionMode, "auto-run">;
   readonly prompt: string;
@@ -61,6 +66,7 @@ export interface DelegationBinding {
   readonly agentId: string;
   readonly sessionId: string;
   readonly type: AgentType;
+  readonly task: DelegationTask;
   readonly provider: AgentPlatformId;
   readonly executionMode: "interactive" | "auto";
   readonly cwd: string;
@@ -122,6 +128,7 @@ function parse(body: unknown): ManualDelegationLaunch | undefined {
     ...Object.fromEntries(identities.filter((key) => value[key] !== undefined).map((key) => [key, value[key]])),
     requestId: value.requestId,
     type: task.type,
+    task: value.task as DelegationTask,
     provider: value.provider,
     executionMode: value.mode,
     prompt: value.prompt,
@@ -138,13 +145,39 @@ function contains(root: string, candidate: string): boolean {
 
 export function createDelegationRoutes(
   launcher: ManualDelegationLauncher,
-  options: { readonly workspaceRoot?: string; readonly stateDirectory?: string } = {},
+  options: {
+    readonly workspaceRoot?: string;
+    readonly stateDirectory?: string;
+    readonly focusParent?: (sessionId: string) => boolean;
+  } = {},
 ): BridgeRequestHandler {
   const launches = new Map<string, {
     readonly fingerprint: string;
     readonly outcome: Promise<{ readonly agentId: string; readonly sessionId: string; readonly terminalId: string }>;
   }>();
   return async (request) => {
+    if (request.url.pathname === "/delegations/focus-parent") {
+      if (request.method !== "POST") return protocolError(404, "not-found", "Route not found");
+      if (request.authorizationScope !== undefined && request.authorizationScope !== "full") {
+        return protocolError(403, "forbidden", "Only an Aboard-launched agent can focus its parent");
+      }
+      if (typeof request.body !== "object" || request.body === null || Array.isArray(request.body)) {
+        return protocolError(400, "invalid-request", "Parent focus request is invalid");
+      }
+      const focusBody = request.body as Record<string, unknown>;
+      const childSessionId = focusBody.childSessionId;
+      if (Object.keys(focusBody).length !== 1 || typeof childSessionId !== "string" || !childSessionId.trim()) {
+        return protocolError(400, "invalid-request", "Parent focus request is invalid");
+      }
+      if (options.stateDirectory === undefined || options.focusParent === undefined) {
+        return protocolError(404, "not-found", "Delegation binding is unavailable");
+      }
+      const child = await readDelegationBinding(options.stateDirectory, childSessionId);
+      if (child?.parentSessionId === undefined) return protocolError(404, "not-found", "Delegation parent is unavailable");
+      const parent = await readDelegationBinding(options.stateDirectory, child.parentSessionId);
+      options.focusParent(parent?.sessionId ?? child.parentSessionId);
+      return { status: 204 };
+    }
     if (request.url.pathname !== "/delegations") return protocolError(404, "not-found", "Route not found");
     if (request.method !== "POST") return protocolError(404, "not-found", "Route not found");
     const parsed = parse(request.body);
@@ -174,14 +207,14 @@ export function createDelegationRoutes(
             const saved = JSON.parse(await readFile(recordPath, "utf8")) as { fingerprint: string; outcome?: { agentId: string; sessionId: string; terminalId: string } };
             if (saved.fingerprint !== fingerprint) throw new Error("Delegation request ID was already used for different input");
             if (saved.outcome !== undefined) return saved.outcome;
-            throw new Error("Delegation startup is uncertain; verify the existing execution before retrying");
+            throw new StartupUncertain("Delegation startup is uncertain; verify the existing execution before retrying");
           }
         }
         const launched = await (parsed.resumeAgentId === undefined ? launcher.launch(parsed)
           : launcher.resume?.(parsed) ?? Promise.reject(new Error("Delegation resume is unavailable")));
         if (recordPath !== undefined) {
           if (parsed.harnessSessionId !== undefined && options.stateDirectory !== undefined) {
-            const binding: DelegationBinding = { harnessSessionId: parsed.harnessSessionId, terminalId: launched.terminalId, agentId: launched.agentId, sessionId: launched.sessionId, type: parsed.type, provider: parsed.provider, executionMode: parsed.executionMode, cwd: parsed.cwd, description: parsed.description, ...(parsed.harnessPython === undefined ? {} : { harnessPython: parsed.harnessPython }), ...(parsed.parentSessionId === undefined ? {} : { parentSessionId: parsed.parentSessionId }), ...(parsed.harnessStateDirectory === undefined ? {} : { harnessStateDirectory: parsed.harnessStateDirectory }), ...(parsed.harnessRuntimePath === undefined ? {} : { harnessRuntimePath: parsed.harnessRuntimePath }) };
+            const binding: DelegationBinding = { harnessSessionId: parsed.harnessSessionId, terminalId: launched.terminalId, agentId: launched.agentId, sessionId: launched.sessionId, type: parsed.type, task: parsed.task, provider: parsed.provider, executionMode: parsed.executionMode, cwd: parsed.cwd, description: parsed.description, ...(parsed.harnessPython === undefined ? {} : { harnessPython: parsed.harnessPython }), ...(parsed.parentSessionId === undefined ? {} : { parentSessionId: parsed.parentSessionId }), ...(parsed.harnessStateDirectory === undefined ? {} : { harnessStateDirectory: parsed.harnessStateDirectory }), ...(parsed.harnessRuntimePath === undefined ? {} : { harnessRuntimePath: parsed.harnessRuntimePath }) };
             const destination = bindingPath(options.stateDirectory, parsed.harnessSessionId);
             await writeFile(`${destination}.tmp`, JSON.stringify(binding), { mode: 0o600 });
             await rename(`${destination}.tmp`, destination);
@@ -197,6 +230,7 @@ export function createDelegationRoutes(
       const launched = await outcome;
       return { status: 201, body: { ok: true, ...launched } };
     } catch (error) {
+      if (error instanceof StartupUncertain) return protocolError(409, "startup-uncertain", error.message);
       return protocolError(409, "conflict", error instanceof Error ? error.message : "Delegation launch failed");
     }
   };

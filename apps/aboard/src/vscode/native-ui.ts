@@ -88,17 +88,17 @@ export function registerNativeFleetUi(context: ExtensionContext, options: Native
   const engine = options.autoRun.engine;
   let autoRunStarting = false;
   const forecast = new AutoRunForecastController(() => renderAutoRun());
-  const handoffFor = (issueNumber: number): { readonly terminalId: TerminalId; readonly type: "implementer" | "reviewer"; readonly agentId: string } | undefined => {
+  const handoffFor = (issueNumber: number): { readonly terminalId: TerminalId; readonly type: "address" | "review"; readonly agentId: string } | undefined => {
     const persisted = engine.persisted();
     const recorded = persisted?.workerSession?.issueNumber === issueNumber
-      && (persisted.workerSession.type === "implementer" || persisted.workerSession.type === "reviewer")
+      && (persisted.workerSession.type === "address" || persisted.workerSession.type === "review")
       ? persisted.workerSession
       : undefined;
     const sessions = recorded === undefined
       ? fleet.list()
       : [fleet.get(recorded.agentId)].filter((session): session is AgentSession => session !== undefined && session.sessionId === recorded.sessionId);
     for (const session of sessions) {
-      if (session.identity.type !== "implementer" && session.identity.type !== "reviewer") continue;
+      if (session.identity.type !== "address" && session.identity.type !== "review") continue;
       if (session.issueNumbers?.includes(issueNumber) !== true) continue;
       if (!isTerminalOpen(session.terminal.terminalId)) continue;
       return { terminalId: session.terminal.terminalId, type: session.identity.type, agentId: session.identity.agentId };

@@ -115,7 +115,7 @@ export function launchWriteCapability(
   agentType: AgentType,
   configuration: LaunchConfiguration,
 ): WriteCapability {
-  if (agentType === "Explore") return "read-only";
+  if (agentType === "explore") return "read-only";
   if (configuration.shape === "skill") return "write-capable";
   return configuration.shape === "default" ? "write-capable" : "read-only";
 }
@@ -378,26 +378,26 @@ function wrapCommand(
 }
 
 function assertLaunchShape(agentType: AgentType, configuration: LaunchConfiguration): void {
-  if (["interactive", "Prototype", "Web Search", "Brainstorm", "General"].includes(agentType)) {
+  if (["interactive", "prototype", "websearch", "brainstorm", "general"].includes(agentType)) {
     if (configuration.shape !== "default") {
       throw new LaunchPlanError("shape-not-allowed", "interactive launches as Claude Code's default session");
     }
     return;
   }
-  if (agentType === "implementer") {
+  if (agentType === "address") {
     if (configuration.shape !== "skill" || configuration.skillName !== "address-this") {
-      throw new LaunchPlanError("shape-not-allowed", "implementer must launch through /address-this");
+      throw new LaunchPlanError("shape-not-allowed", "address must launch through /address-this");
     }
     return;
   }
-  if (agentType === "reviewer") {
+  if (agentType === "review") {
     // One skill for both dispositions: AFK and HITL differ in orchestration.
     if (configuration.shape !== "skill" || configuration.skillName !== "review-this") {
-      throw new LaunchPlanError("shape-not-allowed", "reviewer must launch through /review-this");
+      throw new LaunchPlanError("shape-not-allowed", "review must launch through /review-this");
     }
     return;
   }
-  if (isNamedBuiltinAgentType(agentType) && configuration.shape === "builtin" && configuration.agentName === agentType) return;
+  if (isNamedBuiltinAgentType(agentType) && configuration.shape === "builtin" && configuration.agentName === "Explore") return;
   throw new LaunchPlanError("shape-not-allowed", `${agentType} has no supported launch configuration`);
 }
 
@@ -419,7 +419,7 @@ export function planLaunch(request: LaunchPlanRequest): LaunchPlan {
   }
 
   const launchRuntimeDirectory = agentRuntimeDirectory(runtimeDirectory, request.agentId);
-  const task = prompt !== undefined && (agentType === "implementer" || agentType === "reviewer")
+  const task = prompt !== undefined && (agentType === "address" || agentType === "review")
     ? { agentId: request.agentId, relativePath: taskPromptPath(runtimeDirectory, request.agentId, request.promptRoot), contents: typeof prompt === "string" ? prompt : prompt.text }
     : undefined;
   const shapeArguments: string[] = [

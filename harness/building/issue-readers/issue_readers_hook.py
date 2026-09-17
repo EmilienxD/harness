@@ -416,7 +416,7 @@ def build_review_context(cwd: Path) -> str:
         (
             f"Aboard pinned {review_range} as the immutable review scope. Its implementation is intentionally present as uncommitted working-tree changes; do not commit it."
             if review_range is not None
-            else "Aboard is continuing the exact reviewer conversation over its preserved working tree. Treat every existing change as part of that continuation."
+            else "Aboard is continuing the exact review conversation over its preserved working tree. Treat every existing change as part of that continuation."
             if continuation
             else "Worktree verified clean by the review-this hook before this invocation; every change now present is yours."
         ),

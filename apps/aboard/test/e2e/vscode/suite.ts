@@ -153,7 +153,7 @@ export async function run(): Promise<void> {
     await eventually(async () => {
       const value = await diagnostics();
       return value?.observations.some((item) => item.checkpoint === handoffCheckpoint) ? value : undefined;
-    }, review ? "HITL reviewer did not complete" : "HITL implementer did not complete", 480);
+    }, review ? "HITL review did not complete" : "HITL address did not complete", 480);
     const worktree = await eventually(async () => {
       const output = (await execFileAsync("git", ["worktree", "list", "--porcelain"], { cwd: root, encoding: "utf8" })).stdout;
       return worktreeRoots(output).find((path) => path.toLowerCase() !== resolve(root).toLowerCase());
@@ -169,7 +169,7 @@ export async function run(): Promise<void> {
     assert.match(dirty, /^ M deterministic\.txt\s*$/u, "the acceptance handoff is wholly unstaged");
     const rootHead = (await execFileAsync("git", ["rev-parse", "HEAD"], { cwd: root, encoding: "utf8" })).stdout.trim();
     const handoffHead = (await execFileAsync("git", ["rev-parse", "HEAD"], { cwd: worktree, encoding: "utf8" })).stdout.trim();
-    assert.equal(handoffHead, rootHead, "the temporary implementer checkpoint is reset before acceptance");
+    assert.equal(handoffHead, rootHead, "the temporary address checkpoint is reset before acceptance");
     const beforeAcceptance = (await execFileAsync("gh", ["pr", "list", "--repo", repository, "--state", "open", "--json", "number"], { encoding: "utf8" })).stdout;
     assert.deepEqual(JSON.parse(beforeAcceptance), [], "no PR exists before acceptance");
     // Let the handoff settle so acceptance models a deliberate user follow-up
@@ -193,7 +193,7 @@ export async function run(): Promise<void> {
     const completed = await eventually(async () => {
       const value = await diagnostics();
       return value?.observations.some((item) => item.checkpoint === finalCheckpoint) ? value : undefined;
-    }, review ? "HITL acceptance conversation did not complete" : "HITL follow-up implementer did not complete", 480);
+    }, review ? "HITL acceptance conversation did not complete" : "HITL follow-up address did not complete", 480);
     const successes = completed.observations.filter((item) => item.scenario !== null && item.result === "success");
     assert.deepEqual(successes.map((item) => item.checkpoint), review ? [
       "auto-hitl-read", "auto-hitl-edit", "auto-hitl-commit", "auto-hitl-complete",

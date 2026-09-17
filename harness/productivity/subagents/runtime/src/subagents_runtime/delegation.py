@@ -32,7 +32,7 @@ TASK_POLICIES = {
     "prototype-with-agent": TaskPolicy("prototype", frozenset({"interactive", "auto"})),
     "websearch-with-agent": TaskPolicy("websearch", frozenset({"interactive", "auto"})),
     "brainstorm-with-agent": TaskPolicy("brainstorm", frozenset({"interactive"})),
-    "address-with-agent": TaskPolicy("implement", frozenset({"interactive", "auto"})),
+    "address-with-agent": TaskPolicy("address", frozenset({"interactive", "auto"})),
     "review-with-agent": TaskPolicy("review", frozenset({"interactive", "auto"})),
     "work-with-agent": TaskPolicy("general", frozenset({"interactive", "auto"})),
 }
@@ -291,7 +291,37 @@ def _fail_request(path, request_id, execution_id, child_id, exc, session_id):
         claimed.unlink(missing_ok=True)
         with sessions._connect() as connection:
             connection.execute("UPDATE requests SET source_deleted_at=CURRENT_TIMESTAMP WHERE id=?", (request_id,))
+            # A fork that never started leaves no copy to speak through; the child keeps
+            # the conversation it already had, so it stays resumable.
+            connection.execute(
+                "UPDATE sessions SET provider_session_id=(SELECT fork_of FROM executions WHERE id=?) WHERE id=(SELECT session_id FROM executions WHERE id=? AND fork_of IS NOT NULL)",
+                (execution_id, execution_id),
+            )
     return ProcessResult(path, state, request_id, child_id, str(exc))
+
+
+def _supersede_child(connection, child_session_id: str) -> None:
+    """Release a live child's claim so a forked continuation can take its place.
+
+    The original execution keeps running wherever the user left it; only its hold on
+    the child's identity ends, and its unfinished request is settled for the parent.
+    """
+    connection.execute(
+        "UPDATE executions SET superseded_at=CURRENT_TIMESTAMP WHERE session_id=? AND superseded_at IS NULL AND state IN ('prepared','starting','running','uncertain')",
+        (child_session_id,),
+    )
+    connection.execute(
+        "DELETE FROM reply_authorizations WHERE child_session_id=?", (child_session_id,)
+    )
+    # Born acknowledged: the continuation the parent asked for is the answer to this
+    # request, so its settlement is never delivered as a result of its own.
+    connection.execute(
+        "UPDATE requests SET state='cancelled',reason=COALESCE(reason,?),completed_at=CURRENT_TIMESTAMP,acknowledgement_sequence=COALESCE(acknowledgement_sequence,0),acknowledged_at=CURRENT_TIMESTAMP WHERE child_session_id=? AND state IN ('launching','pending','uncertain')",
+        (
+            "superseded by a forked continuation; its original session stays open",
+            child_session_id,
+        ),
+    )
 
 
 def reconcile_inbox(session_id: str, *, launch: Callable | None = None) -> list[ProcessResult]:
@@ -446,9 +476,15 @@ def process_inbox(
             )
             if claimed.exists():
                 continue
+            fork = False
+            fork_of = None
             if request.resume:
-                processes.require_exited(
-                    sessions.resolve_session(request.resume, session_id)
+                # A live child is continued in a copy of its transcript, exactly as the
+                # providers' own fork commands do; its open session is left alone.
+                fork = bool(
+                    processes.live_executions(
+                        sessions.resolve_session(request.resume, session_id)
+                    )
                 )
             with sessions._connect() as connection:
                 connection.execute("BEGIN IMMEDIATE")
@@ -465,13 +501,20 @@ def process_inbox(
                 if request.resume:
                     child_id = sessions.resolve_session(request.resume, session_id)
                     row = connection.execute(
-                        "SELECT provider,execution_mode,cwd,agent_index FROM sessions WHERE id=? AND parent_session_id=?",
+                        "SELECT provider,execution_mode,cwd,agent_index,provider_session_id FROM sessions WHERE id=? AND parent_session_id=?",
                         (child_id, session_id),
                     ).fetchone()
                     if row is None:
                         raise RequestFileError(
                             "child is not owned by this conversation"
                         )
+                    if fork:
+                        if not row[4]:
+                            raise RequestFileError(
+                                "child has no bound conversation to fork"
+                            )
+                        fork_of = row[4]
+                        _supersede_child(connection, child_id)
                     original = connection.execute(
                         "SELECT task FROM requests WHERE child_session_id=? ORDER BY created_at LIMIT 1",
                         (child_id,),
@@ -514,13 +557,14 @@ def process_inbox(
                     ),
                 )
                 connection.execute(
-                    "INSERT INTO executions(id,session_id,request_id,backend,state,reservation_pid,reservation_birth) VALUES (?,?,?,'standalone','prepared',?,?)",
+                    "INSERT INTO executions(id,session_id,request_id,backend,state,reservation_pid,reservation_birth,fork_of) VALUES (?,?,?,'standalone','prepared',?,?,?)",
                     (
                         execution_id,
                         child_id,
                         request_id,
                         os.getpid(),
                         processes.birth_identity(os.getpid()),
+                        fork_of,
                     ),
                 )
             results.append(_finish_launch(request, request_id, execution_id, child_id, number, cwd, path, launch))
@@ -542,14 +586,38 @@ def _next_sequence(connection, session_id: str) -> int:
     return int(row[0])
 
 
-def arm_reply(child_session_id: str) -> None:
+def _active_request(
+    connection, child_session_id: str, execution_id: str | None, *, interactive: bool = False
+):
+    """The request this execution answers for.
+
+    A fork leaves an older execution running against the same child, and that execution
+    must never resolve the continuation's request. Its own request settles it; a session
+    with no execution of its own falls back to the child's single active request.
+    """
+    scoped = (
+        connection.execute(
+            "SELECT request_id FROM executions WHERE id=?", (execution_id,)
+        ).fetchone()
+        if execution_id
+        else None
+    )
+    request_id = scoped[0] if scoped else None
+    return connection.execute(
+        "SELECT id, mode, state FROM requests WHERE child_session_id = ?"
+        " AND state IN ('launching','pending','uncertain') AND (? IS NULL OR id = ?)"
+        + (" AND mode = 'interactive'" if interactive else ""),
+        (child_session_id, request_id, request_id),
+    ).fetchone()
+
+
+def arm_reply(child_session_id: str, execution_id: str | None = None) -> None:
     sessions = _sessions_module()
     with sessions._connect() as connection:
         connection.execute("BEGIN IMMEDIATE")
-        row = connection.execute(
-            "SELECT id FROM requests WHERE child_session_id = ? AND mode = 'interactive' AND state IN ('launching','pending','uncertain')",
-            (child_session_id,),
-        ).fetchone()
+        row = _active_request(
+            connection, child_session_id, execution_id, interactive=True
+        )
         if row is None:
             connection.rollback()
             raise sessions.SessionError("no pending interactive parent request")
@@ -584,14 +652,12 @@ def report_child_stop(
     success: bool,
     reason: str | None = None,
     cancelled: bool = False,
+    execution_id: str | None = None,
 ) -> bool:
     """Resolve an auto request or consume an interactive one-shot reply."""
     with _sessions_module()._connect() as connection:
         connection.execute("BEGIN IMMEDIATE")
-        row = connection.execute(
-            "SELECT id, mode, state FROM requests WHERE child_session_id = ? AND state IN ('launching','pending','uncertain')",
-            (child_session_id,),
-        ).fetchone()
+        row = _active_request(connection, child_session_id, execution_id)
         if row is None:
             connection.rollback()
             return False
@@ -683,16 +749,41 @@ def claim_instructions(session_id: str, *, compact: bool = False) -> str | None:
     return document + f"\n\nConversation inbox: {inbox}\n"
 
 
-def _running_count(connection, parent_session_id: str) -> int:
-    return int(
+def _plural(total: int, singular: str, plural: str) -> str:
+    return singular if total == 1 else plural
+
+
+def _delegation_status(connection, parent_session_id: str) -> str:
+    """What the parent must know to act: who is working, who owes a reply, who can be resumed."""
+    active = dict(
         connection.execute(
-            "SELECT count(*) FROM requests WHERE parent_session_id = ? AND state IN ('launching', 'pending')",
+            "SELECT mode,count(*) FROM requests WHERE parent_session_id=? AND state IN ('launching','pending','uncertain') GROUP BY mode",
+            (parent_session_id,),
+        ).fetchall()
+    )
+    running = int(active.get("auto", 0))
+    owed = int(active.get("interactive", 0))
+    idle = int(
+        connection.execute(
+            """
+            SELECT count(*) FROM sessions s WHERE s.parent_session_id = ?
+              AND s.provider_session_id IS NOT NULL
+              AND NOT EXISTS (
+                SELECT 1 FROM requests r WHERE r.child_session_id = s.id
+                  AND r.state IN ('launching','pending','uncertain')
+              )
+            """,
             (parent_session_id,),
         ).fetchone()[0]
     )
+    return (
+        f"{running} auto {_plural(running, 'agent is', 'agents are')} still running, "
+        f"{owed} interactive {_plural(owed, 'agent', 'agents')} still {_plural(owed, 'owes', 'owe')} a reply, "
+        f"{idle} {_plural(idle, 'agent is', 'agents are')} idle and available for resume."
+    )
 
 
-def _format_results(rows, running: int) -> str:
+def _format_results(rows, status: str) -> str:
     messages: list[str] = []
     for row in rows:
         _request_id, number, state, reply, reason, delivery_id = row[:6]
@@ -703,11 +794,12 @@ def _format_results(rows, running: int) -> str:
         if state == "succeeded":
             messages.append(f"{identifier} finished. Agent replied:\n\n{reply}")
         elif state == "cancelled":
-            messages.append(f"{identifier} was cancelled.")
+            messages.append(
+                f"{identifier} was cancelled" + (f": {reason}." if reason else ".")
+            )
         else:
             messages.append(f"{identifier} failed: {reason or 'unknown failure'}.")
-    noun = "agent" if running == 1 else "agents"
-    messages.append(f"{running} {noun} still running.")
+    messages.append(status)
     return "\n\n".join(messages)
 
 
@@ -739,7 +831,7 @@ def claim_parent_delivery(parent_session_id: str, event: str) -> ParentDelivery 
                     (sequence, row[0]),
                 )
         delivery_id = selected[0][5]
-        text = _format_results(selected, _running_count(connection, parent_session_id))
+        text = _format_results(selected, _delegation_status(connection, parent_session_id))
         connection.commit()
         return ParentDelivery(delivery_id, text)
 

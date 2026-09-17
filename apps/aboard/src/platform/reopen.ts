@@ -53,9 +53,13 @@ export interface ReopenCoordinatorOptions {
 
 const TYPE_SELECTORS: Readonly<Record<string, AgentType>> = {
   interactive: "interactive",
-  explore: "Explore",
-  implementer: "implementer",
-  reviewer: "reviewer",
+  explore: "explore",
+  prototype: "prototype",
+  brainstorm: "brainstorm",
+  websearch: "websearch",
+  general: "general",
+  address: "address",
+  review: "review",
 };
 
 function requiresNextMessage(candidate: ReopenCandidate): boolean {

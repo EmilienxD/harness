@@ -9,7 +9,7 @@ import { ChatGptAgentPlatform } from "../../src/chatgpt/platform.js";
 import { FileSystemPromptSpillStore } from "../../src/platform/spill.js";
 import type { AgentId, SessionId } from "../../src/domain/contracts.js";
 
-const agentId = "implementer-1" as AgentId;
+const agentId = "address-1" as AgentId;
 const provisional = "6b1e3f7a-2c4d-4a8b-9f10-2c3d4e5f6071" as SessionId;
 
 async function prepared(context: { after(callback: () => Promise<void>): void }): Promise<{ readonly script: string; readonly guard: string }> {
@@ -25,7 +25,7 @@ async function prepared(context: { after(callback: () => Promise<void>): void })
   const plan = platform.planLaunch({
     agentId,
     sessionId: provisional,
-    agentType: "implementer",
+    agentType: "address",
     autoRunRestricted: true,
     shell: "powershell",
     configuration: { shape: "skill", skillName: "address-this", declaredCommand: ["codex"] },
@@ -47,7 +47,7 @@ function decide(script: string, payload: unknown, raw?: string): { readonly stat
   const result = spawnSync("uv", ["run", "--no-project", "python", script, "worker-guard"], {
     input: raw ?? JSON.stringify(payload),
     encoding: "utf8",
-    env: { ...process.env, ABOARD_AGENT_ID: agentId, ABOARD_AGENT_TYPE: "implementer" },
+    env: { ...process.env, ABOARD_AGENT_ID: agentId, ABOARD_AGENT_TYPE: "address" },
   });
   assert.equal(result.stderr, "");
   if (result.stdout.trim().length === 0) return { status: result.status };

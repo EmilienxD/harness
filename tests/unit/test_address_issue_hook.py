@@ -188,7 +188,7 @@ def test_any_pre_existing_change_blocks_before_model_invocation(
     assert "completely clean Git worktree" in error
 
 
-def test_aboard_continuation_keeps_the_exact_dirty_implementer_handoff(
+def test_aboard_continuation_keeps_the_exact_dirty_address_handoff(
     tmp_path, monkeypatch, capsys,
 ):
     root = repository(tmp_path)

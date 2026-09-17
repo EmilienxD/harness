@@ -490,7 +490,7 @@
         "aboard.autoRun.review": {
           "type": "boolean",
           "default": false,
-          "description": "Launch an Auto Run reviewer after each issue is addressed."
+          "description": "Launch an Auto Run review after each issue is addressed."
         },
         "aboard.autoRun.branchMode": {
           "type": "string",
@@ -501,10 +501,10 @@
           "default": "per-issue",
           "description": "Use one branch and pull request per issue, or commit all issues directly to the run session branch and use only its cumulative pull request."
         },
-        "aboard.autoRun.exploreBeforeImplement": {
+        "aboard.autoRun.exploreBeforeAddress": {
           "type": "boolean",
           "default": false,
-          "description": "Launch a visible read-only Explore agent immediately before each fresh auto-run implementer. Its bounded codebase report is passed directly to the implementer and published best-effort on the issue. The setting is frozen when a run starts and preserved across resume."
+          "description": "Launch a visible read-only explore agent immediately before each fresh auto-run address worker. Its bounded codebase report is passed directly to that worker and published best-effort on the issue. The setting is frozen when a run starts and preserved across resume."
         },
         "aboard.autoRun.issueContextDepth": {
           "type": "integer",
@@ -516,7 +516,7 @@
         "aboard.autoRun.prompt": {
           "type": "string",
           "default": "",
-          "markdownDescription": "Persistent note added near the end of every Auto Run implementer and reviewer prompt. It is inserted before the per-run note supplied after `/auto`, so that dynamic note remains last and can refine the configured guidance. The value is frozen when a run starts and preserved across resume."
+          "markdownDescription": "Persistent note added near the end of every Auto Run address and review prompt. It is inserted before the per-run note supplied after `/auto`, so that dynamic note remains last and can refine the configured guidance. The value is frozen when a run starts and preserved across resume."
         },
         "aboard.autoRun.mergeStrategy": {
           "type": "string",

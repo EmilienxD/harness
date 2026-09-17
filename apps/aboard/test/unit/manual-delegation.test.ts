@@ -19,8 +19,8 @@ test("manual delegation maps task identity and explicit execution mode", async (
 
   assert.equal(response.status, 201);
   assert.deepEqual(launches, [{
-    requestId: "request-1", type: "Web Search", provider: "chatgpt", executionMode: "auto",
-    prompt: "Find primary sources.", skill: "websearch", cwd: "C:\\work", description: "Web Search",
+    requestId: "request-1", type: "websearch", task: "websearch", provider: "chatgpt", executionMode: "auto",
+    prompt: "Find primary sources.", skill: "websearch", cwd: "C:\\work", description: "websearch",
   }]);
 });
 
@@ -30,7 +30,7 @@ test("manual issue delegation invokes the reader worker skills", async () => {
     launch: async (request) => { launches.push(request); return { agentId: "agent-4", sessionId: "session", terminalId: "terminal" }; },
   });
 
-  for (const [index, task] of ["implement", "review"].entries()) {
+  for (const [index, task] of ["address", "review"].entries()) {
     const response = await handler({
       method: "POST",
       url: new URL("http://127.0.0.1/delegations"),
@@ -43,12 +43,12 @@ test("manual issue delegation invokes the reader worker skills", async () => {
 
   assert.deepEqual(launches, [
     {
-      requestId: "request-0", type: "General", provider: "chatgpt", executionMode: "auto",
-      prompt: "Do it.", skill: "address-this", cwd: "C:\\work", description: "Issue Implementation",
+      requestId: "request-0", type: "general", task: "address", provider: "chatgpt", executionMode: "auto",
+      prompt: "Do it.", skill: "address-this", cwd: "C:\\work", description: "Address",
     },
     {
-      requestId: "request-1", type: "General", provider: "chatgpt", executionMode: "auto",
-      prompt: "Do it.", skill: "review-this", cwd: "C:\\work", description: "Issue Review",
+      requestId: "request-1", type: "general", task: "review", provider: "chatgpt", executionMode: "auto",
+      prompt: "Do it.", skill: "review-this", cwd: "C:\\work", description: "Review",
     },
   ]);
 });
@@ -140,6 +140,28 @@ test("delegation deduplication survives bridge restart and rejects conflicting r
   }
 });
 
+test("an unfinished delegation claim is refused as uncertain, not as an ordinary conflict", async () => {
+  const { mkdtemp, rm } = await import("node:fs/promises");
+  const { tmpdir } = await import("node:os");
+  const { join } = await import("node:path");
+  const root = await mkdtemp(join(tmpdir(), "harness-uncertain-"));
+  const launcher = { launch: async () => { throw new Error("the terminal could not be created"); } };
+  const request = { method: "POST", url: new URL("http://127.0.0.1/delegations"), headers: {}, body: { requestId: "unfinished", task: "general", provider: "claude", mode: "auto", prompt: "Task", cwd: root }, signal: new AbortController().signal };
+  const codeOf = (response: { readonly body?: unknown }): string => (response.body as { readonly error: { readonly code: string } }).error.code;
+  try {
+    const refused = await createDelegationRoutes(launcher, { stateDirectory: root })(request);
+    assert.equal(refused.status, 409);
+    assert.equal(codeOf(refused), "conflict");
+
+    const retried = await createDelegationRoutes(launcher, { stateDirectory: root })(request);
+
+    assert.equal(retried.status, 409);
+    assert.equal(codeOf(retried), "startup-uncertain");
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("caller-driven reopen continues through the child's saved Harness state after a bridge restart", async () => {
   const { mkdtemp, rm } = await import("node:fs/promises");
   const { tmpdir } = await import("node:os");
@@ -156,10 +178,47 @@ test("caller-driven reopen continues through the child's saved Harness state aft
       assert.equal(binding.parentSessionId, "parent");
       assert.equal(binding.harnessStateDirectory, join(root, "state"));
       assert.equal(binding.executionMode, "interactive");
+      assert.equal(binding.task, "general");
       assert.equal(message, "Next task");
       const restarted = createDelegationRoutes({ launch: async () => assert.fail("must resume"), resume: async () => ({ agentId: "agent-1", sessionId: "native", terminalId: "terminal-2" }) }, { stateDirectory: root });
       assert.equal((await restarted({ ...request, body: { ...body, requestId: "next", resumeAgentId: "agent-1", resumeSessionId: "native" } })).status, 201);
     });
     assert.deepEqual(resumed, { agentId: "agent-1", sessionId: "native", terminalId: "terminal-2" });
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test("a completed child delegation focuses its saved parent session", async () => {
+  const { mkdtemp, rm } = await import("node:fs/promises");
+  const { tmpdir } = await import("node:os");
+  const { join } = await import("node:path");
+  const root = await mkdtemp(join(tmpdir(), "harness-focus-parent-"));
+  const focused: string[] = [];
+  const handler = createDelegationRoutes(
+    { launch: async () => ({ agentId: "agent-2", sessionId: "native-child", terminalId: "terminal-2" }) },
+    { stateDirectory: root, focusParent: (sessionId) => { focused.push(sessionId); return true; } },
+  );
+  const signal = new AbortController().signal;
+  try {
+    const launched = await handler({
+      authorizationScope: "delegation",
+      method: "POST",
+      url: new URL("http://127.0.0.1/delegations"),
+      headers: {},
+      body: { requestId: "request-1", task: "general", provider: "claude", mode: "interactive", prompt: "Task", cwd: root, harnessSessionId: "stable-child", parentSessionId: "native-parent" },
+      signal,
+    });
+    assert.equal(launched.status, 201);
+
+    const response = await handler({
+      authorizationScope: "full",
+      method: "POST",
+      url: new URL("http://127.0.0.1/delegations/focus-parent"),
+      headers: {},
+      body: { childSessionId: "stable-child" },
+      signal,
+    });
+
+    assert.equal(response.status, 204);
+    assert.deepEqual(focused, ["native-parent"]);
   } finally { await rm(root, { recursive: true, force: true }); }
 });

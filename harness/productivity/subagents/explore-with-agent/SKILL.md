@@ -10,8 +10,11 @@ disable-model-invocation: true
 
 # Explore with an Agent
 
-Follow the delegation workflow injected by the hook, using the persistent conversation inbox. Launch only after the user explicitly requests delegation.
+Follow the shared delegation workflow and inbox supplied by the hook. If no hook supplied them, stop immediately and notify the user without looking for a workaround.
 
-Request parameters: `task: explore`; mode: auto; optional provider: `claude` or `chatgpt`.
+Request parameters:
+- task: explore
+- mode: auto
+- provider (Optional): `claude` or `chatgpt`
 
-Ask the child to inspect the codebase and report findings without editing files.
+Ask the child to inspect the codebase and report findings without editing files. The task param already tells the agent how to explore, not what to explore.

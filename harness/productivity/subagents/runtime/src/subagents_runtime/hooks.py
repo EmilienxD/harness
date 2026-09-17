@@ -91,6 +91,33 @@ def _inbox_for_path(session_id: str, path: Path) -> str | None:
     return None
 
 
+def _forked_child(execution_id: str | None, conversation: str) -> str | None:
+    """The delegated identity a Harness-started fork carries on, if this is one.
+
+    A fork this runtime launched keeps the child's agent-i identity and simply speaks
+    through the copied conversation. A fork the user starts inside the terminal is a
+    conversation of their own and must never inherit that identity.
+    """
+    if not execution_id:
+        return None
+    with sessions._connect() as connection:
+        row = connection.execute(
+            "SELECT session_id FROM executions WHERE id=? AND fork_of IS NOT NULL AND superseded_at IS NULL AND state IN ('prepared','starting','running','uncertain')",
+            (execution_id,),
+        ).fetchone()
+        if row is None:
+            return None
+        bound = connection.execute(
+            "SELECT provider_session_id FROM sessions WHERE id=?", (row[0],)
+        ).fetchone()
+        if bound is None or bound[0] not in (None, conversation):
+            return None
+        connection.execute(
+            "UPDATE sessions SET provider_session_id=? WHERE id=?", (conversation, row[0])
+        )
+        return row[0]
+
+
 def _stop_wait_seconds(cwd: Path) -> float:
     try:
         value = sessions.launch_configuration(cwd)
@@ -125,8 +152,16 @@ def handle(
     cwd = Path(payload.get("cwd") or Path.cwd())
     selected_provider = provider or os.environ.get("HARNESS_PROVIDER", "claude")
     execution_mode = os.environ.get("HARNESS_EXECUTION_MODE", "interactive")
+    execution_id = os.environ.get("HARNESS_EXECUTION_ID")
     fresh = event == "SessionStart" and payload.get("source") in {"clear", "fork"}
-    if fresh:
+    continued = (
+        _forked_child(execution_id, session_id)
+        if event == "SessionStart" and payload.get("source") == "fork"
+        else None
+    )
+    if continued:
+        session_id = continued
+    elif fresh:
         # Providers assign a fresh conversation ID. Never bind it to an inherited parent ID.
         sessions.register_observed(session_id, cwd, selected_provider, execution_mode)
     else:
@@ -134,8 +169,7 @@ def handle(
             session_id, cwd, selected_provider, execution_mode
         )
     observe_parent_event(session_id, event)
-    execution_id = os.environ.get("HARNESS_EXECUTION_ID")
-    if event == "SessionStart" and execution_id and not fresh:
+    if event == "SessionStart" and execution_id and (continued or not fresh):
         from subagents_runtime.processes import confirm_startup
 
         confirm_startup(execution_id)
@@ -175,7 +209,7 @@ def handle(
         if match:
             skill = match.group(1)
             if skill == "reply-to-agent":
-                arm_reply(session_id)
+                arm_reply(session_id, execution_id)
                 context = (
                     "Reply armed. The next successful Stop will be sent to the parent."
                 )
@@ -222,7 +256,7 @@ def handle(
             and re.fullmatch(SKILL_NAME, skill)
         ):
             if skill == "reply-to-agent":
-                arm_reply(session_id)
+                arm_reply(session_id, execution_id)
             else:
                 enable_delegation(session_id, skill)
                 instructions = claim_instructions(session_id)
@@ -251,13 +285,16 @@ def handle(
         if not isinstance(message, str):
             message = ""
         success = event == "Stop" and bool(message.strip())
-        report_child_stop(
+        reported = report_child_stop(
             session_id,
             message,
             success=success,
             reason=None if success else str(payload.get("reason") or event),
             cancelled=event == "SessionEnd",
+            execution_id=execution_id,
         )
+        if reported and success and execution_mode == "interactive":
+            sessions.focus_parent_in_aboard(session_id)
         if event == "Stop":
             delivery = wait_parent_delivery(
                 session_id,

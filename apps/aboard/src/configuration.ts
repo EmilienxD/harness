@@ -20,7 +20,7 @@ export const ABOARD_SETTINGS = [
   "aboard.terminals.closeOnSessionEnd",
   "aboard.autoRun.review",
   "aboard.autoRun.branchMode",
-  "aboard.autoRun.exploreBeforeImplement",
+  "aboard.autoRun.exploreBeforeAddress",
   "aboard.autoRun.issueContextDepth",
   "aboard.autoRun.prompt",
   "aboard.autoRun.mergeStrategy",
@@ -127,7 +127,7 @@ export function readAboardConfiguration(reader: ConfigurationReader): Configurat
     autoRun: {
       branchMode: choice<AutoRunBranchMode>(reader, "aboard.autoRun.branchMode", AUTO_RUN_BRANCH_MODES, "per-issue", diagnostics),
       review: flag(reader, "aboard.autoRun.review", false, diagnostics),
-      exploreBeforeImplement: flag(reader, "aboard.autoRun.exploreBeforeImplement", false, diagnostics),
+      exploreBeforeAddress: flag(reader, "aboard.autoRun.exploreBeforeAddress", false, diagnostics),
       issueContextDepth: integer(reader, "aboard.autoRun.issueContextDepth", DEFAULT_ISSUE_CONTEXT_DEPTH, 0, MAX_ISSUE_CONTEXT_DEPTH, diagnostics),
       permanentPrompt: text(reader, "aboard.autoRun.prompt", "", diagnostics),
       mergeStrategy: choice<MergeStrategy>(reader, "aboard.autoRun.mergeStrategy", MERGE_STRATEGIES, "squash", diagnostics),

@@ -41,12 +41,12 @@ points.
 ## Session and Runtime Model
 
 - `interactive`: empty, user-controlled Claude Code or Codex TUI.
-- `Explore`: read-only exploration; Claude's built-in agent or a top-level Codex session enforced with
+- `explore`: read-only exploration; Claude's built-in Explore agent or a top-level Codex session enforced with
   `sandbox_mode="read-only"` and `approval_policy="never"`.
-- `Prototype`, `Web Search`, `Brainstorm`, and `General`: manual delegation identities. Their explicit
+- `prototype`, `websearch`, `brainstorm`, and `general`: manual delegation identities. Their explicit
   `interactive` or `auto` execution mode is separate from Auto Run worker semantics.
-- `implementer`: Auto Run worker invoking `/address-this` on Claude or `$address-this` on ChatGPT.
-- `reviewer`: Auto Run worker invoking `/review-this` on Claude or `$review-this` on ChatGPT. AFK and
+- `address`: Auto Run worker invoking `/address-this` on Claude or `$address-this` on ChatGPT.
+- `review`: Auto Run worker invoking `/review-this` on Claude or `$review-this` on ChatGPT. AFK and
   HITL are orchestration modes, not separate skills.
 
 Headless execution is one-shot: a detached provider process with no terminal, no takeover, and no resume.
@@ -58,14 +58,17 @@ both launch adapters ask, so a mode never means headless in one of them and visi
 `.abd/scaffold.json` is the initialized-project marker; when absent, runtime surfaces and the command
 endpoint are closed. Mutable runtime state belongs in VS Code storage, not the workspace.
 
-`.harness/launch.json` version 1 is the launch authority and is re-read for every new launch, resume, and
-reopen. `providers.claude` and `providers.chatgpt` are equal, independently validated configurations;
-neither is inferred from the wrapper-friendly `command` array. **Run Agent** asks which provider to launch,
+`.harness/launch.json` is a sparse launch authority and is re-read for every new launch, resume, and
+reopen. Omitted fields use code-owned defaults. `providers.claude` and `providers.chatgpt` are equal,
+independently validated configurations; neither is inferred from the wrapper-friendly `command` array. **Run Agent** asks which provider to launch,
 the Run Agent view above the fleet offers one row per provider that launches the same interactive session
 without the prompt, and `autoRun.provider` selects the Auto Run default and is scaffolded as `claude`. Reopen always uses the
 provider recorded by the session, even when the Auto Run default changes. Existing processes retain their
-configuration. Profiles select model and effort independently and may use `inherit`; Auto Run workers may
-use `by-difficulty`. Platform-specific values must be validated before a terminal is created.
+configuration. Interactive, manual-delegation, and Auto Run profiles select model and effort independently.
+Manual delegation keys are `explore`, `prototype`, `websearch`, `brainstorm`, `address`, `review`, and
+`general`; their task identity must survive launch and resume instead of collapsing configuration to the
+runtime `general` identity. Profiles may use `inherit`; Auto Run workers may use `by-difficulty`.
+Platform-specific values must be validated before a terminal is created.
 
 Difficulty routing:
 
@@ -77,13 +80,14 @@ Difficulty routing:
 | `[AI]-expert-difficulty` or none | `opus`, high | `gpt-5.6-sol`, high |
 
 Interactive and manual sessions inherit the user's native Claude Code or Codex tool settings, including
-built-in subagents and web search. Auto Run workers deny those tools regardless of permissive launch-profile
-settings, with extension-owned Git/GitHub restrictions enforced by a guard hook. ChatGPT Explore must pass
-managed-policy checks for read-only sandboxing, `never` approval, and managed hooks. `[AI]-chrome` is an
-issue property, so both of that issue's workers are told to use browser tooling when they have a tool for it
-and to skip the step otherwise; Claude workers additionally launch with `--chrome`. Codex
-`BROWSER_USE_AVAILABLE_BACKENDS` enforcement is retained in `chatgpt/browser.ts` but disabled, because a
-backend requirement contradicts that skip-if-absent policy.
+built-in subagents and web search, when their exact profile omits an override. Claude exploration defaults
+to Haiku/low and ChatGPT exploration defaults to GPT-5.6 Luna/low. Auto Run workers deny those tools
+regardless of permissive launch-profile settings, with extension-owned Git/GitHub restrictions enforced by
+a guard hook. ChatGPT explore must pass managed-policy checks for read-only sandboxing, `never` approval,
+and managed hooks. `[AI]-chrome` is an issue property, so both of that issue's workers are told to use
+browser tooling when they have a tool for it and to skip the step otherwise; Claude workers additionally
+launch with `--chrome`. Codex `BROWSER_USE_AVAILABLE_BACKENDS` enforcement is retained in
+`chatgpt/browser.ts` but disabled, because a backend requirement contradicts that skip-if-absent policy.
 
 Worktree runs copy ignored local `.claude`, `.agents`, `.codex`, and `.abd` configuration without
 overwriting checkout files or copying live session state. Refuse the run when a copied path is not ignored.
@@ -101,7 +105,7 @@ user/profile/default settings. `.abd/settings.json` accepts flat or nested keys,
 | `aboard.terminals.closeOnSessionEnd` | `false` | Leave exited session terminals available. |
 | `aboard.autoRun.review` | `false` | Add the mode-specific automated review turn. |
 | `aboard.autoRun.branchMode` | `per-issue` | Per-issue PRs or one cumulative branch. |
-| `aboard.autoRun.exploreBeforeImplement` | `false` | Run read-only Explore before a fresh worker. |
+| `aboard.autoRun.exploreBeforeAddress` | `false` | Run read-only explore before a fresh worker. |
 | `aboard.autoRun.issueContextDepth` | `1` | Related-issue traversal depth. |
 | `aboard.autoRun.prompt` | `""` | Persistent worker guidance. |
 | `aboard.autoRun.mergeStrategy` | `squash` | PR merge method. |
@@ -154,10 +158,10 @@ are outside workspaces, permissioned `0600`, and removed on window close.
   prompt surface is easy for humans to find and review.
 - Auto Run injects its commit contract and pinned review scope at launch; the user-owned worker skills
   supply reusable implementation and review behavior.
-  AFK implementers and reviewers require successful turns and exactly one clean descendant commit; an AFK
-  reviewer uses an empty commit when no fixes are needed. HITL without review leaves implementation edits
-  uncommitted. HITL with review creates one clean local implementer checkpoint, mixed-resets it, and gives a
-  non-committing reviewer the immutable checkpoint range. Every HITL path advances only after exactly one
+  AFK address and review workers require successful turns and exactly one clean descendant commit; an AFK
+  review uses an empty commit when no fixes are needed. HITL without review leaves implementation edits
+  uncommitted. HITL with review creates one clean local address checkpoint, mixed-resets it, and gives a
+  non-committing review the immutable checkpoint range. Every HITL path advances only after exactly one
   non-empty, clean user acceptance commit.
 - Workers receive read-only Git commands plus `git add` and `git commit`; Aboard owns every other
   Auto Run Git and GitHub mutation. Aboard observes acceptance commits and never creates them.
@@ -171,7 +175,7 @@ are outside workspaces, permissioned `0600`, and removed on window close.
   supplies a one-second fallback. Recovery uses version-1 records. Persist mutation intent, then observed
   postconditions, before clearing the journal. The HITL mixed
   reset has its own pending action whose postcondition includes an index reset to `beforeSha`, and the
-  temporary implementer checkpoint must never be published.
+  temporary address checkpoint must never be published.
 - Determine worker success only from process outcome, commit ancestry/count, and worktree cleanliness.
   Never parse final-response markup or generate/read worker commit messages.
 - Auto Run adds non-removable Git/GitHub restrictions and, for worktrees, original-checkout path

@@ -1,3 +1,6 @@
+import os
+import subprocess
+
 import pytest
 from subagents_runtime import sessions
 from subagents_runtime.delegation import enable_delegation, process_inbox
@@ -135,7 +138,7 @@ def test_instruction_delivery_is_replayed_then_acknowledged_and_compaction_start
 
 @pytest.mark.parametrize("provider", ["claude", "chatgpt"])
 @pytest.mark.parametrize("mode", ["auto", "interactive"])
-def test_continuation_keeps_child_identity_and_mode_and_refuses_live_execution(
+def test_continuation_of_a_settled_child_keeps_its_identity_and_mode(
     tmp_path, monkeypatch, provider, mode
 ):
     monkeypatch.setenv("HARNESS_STATE_DIR", str(tmp_path / "state"))
@@ -151,11 +154,6 @@ def test_continuation_keeps_child_identity_and_mode_and_refuses_live_execution(
     if mode == "interactive":
         arm_reply(first.child_session_id)
     report_child_stop(first.child_session_id, "Done", success=True)
-    continuation = inbox / "next.md"
-    continuation.write_text("---\nresume: agent-1\n---\nNext task.", encoding="utf-8")
-    [refused] = process_inbox("parent", launch=lambda *_: pytest.fail("overlap"))
-    assert refused.status == "failed"
-    assert "resume refused" in refused.reason
     # Provider process exit is a separate observation from its reply.
     with sessions._connect() as connection:
         connection.execute(
@@ -196,6 +194,272 @@ def test_background_adapter_uses_native_headless_resume_arguments(provider):
     assert sessions.provider_arguments(
         provider, "interactive", "conversation", "--permission-option", resume=True
     )[-2:] == ["--", "--permission-option"]
+
+
+def _standalone_provider(tmp_path, monkeypatch, provider):
+    """A delegated child whose launches stay in this runtime and record their argv."""
+    from subagents_runtime import processes
+
+    started = []
+    monkeypatch.setenv("HARNESS_STATE_DIR", str(tmp_path / "state"))
+    monkeypatch.setattr(sessions, "_discover_delegation_endpoint", lambda _cwd: None)
+    monkeypatch.setattr(sessions, "_command_from_config", lambda _config, _provider="claude": ["provider"])
+
+    def start(execution_id, argv, _environment, _cwd, *, visible):
+        started.append((argv, visible))
+        processes.confirm_startup(execution_id)
+
+    monkeypatch.setattr(processes, "start", start)
+    sessions.register_observed("parent", tmp_path, provider)
+    return started, enable_delegation("parent", "work-with-agent").inbox
+
+
+@pytest.mark.parametrize("provider", ["claude", "chatgpt"])
+def test_live_child_is_continued_in_a_fork_under_the_same_identity(tmp_path, monkeypatch, provider):
+    import os
+
+    from subagents_runtime import processes
+
+    started, inbox = _standalone_provider(tmp_path, monkeypatch, provider)
+    (inbox / "first.md").write_text(
+        "---\ntask: general\nmode: interactive\n---\nInitial task.", encoding="utf-8"
+    )
+    [first] = process_inbox("parent", launch=sessions.launch_delegated)
+    with sessions._connect() as connection:
+        connection.execute(
+            "UPDATE sessions SET provider_session_id='saved-conversation' WHERE id=?",
+            (first.child_session_id,),
+        )
+        # An idle interactive terminal: the provider process is still very much alive.
+        connection.execute(
+            "UPDATE executions SET state='running',provider_pid=?,provider_birth=? WHERE request_id=?",
+            (os.getpid(), processes.birth_identity(os.getpid()), first.request_id),
+        )
+    (inbox / "next.md").write_text(
+        "---\nresume: agent-1\n---\nNext task.", encoding="utf-8"
+    )
+
+    [forked] = process_inbox("parent", launch=sessions.launch_delegated)
+
+    assert forked.status == "launched"
+    assert forked.child_session_id == first.child_session_id
+    assert sessions.resolve_session("agent-1", "parent") == first.child_session_id
+    argv, visible = started[-1]
+    assert visible is True
+    with sessions._connect() as connection:
+        bound = connection.execute(
+            "SELECT provider_session_id FROM sessions WHERE id=?", (first.child_session_id,)
+        ).fetchone()[0]
+    if provider == "claude":
+        assert argv[argv.index("--resume") + 1] == "saved-conversation"
+        assert "--fork-session" in argv
+        assert bound == argv[argv.index("--session-id") + 1] != "saved-conversation"
+    else:
+        assert argv[1:3] == ["fork", "saved-conversation"]
+        assert bound is None
+    assert not list(inbox.iterdir())
+
+
+def _live_delegated_child(tmp_path, monkeypatch, provider="claude"):
+    """agent-1 with a bound conversation and a provider process still running."""
+    import os
+
+    from subagents_runtime import processes
+
+    started, inbox = _standalone_provider(tmp_path, monkeypatch, provider)
+    (inbox / "first.md").write_text(
+        "---\ntask: general\nmode: interactive\n---\nInitial task.", encoding="utf-8"
+    )
+    [first] = process_inbox("parent", launch=sessions.launch_delegated)
+    with sessions._connect() as connection:
+        connection.execute(
+            "UPDATE sessions SET provider_session_id='saved-conversation' WHERE id=?",
+            (first.child_session_id,),
+        )
+        connection.execute(
+            "UPDATE executions SET state='running',provider_pid=?,provider_birth=? WHERE request_id=?",
+            (os.getpid(), processes.birth_identity(os.getpid()), first.request_id),
+        )
+    return started, inbox, first
+
+
+def test_resume_command_forks_a_live_delegated_child(tmp_path, monkeypatch):
+    started, _inbox, first = _live_delegated_child(tmp_path, monkeypatch)
+    monkeypatch.setenv("HARNESS_SESSION_ID", "parent")
+
+    sessions.resume("agent-1", "Next task.")
+
+    argv, _visible = started[-1]
+    assert "--fork-session" in argv
+    assert argv[argv.index("--resume") + 1] == "saved-conversation"
+    assert sessions.resolve_session("agent-1", "parent") == first.child_session_id
+
+
+def test_forked_conversation_starts_up_as_the_same_delegated_child(tmp_path, monkeypatch):
+    import os
+
+    from subagents_runtime import processes
+
+    started, inbox = _standalone_provider(tmp_path, monkeypatch, "claude")
+    (inbox / "first.md").write_text(
+        "---\ntask: general\nmode: interactive\n---\nInitial task.", encoding="utf-8"
+    )
+    [first] = process_inbox("parent", launch=sessions.launch_delegated)
+    with sessions._connect() as connection:
+        connection.execute(
+            "UPDATE sessions SET provider_session_id='saved-conversation' WHERE id=?",
+            (first.child_session_id,),
+        )
+        connection.execute(
+            "UPDATE executions SET state='running',provider_pid=?,provider_birth=? WHERE request_id=?",
+            (os.getpid(), processes.birth_identity(os.getpid()), first.request_id),
+        )
+    (inbox / "next.md").write_text(
+        "---\nresume: agent-1\n---\nNext task.", encoding="utf-8"
+    )
+    process_inbox("parent", launch=sessions.launch_delegated)
+    argv, _visible = started[-1]
+    conversation = argv[argv.index("--session-id") + 1]
+    with sessions._connect() as connection:
+        execution = connection.execute(
+            "SELECT id FROM executions WHERE fork_of IS NOT NULL"
+        ).fetchone()[0]
+    monkeypatch.setenv("HARNESS_EXECUTION_ID", execution)
+    monkeypatch.setenv("HARNESS_SESSION_ID", first.child_session_id)
+
+    handle(
+        {
+            "session_id": conversation,
+            "cwd": str(tmp_path),
+            "hook_event_name": "SessionStart",
+            "source": "fork",
+        },
+        "claude",
+    )
+
+    with sessions._connect() as connection:
+        assert connection.execute(
+            "SELECT id FROM sessions WHERE provider_session_id=?", (conversation,)
+        ).fetchall() == [(first.child_session_id,)]
+
+
+def test_a_superseded_session_cannot_answer_for_its_fork(tmp_path, monkeypatch):
+    from subagents_runtime.delegation import arm_reply, report_child_stop
+
+    _started, inbox, first = _live_delegated_child(tmp_path, monkeypatch)
+    with sessions._connect() as connection:
+        abandoned = connection.execute(
+            "SELECT id FROM executions WHERE request_id=?", (first.request_id,)
+        ).fetchone()[0]
+    (inbox / "next.md").write_text(
+        "---\nresume: agent-1\n---\nNext task.", encoding="utf-8"
+    )
+    [forked] = process_inbox("parent", launch=sessions.launch_delegated)
+    with sessions._connect() as connection:
+        continuation = connection.execute(
+            "SELECT id FROM executions WHERE request_id=?", (forked.request_id,)
+        ).fetchone()[0]
+
+    # The terminal the user left open finishes its own turn; it speaks for nobody now.
+    with pytest.raises(sessions.SessionError, match="pending interactive"):
+        arm_reply(first.child_session_id, abandoned)
+    assert (
+        report_child_stop(
+            first.child_session_id, "Stale answer.", success=True, execution_id=abandoned
+        )
+        is False
+    )
+
+    arm_reply(first.child_session_id, continuation)
+    assert (
+        report_child_stop(
+            first.child_session_id, "Forked answer.", success=True, execution_id=continuation
+        )
+        is True
+    )
+
+
+def test_a_fork_that_never_starts_gives_the_child_its_conversation_back(
+    tmp_path, monkeypatch
+):
+    from subagents_runtime import processes
+
+    _started, inbox, first = _live_delegated_child(tmp_path, monkeypatch)
+
+    def refuse(*_args, **_kwargs):
+        raise OSError("the terminal could not be opened")
+
+    monkeypatch.setattr(processes, "start", refuse)
+    (inbox / "next.md").write_text(
+        "---\nresume: agent-1\n---\nNext task.", encoding="utf-8"
+    )
+
+    [failed] = process_inbox("parent", launch=sessions.launch_delegated)
+
+    assert failed.status == "failed"
+    with sessions._connect() as connection:
+        assert connection.execute(
+            "SELECT provider_session_id FROM sessions WHERE id=?",
+            (first.child_session_id,),
+        ).fetchone() == ("saved-conversation",)
+
+
+def test_fork_settles_the_superseded_request_without_telling_the_parent(tmp_path, monkeypatch):
+    from subagents_runtime.delegation import (
+        arm_reply,
+        claim_parent_delivery,
+        report_child_stop,
+    )
+
+    _started, inbox, first = _live_delegated_child(tmp_path, monkeypatch)
+    (inbox / "next.md").write_text(
+        "---\nresume: agent-1\n---\nNext task.", encoding="utf-8"
+    )
+    [forked] = process_inbox("parent", launch=sessions.launch_delegated)
+
+    # Superseding is bookkeeping between the runtime and its child, not news to deliver.
+    assert claim_parent_delivery("parent", "Stop") is None
+    with sessions._connect() as connection:
+        assert connection.execute(
+            "SELECT state FROM requests WHERE id=?", (first.request_id,)
+        ).fetchone() == ("cancelled",)
+        continuation = connection.execute(
+            "SELECT id FROM executions WHERE request_id=?", (forked.request_id,)
+        ).fetchone()[0]
+    arm_reply(first.child_session_id, continuation)
+    report_child_stop(
+        first.child_session_id, "Forked answer.", success=True, execution_id=continuation
+    )
+
+    delivery = claim_parent_delivery("parent", "Stop")
+
+    assert delivery is not None and "Forked answer." in delivery.text
+    assert "cancelled" not in delivery.text
+
+
+@pytest.mark.parametrize("mode", ["auto", "interactive"])
+def test_fork_arguments_copy_the_conversation_natively(mode):
+    claude = sessions.provider_arguments(
+        "claude", mode, "conversation", "next", fork=True, fork_id="copy"
+    )
+    chatgpt = sessions.provider_arguments("chatgpt", mode, "conversation", "next", fork=True)
+
+    headless = ["-p", "--output-format", "stream-json", "--verbose"] if mode == "auto" else []
+    assert claude == [
+        *headless,
+        "--resume",
+        "conversation",
+        "--fork-session",
+        "--session-id",
+        "copy",
+        "--",
+        "next",
+    ]
+    assert chatgpt == (
+        ["exec", "fork", "conversation", "--json", "--", "next"]
+        if mode == "auto"
+        else ["fork", "conversation", "--", "next"]
+    )
 
 
 def test_detached_supervisor_binds_conversation_and_delivers_after_process_exit(
@@ -597,6 +861,83 @@ def test_aboard_receives_runtime_location_and_execution_identity(tmp_path, monke
     )
 
 
+def test_aboard_refusal_fails_definitively_and_reports_its_reason(tmp_path, monkeypatch):
+    import io
+    import json
+    import urllib.error
+
+    monkeypatch.setenv("HARNESS_STATE_DIR", str(tmp_path / "state"))
+    sessions.register_observed("parent", tmp_path, "claude")
+    inbox = enable_delegation("parent", "work-with-agent").inbox
+    (inbox / "task.md").write_text(
+        "---\ntask: general\nmode: auto\n---\nTask.", encoding="utf-8"
+    )
+    monkeypatch.setattr(
+        sessions, "_discover_delegation_endpoint", lambda cwd: ("127.0.0.1", 4823, "t")
+    )
+    body = json.dumps(
+        {
+            "ok": False,
+            "error": {
+                "code": "conflict",
+                "message": "Delegated session ownership does not match",
+            },
+        }
+    ).encode("utf-8")
+
+    def refuse(request, timeout):
+        raise urllib.error.HTTPError(
+            request.full_url, 409, "Conflict", {}, io.BytesIO(body)
+        )
+
+    monkeypatch.setattr(sessions.urllib.request, "urlopen", refuse)
+
+    [refused] = process_inbox("parent", launch=sessions.launch_delegated)
+
+    assert refused.status == "failed"
+    assert "Delegated session ownership does not match" in refused.reason
+    assert not list(inbox.iterdir())
+
+
+def test_aboard_uncertain_startup_keeps_its_reservation_for_recovery(
+    tmp_path, monkeypatch
+):
+    import io
+    import json
+    import urllib.error
+
+    monkeypatch.setenv("HARNESS_STATE_DIR", str(tmp_path / "state"))
+    sessions.register_observed("parent", tmp_path, "claude")
+    inbox = enable_delegation("parent", "work-with-agent").inbox
+    (inbox / "task.md").write_text(
+        "---\ntask: general\nmode: auto\n---\nTask.", encoding="utf-8"
+    )
+    monkeypatch.setattr(
+        sessions, "_discover_delegation_endpoint", lambda cwd: ("127.0.0.1", 4823, "t")
+    )
+    body = json.dumps(
+        {
+            "ok": False,
+            "error": {
+                "code": "startup-uncertain",
+                "message": "Delegation startup is uncertain; verify the existing execution",
+            },
+        }
+    ).encode("utf-8")
+
+    def refuse(request, timeout):
+        raise urllib.error.HTTPError(
+            request.full_url, 409, "Conflict", {}, io.BytesIO(body)
+        )
+
+    monkeypatch.setattr(sessions.urllib.request, "urlopen", refuse)
+
+    [unresolved] = process_inbox("parent", launch=sessions.launch_delegated)
+
+    assert unresolved.status == "uncertain"
+    assert (inbox / "task.md.running").is_file()
+
+
 def test_aboard_wrapper_error_preserves_live_provider_identity_and_marker(
     tmp_path, monkeypatch
 ):
@@ -692,3 +1033,53 @@ def test_supervisor_error_keeps_live_provider_uncertain(tmp_path, monkeypatch):
         )
     with pytest.raises(sessions.SessionError, match="uncertain"):
         processes.require_exited(child)
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows process creation contract")
+def test_headless_provider_does_not_open_a_windows_console(tmp_path, monkeypatch):
+    import json
+    from types import SimpleNamespace
+
+    from subagents_runtime import processes
+
+    monkeypatch.setenv("HARNESS_STATE_DIR", str(tmp_path / "state"))
+    sessions.register_observed("parent", tmp_path, "claude")
+    inbox = enable_delegation("parent", "work-with-agent").inbox
+    (inbox / "task.md").write_text(
+        "---\ntask: general\nmode: auto\n---\nTask.", encoding="utf-8"
+    )
+
+    with pytest.raises(KeyboardInterrupt):
+        process_inbox(
+            "parent", launch=lambda *_: (_ for _ in ()).throw(KeyboardInterrupt())
+        )
+    child = sessions.resolve_session("agent-1", "parent")
+    with sessions._connect() as connection:
+        execution = connection.execute("SELECT id FROM executions").fetchone()[0]
+    specification = tmp_path / "launch.json"
+    specification.write_text(
+        json.dumps(
+            {
+                "argv": ["provider"],
+                "environment": {"HARNESS_SESSION_ID": child},
+                "cwd": str(tmp_path),
+                "visible": False,
+            }
+        ),
+        encoding="utf-8",
+    )
+    launches = []
+    fake_provider = SimpleNamespace(
+        pid=os.getpid(), stdout=[], wait=lambda: 0, poll=lambda: 0
+    )
+
+    def popen(*args, **kwargs):
+        launches.append((args, kwargs))
+        return fake_provider
+
+    monkeypatch.setattr(processes, "native_command", lambda argv: argv)
+    monkeypatch.setattr(processes.subprocess, "Popen", popen)
+
+    processes.supervise(execution, specification)
+
+    assert launches[0][1].get("creationflags") == subprocess.CREATE_NO_WINDOW

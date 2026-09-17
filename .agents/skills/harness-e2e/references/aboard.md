@@ -83,7 +83,7 @@ The foundational Claude scenario is history-derived: real Read result, real Edit
 
 Auto Run uses fresh issue numbers and restores the repository in finally. The fake model reads before editing. Resolve worktree paths from the one active Git-registered worktree; never edit the original checkout to avoid a prompt. Preserve narrow worker mutation policy rather than granting broad shell access.
 
-Do not globally change Aboard production launch commands for E2E. Interactive, Explore, implementer, reviewer, resume, HITL, and takeover paths rely on their authored interactive CLI shapes.
+Do not globally change Aboard production launch commands for E2E. Interactive, explore, address, review, resume, HITL, and takeover paths rely on their authored interactive CLI shapes.
 
 ## Verification
 

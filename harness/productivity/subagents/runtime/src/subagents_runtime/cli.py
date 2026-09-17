@@ -37,7 +37,7 @@ def cmd_reply(_args: argparse.Namespace) -> int:
     session_id = os.environ.get("HARNESS_SESSION_ID")
     if not session_id:
         raise SessionError("harness reply must run inside a delegated child")
-    arm_reply(session_id)
+    arm_reply(session_id, os.environ.get("HARNESS_EXECUTION_ID"))
     print("The next successful Stop will reply to the parent")
     return 0
 

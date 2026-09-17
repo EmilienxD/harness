@@ -61,6 +61,72 @@ def test_interactive_stop_requires_one_shot_reply_authorization(tmp_path: Path, 
     assert delivery is not None and "The routed answer." in delivery.text
 
 
+def test_successful_interactive_reply_asks_aboard_to_focus_the_parent(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    import io
+    import json
+
+    from subagents_runtime.hooks import handle
+
+    _parent, _request, child = setup_request(tmp_path, monkeypatch, mode="interactive")
+    arm_reply(child)
+    monkeypatch.setenv("ABOARD_BRIDGE_PORT", "4823")
+    monkeypatch.setenv("ABOARD_BRIDGE_TOKEN", "private-token")
+    monkeypatch.setenv("HARNESS_EXECUTION_MODE", "interactive")
+    sent = []
+
+    def response(request, timeout):
+        sent.append((request, timeout))
+        return io.BytesIO(b"")
+
+    monkeypatch.setattr(sessions.urllib.request, "urlopen", response)
+
+    handle({
+        "session_id": child,
+        "cwd": str(tmp_path),
+        "hook_event_name": "Stop",
+        "last_assistant_message": "The routed answer.",
+    })
+
+    assert len(sent) == 1
+    request, timeout = sent[0]
+    assert request.full_url == "http://127.0.0.1:4823/delegations/focus-parent"
+    assert request.headers["Authorization"] == "Bearer private-token"
+    assert json.loads(request.data) == {"childSessionId": child}
+    assert timeout <= 2
+
+
+def test_delivery_counts_running_auto_owed_replies_and_idle_children(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("HARNESS_STATE_DIR", str(tmp_path / "state"))
+    sessions.register_observed("parent", tmp_path, "claude")
+    inbox = enable_delegation("parent", "work-with-agent").inbox
+    for name, mode in (("a.md", "auto"), ("b.md", "auto"), ("c.md", "interactive"), ("d.md", "interactive")):
+        (inbox / name).write_text(f"---\ntask: general\nmode: {mode}\n---\nTask.", encoding="utf-8")
+    children = {
+        result.request_id: result.child_session_id
+        for result in process_inbox("parent", launch=lambda _request, _id, number, _cwd: f"conversation-{number}")
+    }
+    finished = [sessions.resolve_session(name, "parent") for name in ("agent-1", "agent-3")]
+    arm_reply(finished[1])
+    for child in finished:
+        report_child_stop(child, "Done.", success=True)
+
+    # A child that never bound a conversation cannot be resumed, so it is not offered.
+    def unlaunchable(*_args):
+        raise RuntimeError("startup failed")
+
+    (inbox / "e.md").write_text("---\ntask: general\nmode: auto\n---\nTask.", encoding="utf-8")
+    [stranded] = process_inbox("parent", launch=unlaunchable)
+    assert stranded.status == "failed"
+
+    delivery = claim_parent_delivery("parent", "Stop")
+
+    assert delivery is not None and len(children) == 4
+    assert delivery.text.endswith(
+        "1 auto agent is still running, 1 interactive agent still owes a reply, "
+        "2 agents are idle and available for resume."
+    )
+
+
 def test_failed_interactive_stop_clears_authorization_but_keeps_request_pending(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     _parent, request, child = setup_request(tmp_path, monkeypatch, mode="interactive")
     arm_reply(child)
@@ -141,6 +207,35 @@ def test_all_execution_modes_can_enable_delegation(
     _parent, _request, interactive_child = setup_request(tmp_path / "interactive", monkeypatch, mode="interactive")
     grant = enable_delegation(interactive_child, "work-with-agent", original_cwd=tmp_path / "interactive")
     assert grant.parent_session_id == interactive_child
+
+
+def test_executions_migrate_to_the_fork_aware_schema_without_losing_their_state(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from subagents_runtime import storage
+
+    state = tmp_path / "state"
+    state.mkdir()
+    schema = (Path(storage.__file__).parent / "resources" / "schema.sql").read_text(encoding="utf-8")
+    previous = schema.replace(" fork_of TEXT, superseded_at TEXT,\n", "").replace(" AND superseded_at IS NULL", "")
+    assert previous != schema
+    connection = sqlite3.connect(state / "sessions.sqlite3")
+    connection.executescript(previous)
+    connection.executescript("""
+        INSERT INTO sessions(id,provider_session_id,cwd) VALUES ('parent','parent','C:/work');
+        INSERT INTO sessions(id,provider_session_id,cwd,parent_session_id,agent_index) VALUES ('child','child','C:/work','parent',1);
+        INSERT INTO requests(id,parent_session_id,child_session_id,agent_number,state,mode) VALUES ('request','parent','child',1,'pending','interactive');
+        INSERT INTO executions(id,session_id,request_id,backend,state,provider_pid) VALUES ('execution','child','request','standalone','running',4242);
+        PRAGMA user_version=2;
+    """)
+    connection.commit()
+    connection.close()
+    monkeypatch.setenv("HARNESS_STATE_DIR", str(state))
+
+    with sessions._connect() as connection:
+        assert connection.execute("PRAGMA user_version").fetchone()[0] == storage.SCHEMA_VERSION
+        assert connection.execute(
+            "SELECT state,provider_pid,fork_of,superseded_at FROM executions WHERE id='execution'"
+        ).fetchone() == ("running", 4242, None, None)
+        assert connection.execute("PRAGMA foreign_key_check").fetchall() == []
 
 
 def test_existing_session_database_migrates_without_losing_a_ready_reply(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

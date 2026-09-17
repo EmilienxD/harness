@@ -195,7 +195,7 @@ test("OpenAI emulator drives a real Codex function turn and redacts diagnostics"
   await rm(root, { recursive: true, force: true });
 });
 
-test("OpenAI auto-run preserves its implementer route across history-only continuations", async () => {
+test("OpenAI auto-run preserves its address route across history-only continuations", async () => {
   const root = await mkdtemp(join(tmpdir(), "aboard-codex-auto-run-"));
   const server = await startFakeOpenAiServer({ repoRoot: root });
   const headers = { authorization: `Bearer ${server.authToken}`, "content-type": "application/json" };
@@ -236,7 +236,7 @@ test("OpenAI auto-run preserves its implementer route across history-only contin
   }
 });
 
-test("OpenAI AFK reviewer creates an empty completion commit before reporting approval", async () => {
+test("OpenAI AFK review creates an empty completion commit before reporting approval", async () => {
   const root = await mkdtemp(join(tmpdir(), "aboard-codex-review-"));
   const server = await startFakeOpenAiServer({ repoRoot: root });
   const headers = { authorization: `Bearer ${server.authToken}`, "content-type": "application/json" };
@@ -280,7 +280,7 @@ test("OpenAI emulator resolves a spilled worker task when launch guidance follow
   const spillDirectory = join(root, "worker-1");
   await mkdir(spillDirectory, { recursive: true });
   const spillPath = join(spillDirectory, "task.md");
-  await writeFile(spillPath, "[E2E:chatgpt-implement] address it.\n", "utf8");
+  await writeFile(spillPath, "[E2E:chatgpt-address] address it.\n", "utf8");
   const server = await startFakeOpenAiServer({});
   const headers = { authorization: `Bearer ${server.authToken}`, "content-type": "application/json" };
   try {
@@ -301,7 +301,7 @@ test("OpenAI emulator resolves a spilled worker task when launch guidance follow
   }
 });
 
-test("OpenAI HITL reviewer leaves its automated result uncommitted and commits only after user acceptance", async () => {
+test("OpenAI HITL review leaves its automated result uncommitted and commits only after user acceptance", async () => {
   const root = await mkdtemp(join(tmpdir(), "aboard-codex-hitl-review-"));
   const server = await startFakeOpenAiServer({ repoRoot: root });
   const headers = { authorization: `Bearer ${server.authToken}`, "content-type": "application/json" };

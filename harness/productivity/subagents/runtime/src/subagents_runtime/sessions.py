@@ -23,6 +23,10 @@ class SessionError(RuntimeError):
 from subagents_runtime.storage import connect as _connect
 from subagents_runtime.storage import state_dir
 
+_CLAUDE_MODELS = frozenset({"haiku", "sonnet", "opus"})
+_CLAUDE_EFFORTS = frozenset({"low", "medium", "high", "xhigh", "max"})
+_CHATGPT_EFFORTS = frozenset({"minimal", "low", "medium", "high", "xhigh"})
+
 
 def _config() -> dict[str, Any]:
     path = state_dir() / "config.json"
@@ -54,17 +58,21 @@ def launch_configuration(cwd: Path) -> dict[str, Any]:
             raise SessionError(
                 f"Harness launch configuration {path} must be a version-1 JSON object"
             )
-        auto_run = value.get("autoRun")
-        providers = value.get("providers")
-        if (
-            not isinstance(auto_run, dict)
-            or auto_run.get("provider") not in {"claude", "chatgpt"}
-            or not isinstance(providers, dict)
-            or not isinstance(providers.get("claude"), dict)
-            or not isinstance(providers.get("chatgpt"), dict)
+        auto_run = value.get("autoRun", {})
+        providers = value.get("providers", {})
+        if not isinstance(auto_run, dict) or (
+            "provider" in auto_run
+            and auto_run.get("provider") not in {"claude", "chatgpt"}
         ):
             raise SessionError(
-                f"Harness launch configuration {path} must configure autoRun.provider and both providers.claude and providers.chatgpt"
+                f"Harness launch configuration {path} autoRun.provider must be claude or chatgpt"
+            )
+        if not isinstance(providers, dict) or any(
+            name in providers and not isinstance(providers[name], dict)
+            for name in ("claude", "chatgpt")
+        ):
+            raise SessionError(
+                f"Harness launch configuration {path} providers must contain JSON objects"
             )
         session = value.get("session", {})
         if not isinstance(session, dict):
@@ -82,11 +90,7 @@ def launch_configuration(cwd: Path) -> dict[str, Any]:
                 f"Harness launch configuration {path} session.stopWaitHours must be a non-negative finite number"
             )
         return value
-    return {
-        "version": 1,
-        "autoRun": {"provider": "claude"},
-        "providers": {"claude": {}, "chatgpt": {}},
-    }
+    return {"version": 1}
 
 
 def _split_command(value: str) -> list[str]:
@@ -133,6 +137,83 @@ def _command_from_config(config: dict[str, Any], provider: str) -> list[str]:
 
 def _provider_command(config: dict[str, Any], provider: str) -> list[str]:
     return _command_from_config(config, provider)
+
+
+def delegation_profile_arguments(
+    config: dict[str, Any], provider: str, task: str
+) -> list[str]:
+    """Resolve one manual task without coupling it to another launch profile."""
+    providers = config.get("providers", {})
+    provider_config = providers.get(provider, {}) if isinstance(providers, dict) else {}
+    delegations = provider_config.get("delegations", {})
+    if not isinstance(delegations, dict):
+        raise SessionError(f"providers.{provider}.delegations must be a JSON object")
+    selected = delegations.get(task, {})
+    if not isinstance(selected, dict):
+        raise SessionError(
+            f"providers.{provider}.delegations.{task} must be a JSON object"
+        )
+    if provider == "chatgpt" and task == "explore":
+        model, effort = "gpt-5.6-luna", "low"
+    elif provider == "claude" and task == "explore":
+        model, effort = "haiku", "low"
+    else:
+        model = effort = None
+    model = selected.get("model", model)
+    effort = selected.get("effort", effort)
+    model = None if model == "inherit" else model
+    effort = None if effort == "inherit" else effort
+    model_invalid = (
+        model is not None
+        and (
+            not isinstance(model, str)
+            or not model.strip()
+            or (provider == "claude" and model not in _CLAUDE_MODELS)
+            or (
+                provider == "chatgpt"
+                and (model in _CLAUDE_MODELS or model == "by-difficulty")
+            )
+        )
+    )
+    if model_invalid:
+        raise SessionError(
+            f"providers.{provider}.delegations.{task}.model is not valid for {provider}"
+        )
+    effort_invalid = effort is not None and (
+        not isinstance(effort, str)
+        or effort
+        not in (_CLAUDE_EFFORTS if provider == "claude" else _CHATGPT_EFFORTS)
+    )
+    if effort_invalid:
+        raise SessionError(
+            f"providers.{provider}.delegations.{task}.effort is not valid for {provider}"
+        )
+    arguments: list[str] = []
+    if provider == "claude":
+        denied_tools = selected.get("deniedTools", [])
+        if task == "explore" and "deniedTools" in selected:
+            raise SessionError(
+                f"providers.{provider}.delegations.{task}.deniedTools is not supported"
+            )
+        if not isinstance(denied_tools, list) or not all(
+            isinstance(rule, str) and rule.strip() for rule in denied_tools
+        ):
+            raise SessionError(
+                f"providers.{provider}.delegations.{task}.deniedTools must be an array of non-empty strings"
+            )
+        if denied_tools:
+            arguments.extend(
+                ["--disallowedTools", ",".join(dict.fromkeys(denied_tools))]
+            )
+    if model is not None:
+        arguments.extend(["--model", model])
+    if effort is not None:
+        arguments.extend(
+            ["--effort", effort]
+            if provider == "claude"
+            else ["-c", f"model_reasoning_effort={json.dumps(effort)}"]
+        )
+    return arguments
 
 
 def _harness_environment(environment: dict[str, str]) -> dict[str, str]:
@@ -343,21 +424,33 @@ def provider_arguments(
     prompt: str | None,
     *,
     resume: bool = False,
+    fork: bool = False,
+    fork_id: str | None = None,
+    launch_options: list[str] | None = None,
 ) -> list[str]:
-    """Native provider arguments, with permissions supplied by native configuration."""
+    """Native provider arguments, with permissions supplied by native configuration.
+
+    A fork continues a copy of the conversation, which is the only way to carry a
+    transcript forward while its original session is still open somewhere else.
+    """
     arguments = []
     if provider == "claude":
         if mode != "interactive":
             arguments.extend(["-p", "--output-format", "stream-json", "--verbose"])
-        if conversation:
+        if fork:
+            arguments.extend(["--resume", conversation, "--fork-session"])
+            if fork_id:
+                arguments.extend(["--session-id", fork_id])
+        elif conversation:
             arguments.extend(["--resume" if resume else "--session-id", conversation])
     elif mode != "interactive":
         arguments.extend(["exec"])
-        if resume:
-            arguments.extend(["resume", conversation])
+        if fork or resume:
+            arguments.extend(["fork" if fork else "resume", conversation])
         arguments.append("--json")
-    elif resume:
-        arguments.extend(["resume", conversation])
+    elif fork or resume:
+        arguments.extend(["fork" if fork else "resume", conversation])
+    arguments.extend(launch_options or [])
     if prompt:
         arguments.append("--")
         arguments.append(prompt)
@@ -369,14 +462,14 @@ def launch_delegated(request, request_id: str, agent_number: int, cwd: Path) -> 
 
     with _connect() as connection:
         row = connection.execute(
-            "SELECT r.child_session_id,e.id,s.provider_session_id FROM requests r JOIN executions e ON e.request_id=r.id JOIN sessions s ON s.id=r.child_session_id WHERE r.id=?",
+            "SELECT r.child_session_id,e.id,s.provider_session_id,e.fork_of FROM requests r JOIN executions e ON e.request_id=r.id JOIN sessions s ON s.id=r.child_session_id WHERE r.id=?",
             (request_id,),
         ).fetchone()
     if row is None:
         raise SessionError(
             "Delegated launch requires a persisted execution reservation"
         )
-    child_id, execution_id, conversation = row
+    child_id, execution_id, conversation, fork_of = row
     environment = os.environ.copy()
     environment.update(
         {
@@ -392,6 +485,37 @@ def launch_delegated(request, request_id: str, agent_number: int, cwd: Path) -> 
     environment["PYTHONPATH"] = (
         runtime_root + os.pathsep + environment.get("PYTHONPATH", "")
     )
+    if fork_of:
+        # The original session is still open and still owns its provider handle, so a
+        # fork starts its own process here and takes over the child's identity.
+        forked = str(uuid.uuid4()) if request.provider == "claude" else None
+        with _connect() as connection:
+            connection.execute(
+                "UPDATE sessions SET provider_session_id=? WHERE id=?", (forked, child_id)
+            )
+        launch_config = launch_configuration(cwd)
+        command = [
+            *_provider_command(launch_config, request.provider),
+            *provider_arguments(
+                request.provider,
+                request.mode,
+                fork_of,
+                request.prompt,
+                fork=True,
+                fork_id=forked,
+                launch_options=delegation_profile_arguments(
+                    launch_config, request.provider, request.task
+                ),
+            ),
+        ]
+        processes.start(
+            execution_id,
+            command,
+            environment,
+            cwd,
+            visible=request.mode == "interactive",
+        )
+        return child_id
     if aboard_session := _launch_through_aboard(request, request_id, cwd):
         with _connect() as connection:
             connection.execute(
@@ -407,7 +531,7 @@ def launch_delegated(request, request_id: str, agent_number: int, cwd: Path) -> 
         "prototype": "prototype",
         "websearch": "websearch",
         "brainstorm": "grill-me",
-        "implement": "address-this",
+        "address": "address-this",
         "review": "review-this",
     }.get(request.task)
     continuing = bool(request.resume)
@@ -418,12 +542,20 @@ def launch_delegated(request, request_id: str, agent_number: int, cwd: Path) -> 
     )
     if not continuing and request.provider == "claude":
         conversation = child_id
-    command = _provider_command(launch_configuration(cwd), request.provider)
+    launch_config = launch_configuration(cwd)
+    command = _provider_command(launch_config, request.provider)
     if not continuing and request.provider == "claude":
         command.extend(["--name", f"agent-{agent_number}"])
     command.extend(
         provider_arguments(
-            request.provider, request.mode, conversation, prompt, resume=continuing
+            request.provider,
+            request.mode,
+            conversation,
+            prompt,
+            resume=continuing,
+            launch_options=delegation_profile_arguments(
+                launch_config, request.provider, request.task
+            ),
         )
     )
     processes.start(
@@ -507,6 +639,48 @@ def _discover_delegation_endpoint(cwd: Path) -> tuple[str, int, str] | None:
     return host, port, token
 
 
+def focus_parent_in_aboard(child_session_id: str) -> bool:
+    """Best-effort focus handoff for an interactive child launched by Aboard."""
+    port_text = os.environ.get("ABOARD_BRIDGE_PORT")
+    token = os.environ.get("ABOARD_BRIDGE_TOKEN")
+    if not port_text or not token:
+        return False
+    try:
+        port = int(port_text)
+        if not 1 <= port <= 65535:
+            return False
+        request = urllib.request.Request(
+            f"http://127.0.0.1:{port}/delegations/focus-parent",
+            data=json.dumps({"childSessionId": child_session_id}).encode("utf-8"),
+            headers={
+                "Authorization": f"Bearer {token}",
+                "Content-Type": "application/json",
+            },
+            method="POST",
+        )
+        with urllib.request.urlopen(request, timeout=1):
+            return True
+    except (OSError, ValueError, urllib.error.HTTPError):
+        return False
+
+
+def _aboard_error(exc: urllib.error.HTTPError) -> tuple[str | None, str]:
+    """The bridge's own words for a refusal, so a caller never has to guess."""
+    try:
+        payload = json.loads(exc.read().decode("utf-8"))
+    except (OSError, ValueError, UnicodeError):
+        return None, ""
+    error = payload.get("error") if isinstance(payload, dict) else None
+    if not isinstance(error, dict):
+        return None, ""
+    code = error.get("code")
+    message = error.get("message")
+    return (
+        code if isinstance(code, str) else None,
+        message if isinstance(message, str) else "",
+    )
+
+
 def _launch_through_aboard(request, request_id: str, cwd: Path) -> str | None:
     endpoint = _discover_delegation_endpoint(cwd)
     if endpoint is None:
@@ -576,16 +750,29 @@ def _launch_through_aboard(request, request_id: str, cwd: Path) -> str | None:
                 result = json.loads(response.read().decode("utf-8"))
             break
         except urllib.error.HTTPError as exc:
-            if exc.code != 401 or attempt != 0 or os.environ.get("ABOARD_BRIDGE_TOKEN"):
-                raise SessionError(
-                    f"Aboard delegation launch failed with HTTP {exc.code}"
-                ) from None
-            refreshed = _discover_delegation_endpoint(cwd)
-            if refreshed is None:
-                raise SessionError(
-                    "Aboard delegation endpoint authentication expired"
-                ) from None
-            endpoint = refreshed
+            if exc.code == 401 and attempt == 0 and not os.environ.get(
+                "ABOARD_BRIDGE_TOKEN"
+            ):
+                refreshed = _discover_delegation_endpoint(cwd)
+                if refreshed is None:
+                    raise SessionError(
+                        "Aboard delegation endpoint authentication expired"
+                    ) from None
+                endpoint = refreshed
+                continue
+            code, detail = _aboard_error(exc)
+            if reservation and 400 <= exc.code < 500 and code != "startup-uncertain":
+                # A refusal is a decision taken before anything started. Release the
+                # reservation so the request fails definitively and can be retried.
+                with _connect() as connection:
+                    connection.execute(
+                        "UPDATE executions SET state='prepared' WHERE id=? AND state='starting'",
+                        (reservation[1],),
+                    )
+            raise SessionError(
+                f"Aboard refused the delegation with HTTP {exc.code}"
+                + (f": {detail}" if detail else "")
+            ) from None
         except (OSError, ValueError) as exc:
             raise SessionError(
                 "Aboard delegation endpoint could not launch the request"
@@ -624,7 +811,6 @@ def resume(session_id: str, message: str | None = None) -> None:
     from subagents_runtime import processes
 
     session_id = resolve_session(session_id)
-    processes.require_exited(session_id)
     with _connect() as connection:
         row = connection.execute(
             "SELECT provider_session_id,cwd,provider,execution_mode,parent_session_id,agent_index FROM sessions WHERE id=?",
@@ -635,6 +821,7 @@ def resume(session_id: str, message: str | None = None) -> None:
     if not row[0]:
         raise SessionError("Provider conversation has not been bound; resume refused")
     if row[4]:
+        # The owning conversation's inbox decides between a plain resume and a fork.
         if not message or not message.strip():
             raise SessionError(
                 "Delegated continuations require a nonempty next message"
@@ -663,6 +850,7 @@ def resume(session_id: str, message: str | None = None) -> None:
                 results[-1].reason if results else "Resume request was not processed"
             )
         return
+    processes.require_exited(session_id)
     command = [
         *_provider_command(launch_configuration(Path(row[1])), row[2]),
         *provider_arguments(row[2], row[3], row[0], message, resume=True),

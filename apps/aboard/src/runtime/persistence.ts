@@ -121,7 +121,7 @@ function parseFrozenSettings(value: unknown): FrozenRunSettings | undefined {
     : undefined;
   if (
     typeof value.review !== "boolean"
-    || typeof value.exploreBeforeImplement !== "boolean"
+    || typeof value.exploreBeforeAddress !== "boolean"
     || !isDepth(value.issueContextDepth)
     || typeof value.mergeRunPullRequest !== "boolean"
     || mergeStrategy === undefined
@@ -139,7 +139,7 @@ function parseFrozenSettings(value: unknown): FrozenRunSettings | undefined {
   return {
     branchMode,
     review: value.review,
-    exploreBeforeImplement: value.exploreBeforeImplement,
+    exploreBeforeAddress: value.exploreBeforeAddress,
     issueContextDepth: value.issueContextDepth,
     mergeStrategy,
     mergeRunPullRequest: value.mergeRunPullRequest,
@@ -194,7 +194,7 @@ function parseProgress(value: unknown): IssueProgress | undefined {
     if (value.expectedBranch !== undefined && nonEmptyString(value.expectedBranch) === undefined) return undefined;
     if (value.mergeSha !== undefined && fullSha(value.mergeSha) === undefined) return undefined;
     if (value.issueClosed !== undefined && value.issueClosed !== true) return undefined;
-    for (const sha of [value.beforeSha, value.implementerCommitSha, value.implementationSha, value.reviewedSha]) if (sha !== undefined && fullSha(sha) === undefined) return undefined;
+    for (const sha of [value.beforeSha, value.addressCommitSha, value.implementationSha, value.reviewedSha]) if (sha !== undefined && fullSha(sha) === undefined) return undefined;
     return {
       state: "current",
       phase,
@@ -202,7 +202,7 @@ function parseProgress(value: unknown): IssueProgress | undefined {
       ...(headSha === undefined ? {} : { headSha }),
       ...(value.reviewed === true ? { reviewed: true as const } : {}),
       ...(value.beforeSha === undefined ? {} : { beforeSha: value.beforeSha as string }),
-      ...(value.implementerCommitSha === undefined ? {} : { implementerCommitSha: value.implementerCommitSha as string }),
+      ...(value.addressCommitSha === undefined ? {} : { addressCommitSha: value.addressCommitSha as string }),
       ...(value.resetCompleted === true ? { resetCompleted: true as const } : {}),
       ...(value.hitlReviewCompleted === true ? { hitlReviewCompleted: true as const } : {}),
       ...(value.implementationSha === undefined ? {} : { implementationSha: value.implementationSha as string }),
@@ -219,10 +219,10 @@ function parseProgress(value: unknown): IssueProgress | undefined {
   if (prNumber === undefined || typeof value.issueClosed !== "boolean") return undefined;
   if (value.resetCompleted !== undefined && value.resetCompleted !== true) return undefined;
   if (value.hitlReviewCompleted !== undefined && value.hitlReviewCompleted !== true) return undefined;
-  for (const sha of [value.beforeSha, value.implementerCommitSha, value.implementationSha, value.reviewedSha]) if (sha !== undefined && fullSha(sha) === undefined) return undefined;
+  for (const sha of [value.beforeSha, value.addressCommitSha, value.implementationSha, value.reviewedSha]) if (sha !== undefined && fullSha(sha) === undefined) return undefined;
   return { state: "done", result: "landed", prNumber, issueClosed: value.issueClosed,
     ...(value.beforeSha === undefined ? {} : { beforeSha: value.beforeSha as string }),
-    ...(value.implementerCommitSha === undefined ? {} : { implementerCommitSha: value.implementerCommitSha as string }),
+    ...(value.addressCommitSha === undefined ? {} : { addressCommitSha: value.addressCommitSha as string }),
     ...(value.resetCompleted === true ? { resetCompleted: true as const } : {}),
     ...(value.hitlReviewCompleted === true ? { hitlReviewCompleted: true as const } : {}),
     ...(value.implementationSha === undefined ? {} : { implementationSha: value.implementationSha as string }),
@@ -259,16 +259,16 @@ function parsePendingAction(value: unknown): PendingAction | undefined {
     }
     case "worker-turn": {
       const parentSha = fullSha(value.parentSha);
-      if (branch === undefined || parentSha === undefined || (value.role !== "implementer" && value.role !== "reviewer") || (value.completion !== "commit" && value.completion !== "uncommitted")) return undefined;
+      if (branch === undefined || parentSha === undefined || (value.role !== "address" && value.role !== "review") || (value.completion !== "commit" && value.completion !== "uncommitted")) return undefined;
       if (value.outcome !== undefined && value.outcome !== "succeeded" && value.outcome !== "failed") return undefined;
       return { kind: "worker-turn", branch, parentSha, role: value.role, completion: value.completion,
         ...(value.outcome === undefined ? {} : { outcome: value.outcome }) };
     }
     case "reset-implementation": {
       const beforeSha = fullSha(value.beforeSha);
-      const implementerCommitSha = fullSha(value.implementerCommitSha);
-      if (branch === undefined || beforeSha === undefined || implementerCommitSha === undefined) return undefined;
-      return { kind: "reset-implementation", branch, beforeSha, implementerCommitSha };
+      const addressCommitSha = fullSha(value.addressCommitSha);
+      if (branch === undefined || beforeSha === undefined || addressCommitSha === undefined) return undefined;
+      return { kind: "reset-implementation", branch, beforeSha, addressCommitSha };
     }
     case "push": {
       const sha = fullSha(value.sha);
@@ -365,9 +365,9 @@ export function parseAutoRunRecord(value: unknown): AutoRunRecord | undefined {
     workerSession === undefined
     || nonEmptyString(workerSession.agentId) === undefined
     || nonEmptyString(workerSession.sessionId) === undefined
-    || (workerSession.type !== "implementer" && workerSession.type !== "reviewer" && workerSession.type !== "Explore")
+    || (workerSession.type !== "address" && workerSession.type !== "review" && workerSession.type !== "explore")
     || positiveInteger(workerSession.issueNumber) === undefined
-    || (workerSession.continuable !== undefined && (workerSession.continuable !== true || workerSession.type === "Explore"))
+    || (workerSession.continuable !== undefined && (workerSession.continuable !== true || workerSession.type === "explore"))
   )) return undefined;
   if (currentIssue !== undefined && (!issueNumbers.has(String(currentIssue)) || progress[String(currentIssue)]?.state !== "current")) return undefined;
   return {
@@ -394,7 +394,7 @@ export function parseAutoRunRecord(value: unknown): AutoRunRecord | undefined {
     ...(workerSession === undefined ? {} : { workerSession: {
       agentId: workerSession.agentId as AgentId,
       sessionId: workerSession.sessionId as SessionId,
-      type: workerSession.type as "implementer" | "reviewer" | "Explore",
+      type: workerSession.type as "address" | "review" | "explore",
       issueNumber: workerSession.issueNumber as number,
       ...(workerSession.continuable === true ? { continuable: true as const } : {}),
     } }),
