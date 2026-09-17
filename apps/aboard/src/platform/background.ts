@@ -33,7 +33,7 @@ export function createBackgroundProcess(
       try {
         // Windows processes survive their launcher without DETACHED_PROCESS;
         // PowerShell requires its hidden console to initialize and run commands.
-        child = spawn(executable, args, { cwd: options.cwd, env: { ...process.env, ...options.env }, detached: process.platform !== "win32", windowsHide: true, stdio: ["ignore", stdout, stderr] });
+        child = spawn(executable, args, { cwd: options.cwd, env: { ...process.env, ...options.env, ABOARD_HEADLESS: "1" }, detached: process.platform !== "win32", windowsHide: true, stdio: ["ignore", stdout, stderr] });
       } finally {
         closeSync(stdout);
         closeSync(stderr);

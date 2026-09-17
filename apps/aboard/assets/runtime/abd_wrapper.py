@@ -192,6 +192,18 @@ def main() -> int:
     spawn_error: str | None = None
     child = None
     native_stream = os.environ.get("ABOARD_HEADLESS_CHATGPT") == "1"
+    # Hiding the launch shell does not stop descendants inheriting its console.
+    # Keep headless providers (and lifecycle helpers) console-free; interactive
+    # providers must retain their VS Code terminal and Ctrl+C handling.
+    process_options = (
+        {
+            "creationflags": subprocess.CREATE_NO_WINDOW,
+            "stdin": subprocess.DEVNULL,
+            "stderr": sys.stderr,
+        }
+        if os.name == "nt" and os.environ.get("ABOARD_HEADLESS") == "1"
+        else {}
+    )
     native_session = None
     native_message = ""
     native_success = False
@@ -203,11 +215,16 @@ def main() -> int:
             input=json.dumps(payload).encode("utf-8"),
             stdout=subprocess.DEVNULL,
             check=False,
+            **{key: value for key, value in process_options.items() if key != "stdin"},
         )
 
     try:
         try:
-            child = subprocess.Popen(_executable(command), **({"stdout": subprocess.PIPE} if native_stream else {}))
+            child = subprocess.Popen(
+                _executable(command),
+                **process_options,
+                **({"stdout": subprocess.PIPE} if native_stream else {"stdout": sys.stdout} if process_options else {}),
+            )
         except OSError as error:
             # The command itself could not be run: the shell found the wrapper
             # but not the configured agent runtime. Nothing else will report this.
