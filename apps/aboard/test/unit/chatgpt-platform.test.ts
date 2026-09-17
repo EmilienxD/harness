@@ -229,7 +229,9 @@ test("Auto Run gives ChatGPT exploration a headless exec run and its workers an 
   });
 
   assert.deepEqual(explore.args.slice(0, 2), ["exec", "--json"]);
+  assert.equal(explore.providerEnvironment?.ABOARD_HEADLESS_CHATGPT, "1");
   assert.equal(address.args.includes("exec"), false);
+  assert.equal(address.providerEnvironment?.ABOARD_HEADLESS_CHATGPT, undefined);
   assert.equal(address.args.includes("--json"), false);
 });
 

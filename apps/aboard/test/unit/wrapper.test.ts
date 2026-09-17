@@ -9,6 +9,43 @@ import { lockMarkerDirectory, lockMarkerLive, lockMarkerPresent, sessionExitFail
 
 const WRAPPER = join(process.cwd(), "assets", "runtime", "abd_wrapper.py");
 
+test("headless ChatGPT wrapper reports native stream startup and completion without CLI hooks", async () => {
+  const { createServer } = await import("node:http");
+  const root = mkdtempSync(join(tmpdir(), "aboard-native-stream-"));
+  const events: { route: string; body: Record<string, unknown> }[] = [];
+  const server = createServer((request, response) => {
+    let body = "";
+    request.on("data", (chunk) => { body += chunk; });
+    request.on("end", () => {
+      events.push({ route: request.url!, body: JSON.parse(body) as Record<string, unknown> });
+      response.end(JSON.stringify({ ok: true, accepted: true }));
+    });
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const port = (server.address() as { port: number }).port;
+  const sessionId = "af817a6c-cd41-41e2-a4db-44d3f43cd560";
+  const stream = [
+    { type: "thread.started", thread_id: sessionId },
+    { type: "item.completed", item: { type: "agent_message", text: "Native result" } },
+    { type: "turn.completed" },
+  ].map((event) => JSON.stringify(event)).join("\n") + "\n";
+  const child = spawn("uv", ["run", "--no-project", "python", WRAPPER, join(root, "agent.lock"), "--", process.execPath, "-e", `process.stdout.write(${JSON.stringify(stream)})`], {
+    env: { ...process.env, HARNESS_EXECUTION_ID: "", HARNESS_EXECUTION_MODE: "auto", ABOARD_HEADLESS_CHATGPT: "1", ABOARD_AGENT_ID: "7", ABOARD_SESSION_ID: "provisional", ABOARD_BRIDGE_PORT: String(port), ABOARD_BRIDGE_TOKEN: "dummy" },
+    stdio: "ignore",
+  });
+  try {
+    const code = await new Promise<number | null>((resolve) => child.once("close", resolve));
+    assert.equal(code, 0);
+    assert.deepEqual(events.map((event) => event.route), ["/hooks/session-start", "/hooks/stop"]);
+    assert.equal(events[0]?.body.sessionId, sessionId);
+    assert.equal(events[1]?.body.lastAssistantMessage, "Native result");
+  } finally {
+    child.kill();
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("each Aboard launch gets a fresh one-time code", () => {
   const layout = sessionWrapperLayout("C:\\storage\\runtime", WRAPPER);
   const first = layout.mintLaunchCode();

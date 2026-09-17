@@ -191,9 +191,23 @@ def main() -> int:
     exit_code: int | None = None
     spawn_error: str | None = None
     child = None
+    native_stream = os.environ.get("ABOARD_HEADLESS_CHATGPT") == "1"
+    native_session = None
+    native_message = ""
+    native_success = False
+
+    def report_native(route: str, payload: dict[str, Any]) -> None:
+        # exec --json is a lifecycle source even when Codex doesn't run hooks.
+        subprocess.run(
+            [sys.executable, os.path.join(os.path.dirname(__file__), "abd_hook.py"), route],
+            input=json.dumps(payload).encode("utf-8"),
+            stdout=subprocess.DEVNULL,
+            check=False,
+        )
+
     try:
         try:
-            child = subprocess.Popen(_executable(command))
+            child = subprocess.Popen(_executable(command), **({"stdout": subprocess.PIPE} if native_stream else {}))
         except OSError as error:
             # The command itself could not be run: the shell found the wrapper
             # but not the configured agent runtime. Nothing else will report this.
@@ -207,6 +221,38 @@ def main() -> int:
             from subagents_runtime.processes import birth_identity
             with connect() as connection:
                 connection.execute('UPDATE executions SET supervisor_pid=?,supervisor_birth=?,provider_pid=?,provider_birth=? WHERE id=?', (os.getpid(),birth_identity(os.getpid()),child.pid,birth_identity(child.pid),execution_id))
+        if native_stream and child.stdout:
+            for line in child.stdout:
+                sys.stdout.buffer.write(line)
+                sys.stdout.buffer.flush()
+                try:
+                    event = json.loads(line)
+                except (ValueError, UnicodeError):
+                    continue
+                if not isinstance(event, dict):
+                    continue
+                if event.get("type") == "thread.started" and isinstance(event.get("thread_id"), str):
+                    native_session = event["thread_id"]
+                    if execution_id:
+                        from pathlib import Path
+                        from subagents_runtime import sessions
+                        from subagents_runtime.processes import confirm_startup
+                        sessions.bind_observed(native_session, Path.cwd(), "chatgpt", os.environ.get("HARNESS_EXECUTION_MODE", "auto"))
+                        confirm_startup(execution_id, child.pid)
+                    report_native("session-start", {"hook_event_name": "SessionStart", "session_id": native_session, "source": "startup"})
+                item = event.get("item")
+                if event.get("type") == "item.completed" and isinstance(item, dict) and item.get("type") == "agent_message" and isinstance(item.get("text"), str):
+                    native_message = item["text"]
+                if event.get("type") == "turn.completed":
+                    native_success = True
+                elif event.get("type") == "turn.failed":
+                    native_success = False
+            exit_code = child.wait()
+            if native_session and native_success and exit_code == 0 and native_message:
+                report_native("worker-stop", {"hook_event_name": "Stop", "session_id": native_session, "cwd": os.getcwd(), "last_assistant_message": native_message})
+            elif native_session:
+                report_native("worker-stop-failure", {"hook_event_name": "StopFailure", "session_id": native_session, "cwd": os.getcwd(), "error": "Headless Codex turn failed"})
+            return exit_code
         while True:
             try:
                 exit_code = child.wait()
@@ -231,8 +277,8 @@ def main() -> int:
                 session = connection.execute("SELECT session_id FROM executions WHERE id=?", (execution_id,)).fetchone()
             if session and not provider_alive:
                 from subagents_runtime.delegation import report_child_stop
-                report_child_stop(session[0], "", success=False,
-                                  reason=spawn_error or "Provider process exited without delivering a result",
+                report_child_stop(session[0], native_message if native_stream else "", success=native_stream and native_success and exit_code == 0 and bool(native_message),
+                                  reason=None if native_stream and native_success and exit_code == 0 and native_message else spawn_error or "Provider process exited without delivering a result",
                                   cancelled=not spawn_error and os.environ.get("HARNESS_EXECUTION_MODE") == "interactive",
                                   execution_id=execution_id)
         if provider_alive:

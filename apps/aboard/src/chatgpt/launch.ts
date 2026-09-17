@@ -182,6 +182,7 @@ function planChatGptSession(request: PlatformLaunchRequest | PlatformResumeReque
     requiresWriteLease: requiresWriteLease(request.agentType, writeCapability),
     promptDelivery: built.promptDelivery,
     runtimeDirectory,
+    ...(isHeadlessExecution(request.agentType, request.executionMode) ? { providerEnvironment: { ABOARD_HEADLESS_CHATGPT: "1" } } : {}),
     ...(chrome ? { chromeRequired: true as const } : {}),
     ...(guard === undefined ? {} : { guard }),
     ...(readOnlyFiles.length === 0 ? {} : { permissionProfile: WORKTREE_PERMISSION_PROFILE }),
