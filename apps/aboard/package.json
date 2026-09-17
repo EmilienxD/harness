@@ -397,7 +397,8 @@
         },
         {
           "command": "aboard.killAgent",
-          "when": "viewItem == aboard.agent.interactive || viewItem == aboard.agent.background"
+          "when": "viewItem == aboard.agent.interactive || viewItem == aboard.agent.background",
+          "group": "inline@1"
         },
         {
           "command": "aboard.startAutoRun",

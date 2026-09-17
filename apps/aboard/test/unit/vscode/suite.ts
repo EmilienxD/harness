@@ -59,7 +59,7 @@ export async function run(): Promise<void> {
   const row = fleetModel.roots().find((node) => node.kind === "agent" && node.session.identity.agentId === agentId);
   assert.ok(row, "the interactive session has an Agents row");
   assert.equal(fleetModel.item(row).description, "Claude · running");
-  assert.equal(fleetModel.item(row).icon, "sparkle-filled");
+  assert.equal(fleetModel.item(row).icon, "eye");
   fleetModel.dispose();
 
   const available = await commands.getCommands(true);

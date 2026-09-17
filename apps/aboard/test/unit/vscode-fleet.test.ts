@@ -52,7 +52,7 @@ test("fleet rows distinguish execution mode and provider independently of the wr
   assert.deepEqual(
     { icon: rows.get(interactiveId)?.icon, description: rows.get(interactiveId)?.description, tooltip: rows.get(interactiveId)?.tooltip },
     {
-      icon: "sparkle-filled",
+      icon: "eye",
       description: "Claude · running · lease holder",
       tooltip: "Provider: Claude\nMode: Interactive\nSession: session-interactive-claude\nStatus: running\nHolds the write lease",
     },
@@ -60,7 +60,7 @@ test("fleet rows distinguish execution mode and provider independently of the wr
   assert.deepEqual(
     { icon: rows.get(backgroundId)?.icon, description: rows.get(backgroundId)?.description, tooltip: rows.get(backgroundId)?.tooltip },
     {
-      icon: "lock",
+      icon: "eye-closed",
       description: "Codex · running",
       tooltip: "Provider: Codex\nMode: Background\nSession: session-background-codex\nStatus: running",
     },
@@ -97,10 +97,10 @@ test("an Auto Run worker row stays focusable while its exploration row does not"
   const model = new FleetTreeModel(fleet, new WriteLease(), { refresh() {} }, () => true);
   const rows = new Map(model.roots().map((node) => [node.session.identity.agentId, model.item(node)]));
 
-  assert.equal(rows.get(addressId)?.icon, "sparkle-filled");
+  assert.equal(rows.get(addressId)?.icon, "eye");
   assert.equal(rows.get(addressId)?.contextValue, "aboard.agent.interactive");
   assert.equal(rows.get(addressId)?.command?.command, "aboard.focusAgent");
-  assert.equal(rows.get(exploreId)?.icon, "lock");
+  assert.equal(rows.get(exploreId)?.icon, "eye-closed");
   assert.equal(rows.get(exploreId)?.contextValue, "aboard.agent.background");
   assert.equal(rows.get(exploreId)?.command, undefined);
   model.dispose();

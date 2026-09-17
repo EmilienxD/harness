@@ -106,7 +106,7 @@ export function registerFleetCommands(host: AgentCommandHost, terminals: AgentTe
 }
 
 function agentIcon(session: AgentSession): string {
-  return isBackground(session) ? "lock" : "sparkle-filled";
+  return isBackground(session) ? "eye-closed" : "eye";
 }
 
 function isBackground(session: AgentSession): boolean {
