@@ -1,6 +1,6 @@
 ---
 name: grill-me-in-lavish
-description: Stress-test a plan or design through a branching interview presented as interactive Lavish HTML, with visual explanations, clickable choices, and preselected recommendations. Use when the user explicitly asks to be grilled in Lavish.
+description: Stress-test a plan through branching interview rounds in an interactive Lavish board.
 argument-hint: "[plan or design]"
 license: MIT
 metadata:
@@ -8,41 +8,78 @@ metadata:
 disable-model-invocation: true
 ---
 
-Interview the user relentlessly until you reach a shared understanding. Map this as a **design tree**: every decision branches into the decisions that hang off it.
+Interview the user relentlessly until you reach a shared understanding. Map the plan as a **design tree**: each decision branches into the decisions that depend on it.
 
-Work the tree in **rounds**. The **frontier** is every decision whose prerequisites are already settled: the questions you can ask _now_ without guessing at answers you haven't heard yet. Ask the whole frontier in one round: number each question, give 1–4 options, and provide your recommended answer. Prefer giving your recommendation as **the first option** (A) for readability. Then wait for the user's answers before the next round.
+## Interview workflow
 
-Present every round as an interactive Lavish HTML artifact. Before writing HTML, get the current source of truth from the CLI:
+Follow the reserved inbox path or recovery status supplied by the hook. If it is recovering or waiting on an existing round, finish your response so the hook can continue. If it supplied neither a path nor a recovery status, notify the user that the runtime hooks are missing or inactive and stop.
 
-- `npx -y lavish-axi --help` for commands and the review loop
-- `npx -y lavish-axi design` for current design guidance
-- `npx -y lavish-axi playbook input` for interactive controls
-- `npx -y lavish-axi playbook <id>` for every other playbook that matches the round's visual content
+Work in **rounds**. The **frontier** is every decision whose prerequisites are settled. Ask the whole frontier together, then wait for submitted answers. A question depending on another unanswered question belongs to a later round.
 
-Invoke every CLI command as `npx -y lavish-axi ...`, including follow-up commands whose output starts with `lavish-axi`. Create the HTML under `.lavish/` unless the user specifies another location, open it with Lavish, and poll for submitted answers. Do not duplicate the round as a prose questionnaire in chat.
+Finding facts is your job: inspect the codebase and environment before asking for decisions. Prioritize high-impact choices about behavior, UX, scope, architecture, failure handling, dependencies, and migrations. The decisions belong to the user.
 
-Build each round from [`assets/board-template.html`](assets/board-template.html). Copy the template to the artifact location and replace only its `__GRILL_ME_DATA__` marker with valid JSON matching the schema documented beside that marker. Keep the template's structure, styles, and interaction code intact; update the payload rather than improvising a new page.
+For each round:
 
-Format each round in the artifact like the original questionnaire, enhanced visually where that makes the decision easier to understand:
+1. Compose numbered questions with stable IDs. Ask the actual question, then explain why it matters: relevant context, consequences, and uncertainty. Use several concise sentences or a compact visual explanation, scaled to the decision's difficulty.
+2. Provide normally four proposals, A–D; use fewer when further proposals would be artificial. Explain every proposal's behavior and tradeoff. Put the recommendation first as A when practical; its rationale belongs in that proposal's explanation.
+3. Write any supporting assets first in the supplied assets directory. Create the complete round JSON directly at the exact fresh path supplied by the hook. The runtime owns this directory outside the project, creates its parents, and reserves the filename. You are its sole inbox writer; create the file directly without listing the directory or reading a template. Write the round file last: a successful write publishes it automatically.
+4. The write hook renders the board, opens it through Lavish, and waits for submitted feedback in the same tool call. Continue from the returned answers. If the write hook supplies no feedback, finish your response so the Stop hook can recover publication or waiting. The generated page and Lavish's operational commands belong to the runtime; work through the supplied inbox. Keep the questionnaire in the artifact rather than repeating it in chat.
 
-- Give every question a stable visible number such as **Q1**, a title, its full question body, 1–4 options labeled A onward, and a short `Recommended: A` explanation.
-- Use comparisons, diagrams, screenshots, or images when they materially improve the explanation or recommendation. Use real project visuals when available; place local assets beside the HTML and use relative paths in the question's optional `image` payload.
-- Make each complete option a native clickable `<label>` containing a radio input. Put the recommended answer in A and mark A `checked` when the artifact opens, while making clear that a preselection is not an answer until submitted.
-- Give every question its own form and **Queue this answer** button. Queueing records that question locally in Lavish but does not send feedback to the agent. Use a stable per-round, per-question `queueKey` so re-queueing replaces the earlier unsent version.
-- Always provide the template's freeform answer field and **Write my own answer** control. The user may supplement a listed option or clear the preselection and answer entirely outside the proposed choices.
-- Provide one board-level **Submit round** button. It calls `window.lavish.sendQueuedPrompts()` once to send all and only the answers the user queued in that round. An unqueued question remains open, and an edited queued answer must be re-queued before the round can be submitted.
-- Queue concise natural-language answers without attaching a `data` object or serializing responses as JSON into the conversation.
-- Show queued state separately from local selected state. Radio and text changes update only local state.
-- Keep the native controls keyboard-accessible, readable on mobile, and free of horizontal overflow.
+When feedback arrives, settle only explicit answers in the submitted batch, retain unanswered questions, and recompute the frontier. Recommendations begin unselected. Local selection and queueing are not submission; silence and omitted questions approve nothing. Freeform answers may replace or supplement a proposal. Fatal artifact errors require a repaired round rather than settling decisions. Validation errors supply a fresh path for the corrected complete payload.
 
-Each round the user answers reshapes the tree: settled decisions push the frontier outward and unblock questions that **depend** on them. Recompute the frontier and ask the next round. A question whose answer depends on another question still open in this round belongs to a _later_ round, not this one.
+## Round contract
 
-Finding _facts_ is your job, never the user's. When a frontier question needs a fact from the environment (filesystem, tools, etc.), explore to find it; don't ask the user for anything you could look up yourself in the codebase. When working with sub-agents, don't block on them: a running exploration is an unsettled prerequisite, so only the questions downstream of it wait for the sub-agent(s) to report; ask the rest of the frontier now. The _decisions_ are the user's: present each to them and wait.
+Create UTF-8 JSON shaped like this. The runtime assigns the round number; round titles and subtitles are unnecessary.
 
-Prioritize questioning high-impact decisions (e.g., UI/UX changes, failure behavior, scope boundaries, interaction with existing rules, architecture changes, dependency changes, migrations, security concerns) over low-impact decisions (e.g., creating a class, creating new tests, updating an endpoint).
+```json
+{
+  "questions": [{
+    "id": "Q1",
+    "question": "When should a round become visible?",
+    "explanation_html": "<p>Publication makes the questions available for review. A round may reference images or interactive examples, so the order of writes matters.</p><p>We need to choose whether writing the complete round commits it immediately or requires a separate publication step.</p>",
+    "recommendation": "A",
+    "options": [
+      {"letter": "A", "label": "Publish on write", "detail": "Write assets first and the round last. This avoids a separate publication command."},
+      {"letter": "B", "label": "Publish explicitly", "detail": "Prepare the content, then invoke publication. This adds a tool call but separates drafting from publication."}
+    ]
+  }]
+}
+```
 
-If a question cannot be answered solely from the code or from judgment, you may consider a web search to find real-world examples, open-source code to reuse, benchmarks, or prototyping before assuming your recommendation is correct. If so, propose your ideas to the user before proceeding (e.g., "This API doesn't provide enough documentation; we should consider prototyping it before assuming it's the right decision.").
+IDs must be unique Q1, Q2, etc. Keep an unanswered decision's ID across rounds. Options use consecutive letters A onward, with 1–4 explained proposals and a recommendation naming one available letter. Question, option label, and detail are plain text; `explanation_html` is HTML.
 
-Every question requires an explicit queued answer included in a submitted round. A preselected recommendation, silence, omission, an ambiguous response, or answering other questions does not approve the recommendation. Keep polling the current artifact while the user queues answers; do not start another agent round for each queued question. Only after **Submit round** sends the batch should you settle its answered questions, keep every unqueued question open, recompute the frontier, and replace the HTML with the next round's questions.
+For interactive explanations, add optional `init_js` to that question. It executes once after mounting, with `root` referring to that question's explanation element:
 
-The session is done when the frontier is empty: every branch of the design tree has been visited, and nothing is left silently assumed. Do not act on it until the user confirms you have reached a shared understanding. Simply tell the user that you have reached a shared understanding, summarize the core solution decided upon to solve the initial problem in 1–3 sentences, and state that you are ready to proceed to the next steps.
+```json
+"init_js": "const select = root.querySelector('select'); const preview = root.querySelector('output'); select.addEventListener('change', () => { preview.textContent = select.value; });"
+```
+
+Put script logic in `init_js`, since script tags inserted as HTML do not initialize. Scope DOM queries to `root`, use distinct IDs such as `Q1-preview`, and keep demonstration controls local. The board owns answer forms, queueing, and submission. For larger examples, `init_js` may load a script from the supplied empty assets directory. Use the hook-supplied relative URL prefix for supporting files, including images with useful alt text.
+
+## HTML and visual style
+
+The board supplies its style: warm paper (`--paper`), cream cards (`--surface`), charcoal text (`--ink`, `--ink-2`), muted secondary text (`--ink-soft`), and restrained terracotta emphasis (`--accent`, `--accent-soft`). Headings use `--font-head` (Space Grotesk); body text uses `--font-body` (DM Sans). Match these variables instead of introducing another page theme or a CDN design system. Product UI previews should reproduce the subject product's actual appearance inside this explanation.
+
+Use semantic HTML. The explanation automatically styles paragraphs, headings, figures, captions, tables, code blocks, and disclosures. Available helpers:
+
+- `.grid`: two equal columns, stacked on narrow screens; `.panel`: a lightly bordered inset card.
+- `.note`: a restrained terracotta callout; `.table-wrap`: a horizontally contained table wrapper.
+- `<details><summary>…</summary>…</details>`: optional supporting detail, with the essential rationale visible.
+
+Use these focused Lavish authoring principles:
+
+- **Comparison:** align the same criteria, show concrete behavior, and make costs as visible as benefits. Keep the recommendation in its proposal.
+- **Table:** use a table when rows share fields. State what the comparison demonstrates before the table; use semantic headers and `.table-wrap` for wide content.
+- **Diagram:** explain one concept at a time with responsive inline SVG (`viewBox`, width 100%). Give meaningful elements stable IDs and `<title>` descriptions. Use page color variables and short labels, with explanatory prose outside the SVG.
+- **Interaction:** native selectors, sliders, and buttons can demonstrate behavior, but changes remain local until the board's explicit answer submission. Label controls and keep explanations understandable without interaction.
+- **Layout:** contain media and code; use `minmax(0, 1fr)` and `min-width: 0` for custom grids. Scope additional CSS beneath `#explanation-Q1` (or the relevant ID). The board disables explanation animations for reduced-motion preferences.
+
+Use real project screenshots when they clarify a UI decision. Tables, SVG, images, or animations should explain the decision, rather than decorate it. For unfamiliar advanced visuals, consult only the matching `npx -y lavish-axi playbook <id>`; the board already provides the page design and input lifecycle. Verify custom visuals at narrow widths; inspect SVG interiors because Lavish's layout audit does not check them.
+
+## Completion
+
+The frontier is empty only when every branch has been visited and no decision is silently assumed. Write `{"complete": true, "summary": "Brief agreed solution"}` to the supplied fresh path to disarm waiting. Summarize the solution in 1–3 sentences and say you are ready for next steps. Wait for the user to confirm shared understanding before acting on the plan.
+
+Chat messages can interrupt a review to revise its questions. A revised round opens a separate Lavish review and closes the previous one; tell the user that previously queued but unsubmitted answers must be queued again. Ordinary submitted rounds reload the existing board.
+
+If the user cancels the interview or changes tasks, write `{"cancel": true}` to the supplied path, including the cancellation path supplied while paused. Hooks close the review without polling or claiming agreement. If cleanup is interrupted, hooks retry it on later session activity; follow the reported status.
