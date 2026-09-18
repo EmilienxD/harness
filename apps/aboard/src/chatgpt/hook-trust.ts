@@ -1,5 +1,5 @@
-/** Workspace consent for running all enabled Codex hooks during Auto Run. */
-export class AutoRunHookTrust {
+/** Workspace consent for running all enabled ChatGPT hooks during Aboard launches and resumes. */
+export class ChatGptHookTrust {
   #pending: Promise<boolean> | undefined;
   public constructor(private readonly host: {
     readonly isAllowed: () => boolean;

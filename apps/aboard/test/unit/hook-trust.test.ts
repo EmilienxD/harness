@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { AutoRunHookTrust } from "../../src/chatgpt/hook-trust.js";
+import { ChatGptHookTrust } from "../../src/chatgpt/hook-trust.js";
 
 test("workspace hook consent is remembered across activations", async () => {
   let allowed = false;
@@ -10,8 +10,8 @@ test("workspace hook consent is remembered across activations", async () => {
     remember: async () => { allowed = true; },
     ask: async () => true,
   };
-  assert.equal(await new AutoRunHookTrust(host).approve(), true);
-  const restored = new AutoRunHookTrust({ ...host, ask: async () => { throw new Error("Unexpected prompt"); } });
+  assert.equal(await new ChatGptHookTrust(host).approve(), true);
+  const restored = new ChatGptHookTrust({ ...host, ask: async () => { throw new Error("Unexpected prompt"); } });
   assert.equal(await restored.approve(), true);
 });
 
@@ -19,7 +19,7 @@ test("concurrent requests share consent and cancellation can be retried", async 
   const prompt: { answer?: (allowed: boolean) => void } = {};
   const answer = (allowed: boolean) => { prompt.answer?.(allowed); };
   let allowed = false;
-  const consent = new AutoRunHookTrust({
+  const consent = new ChatGptHookTrust({
     isAllowed: () => allowed,
     remember: async () => { allowed = true; },
     ask: () => new Promise<boolean>((resolve) => {

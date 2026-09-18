@@ -20,7 +20,7 @@ import { createVsCodeTerminalHost } from "./vscode/terminals.js";
 import { spawnCommandRunner } from "./platform/preflight.js";
 import { ClaudeAgentPlatform } from "./claude/platform.js";
 import { ChatGptAgentPlatform } from "./chatgpt/platform.js";
-import { AutoRunHookTrust } from "./chatgpt/hook-trust.js";
+import { ChatGptHookTrust } from "./chatgpt/hook-trust.js";
 import type { AgentPlatform, AgentPlatformId } from "./platform/agent-platform.js";
 import { GitHubBoundaryError, GitHubClient, ProcessGhExecutor } from "./github/client.js";
 import { readScaffoldState, scaffoldCatalogRevision, scaffoldProject } from "./scaffold/project.js";
@@ -253,18 +253,18 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
       script: join(context.extensionPath, "assets", "runtime", "abd_hook.py"),
     },
   });
-  const hookTrustKey = `aboard.autoRun.codexHooksAllowed:${workspaceRoot}`;
-  const autoRunHookTrust = new AutoRunHookTrust({
+  const hookTrustKey = `aboard.codexHooksAllowed:${workspaceRoot}`;
+  const ChatGptHookTrust = new ChatGptHookTrust({
     isAllowed: () => context.workspaceState.get<boolean>(hookTrustKey) === true,
     remember: async () => { await context.workspaceState.update(hookTrustKey, true); },
     ask: async () => await window.showWarningMessage(
-      "Allow configured Codex hooks during Auto Run in this workspace?",
-      { modal: true, detail: "Auto Run needs Aboard's guard and lifecycle hooks. This allows all enabled Codex hooks, including user and project hooks, without individual trust review during automated runs and worker resumes. Only allow this if you trust those hooks. Your choice is remembered for this workspace." },
+      "Allow configured Codex hooks for Aboard sessions in this workspace?",
+      { modal: true, detail: "Aboard needs lifecycle hooks to detect session startup, and guard hooks for Auto Run. This allows all enabled Codex hooks, including user and project hooks, without individual trust review during Aboard launches and resumes. Only allow this if you trust those hooks. Your choice is remembered for this workspace." },
       "Allow Hooks",
     ) === "Allow Hooks",
   });
   const chatGptPlatform = new ChatGptAgentPlatform({
-    approveAutoRunHooks: () => autoRunHookTrust.approve(),
+    approveHooks: () => ChatGptHookTrust.approve(),
     commandRunner: spawnCommandRunner(workspaceRoot),
     lifecycleAssets: {
       settings: join(context.extensionPath, "assets", "runtime", "abd-hooks.json"),
@@ -561,7 +561,7 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
       createAutoRoutes({
         dryRun: (options) => autoRun.dryRun(options),
         start: async (options) => {
-          if ((await launchFile.load()).value.autoRunProvider === "chatgpt" && !await autoRunHookTrust.approve()) {
+          if ((await launchFile.load()).value.autoRunProvider === "chatgpt" && !await ChatGptHookTrust.approve()) {
             return { started: false as const, reason: "Codex Auto Run requires workspace hook consent" };
           }
           return autoRun.start(options);
@@ -660,7 +660,7 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
   await startRuntimeBridge();
   const startAutoRun = async (preview: AutoRunPreview) => {
     if (!requireInitialized()) return { started: false as const, reason: "the project is not initialized" };
-    if ((await launchFile.load()).value.autoRunProvider === "chatgpt" && !await autoRunHookTrust.approve()) {
+    if ((await launchFile.load()).value.autoRunProvider === "chatgpt" && !await ChatGptHookTrust.approve()) {
       return { started: false as const, reason: "Codex Auto Run requires workspace hook consent" };
     }
     return autoRun.startPreviewed(preview);

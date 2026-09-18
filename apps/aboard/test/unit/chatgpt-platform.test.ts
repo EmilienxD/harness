@@ -27,12 +27,12 @@ test("Codex hook definitions stay stable across new terminals, forks, and resume
   assert.deepEqual(hooks(platform.planSessionResume(next).args), first);
 });
 
-test("Auto Run preflight requires hook consent while interactive preflight does not", async () => {
+test("Codex launch and resume preflight require workspace hook consent", async () => {
   const platform = new ChatGptAgentPlatform({
     lifecycleAssets: { settings: "hooks.json", script: "hook.py" },
     commandRunner: async () => ({ code: 0, stdout: "codex-cli 0.153.4", stderr: "" }),
     policyProbe: { require: async () => {} },
-    approveAutoRunHooks: async () => false,
+    approveHooks: async () => false,
   });
   const request = {
     agentId, sessionId: provisional, agentType: "address" as const, autoRunRestricted: true as const,
@@ -41,13 +41,32 @@ test("Auto Run preflight requires hook consent while interactive preflight does 
   };
   await assert.rejects(platform.preflight(platform.planLaunch(request)), /hook consent/u);
   await assert.rejects(platform.preflight(platform.planSessionResume(request)), /hook consent/u);
-  await platform.preflight(platform.planLaunch({
+  const interactive = {
     agentId, sessionId: provisional, agentType: "interactive", shell: "powershell",
     configuration: { shape: "default" },
-  }));
+  } as const;
+  await assert.rejects(platform.preflight(platform.planLaunch(interactive)), /hook consent/u);
+  await assert.rejects(platform.preflight(platform.planSessionResume(interactive)), /hook consent/u);
 });
 
-test("Auto Run Codex launches and resumes bypass hook trust, including background exploration", () => {
+test("workspace hook consent admits manual Codex launches, forks, and resumes", async () => {
+  const platform = new ChatGptAgentPlatform({
+    lifecycleAssets: { settings: "hooks.json", script: "hook.py" },
+    commandRunner: async () => ({ code: 0, stdout: "codex-cli 0.153.4", stderr: "" }),
+    policyProbe: { require: async () => {} },
+    approveHooks: async () => true,
+  });
+  const request = {
+    agentId, sessionId: provisional, agentType: "interactive", shell: "powershell",
+    configuration: { shape: "default" },
+  } as const;
+  for (const plan of [platform.planLaunch(request), platform.planLaunch({ ...request, forkSessionId: actual }), platform.planSessionResume(request)]) {
+    assert.ok(plan.args.includes("--dangerously-bypass-hook-trust"));
+    await platform.preflight(plan);
+  }
+});
+
+test("Codex launches and resumes enable lifecycle hooks without native trust review", () => {
   const platform = new ChatGptAgentPlatform({
     lifecycleAssets: { settings: "hooks.json", script: "hook.py" },
     commandRunner: async () => ({ code: 0, stdout: "codex-cli 0.153.4", stderr: "" }),
@@ -66,7 +85,7 @@ test("Auto Run Codex launches and resumes bypass hook trust, including backgroun
     agentId, sessionId: provisional, agentType: "explore", executionMode: "auto",
     shell: "powershell", configuration: { shape: "explore" }, prompt: "Explore.",
   });
-  assert.equal(manual.args.includes("--dangerously-bypass-hook-trust"), false);
+  assert.equal(manual.args.includes("--dangerously-bypass-hook-trust"), true);
 });
 
 test("interactive ChatGPT forks preserve history and observe fork startup", () => {
@@ -108,7 +127,7 @@ test("the ChatGPT adapter launches a visible Codex session without imposing its 
   assert.equal(plan.platform, "chatgpt");
   assert.deepEqual(plan.command, ["wrapper", "codex"]);
   assert.equal(plan.args.includes("--session-id"), false);
-  assert.equal(plan.args.includes("--dangerously-bypass-hook-trust"), false);
+  assert.equal(plan.args.includes("--dangerously-bypass-hook-trust"), true);
   assert.deepEqual(plan.args.slice(-2), ["--", "Inspect the launch boundary."]);
   assert.equal(plan.args.at(-1), "Inspect the launch boundary.");
   assert.equal(plan.promptDelivery, "inline");
