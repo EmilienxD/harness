@@ -70,7 +70,7 @@ Use these focused Lavish authoring principles:
 
 - **Comparison:** align the same criteria, show concrete behavior, and make costs as visible as benefits. Keep the recommendation in its proposal.
 - **Table:** use a table when rows share fields. State what the comparison demonstrates before the table; use semantic headers and `.table-wrap` for wide content.
-- **Diagram:** explain one concept at a time with responsive inline SVG (`viewBox`, width 100%). Give meaningful elements stable IDs and `<title>` descriptions. Use page color variables and short labels, with explanatory prose outside the SVG.
+- **Diagram:** explain one concept at a time with responsive inline SVG (`viewBox`, width 100%). Give meaningful elements stable IDs and `<title>` descriptions. Use page color variables and short labels, with explanatory prose outside the SVG. External SVGs loaded through `<img>` cannot inherit page CSS variables; define their colors/fonts locally or use literal fallbacks such as `var(--surface, #fbfaf6)`.
 - **Interaction:** native selectors, sliders, and buttons can demonstrate behavior, but changes remain local until the board's explicit answer submission. Label controls and keep explanations understandable without interaction.
 - **Layout:** contain media and code; use `minmax(0, 1fr)` and `min-width: 0` for custom grids. Scope additional CSS beneath `#explanation-Q1` (or the relevant ID). The board disables explanation animations for reduced-motion preferences.
 

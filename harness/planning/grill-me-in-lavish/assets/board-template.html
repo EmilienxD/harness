@@ -10,8 +10,8 @@
 :root {
   --paper: #f5f3ee; --paper-2: #e8e4dd; --paper-3: #ded8cf; --surface: #fbfaf6;
   --ink: #2d2d2d; --ink-2: #0d0d0d; --ink-soft: #6b6862; --ink-faint: #96918a;
-  --accent: #1e3a5f; --accent-soft: #d8e0e9; --success: #4f6b58; --success-soft: #dfe8e1;
-  --warning: #8a671f; --warning-soft: #eee4c7; --font-head: "Space Grotesk", system-ui, sans-serif;
+  --accent: #5b53ff; --accent-soft: #e6e5ff; --success: #12b76a; --success-soft: #dbf4e9;
+  --font-head: "Space Grotesk", system-ui, sans-serif;
   --font-body: "DM Sans", system-ui, sans-serif; --radius-sm: 6px; --radius-md: 10px;
   --shadow-card: 10px 10px 0 var(--ink-2); --focus: 0 0 0 3px color-mix(in srgb, var(--accent) 28%, transparent);
 }
@@ -28,15 +28,22 @@ button { color: inherit; }
 .brand__name { color: var(--ink-2); font: 650 14px/1 var(--font-head); }
 .page { max-width: 1040px; margin: auto; padding: 26px 24px 58px; }
 .deck-wrap { min-width: 0; }
-.deck { position: relative; display: grid; margin-right: 10px; margin-bottom: 10px; }
-.deck::before { content: ""; position: absolute; inset: 0; z-index: 0; transform: translate(10px, 10px); background: var(--ink-2); border-radius: var(--radius-md); }
-.deck.is-last::before { transform: translate(7px, 7px); }
-.question { grid-area: 1 / 1; z-index: 1; overflow: hidden; background: var(--surface); border: 1.5px solid var(--ink-2); border-radius: var(--radius-md); }
+.deck { position: relative; display: grid; margin: 4px 16px 20px 12px; }
+/* Two rotated card faces peek out behind the active card, like a dealt stack
+   of paper. The stack thins as you move through the questions: one edge
+   disappears on the second-to-last question, both on the last. */
+.deck::before, .deck::after { content: ""; position: absolute; inset: 0; z-index: 0; background: var(--surface); border: 1.5px solid var(--ink-2); border-radius: var(--radius-md); box-shadow: 4px 4px 0 var(--ink-2); }
+.deck::before { transform: rotate(1.4deg) translate(5px, 6px); }
+.deck::after { transform: rotate(-1.1deg) translate(-4px, 11px); }
+.deck.is-penult::after { display: none; }
+.deck.is-last::before, .deck.is-last::after { display: none; }
+.question { grid-area: 1 / 1; z-index: 1; display: flex; flex-direction: column; overflow: hidden; background: var(--surface); border: 1.5px solid var(--ink-2); border-radius: var(--radius-md); box-shadow: var(--shadow-card); }
+/* Hidden cards are removed from layout so the deck sizes to the active card, not the tallest one. */
 .question[hidden] { display: none; }
-.question__pad { padding: clamp(24px, 4vw, 38px); }
-.question__top { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 13px; }
-.qid { color: var(--ink-faint); font: 650 10px/1 var(--font-head); letter-spacing: .2em; text-transform: uppercase; }
-.round-label { color: var(--ink-soft); font: 650 10px/1 var(--font-head); letter-spacing: .13em; text-transform: uppercase; }
+.question__pad { flex: 1 1 auto; display: flex; flex-direction: column; padding: clamp(24px, 4vw, 38px); }
+.question__top { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 13px; flex-wrap: wrap; }
+.qid-slot { min-width: 0; flex: 1 1 auto; overflow-x: auto; }
+.round-label { flex: 0 0 auto; color: var(--ink-soft); font: 650 10px/1 var(--font-head); letter-spacing: .13em; text-transform: uppercase; }
 .question h2 { max-width: 760px; margin: 0; color: var(--ink-2); font: 600 clamp(19px, 2.8vw, 26px)/1.14 var(--font-head); letter-spacing: 0; text-wrap: balance; }
 .explanation { min-width: 0; margin: 18px 0 22px; color: var(--ink-soft); font-size: 15px; line-height: 1.62; }
 .explanation > :first-child { margin-top: 0; } .explanation > :last-child { margin-bottom: 0; }
@@ -55,7 +62,7 @@ button { color: inherit; }
 .explanation select, .explanation input, .explanation button { max-width: 100%; }
 .explanation details { padding: 12px 0; } .explanation summary { cursor: pointer; color: var(--ink); font-weight: 600; }
 .explanation p, .explanation li { overflow-wrap: anywhere; }
-.answer-form { display: flex; flex-direction: column; gap: 15px; }
+.answer-form { flex: 1 1 auto; display: flex; flex-direction: column; gap: 15px; }
 .options { display: flex; flex-direction: column; gap: 9px; }
 .option { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 12px; align-items: start; padding: 13px 14px; cursor: pointer; background: var(--surface); border: 1px solid var(--paper-3); border-radius: var(--radius-sm); transition: border-color 120ms, background 120ms, transform 120ms; }
 .option:hover { border-color: color-mix(in srgb, var(--ink) 50%, transparent); transform: translateY(-1px); }
@@ -72,7 +79,7 @@ button { color: inherit; }
 .text-link:focus-visible { outline: none; box-shadow: var(--focus); }
 .freeform textarea { width: 100%; min-height: 84px; resize: vertical; padding: 13px 14px; color: var(--ink-2); background: var(--surface); border: 1px solid var(--paper-3); border-radius: var(--radius-sm); font-size: 13px; line-height: 1.45; }
 .freeform textarea:focus { outline: none; border-color: var(--accent); box-shadow: var(--focus); }
-.question__foot { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; padding-top: 15px; border-top: 1px solid color-mix(in srgb, var(--ink) 9%, transparent); }
+.question__foot { margin-top: auto; display: flex; flex-wrap: wrap; align-items: center; gap: 12px; padding-top: 15px; border-top: 1px solid color-mix(in srgb, var(--ink) 9%, transparent); }
 .submit { display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-height: 42px; padding: 0 18px; color: var(--paper); background: var(--ink-2); border: 1px solid var(--ink-2); border-radius: var(--radius-sm); cursor: pointer; font-size: 13px; font-weight: 700; transition: background 120ms, transform 120ms; }
 .submit:hover { background: var(--ink); transform: translateY(-1px); } .submit:active { transform: translateY(1px); }
 .submit:focus-visible { outline: none; box-shadow: var(--focus); }
@@ -80,22 +87,18 @@ button { color: inherit; }
 .form-message { flex-basis: 100%; min-height: 18px; color: var(--accent); font-size: 12px; font-weight: 700; }
 .round-submit { margin-left: auto; } .round-submit:disabled { opacity: .42; cursor: not-allowed; transform: none; }
 .round-message { flex-basis: 100%; min-height: 18px; color: var(--accent); font-size: 12px; font-weight: 700; text-align: right; }
-.question-strip { margin-top: 24px; padding: 17px 0 0; border-top: 1px solid color-mix(in srgb, var(--ink) 15%, transparent); }
-.question-map { display: flex; justify-content: center; gap: 7px; min-height: 38px; padding: 1px 1px 4px; }
+.question-map { display: flex; align-items: center; justify-content: flex-start; gap: 7px; min-height: 38px; padding: 1px 1px 3px; overflow-x: auto; }
 .map-btn { min-width: 48px; height: 38px; flex: 0 0 auto; cursor: pointer; color: var(--ink-soft); background: transparent; border: 1px solid color-mix(in srgb, var(--ink) 15%, transparent); border-radius: var(--radius-sm); padding: 0 13px; font: 650 10px/1 var(--font-head); letter-spacing: .1em; transition: transform 120ms, border-color 120ms, background 120ms; }
 .map-btn:hover { transform: translateY(-1px); border-color: var(--ink); } .map-btn:focus-visible { outline: none; box-shadow: var(--focus); }
 .map-btn.is-active { color: var(--paper); border-color: var(--ink-2); background: var(--ink-2); }
 .map-btn.is-queued, .map-btn.is-sent { color: var(--success); border-color: var(--success); background: var(--success-soft); }
-.map-btn.is-edited { color: var(--warning); border-color: var(--warning); background: var(--warning-soft); }
 .map-btn.is-active.is-queued, .map-btn.is-active.is-sent { color: var(--paper); background: var(--success); }
-.map-btn.is-active.is-edited { color: var(--paper); background: var(--warning); }
-.map-jump { min-width: 62px; color: var(--accent); border-style: dashed; }
 .fatal { max-width: 720px; margin: 50px auto; padding: 28px; background: var(--surface); border: 1.5px solid var(--ink-2); border-radius: var(--radius-md); box-shadow: var(--shadow-card); }
 .fatal h2 { margin: 0 0 8px; color: var(--ink-2); font-family: var(--font-head); }
-@media (prefers-reduced-motion: no-preference) { .question:not([hidden]) { animation: settle 260ms cubic-bezier(.2,.7,.2,1) both; } @keyframes settle { from { opacity: .72; transform: translateY(6px); } to { opacity: 1; transform: none; } } }
+@media (prefers-reduced-motion: no-preference) { .question:not([hidden]) { animation: settle 260ms cubic-bezier(.2,.7,.2,1) both; } @keyframes settle { from { opacity: .72; } to { opacity: 1; } } }
 @media (prefers-reduced-motion: reduce) { .explanation *, .explanation *::before, .explanation *::after { animation: none !important; transition: none !important; } }
 @media (max-width: 640px) { .explanation .grid { grid-template-columns: minmax(0, 1fr); } }
-@media (max-width: 560px) { .nav__inner, .page { padding-left: 17px; padding-right: 17px; } .question__top { align-items: flex-start; } .option { grid-template-columns: auto minmax(0, 1fr); } .option__badges { grid-column: 2; justify-self: start; align-items: flex-start; } .question__foot { align-items: stretch; } .question__foot .submit { flex: 1 1 180px; } .question-map { justify-content: flex-start; overflow-x: auto; } }
+@media (max-width: 560px) { .nav__inner, .page { padding-left: 17px; padding-right: 17px; } .question__top { align-items: flex-start; } .option { grid-template-columns: auto minmax(0, 1fr); } .option__badges { grid-column: 2; justify-self: start; align-items: flex-start; } .question__foot { align-items: stretch; } .question__foot .submit { flex: 1 1 180px; } .question-map { gap: 4px; } .map-btn { min-width: 36px; padding: 0 6px; } }
 </style>
 </head>
 <body>
@@ -112,9 +115,6 @@ button { color: inherit; }
   <section class="deck-wrap" aria-label="Questions">
     <div class="deck" id="deck"></div>
   </section>
-  <nav class="question-strip" aria-label="Question navigation">
-    <div class="question-map" id="question-map"></div>
-  </nav>
 </main>
 
 <!--
@@ -188,9 +188,13 @@ __GRILL_ME_DATA__
   }
 
   var deck = document.getElementById("deck");
-  var map = document.getElementById("question-map");
+  var map = node("div", "question-map");
+  map.id = "question-map";
+  map.setAttribute("role", "navigation");
+  map.setAttribute("aria-label", "Question navigation");
   var states = data.questions.map(function () { return "open"; });
   var cards = [];
+  var qidSlots = [];
   var mapButtons = [];
   var active = 0;
   var roundSubmitted = false;
@@ -215,8 +219,7 @@ __GRILL_ME_DATA__
 
   function updateProgress() {
     var queued = states.filter(function (state) { return state === "queued"; }).length;
-    var edited = states.filter(function (state) { return state === "edited"; }).length;
-    roundButtons.forEach(function (button) { button.disabled = roundSubmitted || queued === 0 || edited > 0; });
+    roundButtons.forEach(function (button) { button.disabled = roundSubmitted || queued === 0; });
   }
 
   function updateState(index, state) {
@@ -224,43 +227,49 @@ __GRILL_ME_DATA__
     var card = cards[index];
     card.classList.toggle("is-queued", state === "queued");
     card.classList.toggle("is-sent", state === "sent");
-    mapButtons[index].className = "map-btn" + (index === active ? " is-active" : "") + (state === "queued" ? " is-queued" : state === "sent" ? " is-sent" : state === "edited" ? " is-edited" : "");
+    mapButtons[index].className = "map-btn" + (index === active ? " is-active" : "") + (state === "queued" ? " is-queued" : state === "sent" ? " is-sent" : "");
     updateProgress();
   }
 
   function show(index) {
     active = Math.max(0, Math.min(cards.length - 1, index));
-    cards.forEach(function (card, cardIndex) { card.hidden = cardIndex !== active; });
+    cards.forEach(function (card, cardIndex) {
+      card.hidden = cardIndex !== active;
+      card.inert = cardIndex !== active; /* hidden cards keep their layout, so block focus and clicks explicitly */
+    });
     mapButtons.forEach(function (button, buttonIndex) {
       button.classList.toggle("is-active", buttonIndex === active);
       button.setAttribute("aria-current", buttonIndex === active ? "true" : "false");
     });
+    deck.classList.toggle("is-penult", active === cards.length - 2);
     deck.classList.toggle("is-last", active === cards.length - 1);
+    qidSlots[active].appendChild(map);
     renderMap();
   }
 
+  /* Question navigation shows a fixed-size window of buttons that slides to keep
+     the active question in view. Because the window always holds the same number
+     of buttons (until there are fewer questions than that), the strip's width
+     never changes and it doesn't shift around as you click through questions. */
+  var NAV_WINDOW = 7;
+
   function renderMap() {
     map.innerHTML = "";
-    var start = Math.max(0, active - 2);
-    var end = Math.min(mapButtons.length - 1, active + 2);
-    if (active >= 10) map.appendChild(jumpButton(active - 10, "-10"));
-    for (var i = start; i <= end; i += 1) map.appendChild(mapButtons[i]);
-    if (active + 10 < mapButtons.length) map.appendChild(jumpButton(active + 10, "+10"));
-  }
-
-  function jumpButton(index, label) {
-    var button = node("button", "map-btn map-jump", label);
-    button.type = "button";
-    button.setAttribute("aria-label", "Jump to question " + (index + 1));
-    button.addEventListener("click", function () { show(index); });
-    return button;
+    var total = mapButtons.length;
+    var size = Math.min(NAV_WINDOW, total);
+    var start = Math.min(Math.max(0, active - Math.floor(size / 2)), total - size);
+    for (var i = start; i < start + size; i++) {
+      map.appendChild(mapButtons[i]);
+    }
   }
 
   data.questions.forEach(function (question, index) {
     var card = node("article", "question");
     var pad = node("div", "question__pad");
     var top = node("div", "question__top");
-    top.appendChild(node("span", "qid", question.id));
+    var qidSlot = node("div", "qid-slot");
+    top.appendChild(qidSlot);
+    qidSlots.push(qidSlot);
     top.appendChild(node("span", "round-label", "Round " + (data.round || 1)));
     pad.appendChild(top);
     pad.appendChild(node("h2", "", question.question));
@@ -309,7 +318,7 @@ __GRILL_ME_DATA__
     form.appendChild(freeform);
 
     var foot = node("div", "question__foot");
-    var submit = node("button", "submit", "Queue");
+    var submit = node("button", "submit", "Queue answer");
     submit.type = "submit";
     foot.appendChild(submit);
     var roundSubmit = node("button", "submit round-submit", "Submit round");
@@ -333,7 +342,7 @@ __GRILL_ME_DATA__
     }
     function sameAnswer(a, b) { return a !== null && b !== null && a.letter === b.letter && a.note === b.note; }
     function refreshQueueButton() {
-      submit.textContent = roundSubmitted ? "Round submitted" : queuedAnswer !== null ? "Update" : "Queue";
+      submit.textContent = roundSubmitted ? "Round submitted" : queuedAnswer !== null ? "Update answer" : "Queue answer";
       submit.disabled = roundSubmitted || sameAnswer(currentAnswer(), queuedAnswer);
     }
     function showSelectedBadge() {
@@ -344,7 +353,7 @@ __GRILL_ME_DATA__
     function markEdited() {
       message.textContent = "";
       roundMessages.forEach(function (item) { item.textContent = ""; });
-      if (queuedAnswer) updateState(index, sameAnswer(currentAnswer(), queuedAnswer) ? "queued" : "edited");
+      if (queuedAnswer) updateState(index, "queued");
       refreshQueueButton();
     }
     queueRefreshers.push(refreshQueueButton);
@@ -411,12 +420,7 @@ __GRILL_ME_DATA__
 
   function submitRound() {
     roundMessages.forEach(function (item) { item.textContent = ""; });
-    var edited = states.filter(function (state) { return state === "edited"; }).length;
     var queued = states.filter(function (state) { return state === "queued"; }).length;
-    if (edited) {
-      roundMessages[active].textContent = "Queue every edited answer again before submitting.";
-      return;
-    }
     if (!queued) {
       roundMessages[active].textContent = "Queue at least one answer before submitting the round.";
       return;
