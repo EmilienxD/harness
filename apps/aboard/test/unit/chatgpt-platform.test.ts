@@ -8,6 +8,25 @@ const agentId = "interactive-1" as AgentId;
 const provisional = "6b1e3f7a-2c4d-4a8b-9f10-2c3d4e5f6071" as SessionId;
 const actual = "af817a6c-cd41-41e2-a4db-44d3f43cd560" as SessionId;
 
+test("Codex hook definitions stay stable across new terminals, forks, and resumes", () => {
+  const platform = new ChatGptAgentPlatform({
+    lifecycleAssets: { settings: "hooks.json", script: "hook.py" },
+    commandRunner: async () => ({ code: 0, stdout: "codex-cli 0.153.4", stderr: "" }),
+  });
+  const request = {
+    agentId, sessionId: provisional, agentType: "interactive" as const,
+    shell: "powershell" as const, configuration: { shape: "default" },
+    runtimeDirectory: "C:/aboard/runtime",
+  };
+  const hooks = (args: readonly string[]) => args.filter((argument) => argument.startsWith("hooks."));
+  const first = hooks(platform.planLaunch(request).args);
+  assert.ok(first.length > 0);
+  const next = { ...request, agentId: "interactive-2" as AgentId, sessionId: actual };
+  assert.deepEqual(hooks(platform.planLaunch(next).args), first);
+  assert.deepEqual(hooks(platform.planLaunch({ ...next, forkSessionId: provisional }).args), first);
+  assert.deepEqual(hooks(platform.planSessionResume(next).args), first);
+});
+
 test("Auto Run preflight requires hook consent while interactive preflight does not", async () => {
   const platform = new ChatGptAgentPlatform({
     lifecycleAssets: { settings: "hooks.json", script: "hook.py" },

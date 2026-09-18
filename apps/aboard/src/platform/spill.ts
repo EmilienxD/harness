@@ -1,4 +1,5 @@
-import { cp, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { randomUUID } from "node:crypto";
+import { cp, mkdir, mkdtemp, readFile, readdir, rename, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 
@@ -52,12 +53,30 @@ export class FileSystemPromptSpillStore implements PromptSpillStore {
   async #prepare(plan: PlatformLaunchPlan, _root?: string): Promise<void> {
     const directory = this.#resolvePath(plan.runtimeDirectory);
     await mkdir(directory, { recursive: true });
-    const hookDirectory = join(directory, "scripts");
+    const hookDirectory = join(plan.platform === "chatgpt" ? this.runtimeRoot : directory, "scripts");
     const hookScript = join(hookDirectory, "abd_hook.py");
     await mkdir(hookDirectory, { recursive: true });
     const assets = this.lifecycleAssets.get(plan.platform);
     if (assets === undefined) throw new Error(`No lifecycle assets are registered for ${plan.platform}`);
-    await cp(assets.script, hookScript, { force: true });
+    if (plan.platform === "chatgpt") {
+      const contents = await readFile(assets.script);
+      const installed = await readFile(hookScript).catch((error: NodeJS.ErrnoException) => {
+        if (error.code === "ENOENT") return undefined;
+        throw error;
+      });
+      if (!installed?.equals(contents)) {
+        // Concurrent launches and live terminals must never see a partial script.
+        const temporary = `${hookScript}.${randomUUID()}.tmp`;
+        try {
+          await writeFile(temporary, contents, { mode: 0o600 });
+          await rename(temporary, hookScript);
+        } finally {
+          await rm(temporary, { force: true });
+        }
+      }
+    } else {
+      await cp(assets.script, hookScript, { force: true });
+    }
     const hooks = replaceHookScript(
       JSON.parse(await readFile(assets.settings, "utf8")) as unknown,
       hookScript,

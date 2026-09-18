@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import test from "node:test";
 
 import { ChatGptAgentPlatform } from "../../src/chatgpt/platform.js";
@@ -40,14 +40,14 @@ async function prepared(context: { after(callback: () => Promise<void>): void })
     denySubagents: true,
     denyCommands: ["git commit*", "git push*", "git checkout*", "git -*", "gh pr merge*"],
   });
-  return { script: join(root, "agents", agentId, "scripts", "abd_hook.py"), guard };
+  return { script: join(root, "scripts", "abd_hook.py"), guard };
 }
 
-function decide(script: string, payload: unknown, raw?: string): { readonly status: number | null; readonly decision?: string; readonly reason?: string } {
+function decide(script: string, payload: unknown, raw?: string, identity = agentId as string): { readonly status: number | null; readonly decision?: string; readonly reason?: string } {
   const result = spawnSync("uv", ["run", "--no-project", "python", script, "worker-guard"], {
     input: raw ?? JSON.stringify(payload),
     encoding: "utf8",
-    env: { ...process.env, ABOARD_AGENT_ID: agentId, ABOARD_AGENT_TYPE: "address" },
+    env: { ...process.env, ABOARD_RUNTIME_ROOT: dirname(dirname(script)), ABOARD_AGENT_ID: identity, ABOARD_AGENT_TYPE: "address" },
   });
   assert.equal(result.stderr, "");
   if (result.stdout.trim().length === 0) return { status: result.status };
@@ -58,6 +58,20 @@ function decide(script: string, payload: unknown, raw?: string): { readonly stat
 function bash(command: string): unknown {
   return { hook_event_name: "PreToolUse", tool_name: "Bash", tool_input: { command } };
 }
+
+test("the shared ChatGPT guard selects only its process's worker restrictions", async (context) => {
+  const { script } = await prepared(context);
+  const other = join(dirname(dirname(script)), "agents", "address-2");
+  await mkdir(other, { recursive: true });
+  await writeFile(join(other, "guard.json"), JSON.stringify({ denySubagents: false, denyCommands: ["npm test*"] }));
+  assert.equal(decide(script, bash("git push origin HEAD")).decision, "deny");
+  assert.deepEqual(decide(script, bash("git push origin HEAD"), undefined, "address-2"), { status: 0 });
+  assert.equal(decide(script, bash("npm test"), undefined, "address-2").decision, "deny");
+  assert.deepEqual(decide(script, bash("npm test")), { status: 0 });
+  for (const identity of ["", "../address-2", "missing-worker"]) {
+    assert.equal(decide(script, bash("npm test"), undefined, identity).decision, "deny");
+  }
+});
 
 test("the ChatGPT worker guard denies Aboard-owned Git and GitHub mutations", async (context) => {
   const { script } = await prepared(context);

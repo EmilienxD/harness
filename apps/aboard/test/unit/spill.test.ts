@@ -6,8 +6,27 @@ import test from "node:test";
 
 import { FileSystemPromptSpillStore, PromptSpillPathError, createPromptSpillRoot } from "../../src/platform/spill.js";
 import { planLaunch } from "../../src/claude/launch.js";
+import { planChatGptLaunch } from "../../src/chatgpt/launch.js";
 import { promptSpillRoot, taskPromptPath } from "../../src/platform/launch.js";
 import type { AgentId, SessionId } from "../../src/domain/contracts.js";
+
+test("Codex's shared lifecycle script survives agent cleanup", async (t) => {
+  const root = await mkdtemp(join(tmpdir(), "aboard-shared-hooks-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const store = new FileSystemPromptSpillStore("C:/project", root, new Map([
+    ["chatgpt", { settings: "assets/runtime/abd-hooks.json", script: "assets/runtime/abd_hook.py" }],
+  ]));
+  const plan = planChatGptLaunch({
+    agentId: "10" as AgentId, sessionId: "29581ba3-a790-4a66-9b8d-dc4748eedcd9" as SessionId,
+    agentType: "interactive", shell: "powershell", configuration: { shape: "default" }, runtimeDirectory: root,
+  });
+  await store.prepare(plan);
+  const script = join(root, "scripts", "abd_hook.py");
+  assert.equal(await readFile(script, "utf8"), await readFile("assets/runtime/abd_hook.py", "utf8"));
+  await store.remove(plan.agentId);
+  await store.prune(new Set());
+  assert.equal(await readFile(script, "utf8"), await readFile("assets/runtime/abd_hook.py", "utf8"));
+});
 
 test("a delegated Claude fork receives a lifecycle startup hook", async (t) => {
   const runtimeRoot = await mkdtemp(join(tmpdir(), "aboard-fork-hooks-test-"));

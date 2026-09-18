@@ -43,6 +43,11 @@ workspace. This permits all enabled Codex hooks, including user and project hook
 implementation, review, exploration, and worker resumes/reopens. Ordinary interactive sessions retain
 Codex's native hook trust review. Cancelling leaves the new run unstarted; start again to reconsider.
 
+Aboard's Codex hook commands use a stable script path in workspace storage, so trusting them carries
+across new terminals, forks, and resumes with unchanged hook definitions. Each process supplies its
+agent identity through the environment. The first launch after this change requires trusting the new
+definitions once.
+
 ### Full Workflow
 
 ```mermaid
