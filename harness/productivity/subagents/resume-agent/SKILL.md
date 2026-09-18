@@ -1,15 +1,13 @@
 ---
 name: resume-agent
 description: Continue a delegated agent with a next message in its existing conversation.
-argument-hint: "agent-i next message"
+argument-hint: "[agent-i] [resume focus]"
 license: MIT
 disable-model-invocation: true
 ---
 
-Resume the agent the user asked to resume.
+Resume the subagent from where it finished by sending a follow-up message to its existing conversation. Use any supplied arguments as the focus for the continuation. Resuming preserves the agent's conversation context. State the next objective, relevant new findings, and completion criteria.
 
 Follow the *Multi Provider Subagent System Guideline* previously supplied by the hook. If no hook supplied them, stop immediately and notify the user without looking for a workaround.
 
-Resolve the user-selected `agent-i` where `i` is the id in this parent conversation, and write a fresh request file with only `resume: agent-i` in frontmatter and the nonempty next message as its body.
-
-The agent keeps its task, provider, execution mode, directory, and id.
+Use an explicit `agent-i` if supplied; otherwise select the only subagent in this parent conversation, or infer the intended one from the user's focus and the agents' prior tasks and results. Ask which agent only when the context leaves multiple or no plausible matches.
