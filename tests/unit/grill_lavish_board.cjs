@@ -25,7 +25,12 @@ const dom = new JSDOM(template.replace('__GRILL_ME_DATA__', JSON.stringify(data)
   runScripts: 'dangerously', url: 'http://localhost/board.html',
   beforeParse(window) {
     window.lavish = {
-      queuePrompt(prompt, options) { queued.set(options.queueKey, prompt); },
+      queuePrompt(prompt, options) {
+        assert.equal(typeof prompt, 'string');
+        assert.equal(options.element.tagName, 'FORM');
+        assert.equal(Object.hasOwn(options, 'data'), false);
+        queued.set(options.queueKey, prompt);
+      },
       sendQueuedPrompts() { submissions++; },
     };
   },
@@ -38,6 +43,9 @@ assert.equal(document.querySelector('#board-subtitle'), null);
 assert.equal(document.querySelectorAll('.explanation table').length, 2);
 assert.equal(document.querySelector('#explanation-Q1').dataset.initialized, 'yes');
 const forms = document.querySelectorAll('.answer-form');
+const roundButtons = [...document.querySelectorAll('.round-submit')];
+assert.equal(roundButtons.length, 2);
+assert.ok(roundButtons.every(button => button.disabled));
 assert.equal(forms[0].querySelector('.rec-badge').closest('label').querySelector('input').value, 'B');
 const preview = document.querySelector('#explanation-Q1 select');
 preview.value = 'After';
@@ -50,23 +58,45 @@ const radio = forms[0].querySelector('input[value=B]');
 radio.checked = true;
 radio.dispatchEvent(new Event('change', { bubbles: true }));
 assert.equal(queued.size, 0);
+assert.equal(forms[0].querySelectorAll('.sel-badge.is-visible').length, 0);
 forms[0].dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
 assert.equal(queued.size, 1);
 assert.match([...queued.values()][0], /Choice: B: Explicit/);
+const queueButton = forms[0].querySelector('button[type=submit]');
+assert.equal(queueButton.textContent, 'Update');
+assert.equal(queueButton.disabled, true);
+assert.equal(forms[0].querySelectorAll('.sel-badge.is-visible').length, 1);
+assert.equal(forms[0].querySelector('.sel-badge.is-visible').closest('label').querySelector('input').value, 'B');
+const alternative = forms[0].querySelector('input[value=A]');
+alternative.checked = true;
+alternative.dispatchEvent(new Event('change', { bubbles: true }));
+assert.equal(queueButton.disabled, false);
+assert.ok(roundButtons.every(button => button.disabled));
+assert.equal(forms[0].querySelector('.sel-badge.is-visible').closest('label').querySelector('input').value, 'B');
+assert.match([...queued.values()][0], /Choice: B: Explicit/);
+radio.checked = true;
+radio.dispatchEvent(new Event('change', { bubbles: true }));
+assert.equal(queueButton.disabled, true);
+assert.ok(roundButtons.every(button => !button.disabled));
 const note = forms[0].querySelector('textarea');
 note.value = 'Keep this reversible';
 note.dispatchEvent(new Event('input', { bubbles: true }));
-assert.equal(document.querySelector('#submit-round').disabled, true);
+assert.equal(radio.checked, true);
+assert.equal(queueButton.disabled, false);
+assert.ok(roundButtons.every(button => button.disabled));
 forms[0].dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
 assert.equal(queued.size, 1);
 assert.match([...queued.values()][0], /Keep this reversible/);
-assert.equal(document.querySelector('#submit-round').disabled, false);
-document.querySelector('#submit-round').click();
+assert.match([...queued.values()][0], /Choice: B: Explicit/);
+assert.equal(queueButton.disabled, true);
+assert.ok(roundButtons.every(button => !button.disabled));
+roundButtons[1].click();
 assert.equal(submissions, 1);
 assert.equal(queued.size, 1);
-assert.equal(forms[1].closest('.question').querySelector('.state').textContent, 'open');
+assert.match([...queued.values()][0], /Answer to Q1:/);
+assert.doesNotMatch([...queued.values()][0], /Answer to Q2:/);
 assert.equal(forms[0].querySelector('input').disabled, true);
-document.querySelector('#submit-round').click();
+roundButtons[1].click();
 assert.equal(submissions, 1);
 dom.window.close();
 const ownQueued = [];
@@ -82,9 +112,7 @@ ownForm.querySelector('textarea').value = 'Publish after validating supporting a
 ownForm.dispatchEvent(new own.window.Event('submit', { cancelable: true }));
 assert.match(ownQueued[0], /My own answer: Publish after validating supporting assets/);
 assert.doesNotMatch(ownQueued[0], /Choice:/);
+assert.equal(ownForm.querySelector('button[type=submit]').disabled, true);
+assert.equal(ownForm.querySelectorAll('.sel-badge.is-visible').length, 0);
 own.window.close();
-const completed = new JSDOM(template.replace('__GRILL_ME_DATA__', JSON.stringify({ round: 2, complete: true, summary: 'Write assets before publishing.' })), { runScripts: 'dangerously' });
-assert.equal(completed.window.document.querySelectorAll('.answer-form').length, 0);
-assert.match(completed.window.document.querySelector('#app').textContent, /Write assets before publishing\./);
-completed.window.close();
 console.log('Board interaction checks passed');

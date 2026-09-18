@@ -12,7 +12,7 @@ Interview the user relentlessly until you reach a shared understanding. Map the 
 
 ## Interview workflow
 
-Follow the reserved inbox path or recovery status supplied by the hook. If it is recovering or waiting on an existing round, finish your response so the hook can continue. If it supplied neither a path nor a recovery status, notify the user that the runtime hooks are missing or inactive and stop.
+Use the exact fresh inbox path supplied by the hook. If no path is supplied, report that the runtime hooks are missing or inactive.
 
 Work in **rounds**. The **frontier** is every decision whose prerequisites are settled. Ask the whole frontier together, then wait for submitted answers. A question depending on another unanswered question belongs to a later round.
 
@@ -23,7 +23,7 @@ For each round:
 1. Compose numbered questions with stable IDs. Ask the actual question, then explain why it matters: relevant context, consequences, and uncertainty. Use several concise sentences or a compact visual explanation, scaled to the decision's difficulty.
 2. Provide normally four proposals, A–D; use fewer when further proposals would be artificial. Explain every proposal's behavior and tradeoff. Put the recommendation first as A when practical; its rationale belongs in that proposal's explanation.
 3. Write any supporting assets first in the supplied assets directory. Create the complete round JSON directly at the exact fresh path supplied by the hook. The runtime owns this directory outside the project, creates its parents, and reserves the filename. You are its sole inbox writer; create the file directly without listing the directory or reading a template. Write the round file last: a successful write publishes it automatically.
-4. The write hook renders the board, opens it through Lavish, and waits for submitted feedback in the same tool call. Continue from the returned answers. If the write hook supplies no feedback, finish your response so the Stop hook can recover publication or waiting. The generated page and Lavish's operational commands belong to the runtime; work through the supplied inbox. Keep the questionnaire in the artifact rather than repeating it in chat.
+4. The write hook renders the board, opens it through Lavish, and waits for submitted feedback in the same tool call. Continue from the returned answers. If the write fails or is interrupted, report the issue in chat. Work through the supplied inbox; hooks own rendering, opening, and polling. Keep the questionnaire in the artifact.
 
 When feedback arrives, settle only explicit answers in the submitted batch, retain unanswered questions, and recompute the frontier. Recommendations begin unselected. Local selection and queueing are not submission; silence and omitted questions approve nothing. Freeform answers may replace or supplement a proposal. Fatal artifact errors require a repaired round rather than settling decisions. Validation errors supply a fresh path for the corrected complete payload.
 
@@ -58,12 +58,12 @@ Put script logic in `init_js`, since script tags inserted as HTML do not initial
 
 ## HTML and visual style
 
-The board supplies its style: warm paper (`--paper`), cream cards (`--surface`), charcoal text (`--ink`, `--ink-2`), muted secondary text (`--ink-soft`), and restrained terracotta emphasis (`--accent`, `--accent-soft`). Headings use `--font-head` (Space Grotesk); body text uses `--font-body` (DM Sans). Match these variables instead of introducing another page theme or a CDN design system. Product UI previews should reproduce the subject product's actual appearance inside this explanation.
+The board supplies its style: warm paper (`--paper`), cream cards (`--surface`), charcoal text (`--ink`, `--ink-2`), muted secondary text (`--ink-soft`), and restrained navy emphasis (`--accent`, `--accent-soft`). Headings use `--font-head` (Space Grotesk); body text uses `--font-body` (DM Sans). Match these variables instead of introducing another page theme or a CDN design system. Product UI previews should reproduce the subject product's actual appearance inside this explanation.
 
 Use semantic HTML. The explanation automatically styles paragraphs, headings, figures, captions, tables, code blocks, and disclosures. Available helpers:
 
 - `.grid`: two equal columns, stacked on narrow screens; `.panel`: a lightly bordered inset card.
-- `.note`: a restrained terracotta callout; `.table-wrap`: a horizontally contained table wrapper.
+- `.note`: a restrained accent callout; `.table-wrap`: a horizontally contained table wrapper.
 - `<details><summary>…</summary>…</details>`: optional supporting detail, with the essential rationale visible.
 
 Use these focused Lavish authoring principles:
@@ -76,10 +76,6 @@ Use these focused Lavish authoring principles:
 
 Use real project screenshots when they clarify a UI decision. Tables, SVG, images, or animations should explain the decision, rather than decorate it. For unfamiliar advanced visuals, consult only the matching `npx -y lavish-axi playbook <id>`; the board already provides the page design and input lifecycle. Verify custom visuals at narrow widths; inspect SVG interiors because Lavish's layout audit does not check them.
 
-## Completion
+When the frontier is empty, summarize the agreed solution in chat. If the user cancels or changes tasks, continue in chat. The board stays open for reference; another round file starts another wait.
 
-The frontier is empty only when every branch has been visited and no decision is silently assumed. Write `{"complete": true, "summary": "Brief agreed solution"}` to the supplied fresh path to disarm waiting. Summarize the solution in 1–3 sentences and say you are ready for next steps. Wait for the user to confirm shared understanding before acting on the plan.
-
-Chat messages can interrupt a review to revise its questions. A revised round opens a separate Lavish review and closes the previous one; tell the user that previously queued but unsubmitted answers must be queued again. Ordinary submitted rounds reload the existing board.
-
-If the user cancels the interview or changes tasks, write `{"cancel": true}` to the supplied path, including the cancellation path supplied while paused. Hooks close the review without polling or claiming agreement. If cleanup is interrupted, hooks retry it on later session activity; follow the reported status.
+Chat interrupts waiting. To revise an unsubmitted round, use the fresh path supplied by the hook. The revision opens a separate review; tell the user that unsent answers must be queued again. Ordinary submitted rounds reload the existing board.

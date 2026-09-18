@@ -12,8 +12,8 @@ const { spawnSync } = require('node:child_process');
   if (!packageDir) throw new Error('Lavish package not found in npx environment');
   const resolver = createRequire(path.join(packageDir, 'package.json'));
   const { decode } = await import(pathToFileURL(resolver.resolve('@toon-format/toon')).href);
-  const [mode, file, receipt] = process.argv.slice(2);
-  if (!['open', 'poll', 'end'].includes(mode) || !file) throw new Error('Expected open|poll|end and an artifact path');
+  const [mode, file] = process.argv.slice(2);
+  if (!['open', 'poll'].includes(mode) || !file) throw new Error('Expected open|poll and an artifact path');
   const args = mode === 'open' ? [file] : [mode, file];
   const result = spawnSync(process.execPath, [path.join(packageDir, 'dist', 'cli.mjs'), ...args], {
     encoding: 'utf8', maxBuffer: 32 * 1024 * 1024,
@@ -24,11 +24,6 @@ const { spawnSync } = require('node:child_process');
     throw new Error(result.error?.message || result.stderr || result.stdout || `Lavish exited ${result.status}`);
   }
   const output = decode(result.stdout.trim());
-  if (receipt) {
-    const temporary = `${receipt}.${process.pid}.tmp`;
-    fs.writeFileSync(temporary, JSON.stringify(output), 'utf8');
-    fs.renameSync(temporary, receipt);
-  }
   process.stdout.write(JSON.stringify(output));
 })().catch(error => {
   process.stderr.write(error.message + '\n');

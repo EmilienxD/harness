@@ -1,17 +1,5 @@
 {
   "hooks": {
-    "SessionStart": [
-      {
-        "matcher": "startup|resume|compact|clear|fork",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "${PYTHON} \"${HOOKS_DIR}/grill-lavish/grill_me_in_lavish_hook.py\" --chatgpt",
-            "additionalContextLimit": 0
-          }
-        ]
-      }
-    ],
     "UserPromptSubmit": [
       {
         "hooks": [
@@ -31,17 +19,6 @@
             "command": "${PYTHON} \"${HOOKS_DIR}/grill-lavish/grill_me_in_lavish_hook.py\" --chatgpt",
             "timeout": 86400,
             "additionalContextLimit": 0
-          }
-        ]
-      }
-    ],
-    "Stop": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "${PYTHON} \"${HOOKS_DIR}/grill-lavish/grill_me_in_lavish_hook.py\" --chatgpt",
-            "timeout": 86400
           }
         ]
       }
