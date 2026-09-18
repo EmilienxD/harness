@@ -1159,7 +1159,7 @@ def test_every_catalogue_manifest_loads():
         "guards": {
             "command-guard", "no-new-documents", "on-edit-block", "on-edit-reminder", "on-read-reminder",
             "prefer-edit-tool", "prefer-fewer-comments", "prefer-read-tool",
-            "redirect-subagents", "usage-limit-wait",
+            "redirect-subagents", "remove-anthropic-coauthor", "usage-limit-wait",
         },
         "extension": {"aboard", "auto"},
     }

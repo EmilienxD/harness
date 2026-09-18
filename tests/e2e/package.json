@@ -32,6 +32,8 @@
     "e2e:report-gotchas": "npm run e2e:report-gotchas:build && node dist/tools/report-gotchas/cli.js",
     "e2e:commit:build": "esbuild tools/commit/cli.ts --bundle --platform=node --format=cjs --target=node22 --outfile=dist/tools/commit/cli.js --sourcemap",
     "e2e:commit": "npm run e2e:commit:build && node dist/tools/commit/cli.js",
+    "e2e:remove-anthropic-coauthor:build": "esbuild tools/remove-anthropic-coauthor/cli.ts --bundle --platform=node --format=cjs --target=node22 --outfile=dist/tools/remove-anthropic-coauthor/cli.js --sourcemap",
+    "e2e:remove-anthropic-coauthor": "npm run e2e:remove-anthropic-coauthor:build && node dist/tools/remove-anthropic-coauthor/cli.js",
     "e2e:usage-limit-wait:build": "esbuild tools/usage-limit-wait/cli.ts --bundle --platform=node --format=cjs --target=node22 --outfile=dist/tools/usage-limit-wait/cli.js --sourcemap",
     "e2e:usage-limit-wait": "npm run e2e:usage-limit-wait:build && node dist/tools/usage-limit-wait/cli.js",
     "e2e:subagents:bridge": "esbuild tools/subagents/cli-bridge.ts --bundle --platform=node --format=cjs --target=node22 --outfile=dist/tools/subagents/cli-bridge.js",

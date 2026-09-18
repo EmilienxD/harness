@@ -129,7 +129,10 @@ Hooks do not need a skill invocation. Select them in the catalogue and restart t
 | `prefer-edit-tool` | Claude Code | Nudges the agent toward Write/Edit after shell-based file changes. |
 | `prefer-fewer-comments` | Claude Code, ChatGPT | Flags newly written comments or docstrings that exceed an editable budget. |
 | `redirect-subagents` | Claude Code | Redirects built-in Agent tool work to configured alternate providers and returns the result to the parent session. |
+| `remove-anthropic-coauthor` | Claude Code | Amends new Git commits to remove `Co-Authored-By: Claude … <noreply@anthropic.com>`, preserving human co-authors. |
 | `usage-limit-wait` | Claude Code, ChatGPT | Pauses at an exhausted subscription window and resumes after reset; usage-reader failures always fail open. |
+
+`remove-anthropic-coauthor` runs after successful Bash/PowerShell calls that report a Git commit. It checks that the reported commit is still HEAD, removes matching lines from the final trailer paragraph, and reports the new hash to Claude. The amend preserves the tree, parents, original author, index, and worktree; commit hooks are not rerun, and configured commit signing is honored. Keep commit and push in separate tool calls so the hook can clean the message before it is pushed. Quiet commits or redirected commit output cannot be detected. Repository lookup supports the hook's working directory and literal `cd` or `git -C` paths; shell variables and computed paths are not expanded.
 
 #### Guard configuration
 
@@ -209,3 +212,5 @@ npm install
 npm run check
 npm test
 ```
+
+Run `npm run e2e:remove-anthropic-coauthor` from `tests/e2e/` to verify the attribution-removal hook with the real `claude -p` CLI and the fake Anthropic endpoint. This journey requires the ownership-recorded `EmilienxD/harness-e2e` checkout; set `HARNESS_E2E_FIXTURE_ROOT` to its runtime directory (defaults to `ABOARD_E2E_ROOT`, then `~/dev/harness-e2e-runtime`). It commits in a temporary clone, verifies two model trailers are removed while human co-authors and staged changes survive, and leaves the shared checkout and remote unchanged.
