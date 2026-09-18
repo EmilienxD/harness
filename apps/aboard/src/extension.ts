@@ -254,7 +254,7 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
     },
   });
   const hookTrustKey = `aboard.codexHooksAllowed:${workspaceRoot}`;
-  const ChatGptHookTrust = new ChatGptHookTrust({
+  const chatGptHookTrust = new ChatGptHookTrust({
     isAllowed: () => context.workspaceState.get<boolean>(hookTrustKey) === true,
     remember: async () => { await context.workspaceState.update(hookTrustKey, true); },
     ask: async () => await window.showWarningMessage(
@@ -264,7 +264,7 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
     ) === "Allow Hooks",
   });
   const chatGptPlatform = new ChatGptAgentPlatform({
-    approveHooks: () => ChatGptHookTrust.approve(),
+    approveHooks: () => chatGptHookTrust.approve(),
     commandRunner: spawnCommandRunner(workspaceRoot),
     lifecycleAssets: {
       settings: join(context.extensionPath, "assets", "runtime", "abd-hooks.json"),
@@ -561,7 +561,7 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
       createAutoRoutes({
         dryRun: (options) => autoRun.dryRun(options),
         start: async (options) => {
-          if ((await launchFile.load()).value.autoRunProvider === "chatgpt" && !await ChatGptHookTrust.approve()) {
+          if ((await launchFile.load()).value.autoRunProvider === "chatgpt" && !await chatGptHookTrust.approve()) {
             return { started: false as const, reason: "Codex Auto Run requires workspace hook consent" };
           }
           return autoRun.start(options);
@@ -660,7 +660,7 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
   await startRuntimeBridge();
   const startAutoRun = async (preview: AutoRunPreview) => {
     if (!requireInitialized()) return { started: false as const, reason: "the project is not initialized" };
-    if ((await launchFile.load()).value.autoRunProvider === "chatgpt" && !await ChatGptHookTrust.approve()) {
+    if ((await launchFile.load()).value.autoRunProvider === "chatgpt" && !await chatGptHookTrust.approve()) {
       return { started: false as const, reason: "Codex Auto Run requires workspace hook consent" };
     }
     return autoRun.startPreviewed(preview);
