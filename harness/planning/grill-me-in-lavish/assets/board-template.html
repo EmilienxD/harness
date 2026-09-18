@@ -82,10 +82,20 @@ button { color: inherit; }
 
 .deck-wrap { min-width: 0; }
 .section-head { display: flex; align-items: baseline; justify-content: space-between; gap: 14px; margin-bottom: 12px; }
-.deck { position: relative; display: grid; margin-right: 10px; margin-bottom: 10px; }
-.deck::before { content: ""; position: absolute; inset: 0; z-index: 0; transform: translate(10px, 10px); background: var(--ink-2); border-radius: var(--radius-md); }
-.deck.is-last::before { transform: translate(7px, 7px); }
-.question { grid-area: 1 / 1; z-index: 1; overflow: hidden; background: var(--surface); border: 1.5px solid var(--ink-2); border-radius: var(--radius-md); }
+.deck { position: relative; display: grid; }
+/* the stack: a squared-up paper pile - solid card faces at slight opposing
+   rotations, like dealt cards, not one flat offset slab. The pile thins as
+   questions are worked through: two edges, then one, then none on the last. */
+.deck::before, .deck::after {
+  content: ""; position: absolute; inset: 0; z-index: 0;
+  background: var(--surface); border: 1.5px solid var(--ink-2);
+  border-radius: var(--radius-md); box-shadow: 3px 3px 0 var(--ink-2);
+}
+.deck::before { transform: rotate(1.3deg) translate(4px, 5px); }
+.deck::after  { transform: rotate(-1.1deg) translate(-3px, 9px); }
+.deck.is-penult::after { display: none; }
+.deck.is-last::before, .deck.is-last::after { display: none; }
+.question { grid-area: 1 / 1; z-index: 1; overflow: hidden; background: var(--surface); border: 1.5px solid var(--ink-2); border-radius: var(--radius-md); box-shadow: 4px 4px 0 var(--ink-2); }
 .question[hidden] { display: none; }
 .question__pad { padding: clamp(24px, 4vw, 38px); }
 .question__top { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 13px; }
@@ -397,6 +407,7 @@ __GRILL_ME_DATA__
     document.getElementById("deck-count").textContent = "question " + (active + 1) + " of " + cards.length;
     document.getElementById("prev").disabled = active === 0;
     document.getElementById("next").disabled = active === cards.length - 1;
+    deck.classList.toggle("is-penult", active === cards.length - 2);
     deck.classList.toggle("is-last", active === cards.length - 1);
   }
 
