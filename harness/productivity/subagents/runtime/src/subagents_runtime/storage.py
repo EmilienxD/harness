@@ -278,6 +278,9 @@ def connect():
         if version < SCHEMA_VERSION:
             _migrate(connection)
         _reconcile_migration_files(connection)
+        from subagents_runtime.cleanup import cleanup_inactive_executions
+
+        cleanup_inactive_executions(connection, root)
     except BaseException:
         connection.close()
         raise
