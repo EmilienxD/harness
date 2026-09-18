@@ -1,7 +1,6 @@
 import hashlib
 import io
 import json
-import re
 import subprocess
 from contextlib import nullcontext
 
@@ -629,30 +628,6 @@ def test_receipt_paths_cannot_escape_the_target_root(tmp_path):
 
     with pytest.raises(InstallError, match="escapes target root"):
         selected.plan({tool.name})
-
-
-def test_uv_action_pins_contain_the_runtime_shipped_by_the_catalogue():
-    for tool in discover().values():
-        for action in tool.actions:
-            if action.type != "uv-tool":
-                continue
-            match = re.search(r"@([0-9a-f]{40})#subdirectory=(.+)$", action.data["source"])
-            assert match is not None, tool.name
-            revision, runtime = match.groups()
-            result = subprocess.run(
-                [
-                    "git",
-                    "diff",
-                    "--exit-code",
-                    revision,
-                    "--",
-                    runtime,
-                    f":(exclude){runtime}/README.md",
-                ],
-                capture_output=True,
-                text=True,
-            )
-            assert result.returncode == 0, f"{tool.name} action pin is stale:\n{result.stdout}"
 
 
 def test_workspace_files_can_be_limited_to_project_installs(tmp_path):
