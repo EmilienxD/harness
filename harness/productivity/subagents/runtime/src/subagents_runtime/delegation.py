@@ -790,11 +790,26 @@ def _delegation_status(connection, parent_session_id: str) -> str:
             (parent_session_id,),
         ).fetchone()[0]
     )
-    return (
-        f"{running} auto {_plural(running, 'agent is', 'agents are')} still running, "
-        f"{owed} interactive {_plural(owed, 'agent', 'agents')} still {_plural(owed, 'owes', 'owe')} a reply, "
-        f"{idle} {_plural(idle, 'agent is', 'agents are')} idle and available for resume."
-    )
+
+    parts = []
+
+    if running:
+        parts.append(
+            f"{running} auto {_plural(running, 'agent is', 'agents are')} still running"
+        )
+
+    if owed:
+        parts.append(
+            f"{owed} interactive {_plural(owed, 'agent', 'agents')} still "
+            f"{_plural(owed, 'owes', 'owe')} a reply"
+        )
+
+    if idle:
+        parts.append(
+            f"{idle} {_plural(idle, 'agent is', 'agents are')} idle and available for resume"
+        )
+
+    return ", ".join(parts) + "." if parts else ""
 
 
 def _format_results(rows, status: str) -> str:
@@ -806,7 +821,7 @@ def _format_results(rows, status: str) -> str:
         )
         messages.append(f"Delivery ID: {delivery_id}")
         if state == "succeeded":
-            messages.append(f"{identifier} finished. Agent replied:\n\n{reply}")
+            messages.append(f"{identifier} finished. Agent replied:\n<reply>\n{reply}\n</reply>")
         elif state == "cancelled":
             messages.append(
                 f"{identifier} was cancelled" + (f": {reason}." if reason else ".")
@@ -814,7 +829,7 @@ def _format_results(rows, status: str) -> str:
         else:
             messages.append(f"{identifier} failed: {reason or 'unknown failure'}.")
     messages.append(status)
-    return "\n\n".join(messages)
+    return "\n" + "\n\n".join(messages)
 
 
 def claim_parent_delivery(parent_session_id: str, event: str) -> ParentDelivery | None:
