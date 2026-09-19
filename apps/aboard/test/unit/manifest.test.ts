@@ -162,11 +162,11 @@ test("the auto-run card offers exactly the actions its state allows", async () =
   const inline = contributes.menus["view/item/context"] ?? [];
   const action = (command: string) => inline.find((entry) => entry.command === command);
 
-  // Start lives on the card itself as its inline action; repeating it in the
-  // view title would only duplicate the button one row below.
+  // The title keeps Start discoverable when the card cannot offer it.
   const start = action("aboard.startAutoRun");
   assert.match(start?.group ?? "", /^inline@/, "Start Auto Run must be the card's inline action");
-  assert.equal(title.some((entry) => entry.command === "aboard.startAutoRun"), false, "Start Auto Run must not also sit in the view title");
+  assert.equal(title.find((entry) => entry.command === "aboard.startAutoRun")?.when,
+    "view == aboard.autoRun && aboard.initialized && !aboard.autoRunActive");
 
   // Start is offered only for a successfully checked, ready preview. Idle,
   // failed, refreshing, empty, and blocked forecasts must be reviewed first.
@@ -204,10 +204,9 @@ test("the auto-run card offers exactly the actions its state allows", async () =
   const issueButtons = inline.filter((entry) => entry.command === "aboard.openIssue" && (entry.when ?? "").includes("aboard.autoRun.issue"));
   assert.equal(issueButtons.length, 1, "each issue row must contribute one GitHub issue button");
 
-  // The palette mirrors the same gating, so neither surface can offer a Start
-  // the other refuses.
+  // The palette remains discoverable while there is no active run.
   const palette = new Map((contributes.menus.commandPalette ?? []).map((entry) => [entry.command, entry.when]));
-  assert.equal(palette.get("aboard.startAutoRun"), "aboard.initialized && aboard.autoRunCard == forecast");
+  assert.equal(palette.get("aboard.startAutoRun"), "aboard.initialized && !aboard.autoRunActive");
   assert.match(palette.get("aboard.resumeAutoRun") ?? "", /aboard\.autoRunCard == recoverable/);
 });
 

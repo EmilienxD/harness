@@ -224,8 +224,15 @@ export function registerNativeFleetUi(context: ExtensionContext, options: Native
     }),
     commands.registerCommand("aboard.startAutoRun", async () => {
       if (autoRunStarting) return;
+      await checkAutoRun(true);
       const card = autoRunCard(autoRunSources);
-      if (card.kind !== "forecast" || autoRunCardMenuState(card) !== "forecast") return;
+      if (card.kind !== "forecast" || autoRunCardMenuState(card) !== "forecast") {
+        const reason = card.kind === "forecast"
+          ? card.forecast.error ?? (card.forecast.preview.blockers.join("; ") || card.forecast.preview.emptyReason || "The preview is still being checked.")
+          : card.kind === "unavailable" ? card.error : "Review the current run in the Auto Run panel before starting another.";
+        void window.showWarningMessage(`aboard cannot start an auto-run: ${reason}`);
+        return;
+      }
       autoRunStarting = true;
       renderAutoRun();
       let warning: string | undefined;

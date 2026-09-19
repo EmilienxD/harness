@@ -20,7 +20,8 @@ def install(name, tmp_path, platform="claude"):
 
 
 @pytest.mark.parametrize("platform", ["claude", "chatgpt"])
-def test_auto_hook_blocks_standalone_invocation(tmp_path, platform):
+@pytest.mark.parametrize("prompt", ["/auto --dry", "$auto --dry", "[$auto](C:/project/.agents/skills/auto/SKILL.md)"])
+def test_auto_hook_blocks_standalone_invocation(tmp_path, platform, prompt):
     target = install("auto", tmp_path, platform)
     script = target.install_root / "hooks/auto_hook.py"
     environment = os.environ.copy()
@@ -28,7 +29,7 @@ def test_auto_hook_blocks_standalone_invocation(tmp_path, platform):
         environment.pop(name, None)
     result = subprocess.run(
         [sys.executable, str(script)],
-        input=json.dumps({"prompt": "/auto --dry", "hook_event_name": "UserPromptSubmit"}),
+        input=json.dumps({"prompt": prompt, "hook_event_name": "UserPromptSubmit"}),
         capture_output=True,
         text=True,
         env=environment,
@@ -49,7 +50,8 @@ def test_auto_installs_one_shared_skill_body_for_both_platforms(tmp_path):
     assert ".codex/hooks/auto_hook.py" in command
 
 
-def test_auto_hook_prefers_the_runtime_session_id_from_chatgpt(tmp_path, monkeypatch):
+@pytest.mark.parametrize("prompt", ["/auto --dry", "$auto --dry", "[$auto](C:/project/.agents/skills/auto/SKILL.md) --dry"])
+def test_auto_hook_prefers_the_runtime_session_id_from_chatgpt(tmp_path, monkeypatch, prompt):
     target = install("auto", tmp_path, "chatgpt")
     script = target.install_root / "hooks" / "auto_hook.py"
     spec = importlib.util.spec_from_file_location("auto_chatgpt_hook_test", script)
@@ -74,7 +76,7 @@ def test_auto_hook_prefers_the_runtime_session_id_from_chatgpt(tmp_path, monkeyp
     monkeypatch.setenv("ABOARD_SESSION_ID", "provisional")
     monkeypatch.setattr(hook.urllib.request, "urlopen", urlopen)
     monkeypatch.setattr(hook.sys, "stdin", io.StringIO(json.dumps({
-        "prompt": "/auto --dry",
+        "prompt": prompt,
         "hook_event_name": "UserPromptSubmit",
         "session_id": "runtime-assigned",
     })))
@@ -82,6 +84,7 @@ def test_auto_hook_prefers_the_runtime_session_id_from_chatgpt(tmp_path, monkeyp
 
     assert hook.main() == 2
     assert captured["sessionId"] == "runtime-assigned"
+    assert captured["prompt"] == "/auto --dry"
 
 
 def test_issue_readers_owns_both_worker_skills():
