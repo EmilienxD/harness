@@ -129,7 +129,7 @@ The scaffold is intentionally sparse. Omitted settings use product defaults, inc
 }
 ```
 
-Add only the overrides the project needs. Delegation profiles are independent from interactive sessions and AUTO RUN workers:
+Add only the overrides the project needs. Delegation profiles are independent from interactive sessions and AUTO RUN workers. Every profile can override its provider's `command`; omitted task commands inherit the provider command:
 
 ```json
 {
@@ -138,9 +138,26 @@ Add only the overrides the project needs. Delegation profiles are independent fr
     "chatgpt": {
       "delegations": {
         "websearch": {
+          "command": ["codex-wrapper", "search"],
           "model": "gpt-5.6-sol",
           "effort": "high"
         }
+      }
+    }
+  }
+}
+```
+
+For example, Claude Auto Run can explore through Kiro while its address and review workers keep using native Claude Code:
+
+```json
+{
+  "version": 1,
+  "providers": {
+    "claude": {
+      "command": ["claude"],
+      "autoRun": {
+        "explore": { "command": ["clauder", "run", "kiro"] }
       }
     }
   }

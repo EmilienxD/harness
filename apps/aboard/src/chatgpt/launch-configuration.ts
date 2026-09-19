@@ -6,13 +6,13 @@ import { CHATGPT_EFFORTS, CHATGPT_WEB_SEARCH_MODES, type ChatGptEffort, type Cha
 
 const AUTO_RUN_TASKS = ["explore", "address", "review"] as const;
 const ROOT_FIELDS = new Set(["command", "interactive", "delegations", "autoRun"]);
-const PROFILE_FIELDS = new Set(["model", "effort", "webSearch", "subagents"]);
+const PROFILE_FIELDS = new Set(["command", "model", "effort", "webSearch", "subagents"]);
 const CLAUDE_MODELS = new Set(["haiku", "sonnet", "opus"]);
 const SUBAGENT_MODES = ["allowed", "denied"] as const;
 const PATH = "config.json providers.chatgpt";
 
 type AutoRunTask = (typeof AUTO_RUN_TASKS)[number];
-interface Profile { readonly model?: string; readonly effort?: ChatGptEffort | typeof BY_DIFFICULTY; readonly webSearch?: ChatGptWebSearch; readonly subagents?: (typeof SUBAGENT_MODES)[number]; }
+interface Profile { readonly command?: readonly string[]; readonly model?: string; readonly effort?: ChatGptEffort | typeof BY_DIFFICULTY; readonly webSearch?: ChatGptWebSearch; readonly subagents?: (typeof SUBAGENT_MODES)[number]; }
 const INHERIT: Profile = {};
 const EXPLORE: Profile = { model: "gpt-5.6-luna", effort: "low" };
 const WORKER: Profile = { model: BY_DIFFICULTY, effort: BY_DIFFICULTY };
@@ -26,13 +26,14 @@ function object(value: unknown, path: string): Record<string, unknown> {
   if (typeof value !== "object" || value === null || Array.isArray(value)) throw new LaunchFileError(`${path} must be a JSON object`);
   return value as Record<string, unknown>;
 }
-function command(value: unknown): readonly string[] {
-  if (value === undefined) return ["codex"];
-  if (!Array.isArray(value) || value.length === 0 || !value.every((token) => typeof token === "string" && token.trim().length > 0)) throw new LaunchFileError(`${PATH}.command must be a non-empty array of non-empty strings`);
+function command(value: unknown, path: string): readonly string[] | undefined {
+  if (value === undefined) return undefined;
+  if (!Array.isArray(value) || value.length === 0 || !value.every((token) => typeof token === "string" && token.trim().length > 0)) throw new LaunchFileError(`${path} must be a non-empty array of non-empty strings`);
   return value;
 }
 function profile(value: unknown, fallback: Profile, path: string, worker = false): { readonly value: Profile; readonly unknown: readonly string[] } {
   const input = value === undefined ? {} : object(value, path);
+  const selectedCommand = command(input.command, `${path}.command`) ?? fallback.command;
   const rawModel = input.model;
   const selectedModel = rawModel === undefined ? fallback.model : rawModel === "inherit" ? undefined : rawModel;
   if (selectedModel !== undefined && (typeof selectedModel !== "string" || selectedModel.trim().length === 0 || CLAUDE_MODELS.has(selectedModel) || (selectedModel === BY_DIFFICULTY && !worker))) throw new LaunchFileError(`${path}.model is not valid for platform chatgpt; expected inherit${worker ? `, ${BY_DIFFICULTY},` : ""} or a Codex model slug`);
@@ -47,6 +48,7 @@ function profile(value: unknown, fallback: Profile, path: string, worker = false
   if (subagents !== undefined && (typeof subagents !== "string" || !SUBAGENT_MODES.includes(subagents as never))) throw new LaunchFileError(`${path}.subagents is not valid for platform chatgpt; expected ${SUBAGENT_MODES.join(", ")}`);
   return {
     value: {
+      ...(selectedCommand === undefined ? {} : { command: selectedCommand }),
       ...(selectedModel === undefined ? {} : { model: selectedModel }),
       ...(selectedEffort === undefined ? {} : { effort: selectedEffort as NonNullable<Profile["effort"]> }),
       ...(webSearch === undefined ? {} : { webSearch: webSearch as ChatGptWebSearch }),
@@ -59,7 +61,7 @@ function settings(commandValue: readonly string[], selected: Profile, shape: Cha
   return {
     shape,
     ...(shape === "skill" ? { skillName: skillName ?? "" } : {}),
-    declaredCommand: commandValue,
+    declaredCommand: selected.command ?? commandValue,
     ...(selected.model === undefined ? {} : { declaredModel: selected.model }),
     ...(selected.effort === undefined ? {} : { declaredEffort: selected.effort }),
     ...(selected.webSearch === undefined ? {} : { webSearch: selected.webSearch }),
@@ -99,5 +101,5 @@ export function parseChatGptLaunchFile(root: Record<string, unknown>): { readonl
     autoRun[task] = parsed.value;
     unknown.push(...parsed.unknown.map((field) => `autoRun.${task}.${field}`));
   }
-  return { value: new ChatGptLaunchFile(command(root.command), interactive.value, delegations, autoRun), unknownFields: unknown };
+  return { value: new ChatGptLaunchFile(command(root.command, `${PATH}.command`) ?? ["codex"], interactive.value, delegations, autoRun), unknownFields: unknown };
 }

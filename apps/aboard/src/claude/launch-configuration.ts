@@ -6,14 +6,14 @@ import type { LaunchConfiguration } from "./launch.js";
 
 const AUTO_RUN_TASKS = ["explore", "address", "review"] as const;
 const ROOT_FIELDS = new Set(["command", "interactive", "delegations", "autoRun"]);
-const PROFILE_FIELDS = new Set(["model", "effort", "deniedTools"]);
+const PROFILE_FIELDS = new Set(["command", "model", "effort", "deniedTools"]);
 const MODELS = ["haiku", "sonnet", "opus"] as const;
 const PATH = "config.json providers.claude";
 
 type AutoRunTask = (typeof AUTO_RUN_TASKS)[number];
 type Model = (typeof MODELS)[number] | "inherit" | typeof BY_DIFFICULTY;
 type Effort = EffortLevel | "inherit" | typeof BY_DIFFICULTY;
-interface Profile { readonly model: Model; readonly effort: Effort; readonly deniedTools: readonly string[]; }
+interface Profile { readonly command?: readonly string[]; readonly model: Model; readonly effort: Effort; readonly deniedTools: readonly string[]; }
 
 const INHERIT: Profile = { model: "inherit", effort: "inherit", deniedTools: [] };
 const EXPLORE: Profile = { model: "haiku", effort: "low", deniedTools: [] };
@@ -29,14 +29,15 @@ function object(value: unknown, path: string): Record<string, unknown> {
   return value as Record<string, unknown>;
 }
 
-function command(value: unknown): readonly string[] {
-  if (value === undefined) return ["claude"];
-  if (!Array.isArray(value) || value.length === 0 || !value.every((token) => typeof token === "string" && token.trim().length > 0)) throw new LaunchFileError(`${PATH}.command must be a non-empty array of non-empty strings`);
+function command(value: unknown, path: string): readonly string[] | undefined {
+  if (value === undefined) return undefined;
+  if (!Array.isArray(value) || value.length === 0 || !value.every((token) => typeof token === "string" && token.trim().length > 0)) throw new LaunchFileError(`${path} must be a non-empty array of non-empty strings`);
   return value;
 }
 
 function profile(value: unknown, fallback: Profile, path: string, options: { readonly byDifficulty?: boolean; readonly deniedTools?: boolean } = {}): { readonly value: Profile; readonly unknown: readonly string[] } {
   const input = value === undefined ? {} : object(value, path);
+  const selectedCommand = command(input.command, `${path}.command`) ?? fallback.command;
   const modelAllowed = options.byDifficulty === true ? [BY_DIFFICULTY, ...MODELS] : ["inherit", ...MODELS];
   const effortAllowed = options.byDifficulty === true ? [BY_DIFFICULTY, ...EFFORT_LEVELS] : ["inherit", ...EFFORT_LEVELS];
   const selectedModel = input.model ?? fallback.model;
@@ -46,7 +47,15 @@ function profile(value: unknown, fallback: Profile, path: string, options: { rea
   if (options.deniedTools === false && input.deniedTools !== undefined) throw new LaunchFileError(`${path}.deniedTools is not supported for platform claude`);
   const deniedTools = input.deniedTools ?? fallback.deniedTools;
   if (!Array.isArray(deniedTools) || !deniedTools.every((rule) => typeof rule === "string" && rule.trim().length > 0)) throw new LaunchFileError(`${path}.deniedTools must be an array of non-empty strings`);
-  return { value: { model: selectedModel as Model, effort: selectedEffort as Effort, deniedTools: [...new Set(deniedTools)] }, unknown: Object.keys(input).filter((field) => !PROFILE_FIELDS.has(field)) };
+  return {
+    value: {
+      ...(selectedCommand === undefined ? {} : { command: selectedCommand }),
+      model: selectedModel as Model,
+      effort: selectedEffort as Effort,
+      deniedTools: [...new Set(deniedTools)],
+    },
+    unknown: Object.keys(input).filter((field) => !PROFILE_FIELDS.has(field)),
+  };
 }
 
 function settings(commandValue: readonly string[], selected: Profile, shape: LaunchConfiguration["shape"], skillName?: string): LaunchConfiguration {
@@ -54,7 +63,7 @@ function settings(commandValue: readonly string[], selected: Profile, shape: Lau
     shape,
     ...(shape === "builtin" ? { agentName: "Explore" } : {}),
     ...(shape === "skill" ? { skillName: skillName ?? "" } : {}),
-    declaredCommand: commandValue,
+    declaredCommand: selected.command ?? commandValue,
     ...(selected.model === "inherit" ? {} : { declaredModel: selected.model }),
     ...(selected.effort === "inherit" ? {} : { declaredEffort: selected.effort as DeclaredEffort }),
     deniedTools: selected.deniedTools,
@@ -95,5 +104,5 @@ export function parseClaudeLaunchFile(root: Record<string, unknown>): { readonly
     autoRun[task] = parsed.value;
     unknown.push(...parsed.unknown.map((field) => `autoRun.${task}.${field}`));
   }
-  return { value: new ClaudeLaunchFile(command(root.command), interactive.value, delegations, autoRun), unknownFields: unknown };
+  return { value: new ClaudeLaunchFile(command(root.command, `${PATH}.command`) ?? ["claude"], interactive.value, delegations, autoRun), unknownFields: unknown };
 }

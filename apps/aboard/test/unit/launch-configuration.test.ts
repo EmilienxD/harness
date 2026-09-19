@@ -54,6 +54,36 @@ test("config.json configures providers independently while Claude remains the Au
   assert.deepEqual(settings(parsed.value.configurationFor("chatgpt", "interactive")).declaredCommand, ["wrapper", "codex"]);
 });
 
+test("task commands override their provider command independently", () => {
+  const parsed = parseLaunchFile(JSON.stringify({
+    version: 1,
+    providers: {
+      claude: {
+        command: ["claude"],
+        delegations: { explore: { command: ["clauder", "run", "kiro"] } },
+        autoRun: {
+          explore: { command: ["clauder", "run", "kiro"] },
+          address: { command: ["claude", "--address-profile"] },
+        },
+      },
+      chatgpt: {
+        command: ["codex"],
+        delegations: { websearch: { command: ["codex-wrapper", "search"] } },
+        autoRun: { review: { command: ["codex-wrapper", "review"] } },
+      },
+    },
+  }));
+
+  assert.deepEqual(settings(parsed.value.delegationConfigurationFor("claude", "explore")).declaredCommand, ["clauder", "run", "kiro"]);
+  assert.deepEqual(settings(parsed.value.configurationFor("claude", "explore")).declaredCommand, ["clauder", "run", "kiro"]);
+  assert.deepEqual(settings(parsed.value.configurationFor("claude", "address")).declaredCommand, ["claude", "--address-profile"]);
+  assert.deepEqual(settings(parsed.value.configurationFor("claude", "review")).declaredCommand, ["claude"]);
+  assert.deepEqual(settings(parsed.value.delegationConfigurationFor("chatgpt", "websearch")).declaredCommand, ["codex-wrapper", "search"]);
+  assert.deepEqual(settings(parsed.value.configurationFor("chatgpt", "review")).declaredCommand, ["codex-wrapper", "review"]);
+  assert.deepEqual(settings(parsed.value.configurationFor("chatgpt", "address")).declaredCommand, ["codex"]);
+  assert.deepEqual(parsed.diagnostics, []);
+});
+
 test("config.json resolves interactive and Auto Run profiles", () => {
   const parsed = parseLaunchFile(defaults);
 
@@ -260,6 +290,8 @@ test("invalid known launch fields block configuration", () => {
     '{"version":1,"autoRun":{"provider":"codex"}}',
     providerFile("claude", { command: "claude" }),
     providerFile("claude", { command: [] }),
+    providerFile("claude", { delegations: { explore: { command: [] } } }),
+    providerFile("chatgpt", { autoRun: { address: { command: "codex" } } }),
     providerFile("claude", { interactive: { model: "by-difficulty" } }),
     providerFile("claude", { autoRun: { explore: { deniedTools: ["Agent"] } } }),
     providerFile("claude", { autoRun: { address: { effort: "inherit" } } }),

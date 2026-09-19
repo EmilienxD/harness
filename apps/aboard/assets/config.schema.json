@@ -29,6 +29,7 @@
     "claudeProfile": {
       "type": "object",
       "properties": {
+        "command": { "$ref": "#/$defs/command" },
         "model": { "enum": ["inherit", "haiku", "sonnet", "opus"] },
         "effort": { "enum": ["inherit", "low", "medium", "high", "xhigh", "max"] },
         "deniedTools": { "type": "array", "items": { "type": "string", "minLength": 1 }, "uniqueItems": true }
@@ -38,6 +39,7 @@
       "type": "object",
       "description": "Defaults to Haiku with low effort.",
       "properties": {
+        "command": { "$ref": "#/$defs/command" },
         "model": { "enum": ["inherit", "haiku", "sonnet", "opus"], "default": "haiku" },
         "effort": { "enum": ["inherit", "low", "medium", "high", "xhigh", "max"], "default": "low" }
       }
@@ -45,6 +47,7 @@
     "claudeWorkerProfile": {
       "type": "object",
       "properties": {
+        "command": { "$ref": "#/$defs/command" },
         "model": { "enum": ["by-difficulty", "haiku", "sonnet", "opus"], "default": "by-difficulty" },
         "effort": { "enum": ["by-difficulty", "low", "medium", "high", "xhigh", "max"], "default": "by-difficulty" },
         "deniedTools": { "type": "array", "items": { "type": "string", "minLength": 1 }, "uniqueItems": true }
@@ -53,6 +56,7 @@
     "chatgptProfile": {
       "type": "object",
       "properties": {
+        "command": { "$ref": "#/$defs/command" },
         "model": { "type": "string", "minLength": 1, "not": { "enum": ["haiku", "sonnet", "opus", "by-difficulty"] } },
         "effort": { "enum": ["inherit", "minimal", "low", "medium", "high", "xhigh"] }
       }
@@ -61,6 +65,7 @@
       "type": "object",
       "description": "Defaults to GPT-5.6 Luna with low effort.",
       "properties": {
+        "command": { "$ref": "#/$defs/command" },
         "model": { "type": "string", "minLength": 1, "not": { "enum": ["haiku", "sonnet", "opus", "by-difficulty"] }, "default": "gpt-5.6-luna" },
         "effort": { "enum": ["inherit", "minimal", "low", "medium", "high", "xhigh"], "default": "low" }
       }
@@ -68,6 +73,7 @@
     "chatgptWorkerProfile": {
       "type": "object",
       "properties": {
+        "command": { "$ref": "#/$defs/command" },
         "model": { "anyOf": [{ "const": "by-difficulty" }, { "type": "string", "minLength": 1, "not": { "enum": ["haiku", "sonnet", "opus"] } }], "default": "by-difficulty" },
         "effort": { "enum": ["by-difficulty", "inherit", "minimal", "low", "medium", "high", "xhigh"], "default": "by-difficulty" },
         "webSearch": { "enum": ["disabled", "cached", "indexed", "live"] },
