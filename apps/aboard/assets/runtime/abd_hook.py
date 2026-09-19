@@ -104,6 +104,8 @@ def command_candidates(segment: str) -> list[str]:
 
 
 def guard(payload: dict[str, Any]) -> int:
+    if os.environ.get("ABOARD_GUARD_ENABLED") != "1":
+        return 0
     if payload.get("hook_event_name") != "PreToolUse":
         return 0
     runtime_root = os.environ.get("ABOARD_RUNTIME_ROOT")

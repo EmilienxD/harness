@@ -60,7 +60,7 @@ export class ChatGptPolicyProbe {
       if (policy.allowManagedHooksOnly === true) {
         throw new ChatGptPolicyError(
           "lifecycle-hooks",
-          `Managed Codex policy in ${policy.source} sets allow_managed_hooks_only = true, so Codex skips the hooks Aboard generates for a ${agentType} session and its result would never arrive. Ask your administrator to allow session hooks.`,
+          `Managed Codex policy in ${policy.source} sets allow_managed_hooks_only = true, so Codex skips the project hooks Aboard scaffolds for a ${agentType} session and its result would never arrive. Ask your administrator to allow project hooks.`,
         );
       }
       if (permissionProfile !== undefined) {

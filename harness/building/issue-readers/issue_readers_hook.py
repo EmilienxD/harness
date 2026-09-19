@@ -9,9 +9,9 @@ the Git plumbing, the blocked-prompt protocol -- is written once here.
 cannot be resolved, and injects bounded GitHub issue context when the whole
 argument is a strict list of issue references.
 
-`review-this` blocks dirty manual invocations and injects the pinned target's
-identity and changed-file list. Aboard may explicitly supply a dirty HITL
-review range.
+`review-this` injects the pinned target's identity and changed-file list. A
+dirty manual invocation reviews the existing working-tree changes, while
+Aboard may explicitly supply a dirty HITL review range.
 
 Both products submit the same payload for this event, so `--claude` and
 `--chatgpt` select nothing here; the flag is accepted so every hook in the
@@ -369,6 +369,28 @@ def review_git(arguments: list[str], cwd: Path) -> str:
     return git(arguments, cwd, "review-this", REVIEW_GIT)
 
 
+def worktree_files(cwd: Path) -> list[str]:
+    """Describe staged, unstaged, and untracked paths for a manual review."""
+    status = review_git(["status", "--short", "--untracked-files=all"], cwd)
+    entries: list[str] = []
+    for line in status.splitlines():
+        if len(line) < 4:
+            continue
+        code = line[:2]
+        path = line[3:]
+        if code == "??":
+            name = "untracked"
+        else:
+            states = []
+            for letter in code:
+                state = STATUS_NAMES.get(letter)
+                if state is not None and state not in states:
+                    states.append(state)
+            name = ", ".join(states) or code.strip()
+        entries.append(f"{name}: {path}")
+    return entries
+
+
 def parent_sha(cwd: Path) -> str | None:
     result = subprocess.run(
         ["git", "rev-parse", "--verify", "--quiet", "HEAD^"],
@@ -404,28 +426,41 @@ def build_review_context(cwd: Path) -> str:
     continuation = os.environ.get("ABOARD_WORKER_CONTINUATION") == "1"
     if review_range is not None and re.fullmatch(r"[0-9a-fA-F]{40,64}\.\.[0-9a-fA-F]{40,64}", review_range) is None:
         raise Blocked("review-this received an invalid pinned review range from Aboard.")
-    if review_range is None and not continuation:
-        require_clean_worktree(cwd, "review-this", REVIEW_GIT)
     head = review_git(["rev-parse", "HEAD"], cwd).strip()
     subject = review_git(["log", "-1", "--format=%s", review_range.split("..", 1)[1] if review_range else "HEAD"], cwd).strip()
     parent = review_range.split("..", 1)[0] if review_range else parent_sha(cwd)
-    files = changed_files(cwd, review_range)
+    dirty_files = [] if review_range is not None else worktree_files(cwd)
+    files = dirty_files or changed_files(cwd, review_range)
+    if review_range is not None:
+        checkout = f"Aboard pinned {review_range} as the immutable review scope. Its implementation is intentionally present as uncommitted working-tree changes; do not commit it."
+        scope = f"- Review range: {review_range}"
+        heading = "## Files changed by the pinned implementation"
+    elif dirty_files:
+        checkout = (
+            "Aboard is continuing the exact review conversation over its preserved working tree. Treat every existing change as part of that continuation."
+            if continuation else
+            "The review-this hook found pre-existing working-tree changes. Treat all of them as the supplied review target, not as changes you created."
+        )
+        scope = f"- Review base: {head}"
+        heading = "## Files in the working-tree review target"
+    else:
+        checkout = (
+            "Aboard is continuing the exact review conversation over its preserved working tree. Treat every existing change as part of that continuation."
+            if continuation else
+            "Worktree verified clean by the review-this hook before this invocation; every change now present is yours."
+        )
+        scope = f"- Parent commit: {parent}" if parent else "- Parent commit: none (root commit)"
+        heading = "## Files changed by the commit under review"
     lines = [
         "Review-this context, prepared by a hook from the local repository.",
         "",
-        (
-            f"Aboard pinned {review_range} as the immutable review scope. Its implementation is intentionally present as uncommitted working-tree changes; do not commit it."
-            if review_range is not None
-            else "Aboard is continuing the exact review conversation over its preserved working tree. Treat every existing change as part of that continuation."
-            if continuation
-            else "Worktree verified clean by the review-this hook before this invocation; every change now present is yours."
-        ),
+        checkout,
         "",
         f"- Starting HEAD: {head}",
-        f"- Review range: {review_range}" if review_range else (f"- Parent commit: {parent}" if parent else "- Parent commit: none (root commit)"),
+        scope,
         f"- Subject: {subject}",
         "",
-        "## Files changed by the pinned implementation" if review_range else "## Files changed by the commit under review",
+        heading,
         "",
     ]
     lines.extend(
@@ -434,6 +469,9 @@ def build_review_context(cwd: Path) -> str:
     )
     lines.extend([
         "",
+        "The diff is deliberately not included; read the working-tree target "
+        "yourself from the repository."
+        if dirty_files else
         "The diff is deliberately not included; read the pinned target or "
         "range yourself from the repository.",
     ])

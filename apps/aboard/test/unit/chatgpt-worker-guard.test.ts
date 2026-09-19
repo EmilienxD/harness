@@ -43,11 +43,17 @@ async function prepared(context: { after(callback: () => Promise<void>): void })
   return { script: join(root, "scripts", "abd_hook.py"), guard };
 }
 
-function decide(script: string, payload: unknown, raw?: string, identity = agentId as string): { readonly status: number | null; readonly decision?: string; readonly reason?: string } {
+function decide(script: string, payload: unknown, raw?: string, identity = agentId as string, enabled = true): { readonly status: number | null; readonly decision?: string; readonly reason?: string } {
   const result = spawnSync("uv", ["run", "--no-project", "python", script, "worker-guard"], {
     input: raw ?? JSON.stringify(payload),
     encoding: "utf8",
-    env: { ...process.env, ABOARD_RUNTIME_ROOT: dirname(dirname(script)), ABOARD_AGENT_ID: identity, ABOARD_AGENT_TYPE: "address" },
+    env: {
+      ...process.env,
+      ABOARD_RUNTIME_ROOT: dirname(dirname(script)),
+      ABOARD_AGENT_ID: identity,
+      ABOARD_AGENT_TYPE: "address",
+      ...(enabled ? { ABOARD_GUARD_ENABLED: "1" } : {}),
+    },
   });
   assert.equal(result.stderr, "");
   if (result.stdout.trim().length === 0) return { status: result.status };
@@ -71,6 +77,11 @@ test("the shared ChatGPT guard selects only its process's worker restrictions", 
   for (const identity of ["", "../address-2", "missing-worker"]) {
     assert.equal(decide(script, bash("npm test"), undefined, identity).decision, "deny");
   }
+});
+
+test("the shared ChatGPT guard is inert outside a restricted Aboard worker", async (context) => {
+  const { script } = await prepared(context);
+  assert.deepEqual(decide(script, bash("git push origin HEAD"), undefined, agentId, false), { status: 0 });
 });
 
 test("the ChatGPT worker guard denies Aboard-owned Git and GitHub mutations", async (context) => {

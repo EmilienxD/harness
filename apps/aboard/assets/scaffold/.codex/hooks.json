@@ -1,0 +1,74 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "startup|resume|fork",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "uv run --no-project --no-managed-python \"$ABOARD_RUNTIME_ROOT/scripts/abd_hook.py\" session-start",
+            "commandWindows": "uv run --no-project --no-managed-python \"$env:ABOARD_RUNTIME_ROOT\\scripts\\abd_hook.py\" session-start"
+          }
+        ]
+      },
+      {
+        "matcher": "compact",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "uv run --no-project --no-managed-python \"$ABOARD_RUNTIME_ROOT/scripts/abd_hook.py\" worker-reground",
+            "commandWindows": "uv run --no-project --no-managed-python \"$env:ABOARD_RUNTIME_ROOT\\scripts\\abd_hook.py\" worker-reground",
+            "timeout": 120
+          }
+        ]
+      }
+    ],
+    "SessionEnd": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "uv run --no-project --no-managed-python \"$ABOARD_RUNTIME_ROOT/scripts/abd_hook.py\" session-end",
+            "commandWindows": "uv run --no-project --no-managed-python \"$env:ABOARD_RUNTIME_ROOT\\scripts\\abd_hook.py\" session-end",
+            "timeout": 3
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "uv run --no-project --no-managed-python \"$ABOARD_RUNTIME_ROOT/scripts/abd_hook.py\" worker-stop",
+            "commandWindows": "uv run --no-project --no-managed-python \"$env:ABOARD_RUNTIME_ROOT\\scripts\\abd_hook.py\" worker-stop"
+          }
+        ]
+      }
+    ],
+    "PostCompact": [
+      {
+        "matcher": "manual|auto",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "uv run --no-project --no-managed-python \"$ABOARD_RUNTIME_ROOT/scripts/abd_hook.py\" worker-post-compact",
+            "commandWindows": "uv run --no-project --no-managed-python \"$env:ABOARD_RUNTIME_ROOT\\scripts\\abd_hook.py\" worker-post-compact"
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Bash|Agent",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "uv run --no-project --no-managed-python \"$ABOARD_RUNTIME_ROOT/scripts/abd_hook.py\" worker-guard",
+            "commandWindows": "uv run --no-project --no-managed-python \"$env:ABOARD_RUNTIME_ROOT\\scripts\\abd_hook.py\" worker-guard"
+          }
+        ]
+      }
+    ]
+  }
+}

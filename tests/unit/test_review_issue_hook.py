@@ -114,7 +114,7 @@ def test_root_commit_reports_no_parent(tmp_path, monkeypatch, capsys):
 
 
 @pytest.mark.parametrize("dirty", ["staged", "unstaged", "untracked"])
-def test_any_pre_existing_change_blocks_before_model_invocation(
+def test_pre_existing_changes_become_the_manual_review_target(
     dirty, tmp_path, monkeypatch, capsys,
 ):
     root = repository(tmp_path)
@@ -124,8 +124,10 @@ def test_any_pre_existing_change_blocks_before_model_invocation(
         (root / "README.md").write_text("changed again\n", encoding="utf-8")
         if dirty == "staged":
             git(root, "add", "-A")
-    error = blocked("/review-this", root, monkeypatch, capsys)
-    assert "completely clean Git worktree" in error
+    context = run_hook("/review-this", root, monkeypatch, capsys)
+    assert "pre-existing working-tree changes" in context
+    assert "working-tree review target" in context
+    assert ("scratch.txt" if dirty == "untracked" else "README.md") in context
 
 
 def test_aboard_pinned_range_allows_the_uncommitted_hitl_handoff(

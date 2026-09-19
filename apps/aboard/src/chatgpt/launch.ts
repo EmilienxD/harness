@@ -80,16 +80,6 @@ function planChatGptSession(request: PlatformLaunchRequest | PlatformResumeReque
   if (chrome && !worker) throw new LaunchPlanError("shape-not-allowed", `The Chrome browser backend is available only to [AI]-chrome auto-run workers: ${request.agentType}`);
   const runtimeRoot = request.runtimeDirectory ?? join(tmpdir(), "abd-runtime");
   const runtimeDirectory = `${runtimeRoot.replaceAll("\\", "/").replace(/\/+$/u, "")}/agents/${request.agentId}`;
-  // Codex hashes the exact hook definition for trust. Keep agent identity out
-  // of the command; the terminal environment supplies it to the shared script.
-  const hookScript = `${runtimeRoot.replaceAll("\\", "/").replace(/\/+$/u, "")}/scripts/abd_hook.py`;
-  const hook = (route: string): string => `uv run --no-project --no-managed-python "${hookScript.replaceAll('"', '\\"')}" ${route}`;
-  const hookEntry = (route: string, matcher?: string): string =>
-    `{${matcher === undefined ? "" : `matcher=${JSON.stringify(matcher)},`}hooks=[{type="command",command=${JSON.stringify(hook(route))}}]}`;
-  const config = (event: string, entries: readonly string[]): readonly string[] => [
-    "-c",
-    `hooks.${event}=[${entries.join(",")}]`,
-  ];
   const subagentsDenied = request.restrictions?.denySubagents === true || configuration.subagents === "denied";
   const denyCommands = [...new Set(request.restrictions?.deniedCommands ?? [])];
   const readOnlyFiles = [...new Set(request.restrictions?.protectedPaths ?? [])];
@@ -106,6 +96,7 @@ function planChatGptSession(request: PlatformLaunchRequest | PlatformResumeReque
     : permissionProfileArguments(readOnlyFiles, explore, worker ? request.writableRoots ?? [] : []);
   const fixed = [
     "--dangerously-bypass-hook-trust",
+    "--add-dir", runtimeRoot,
     "-c", "features.hooks=true",
     ...(explore && readOnlyFiles.length === 0 ? READ_ONLY_POLICY : []),
     ...permissionProfile,
@@ -113,11 +104,6 @@ function planChatGptSession(request: PlatformLaunchRequest | PlatformResumeReque
       ? ["-c", 'web_search="disabled"']
       : configuration.webSearch === undefined ? [] : ["-c", `web_search=${JSON.stringify(configuration.webSearch)}`]),
     ...(subagentsDenied ? ["-c", "features.multi_agent=false", "-c", "agents.enabled=false"] : []),
-    ...config("SessionStart", [hookEntry("session-start", "startup|resume|fork"), hookEntry("worker-reground", "compact")]),
-    ...config("SessionEnd", [hookEntry("session-end")]),
-    ...config("Stop", [hookEntry("worker-stop")]),
-    ...config("PostCompact", [hookEntry("worker-post-compact", "manual|auto")]),
-    ...(guard === undefined ? [] : config("PreToolUse", [hookEntry("worker-guard", "Bash|Agent")])),
     ...(policy.model === undefined ? [] : ["--model", policy.model]),
     ...(policy.effort === undefined ? [] : ["-c", `model_reasoning_effort=${JSON.stringify(policy.effort)}`]),
   ];
@@ -185,7 +171,10 @@ function planChatGptSession(request: PlatformLaunchRequest | PlatformResumeReque
     requiresWriteLease: requiresWriteLease(request.agentType, writeCapability),
     promptDelivery: built.promptDelivery,
     runtimeDirectory,
-    ...(isHeadlessExecution(request.agentType, request.executionMode) ? { providerEnvironment: { ABOARD_HEADLESS_CHATGPT: "1" } } : {}),
+    providerEnvironment: {
+      ABOARD_GUARD_ENABLED: guard === undefined ? "0" : "1",
+      ...(isHeadlessExecution(request.agentType, request.executionMode) ? { ABOARD_HEADLESS_CHATGPT: "1" } : {}),
+    },
     ...(chrome ? { chromeRequired: true as const } : {}),
     ...(guard === undefined ? {} : { guard }),
     ...(readOnlyFiles.length === 0 ? {} : { permissionProfile: WORKTREE_PERMISSION_PROFILE }),

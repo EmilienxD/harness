@@ -8,7 +8,7 @@ const agentId = "interactive-1" as AgentId;
 const provisional = "6b1e3f7a-2c4d-4a8b-9f10-2c3d4e5f6071" as SessionId;
 const actual = "af817a6c-cd41-41e2-a4db-44d3f43cd560" as SessionId;
 
-test("Codex hook definitions stay stable across new terminals, forks, and resumes", () => {
+test("Codex grants every new terminal, fork, and resume access to the Aboard runtime", () => {
   const platform = new ChatGptAgentPlatform({
     lifecycleAssets: { settings: "hooks.json", script: "hook.py" },
     commandRunner: async () => ({ code: 0, stdout: "codex-cli 0.153.4", stderr: "" }),
@@ -18,13 +18,16 @@ test("Codex hook definitions stay stable across new terminals, forks, and resume
     shell: "powershell" as const, configuration: { shape: "default" },
     runtimeDirectory: "C:/aboard/runtime",
   };
-  const hooks = (args: readonly string[]) => args.filter((argument) => argument.startsWith("hooks."));
-  const first = hooks(platform.planLaunch(request).args);
-  assert.ok(first.length > 0);
+  const addedDirectories = (args: readonly string[]) => args.flatMap((argument, index) => argument === "--add-dir" ? [args[index + 1]] : []);
+  const first = addedDirectories(platform.planLaunch(request).args);
+  assert.deepEqual(first, ["C:/aboard/runtime"]);
   const next = { ...request, agentId: "interactive-2" as AgentId, sessionId: actual };
-  assert.deepEqual(hooks(platform.planLaunch(next).args), first);
-  assert.deepEqual(hooks(platform.planLaunch({ ...next, forkSessionId: provisional }).args), first);
-  assert.deepEqual(hooks(platform.planSessionResume(next).args), first);
+  assert.deepEqual(addedDirectories(platform.planLaunch(next).args), first);
+  assert.deepEqual(addedDirectories(platform.planLaunch({ ...next, forkSessionId: provisional }).args), first);
+  assert.deepEqual(addedDirectories(platform.planSessionResume(next).args), first);
+  for (const plan of [platform.planLaunch(request), platform.planSessionResume(next)]) {
+    assert.equal(plan.args.some((argument) => argument.startsWith("hooks.") || argument.startsWith("plugins.")), false);
+  }
 });
 
 test("Codex launch and resume preflight require workspace hook consent", async () => {
@@ -79,6 +82,7 @@ test("Codex launches and resumes enable lifecycle hooks without native trust rev
       prompt: "Work on the issue.", runtimeDirectory: "C:/aboard/runtime",
     };
     assert.ok(platform.planLaunch(request).args.includes("--dangerously-bypass-hook-trust"));
+    assert.ok(platform.planLaunch(request).args.includes("--add-dir"));
     if (agentType !== "explore") assert.ok(platform.planSessionResume(request).args.includes("--dangerously-bypass-hook-trust"));
   }
   const manual = platform.planLaunch({
@@ -88,7 +92,7 @@ test("Codex launches and resumes enable lifecycle hooks without native trust rev
   assert.equal(manual.args.includes("--dangerously-bypass-hook-trust"), true);
 });
 
-test("interactive ChatGPT forks preserve history and observe fork startup", () => {
+test("interactive ChatGPT forks preserve history and access to the lifecycle runtime", () => {
   const platform = new ChatGptAgentPlatform({
     lifecycleAssets: { settings: "hooks.json", script: "hook.py" },
     commandRunner: async () => ({ code: 0, stdout: "codex-cli 0.153.4", stderr: "" }),
@@ -99,8 +103,8 @@ test("interactive ChatGPT forks preserve history and observe fork startup", () =
     prompt: "Continue", runtimeDirectory: "C:/aboard/runtime",
   });
   assert.deepEqual(plan.args.slice(0, 2), ["fork", actual]);
-  const startup = plan.args.find((argument) => argument.startsWith("hooks.SessionStart="));
-  assert.ok(startup?.includes('matcher="startup|resume|fork"'));
+  assert.deepEqual(plan.args.slice(plan.args.indexOf("--add-dir"), plan.args.indexOf("--add-dir") + 2), ["--add-dir", "C:/aboard/runtime"]);
+  assert.equal(plan.args.some((argument) => argument.startsWith("hooks.") || argument.startsWith("plugins.")), false);
 });
 
 test("the ChatGPT adapter launches a visible Codex session without imposing its provisional id", () => {
@@ -131,8 +135,8 @@ test("the ChatGPT adapter launches a visible Codex session without imposing its 
   assert.deepEqual(plan.args.slice(-2), ["--", "Inspect the launch boundary."]);
   assert.equal(plan.args.at(-1), "Inspect the launch boundary.");
   assert.equal(plan.promptDelivery, "inline");
-  assert.match(plan.args.join("\n"), /hooks\.SessionStart/u);
-  assert.match(plan.args.join("\n"), /hooks\.SessionEnd/u);
+  assert.deepEqual(plan.args.slice(plan.args.indexOf("--add-dir"), plan.args.indexOf("--add-dir") + 2), ["--add-dir", "C:/aboard/runtime"]);
+  assert.equal(plan.args.some((argument) => argument.startsWith("hooks.") || argument.startsWith("plugins.")), false);
 });
 
 test("the ChatGPT adapter protects option-shaped prompts from Codex argument parsing", () => {
@@ -387,10 +391,8 @@ test("the ChatGPT adapter resumes the exact Codex conversation with current laun
   assert.equal(plan.args.includes("--model"), true);
   assert.equal(plan.args.includes("model_reasoning_effort=\"high\""), true);
   assert.deepEqual(plan.args.slice(-1), ["Continue from the saved state."]);
-  assert.match(plan.args.join("\n"), /hooks\.SessionStart/u);
-  assert.match(plan.args.join("\n"), /matcher="startup\|resume\|fork"/u);
-  assert.equal(plan.args.filter((argument) => argument.startsWith("hooks.SessionStart=")).length, 1);
-  assert.match(plan.args.join("\n"), /worker-reground/u);
+  assert.deepEqual(plan.args.slice(plan.args.indexOf("--add-dir"), plan.args.indexOf("--add-dir") + 2), ["--add-dir", "C:/aboard/runtime"]);
+  assert.equal(plan.args.some((argument) => argument.startsWith("hooks.") || argument.startsWith("plugins.")), false);
 });
 
 const address = {
@@ -454,7 +456,8 @@ test("a ChatGPT address cannot spawn subagents, search the web, or mutate Aboard
   assert.equal(plan.args.includes('web_search="disabled"'), true);
   assert.equal(plan.args.includes("features.multi_agent=false"), true);
   assert.equal(plan.args.includes("agents.enabled=false"), true);
-  assert.match(plan.args.join("\n"), /hooks\.PreToolUse=\[\{matcher="Bash\|Agent"/u);
+  assert.equal(plan.args.includes("--add-dir"), true);
+  assert.equal(plan.providerEnvironment?.ABOARD_GUARD_ENABLED, "1");
   assert.equal(plan.guard?.relativePath, "C:/aboard/runtime/agents/address-1/guard.json");
   assert.deepEqual(JSON.parse(plan.guard?.contents ?? "{}"), {
     denySubagents: true,

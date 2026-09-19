@@ -66,7 +66,52 @@ function isOwnedAssetPath(path: string): boolean {
   const segments = path.split("/");
   const safe = segments.every((segment) => segment.length > 0 && segment !== "." && segment !== ".." && !segment.includes("\\"));
   return safe && ((segments.length >= 2 && segments[0] === ".abd")
+    || (segments.length === 2 && segments[0] === ".codex" && segments[1] === "hooks.json")
     || (segments.length === 2 && segments[0] === ".harness" && segments[1] === "config.json"));
+}
+
+const CODEX_HOOKS_PATH = ".codex/hooks.json";
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function isAboardHook(value: unknown): boolean {
+  if (!isRecord(value)) return false;
+  return typeof value.command === "string"
+    && value.command.includes("ABOARD_RUNTIME_ROOT")
+    && value.command.includes("abd_hook.py");
+}
+
+function withoutAboardHooks(value: unknown): unknown {
+  if (!Array.isArray(value)) return value;
+  return value.flatMap((candidate) => {
+    if (!isRecord(candidate) || !Array.isArray(candidate.hooks)) return [candidate];
+    const hooks = candidate.hooks.filter((hook) => !isAboardHook(hook));
+    return hooks.length === 0 ? [] : [{ ...candidate, hooks }];
+  });
+}
+
+function mergeCodexHooks(existingText: string, fragmentText: string, path: string): string {
+  const existing = parseObject(existingText, path);
+  const fragment = parseObject(fragmentText, CODEX_HOOKS_PATH);
+  const existingHooks = existing.hooks === undefined ? {} : existing.hooks;
+  const fragmentHooks = fragment.hooks;
+  if (!isRecord(existingHooks)) throw new Error(`${path} hooks must contain a JSON object`);
+  if (!isRecord(fragmentHooks)) throw new Error(`${CODEX_HOOKS_PATH} hooks must contain a JSON object`);
+
+  const hooks: Record<string, unknown> = {};
+  for (const [event, groups] of Object.entries(existingHooks)) {
+    const kept = withoutAboardHooks(groups);
+    if (!Array.isArray(kept) || kept.length > 0) hooks[event] = kept;
+  }
+  for (const [event, groups] of Object.entries(fragmentHooks)) {
+    if (!Array.isArray(groups)) throw new Error(`${CODEX_HOOKS_PATH} hooks.${event} must contain a JSON array`);
+    const current = hooks[event];
+    if (current !== undefined && !Array.isArray(current)) throw new Error(`${path} hooks.${event} must contain a JSON array`);
+    hooks[event] = [...(current ?? []), ...groups];
+  }
+  return `${JSON.stringify({ ...existing, hooks }, null, 2)}\n`;
 }
 
 async function loadManifest(path: string): Promise<Manifest> {
@@ -140,6 +185,14 @@ export async function scaffoldProject(options: ScaffoldOptions): Promise<Scaffol
   for (const { path, content, sourceHash } of catalog.assets) {
     const destination = join(projectRoot, ...path.split("/"));
     let installedAsset: InstalledAsset | undefined;
+    if (path === CODEX_HOOKS_PATH && await exists(destination)) {
+      const current = await readFile(destination, "utf8");
+      const merged = mergeCodexHooks(current, content, destination);
+      if (current !== merged) { await writeFile(destination, merged, "utf8"); updated.push(path); }
+      installedAsset = { sourceHash };
+      next[path] = installedAsset;
+      continue;
+    }
     if (!await exists(destination)) {
       await mkdir(dirname(destination), { recursive: true }); await writeFile(destination, content, "utf8"); created.push(path);
       installedAsset = { sourceHash };

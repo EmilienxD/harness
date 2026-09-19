@@ -269,7 +269,7 @@ test("Windows wrapper preserves exact argv through an npm command shim", { skip:
   const entry = join(root, "node_modules", "example-cli", "bin", "cli.js");
   const args = [
     "-c",
-    'hooks.SessionStart=[{matcher="startup|resume",hooks=[{command="echo (ready) ^ now"}]}]',
+    'model_instructions_file="echo (ready) ^ now"',
     "prompt with spaces & punctuation",
   ];
   try {
