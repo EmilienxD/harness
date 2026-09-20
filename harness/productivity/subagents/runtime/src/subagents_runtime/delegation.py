@@ -815,11 +815,10 @@ def _delegation_status(connection, parent_session_id: str) -> str:
 def _format_results(rows, status: str) -> str:
     messages: list[str] = []
     for row in rows:
-        _request_id, number, state, reply, reason, delivery_id = row[:6]
+        _request_id, number, state, reply, reason, _delivery_id = row[:6]
         identifier = (
             f"agent-{number}" if number is not None else f"Request {_request_id}"
         )
-        messages.append(f"Delivery ID: {delivery_id}")
         if state == "succeeded":
             messages.append(f"{identifier} finished. Agent replied:\n<reply>\n{reply}\n</reply>")
         elif state == "cancelled":
