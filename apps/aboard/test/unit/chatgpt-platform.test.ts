@@ -8,7 +8,14 @@ const agentId = "interactive-1" as AgentId;
 const provisional = "6b1e3f7a-2c4d-4a8b-9f10-2c3d4e5f6071" as SessionId;
 const actual = "af817a6c-cd41-41e2-a4db-44d3f43cd560" as SessionId;
 
-test("Codex grants every new terminal, fork, and resume access to the Aboard runtime", () => {
+function hookConfigurations(args: readonly string[]): Readonly<Record<string, string>> {
+  return Object.fromEntries(args.flatMap((argument, index) =>
+    argument === "-c" && args[index + 1]?.startsWith("hooks.")
+      ? [args[index + 1]!.split(/=(.*)/su, 2) as [string, string]]
+      : []));
+}
+
+test("Codex grants every new terminal, fork, and resume access to stable session-scoped lifecycle hooks", () => {
   const platform = new ChatGptAgentPlatform({
     lifecycleAssets: { settings: "hooks.json", script: "hook.py" },
     commandRunner: async () => ({ code: 0, stdout: "codex-cli 0.153.4", stderr: "" }),
@@ -25,9 +32,58 @@ test("Codex grants every new terminal, fork, and resume access to the Aboard run
   assert.deepEqual(addedDirectories(platform.planLaunch(next).args), first);
   assert.deepEqual(addedDirectories(platform.planLaunch({ ...next, forkSessionId: provisional }).args), first);
   assert.deepEqual(addedDirectories(platform.planSessionResume(next).args), first);
-  for (const plan of [platform.planLaunch(request), platform.planSessionResume(next)]) {
-    assert.equal(plan.args.some((argument) => argument.startsWith("hooks.") || argument.startsWith("plugins.")), false);
+  for (const plan of [platform.planLaunch(request), platform.planLaunch({ ...next, forkSessionId: provisional }), platform.planSessionResume(next)]) {
+    const hooks = hookConfigurations(plan.args);
+    assert.deepEqual(Object.keys(hooks).sort(), ["hooks.SessionEnd", "hooks.SessionStart", "hooks.Stop"]);
+    assert.match(hooks["hooks.SessionStart"]!, /matcher="startup\|resume\|fork"/u);
+    assert.ok(hooks["hooks.SessionStart"]!.includes(
+      'command="uv run --no-project --no-managed-python \\"C:/aboard/runtime/scripts/abd_hook.py\\" session-start"',
+    ));
+    assert.doesNotMatch(hooks["hooks.SessionStart"]!, /args=/u);
+    const definitions = Object.values(hooks).join("\n");
+    assert.doesNotMatch(definitions, /ABOARD_RUNTIME_ROOT|interactive-[12]|6b1e3f7a|af817a6c/u);
   }
+});
+
+test("Codex registers worker reporting and guard hooks only for launches that need them", () => {
+  const platform = new ChatGptAgentPlatform({
+    lifecycleAssets: { settings: "hooks.json", script: "hook.py" },
+    commandRunner: async () => ({ code: 0, stdout: "codex-cli 0.153.4", stderr: "" }),
+  });
+  const common = {
+    agentId: "address-1" as AgentId, sessionId: provisional, agentType: "address" as const,
+    shell: "powershell" as const, configuration: { shape: "skill" as const, skillName: "address-this" },
+    prompt: "Implement.", runtimeDirectory: "C:/aboard/runtime",
+  };
+  const unguarded = hookConfigurations(platform.planLaunch(common).args);
+  assert.deepEqual(Object.keys(unguarded).sort(), [
+    "hooks.PostCompact", "hooks.SessionEnd", "hooks.SessionStart", "hooks.Stop", "hooks.StopFailure",
+  ]);
+  assert.match(unguarded["hooks.SessionStart"]!, /worker-reground/u);
+  assert.match(unguarded["hooks.PostCompact"]!, /worker-post-compact/u);
+  assert.match(unguarded["hooks.StopFailure"]!, /worker-stop-failure/u);
+  assert.equal(unguarded["hooks.PreToolUse"], undefined);
+
+  const guardedPlan = platform.planLaunch({ ...common, autoRunRestricted: true });
+  const guarded = hookConfigurations(guardedPlan.args);
+  assert.match(guarded["hooks.PreToolUse"]!, /matcher="Bash\|Agent"/u);
+  assert.match(guarded["hooks.PreToolUse"]!, /worker-guard/u);
+  assert.equal(guardedPlan.providerEnvironment?.ABOARD_GUARD_PATH, "C:/aboard/runtime/agents/address-1/guard.json");
+  assert.doesNotMatch(Object.values(guarded).join("\n"), /address-1|ABOARD_GUARD_PATH/u);
+});
+
+test("Codex quotes the absolute runtime hook path inside each session-scoped command", () => {
+  const platform = new ChatGptAgentPlatform({
+    lifecycleAssets: { settings: "hooks.json", script: "hook.py" },
+    commandRunner: async () => ({ code: 0, stdout: "codex-cli 0.153.4", stderr: "" }),
+  });
+  const plan = platform.planLaunch({
+    agentId, sessionId: provisional, agentType: "interactive", shell: "powershell",
+    configuration: { shape: "default" }, runtimeDirectory: "C:/Aboard Runtime",
+  });
+  assert.ok(hookConfigurations(plan.args)["hooks.SessionStart"]!.includes(
+    'command="uv run --no-project --no-managed-python \\"C:/Aboard Runtime/scripts/abd_hook.py\\" session-start"',
+  ));
 });
 
 test("Codex launch and resume preflight require workspace hook consent", async () => {
@@ -102,9 +158,10 @@ test("interactive ChatGPT forks preserve history and access to the lifecycle run
     executionMode: "interactive", shell: "powershell", configuration: { shape: "default" },
     prompt: "Continue", runtimeDirectory: "C:/aboard/runtime",
   });
-  assert.deepEqual(plan.args.slice(0, 2), ["fork", actual]);
+  assert.deepEqual(plan.args.slice(plan.args.indexOf("fork"), plan.args.indexOf("fork") + 2), ["fork", actual]);
+  assert.ok(plan.args.indexOf("--add-dir") < plan.args.indexOf("fork"));
   assert.deepEqual(plan.args.slice(plan.args.indexOf("--add-dir"), plan.args.indexOf("--add-dir") + 2), ["--add-dir", "C:/aboard/runtime"]);
-  assert.equal(plan.args.some((argument) => argument.startsWith("hooks.") || argument.startsWith("plugins.")), false);
+  assert.match(hookConfigurations(plan.args)["hooks.SessionStart"]!, /startup\|resume\|fork/u);
 });
 
 test("the ChatGPT adapter launches a visible Codex session without imposing its provisional id", () => {
@@ -136,7 +193,7 @@ test("the ChatGPT adapter launches a visible Codex session without imposing its 
   assert.equal(plan.args.at(-1), "Inspect the launch boundary.");
   assert.equal(plan.promptDelivery, "inline");
   assert.deepEqual(plan.args.slice(plan.args.indexOf("--add-dir"), plan.args.indexOf("--add-dir") + 2), ["--add-dir", "C:/aboard/runtime"]);
-  assert.equal(plan.args.some((argument) => argument.startsWith("hooks.") || argument.startsWith("plugins.")), false);
+  assert.match(hookConfigurations(plan.args)["hooks.SessionStart"]!, /session-start/u);
 });
 
 test("the ChatGPT adapter protects option-shaped prompts from Codex argument parsing", () => {
@@ -387,12 +444,13 @@ test("the ChatGPT adapter resumes the exact Codex conversation with current laun
 
   assert.equal(plan.kind, "resume");
   assert.deepEqual(plan.command, ["wrapper", "codex"]);
-  assert.deepEqual(plan.args.slice(0, 2), ["resume", actual]);
+  assert.deepEqual(plan.args.slice(plan.args.indexOf("resume"), plan.args.indexOf("resume") + 2), ["resume", actual]);
+  assert.ok(plan.args.indexOf("--add-dir") < plan.args.indexOf("resume"));
   assert.equal(plan.args.includes("--model"), true);
   assert.equal(plan.args.includes("model_reasoning_effort=\"high\""), true);
   assert.deepEqual(plan.args.slice(-1), ["Continue from the saved state."]);
   assert.deepEqual(plan.args.slice(plan.args.indexOf("--add-dir"), plan.args.indexOf("--add-dir") + 2), ["--add-dir", "C:/aboard/runtime"]);
-  assert.equal(plan.args.some((argument) => argument.startsWith("hooks.") || argument.startsWith("plugins.")), false);
+  assert.match(hookConfigurations(plan.args)["hooks.SessionStart"]!, /startup\|resume\|fork/u);
 });
 
 const address = {
@@ -457,7 +515,7 @@ test("a ChatGPT address cannot spawn subagents, search the web, or mutate Aboard
   assert.equal(plan.args.includes("features.multi_agent=false"), true);
   assert.equal(plan.args.includes("agents.enabled=false"), true);
   assert.equal(plan.args.includes("--add-dir"), true);
-  assert.equal(plan.providerEnvironment?.ABOARD_GUARD_ENABLED, "1");
+  assert.equal(plan.providerEnvironment?.ABOARD_GUARD_PATH, "C:/aboard/runtime/agents/address-1/guard.json");
   assert.equal(plan.guard?.relativePath, "C:/aboard/runtime/agents/address-1/guard.json");
   assert.deepEqual(JSON.parse(plan.guard?.contents ?? "{}"), {
     denySubagents: true,
@@ -658,7 +716,9 @@ test("a resumed ChatGPT review keeps its restrictions and does not re-invoke its
     restrictions: { deniedCommands: ["gh pr merge*"] },
   });
 
-  assert.deepEqual(resumed.args.slice(0, 2), ["resume", actual]);
+  const resumeIndex = resumed.args.indexOf("resume");
+  assert.deepEqual(resumed.args.slice(resumeIndex, resumeIndex + 2), ["resume", actual]);
+  assert.ok(resumed.args.indexOf("--add-dir") < resumeIndex);
   assert.deepEqual(resumed.args.slice(-1), ["Continue"]);
   assert.equal(resumed.args.includes('web_search="disabled"'), true);
   assert.equal(resumed.args.includes("agents.enabled=false"), true);

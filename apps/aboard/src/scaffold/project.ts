@@ -78,40 +78,46 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function isAboardHook(value: unknown): boolean {
   if (!isRecord(value)) return false;
-  return typeof value.command === "string"
-    && value.command.includes("ABOARD_RUNTIME_ROOT")
-    && value.command.includes("abd_hook.py");
+  if (value.type !== "command" || typeof value.command !== "string") return false;
+  const commandWindows = typeof value.commandWindows === "string" ? value.commandWindows : "";
+  const command = `${value.command}\n${commandWindows}`;
+  return command.includes("ABOARD_RUNTIME_ROOT")
+    && command.includes("abd_hook.py")
+    && /(?:session-start|session-end|worker-stop|worker-stop-failure|worker-reground|worker-post-compact|worker-guard)(?:["']?\s*)$/u.test(command.trim());
 }
 
-function withoutAboardHooks(value: unknown): unknown {
-  if (!Array.isArray(value)) return value;
-  return value.flatMap((candidate) => {
+function withoutAboardHooks(value: unknown): { readonly value: unknown; readonly changed: boolean } {
+  if (!Array.isArray(value)) return { value, changed: false };
+  let changed = false;
+  const groups = value.flatMap((candidate) => {
     if (!isRecord(candidate) || !Array.isArray(candidate.hooks)) return [candidate];
     const hooks = candidate.hooks.filter((hook) => !isAboardHook(hook));
+    if (hooks.length !== candidate.hooks.length) changed = true;
     return hooks.length === 0 ? [] : [{ ...candidate, hooks }];
   });
+  return { value: groups, changed };
 }
 
-function mergeCodexHooks(existingText: string, fragmentText: string, path: string): string {
-  const existing = parseObject(existingText, path);
-  const fragment = parseObject(fragmentText, CODEX_HOOKS_PATH);
-  const existingHooks = existing.hooks === undefined ? {} : existing.hooks;
-  const fragmentHooks = fragment.hooks;
-  if (!isRecord(existingHooks)) throw new Error(`${path} hooks must contain a JSON object`);
-  if (!isRecord(fragmentHooks)) throw new Error(`${CODEX_HOOKS_PATH} hooks must contain a JSON object`);
-
+async function migrateLegacyCodexHooks(projectRoot: string, updated: string[], removed: string[]): Promise<void> {
+  const path = join(projectRoot, ...CODEX_HOOKS_PATH.split("/"));
+  if (!await exists(path)) return;
+  const existing = parseObject(await readFile(path, "utf8"), path);
+  if (!isRecord(existing.hooks)) return;
   const hooks: Record<string, unknown> = {};
-  for (const [event, groups] of Object.entries(existingHooks)) {
+  let changed = false;
+  for (const [event, groups] of Object.entries(existing.hooks)) {
     const kept = withoutAboardHooks(groups);
-    if (!Array.isArray(kept) || kept.length > 0) hooks[event] = kept;
+    changed ||= kept.changed;
+    if (!Array.isArray(kept.value) || kept.value.length > 0) hooks[event] = kept.value;
   }
-  for (const [event, groups] of Object.entries(fragmentHooks)) {
-    if (!Array.isArray(groups)) throw new Error(`${CODEX_HOOKS_PATH} hooks.${event} must contain a JSON array`);
-    const current = hooks[event];
-    if (current !== undefined && !Array.isArray(current)) throw new Error(`${path} hooks.${event} must contain a JSON array`);
-    hooks[event] = [...(current ?? []), ...groups];
+  if (!changed) return;
+  if (Object.keys(existing).length === 1 && Object.keys(hooks).length === 0) {
+    await rm(path);
+    removed.push(CODEX_HOOKS_PATH);
+    return;
   }
-  return `${JSON.stringify({ ...existing, hooks }, null, 2)}\n`;
+  await writeJson(path, { ...existing, hooks });
+  updated.push(CODEX_HOOKS_PATH);
 }
 
 async function loadManifest(path: string): Promise<Manifest> {
@@ -180,19 +186,13 @@ export async function scaffoldProject(options: ScaffoldOptions): Promise<Scaffol
   const previous = await loadManifest(manifestPath);
   const next: Record<string, InstalledAsset> = {};
 
+  await migrateLegacyCodexHooks(projectRoot, updated, removed);
+
   const catalog = await sourceCatalog(assetRoot);
   const currentPaths = new Set(catalog.assets.map((asset) => asset.path));
   for (const { path, content, sourceHash } of catalog.assets) {
     const destination = join(projectRoot, ...path.split("/"));
     let installedAsset: InstalledAsset | undefined;
-    if (path === CODEX_HOOKS_PATH && await exists(destination)) {
-      const current = await readFile(destination, "utf8");
-      const merged = mergeCodexHooks(current, content, destination);
-      if (current !== merged) { await writeFile(destination, merged, "utf8"); updated.push(path); }
-      installedAsset = { sourceHash };
-      next[path] = installedAsset;
-      continue;
-    }
     if (!await exists(destination)) {
       await mkdir(dirname(destination), { recursive: true }); await writeFile(destination, content, "utf8"); created.push(path);
       installedAsset = { sourceHash };
@@ -218,6 +218,8 @@ export async function scaffoldProject(options: ScaffoldOptions): Promise<Scaffol
 
   for (const [path, previousAsset] of Object.entries(previous.assets)) {
     if (currentPaths.has(path)) continue;
+    // Legacy Codex hook ownership is retired by migrateLegacyCodexHooks.
+    if (path === CODEX_HOOKS_PATH) continue;
     const destination = join(projectRoot, ...path.split("/"));
     if (!await exists(destination)) continue;
     const current = await readFile(destination, "utf8");

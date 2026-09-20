@@ -38,7 +38,13 @@ test("a disabled Claude Code auto-compact is reported, and an unset one is not",
   }
 });
 
-test("scaffolding merges Aboard hooks into an existing Codex hooks file", async () => {
+const legacyAboardHook = (route: string) => ({
+  type: "command",
+  command: `uv run --no-project --no-managed-python \"$ABOARD_RUNTIME_ROOT/scripts/abd_hook.py\" ${route}`,
+  commandWindows: `uv run --no-project --no-managed-python \"$env:ABOARD_RUNTIME_ROOT\\scripts\\abd_hook.py\" ${route}`,
+});
+
+test("scaffolding removes only legacy Aboard handlers and preserves arbitrary user hooks", async () => {
   const root = await mkdtemp(join(tmpdir(), "aboard-scaffold-codex-hooks-"));
   const assets = join(process.cwd(), "assets", "scaffold");
   const project = join(root, "project");
@@ -47,7 +53,8 @@ test("scaffolding merges Aboard hooks into an existing Codex hooks file", async 
     description: "User hooks",
     hooks: {
       SessionStart: [{ matcher: "startup", hooks: [{ type: "command", command: "user-start" }] }],
-      PreToolUse: [{ matcher: "Bash", hooks: [{ type: "command", command: "user-guard" }] }],
+      PreToolUse: [{ matcher: "Bash", hooks: [{ type: "command", command: "user-guard" }, legacyAboardHook("worker-guard")] }],
+      Stop: [{ hooks: [legacyAboardHook("worker-stop")] }],
     },
   }, null, 2)}\n`);
 
@@ -60,14 +67,37 @@ test("scaffolding merges Aboard hooks into an existing Codex hooks file", async 
 
   assert.equal(installed.description, "User hooks");
   assert.equal(installed.hooks.SessionStart?.some((group) => group.hooks.some((hook) => hook.command === "user-start")), true);
-  assert.equal(installed.hooks.PreToolUse?.some((group) => group.hooks.some((hook) => hook.command === "user-guard")), true);
-  const aboardCommands = Object.values(installed.hooks).flatMap((groups) => groups.flatMap((group) => group.hooks))
-    .filter((hook) => hook.command.includes("ABOARD_RUNTIME_ROOT"));
-  assert.equal(aboardCommands.length, 6);
-  assert.equal(aboardCommands.every((hook) => hook.command.includes("scripts/abd_hook.py") && hook.commandWindows?.includes("scripts\\abd_hook.py")), true);
+  assert.deepEqual(installed.hooks.PreToolUse?.[0]?.hooks.map((hook) => hook.command), ["user-guard"]);
+  assert.equal(installed.hooks.Stop, undefined);
+  assert.equal(Object.values(installed.hooks).flatMap((groups) => groups.flatMap((group) => group.hooks))
+    .some((hook) => hook.command.includes("ABOARD_RUNTIME_ROOT")), false);
   assert.equal(first.updated.includes(".codex/hooks.json"), true);
 
   const before = await readFile(hooksPath, "utf8");
   await scaffoldProject({ projectRoot: project, assetRoot: assets });
   assert.equal(await readFile(hooksPath, "utf8"), before);
+});
+
+test("scaffolding removes a pure legacy Aboard hooks file and never recreates it", async () => {
+  const root = await mkdtemp(join(tmpdir(), "aboard-scaffold-pure-codex-hooks-"));
+  const assets = join(process.cwd(), "assets", "scaffold");
+  const project = join(root, "project");
+  const hooksPath = join(project, ".codex", "hooks.json");
+  await mkdir(join(project, ".codex"), { recursive: true });
+  await writeFile(hooksPath, `${JSON.stringify({
+    hooks: {
+      SessionStart: [{ matcher: "startup|resume|fork", hooks: [legacyAboardHook("session-start")] }],
+      SessionEnd: [{ hooks: [legacyAboardHook("session-end")] }],
+    },
+  }, null, 2)}\n`);
+
+  const first = await scaffoldProject({ projectRoot: project, assetRoot: assets });
+  assert.deepEqual(first.removed, [".codex/hooks.json"]);
+  await assert.rejects(readFile(hooksPath, "utf8"), { code: "ENOENT" });
+
+  const second = await scaffoldProject({ projectRoot: project, assetRoot: assets });
+  assert.equal(second.created.includes(".codex/hooks.json"), false);
+  assert.equal(second.updated.includes(".codex/hooks.json"), false);
+  assert.equal(second.removed.includes(".codex/hooks.json"), false);
+  await assert.rejects(readFile(hooksPath, "utf8"), { code: "ENOENT" });
 });

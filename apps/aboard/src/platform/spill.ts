@@ -77,11 +77,15 @@ export class FileSystemPromptSpillStore implements PromptSpillStore {
     } else {
       await cp(assets.script, hookScript, { force: true });
     }
-    const hooks = replaceHookScript(
-      JSON.parse(await readFile(assets.settings, "utf8")) as unknown,
-      hookScript,
-    );
-    await writeFile(join(directory, "settings.json"), `${JSON.stringify({ hooks }, null, 2)}\n`, { encoding: "utf8", mode: 0o600 });
+    // Codex receives hooks through launch-scoped `-c hooks.*` arguments. Only
+    // Claude consumes a generated per-agent settings file.
+    if (plan.platform === "claude") {
+      const hooks = replaceHookScript(
+        JSON.parse(await readFile(assets.settings, "utf8")) as unknown,
+        hookScript,
+      );
+      await writeFile(join(directory, "settings.json"), `${JSON.stringify({ hooks }, null, 2)}\n`, { encoding: "utf8", mode: 0o600 });
+    }
 
     if (plan.guard !== undefined) await this.#write(plan.guard);
     if (plan.wrapperRequest !== undefined) await this.#write(plan.wrapperRequest);

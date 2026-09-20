@@ -104,15 +104,11 @@ def command_candidates(segment: str) -> list[str]:
 
 
 def guard(payload: dict[str, Any]) -> int:
-    if os.environ.get("ABOARD_GUARD_ENABLED") != "1":
+    path = os.environ.get("ABOARD_GUARD_PATH")
+    if not path:
         return 0
     if payload.get("hook_event_name") != "PreToolUse":
         return 0
-    runtime_root = os.environ.get("ABOARD_RUNTIME_ROOT")
-    agent_id = os.environ.get("ABOARD_AGENT_ID", "")
-    if not runtime_root or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*", agent_id):
-        return deny(UNREADABLE)
-    path = os.path.join(runtime_root, "agents", agent_id, "guard.json")
     try:
         with open(path, encoding="utf-8") as handle:
             rules: Any = json.load(handle)

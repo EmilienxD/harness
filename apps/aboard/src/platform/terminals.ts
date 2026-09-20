@@ -250,6 +250,8 @@ export class TerminalController {
       ABOARD_WORKSPACE_ROOT: cwd,
       ...(request.providerEnvironment ?? {}),
     };
+    // Detached-process logging still uses this internal runtime location. Hook
+    // discovery and hook commands do not depend on it.
     if (environment.runtimeRoot !== undefined) env.ABOARD_RUNTIME_ROOT = environment.runtimeRoot;
     if (request.issueNumbers !== undefined && request.issueNumbers.length > 0) {
       env.ABOARD_ISSUE_NUMBERS = request.issueNumbers.join(",");

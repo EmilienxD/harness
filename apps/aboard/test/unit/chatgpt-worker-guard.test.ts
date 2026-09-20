@@ -49,10 +49,9 @@ function decide(script: string, payload: unknown, raw?: string, identity = agent
     encoding: "utf8",
     env: {
       ...process.env,
-      ABOARD_RUNTIME_ROOT: dirname(dirname(script)),
       ABOARD_AGENT_ID: identity,
       ABOARD_AGENT_TYPE: "address",
-      ...(enabled ? { ABOARD_GUARD_ENABLED: "1" } : {}),
+      ...(enabled ? { ABOARD_GUARD_PATH: join(dirname(dirname(script)), "agents", identity, "guard.json") } : {}),
     },
   });
   assert.equal(result.stderr, "");

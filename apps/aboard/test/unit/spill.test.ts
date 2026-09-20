@@ -23,6 +23,7 @@ test("Codex's shared lifecycle script survives agent cleanup", async (t) => {
   await store.prepare(plan);
   const script = join(root, "scripts", "abd_hook.py");
   assert.equal(await readFile(script, "utf8"), await readFile("assets/runtime/abd_hook.py", "utf8"));
+  await assert.rejects(readFile(join(plan.runtimeDirectory, "settings.json"), "utf8"), { code: "ENOENT" });
   await store.remove(plan.agentId);
   await store.prune(new Set());
   assert.equal(await readFile(script, "utf8"), await readFile("assets/runtime/abd_hook.py", "utf8"));

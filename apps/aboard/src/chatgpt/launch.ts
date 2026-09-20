@@ -1,5 +1,5 @@
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { isAbsolute, join, resolve } from "node:path";
 
 import type { WriteCapability } from "../domain/capability.js";
 import { isAutoRunWorkerType, isHeadlessExecution, type AgentId, type AgentType, type SessionId } from "../domain/contracts.js";
@@ -8,6 +8,7 @@ import { promptFileReference, skillInvocation } from "../platform/prompts.js";
 import { BY_DIFFICULTY, MAX_COMMAND_LINE_CHARS, promptSpillRoot, requiresWriteLease, taskPromptPath, type LaunchPlan, LaunchPlanError, type PromptDelivery, type RuntimeFile, type SessionWrapperLayout } from "../platform/launch.js";
 import type { PlatformLaunchPlan, PlatformLaunchRequest, PlatformResumeRequest } from "../platform/agent-platform.js";
 import type { IssueDifficulty } from "../shared/labels.js";
+import { codexHookConfigArguments } from "./hooks.js";
 
 export const DEFAULT_CHATGPT_COMMAND = ["codex"] as const;
 
@@ -78,8 +79,12 @@ function planChatGptSession(request: PlatformLaunchRequest | PlatformResumeReque
   if (!Number.isInteger(threshold) || threshold < 0) throw new LaunchPlanError("invalid-threshold", "maxInlinePromptChars must be a non-negative integer");
   const chrome = request.chrome === true;
   if (chrome && !worker) throw new LaunchPlanError("shape-not-allowed", `The Chrome browser backend is available only to [AI]-chrome auto-run workers: ${request.agentType}`);
-  const runtimeRoot = request.runtimeDirectory ?? join(tmpdir(), "abd-runtime");
+  const requestedRuntimeRoot = request.runtimeDirectory ?? join(tmpdir(), "abd-runtime");
+  const runtimeRoot = isAbsolute(requestedRuntimeRoot) || /^[A-Za-z]:[\\/]/u.test(requestedRuntimeRoot)
+    ? requestedRuntimeRoot
+    : resolve(requestedRuntimeRoot);
   const runtimeDirectory = `${runtimeRoot.replaceAll("\\", "/").replace(/\/+$/u, "")}/agents/${request.agentId}`;
+  const hookScript = `${runtimeRoot.replaceAll("\\", "/").replace(/\/+$/u, "")}/scripts/abd_hook.py`;
   const subagentsDenied = request.restrictions?.denySubagents === true || configuration.subagents === "denied";
   const denyCommands = [...new Set(request.restrictions?.deniedCommands ?? [])];
   const readOnlyFiles = [...new Set(request.restrictions?.protectedPaths ?? [])];
@@ -104,6 +109,7 @@ function planChatGptSession(request: PlatformLaunchRequest | PlatformResumeReque
       ? ["-c", 'web_search="disabled"']
       : configuration.webSearch === undefined ? [] : ["-c", `web_search=${JSON.stringify(configuration.webSearch)}`]),
     ...(subagentsDenied ? ["-c", "features.multi_agent=false", "-c", "agents.enabled=false"] : []),
+    ...codexHookConfigArguments(hookScript, request.agentType, guard !== undefined),
     ...(policy.model === undefined ? [] : ["--model", policy.model]),
     ...(policy.effort === undefined ? [] : ["-c", `model_reasoning_effort=${JSON.stringify(policy.effort)}`]),
   ];
@@ -142,7 +148,10 @@ function planChatGptSession(request: PlatformLaunchRequest | PlatformResumeReque
       }
     }
     const background = isHeadlessExecution(request.agentType, request.executionMode);
-    const args = [...(background ? ["exec"] : []), ...(request.forkSessionId === undefined ? kind === "resume" ? ["resume", request.sessionId] : [] : ["fork", request.forkSessionId]), ...(background ? ["--json"] : []), ...fixed, ...promptArgs];
+    const conversation = request.forkSessionId === undefined
+      ? kind === "resume" ? ["resume", request.sessionId] : []
+      : ["fork", request.forkSessionId];
+    const args = [...(background ? ["exec", "--json"] : []), ...fixed, ...conversation, ...promptArgs];
     const wrapped = wrap(command, args, request.wrapper, request.agentId, request.sessionId, runtimeRoot);
     return {
       promptDelivery,
@@ -172,7 +181,7 @@ function planChatGptSession(request: PlatformLaunchRequest | PlatformResumeReque
     promptDelivery: built.promptDelivery,
     runtimeDirectory,
     providerEnvironment: {
-      ABOARD_GUARD_ENABLED: guard === undefined ? "0" : "1",
+      ...(guard === undefined ? {} : { ABOARD_GUARD_PATH: guard.relativePath }),
       ...(isHeadlessExecution(request.agentType, request.executionMode) ? { ABOARD_HEADLESS_CHATGPT: "1" } : {}),
     },
     ...(chrome ? { chromeRequired: true as const } : {}),

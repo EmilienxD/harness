@@ -26,8 +26,8 @@ import { contains } from "./config.js";
 import { startFakeOpenAiServer } from "./codex-server.js";
 
 const PROVISIONAL = "6b1e3f7a-2c4d-4a8b-9f10-2c3d4e5f6071" as SessionId;
-// These isolated fixtures vet their generated hooks; production retains native trust.
-const CODEX_COMMAND = ["codex", "exec", "--json", "--dangerously-bypass-hook-trust"] as const;
+// The adapter adds launch-scoped hook trust after the workspace-level consent gate.
+const CODEX_COMMAND = ["codex", "exec", "--json"] as const;
 const CODEX_MODEL = "codex-e2e";
 const OPENAI_KEY_ENV = "ABOARD_E2E_OPENAI_KEY";
 const execFileAsync = promisify(execFile);
@@ -55,7 +55,7 @@ export async function runChatGptSmoke(config: HarnessConfig): Promise<void> {
     const address = await runScenario(root, { prompt: "[E2E:chatgpt-address] address the deterministic issue.", expectedExit: 0, address: true });
     await runScenario(root, { prompt: "Continue", expectedExit: 0, address: true, resume: address });
     await runScenario(root, { prompt: "[E2E:chatgpt-address] address the deterministic issue with Chrome.", expectedExit: 0, address: true, chrome: "declared" });
-    await runChromeRefusal(root);
+    await runChromeOptional(root);
     await runScenario(root, { prompt: "[E2E:chatgpt-review-approve] review the deterministic pull request.", expectedExit: 0, review: "afk" });
     await runScenario(root, { prompt: "[E2E:chatgpt-review-changes] review the deterministic pull request.", expectedExit: 0, review: "afk" });
     await runScenario(root, { prompt: `${"large deterministic review ".repeat(300)}[E2E:chatgpt-process-failure]`, expectedExit: 1, review: "afk" });
@@ -148,8 +148,8 @@ async function browserProbeFor(root: string, scenario: Scenario): Promise<{ read
   return { browserProbe: new ChatGptBrowserProbe({ codexHome: home }) };
 }
 
-/** A Chrome-required launch must fail before any terminal or Codex process exists. */
-async function runChromeRefusal(root: string): Promise<void> {
+/** A Chrome-required launch remains available when no discoverable backend is declared. */
+async function runChromeOptional(root: string): Promise<void> {
   const agentId = "chatgpt-chrome-absent" as AgentId;
   const runtimeRoot = join(root, agentId);
   const scenario: Scenario = { prompt: "[E2E:chatgpt-address] address it.", expectedExit: 0, address: true, chrome: "absent" };
@@ -165,11 +165,8 @@ async function runChromeRefusal(root: string): Promise<void> {
     prompt: scenario.prompt, runtimeDirectory: runtimeRoot, chrome: true,
   });
   if (plan.chromeRequired !== true) throw new Error("ChatGPT E2E lost the Chrome requirement on the launch plan");
-  let refused: string | undefined;
-  try { await platform.preflight(plan); } catch (error) { refused = error instanceof Error ? error.message : String(error); }
-  if (refused === undefined) throw new Error("ChatGPT E2E started Chrome-required work without a declared Chrome backend");
-  if (!/BROWSER_USE_AVAILABLE_BACKENDS/u.test(refused)) throw new Error(`ChatGPT E2E gave an unusable Chrome refusal: ${refused}`);
-  if (existsSync(join(runtimeRoot, "agents", agentId, "guard.json"))) throw new Error("ChatGPT E2E prepared runtime files for a refused launch");
+  await platform.preflight(plan);
+  if (existsSync(join(runtimeRoot, "agents", agentId, "guard.json"))) throw new Error("ChatGPT E2E prepared runtime files during preflight");
 }
 
 async function runScenario(root: string, scenario: Scenario): Promise<SessionId> {
@@ -177,7 +174,9 @@ async function runScenario(root: string, scenario: Scenario): Promise<SessionId>
   const agentType = scenarioAgentType(scenario);
   const worker = address || scenario.review !== undefined;
   const agentId = `chatgpt-${scenarioName(scenario)}` as AgentId;
-  const runtimeRoot = join(root, agentId);
+  // Production uses one activation runtime, so every agent must receive the
+  // same trusted hook definition while identity stays in its environment.
+  const runtimeRoot = join(root, "runtime");
   const wrapper = sessionWrapperLayout(runtimeRoot, resolve(process.cwd(), "assets", "runtime", "abd_wrapper.py"));
   const realSessionProbe = new ChatGptSessionProbe();
   const platform = new ChatGptAgentPlatform({
@@ -224,6 +223,20 @@ async function runScenario(root: string, scenario: Scenario): Promise<SessionId>
     const plan = resume === undefined
       ? platform.planLaunch(request)
       : platform.planSessionResume({ ...request, sessionId: resume })
+    const hookConfigs = plan.args.filter((argument) => argument.startsWith("hooks."));
+    const hookScript = `${runtimeRoot.replaceAll("\\", "/")}/scripts/abd_hook.py`;
+    if (!hookConfigs.some((argument) => argument.startsWith("hooks.SessionStart=") && argument.includes(hookScript))) {
+      throw new Error("ChatGPT E2E launch omitted its session-scoped absolute lifecycle hook");
+    }
+    if (hookConfigs.some((argument) => argument.includes("ABOARD_RUNTIME_ROOT") || argument.includes(agentId) || argument.includes(PROVISIONAL))) {
+      throw new Error("ChatGPT E2E launch embedded process identity or runtime-root discovery in a hook definition");
+    }
+    if (hookConfigs.some((argument) => argument.startsWith("hooks.PreToolUse=")) !== worker) {
+      throw new Error("ChatGPT E2E launch did not scope its guard hook to restricted workers");
+    }
+    if (worker && !hookConfigs.some((argument) => argument.startsWith("hooks.StopFailure="))) {
+      throw new Error("ChatGPT E2E worker launch omitted failure reporting");
+    }
     await platform.preflight(plan);
     if (resume !== undefined) {
       if (!await platform.isResumable(resume, root, plan.command)) throw new Error("ChatGPT E2E could not discover its saved session through the real Codex App Server");
@@ -245,6 +258,7 @@ async function runScenario(root: string, scenario: Scenario): Promise<SessionId>
     if (plan.wrapperRequest === undefined) throw new Error("ChatGPT E2E expected wrapper request delivery");
     const execution = spawnCaptured("uv", ["run", "--no-project", "--no-managed-python", wrapper.script, wrapper.lockPathFor(agentId), "--request", plan.wrapperRequest.relativePath], root, {
       ...process.env,
+      ...plan.providerEnvironment,
       ABOARD_BRIDGE_PORT: String(bridge.port), ABOARD_BRIDGE_TOKEN: bridge.token,
       ABOARD_AGENT_ID: agentId, ABOARD_SESSION_ID: expectedSessionId, ABOARD_AGENT_TYPE: agentType,
       ABOARD_RUNTIME_ROOT: runtimeRoot, ABOARD_WORKSPACE_ROOT: root, ABOARD_ATTENDED: "1",
@@ -309,6 +323,15 @@ export { validateCodexCli } from "../../../../tests/e2e/core/codex.js";
 export function redactProcessError(captured: string): string {
   if (captured.length === 0) return "no output";
   const bytes = Buffer.byteLength(captured, "utf8");
+  const lines = captured.split(/\r?\n/u);
+  const structural = [...lines].reverse().find((line) =>
+    /^(?:error:|unexpected argument|invalid value)|"type":"error"/iu.test(line.trim())
+    && !/bypass-hook-trust|Model metadata/iu.test(line))
+    ?? lines.find((line) => /^warning:|hook|args/iu.test(line.trim()));
+  if (structural !== undefined) {
+    const index = lines.indexOf(structural);
+    return `${lines.slice(index, index + 6).join(" ").trim().slice(0, 800)} (${bytes} bytes total)`;
+  }
   if (/resolves to the script shim[\s\S]*cannot receive this command line unchanged/iu.test(captured)) {
     return `unsupported Windows script shim (${bytes} bytes redacted)`;
   }

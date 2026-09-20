@@ -325,13 +325,13 @@ test("session Python hooks post proof-of-life and reason, and stay silent withou
   }
 });
 
-test("scaffold registers only lifecycle and Auto Run worker hooks", async () => {
+test("the Claude runtime asset registers only lifecycle and Auto Run worker hooks", async () => {
   const hooks = JSON.parse(await readFile(join(process.cwd(), "assets", "runtime", "abd-hooks.json"), "utf8")) as Record<string, unknown>;
   assert.deepEqual(Object.keys(hooks).sort(), ["PostCompact", "SessionEnd", "SessionStart", "Stop", "StopFailure"].sort());
   assert.equal((hooks.SessionStart as unknown[]).length, 2);
   const regrounding = (hooks.SessionStart as { matcher: string; hooks: { args: string[] }[] }[]).find((entry) => entry.matcher === "compact");
   assert.ok(regrounding?.hooks.some((hook) => hook.args.includes("worker-reground")));
-  assert.deepEqual([...scaffoldedRoutes().names].sort(), [
+  assert.deepEqual([...runtimeAssetRoutes().names].sort(), [
     "session-start",
     "worker-reground",
     "session-end",
@@ -341,7 +341,7 @@ test("scaffold registers only lifecycle and Auto Run worker hooks", async () => 
   ].sort());
 });
 
-function scaffoldedRoutes(): { readonly names: readonly string[]; readonly table: Readonly<Record<string, string>> } {
+function runtimeAssetRoutes(): { readonly names: readonly string[]; readonly table: Readonly<Record<string, string>> } {
   const script = join(process.cwd(), "assets", "runtime", "abd_hook.py");
   const printed = spawnSync("uv", ["run", "--no-project", "python", script, "--routes"], { encoding: "utf8" });
   assert.equal(printed.status, 0);
@@ -364,8 +364,8 @@ function scaffoldedRoutes(): { readonly names: readonly string[]; readonly table
   return { names, table };
 }
 
-test("every scaffolded hook route is path-free and served by a bridge route", async () => {
-  const { names, table } = scaffoldedRoutes();
+test("every runtime hook route is path-free and served by a bridge route", async () => {
+  const { names, table } = runtimeAssetRoutes();
   assert.ok(names.length > 0);
   for (const name of names) assert.doesNotMatch(name, /[/\\]/u, "hook route names must not look like paths");
   const registered = new Set(names.map((name) => table[name]!));
@@ -399,6 +399,6 @@ test("every scaffolded hook route is path-free and served by a bridge route", as
       signal: AbortSignal.abort(),
     });
     // A served route may reject an empty body (400) but must never 404.
-    assert.notEqual(response.status, 404, `${endpoint} is registered in the scaffold but no bridge route serves it`);
+    assert.notEqual(response.status, 404, `${endpoint} is registered in the runtime asset but no bridge route serves it`);
   }
 });
