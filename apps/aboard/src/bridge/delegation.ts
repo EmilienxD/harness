@@ -535,6 +535,16 @@ export class DelegationCoordinator {
       maxInlinePromptChars: this.options.maxInlinePromptChars,
       ...(this.options.wrapper === undefined ? {} : { wrapper: this.options.wrapper }),
     });
+    // Codex creates an empty TUI before it starts an agentic turn. Its
+    // SessionStart hook therefore cannot fire until the user submits the first
+    // prompt. Admit that idle terminal under its provisional identity; the
+    // lifecycle hook binds the real conversation id on first use.
+    const startupProofRequired = this.options.startupTimeoutMs !== undefined && !(
+      platform.id === "chatgpt"
+      && executionMode === "interactive"
+      && plan.promptDelivery === "none"
+      && input.forkSessionId === undefined
+    );
     await platform.preflight(plan);
     const occurredAt = this.#timestamp();
     if (leaseRequired(origin, attended)) {
@@ -562,9 +572,9 @@ export class DelegationCoordinator {
         executionMode,
         ...(input.requestId === undefined ? {} : { harnessRequestId: input.requestId }),
         providerEnvironment: { ...plan.providerEnvironment, ...harnessEnvironment(input), ...(input.harnessSessionId === undefined ? {} : { HARNESS_SESSION_ID: input.harnessSessionId }), ...(input.executionId === undefined ? {} : { HARNESS_EXECUTION_ID: input.executionId }) },
-        // A failed launch prints to the terminal and exits before any hook; the
-        // platform's start observation is the only trustworthy proof the session is up.
-        ...(this.options.startupTimeoutMs === undefined ? {} : { startupTimeoutMs: this.options.startupTimeoutMs }),
+        // Prompted starts and resumes must prove that the platform reached its
+        // lifecycle. A fresh idle Codex TUI cannot provide that proof yet.
+        ...(startupProofRequired ? { startupTimeoutMs: this.options.startupTimeoutMs } : {}),
       }, (createdTerminal) => {
         this.options.fleet.register({
           platform: platform.id,
@@ -586,7 +596,7 @@ export class DelegationCoordinator {
         }, occurredAt);
       });
       terminalStarted = true;
-      if (this.options.startupTimeoutMs !== undefined) {
+      if (startupProofRequired) {
         const startup = this.options.terminals.waitForStartup(agentId);
         if (startup === undefined) throw new Error(`No startup proof was armed for runtime-assigned ${platform.id} session ${agentId}`);
         await startup;

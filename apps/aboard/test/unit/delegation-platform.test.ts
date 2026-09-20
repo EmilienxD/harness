@@ -128,12 +128,11 @@ test("shared delegation asks the selected platform for an executable launch plan
   assert.ok(host.options[0]?.env.PYTHONPATH?.startsWith("C:/installed-runtime"));
 });
 
-test("shared delegation does not report a runtime-assigned session until its actual id is bound", async () => {
+test("a new promptless ChatGPT TUI starts idle without arming an impossible lifecycle proof", async () => {
   const provisional = "6b1e3f7a-2c4d-4a8b-9f10-2c3d4e5f6071" as SessionId;
-  const actual = "af817a6c-cd41-41e2-a4db-44d3f43cd560" as SessionId;
-  let resolveProof: ((value: unknown) => void) | undefined;
+  let proofsArmed = 0;
   const proofs: StartupProofTracker = {
-    awaitStarted: () => new Promise((resolve) => { resolveProof = resolve; }),
+    awaitStarted: () => { proofsArmed += 1; return new Promise(() => undefined); },
     cancel: () => undefined,
   };
   const platform: AgentPlatform = {
@@ -165,16 +164,10 @@ test("shared delegation does not report a runtime-assigned session until its act
     agentIdFactory: () => "agent-1" as AgentId, startupTimeoutMs: 60_000,
   });
 
-  let settled = false;
-  const launched = coordinator.launchInteractive({ type: "interactive", description: "ChatGPT" }, "user").then((value) => { settled = true; return value; });
-  await new Promise((resolve) => setImmediate(resolve));
-  assert.equal(settled, false);
-  assert.equal(fleet.get("agent-1" as AgentId)?.lifecycle.status, "starting");
-  terminals.bindSession("agent-1" as AgentId, provisional, actual);
-  assert.equal(fleet.bindSession("agent-1" as AgentId, provisional, actual, new Date().toISOString() as IsoTimestamp), true);
-  resolveProof?.({ agentId: "agent-1", sessionId: actual });
+  const launched = await coordinator.launchInteractive({ type: "interactive", description: "ChatGPT" }, "user");
 
-  assert.equal((await launched).sessionId, actual);
+  assert.equal(proofsArmed, 0);
+  assert.equal(launched.sessionId, provisional);
   assert.equal(fleet.get("agent-1" as AgentId)?.lifecycle.status, "running");
 });
 
