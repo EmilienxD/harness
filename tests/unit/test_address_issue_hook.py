@@ -117,7 +117,7 @@ def blocked(prompt, cwd, monkeypatch, capsys):
     ("/address-this\nFull issue text", "Full issue text"),
 ])
 def test_invocation_argument_is_everything_after_the_reference(prompt, argument):
-    assert hook.parse_invocation(prompt) == argument
+    assert hook.parse_invocation(prompt, hook.ADDRESS_INVOCATION) == argument
 
 
 @pytest.mark.parametrize("prompt", [
@@ -127,7 +127,7 @@ def test_invocation_argument_is_everything_after_the_reference(prompt, argument)
 ])
 def test_unrelated_prompts_are_ignored(prompt, tmp_path, monkeypatch, capsys):
     fake_github(monkeypatch, {})
-    assert hook.parse_invocation(prompt) is None
+    assert hook.parse_invocation(prompt, hook.ADDRESS_INVOCATION) is None
     assert run_hook(prompt, tmp_path, monkeypatch, capsys) is None
 
 
