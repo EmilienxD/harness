@@ -51,6 +51,8 @@ export interface DelegationLaunchInput {
   readonly requestId?: string;
   readonly harnessSessionId?: string;
   readonly executionId?: string;
+  /** Window-scoped link that lets an interactive child reveal its parent terminal. */
+  readonly parentTerminalUri?: string;
   readonly type: AgentType;
   readonly prompt?: string;
   /** Trusted skill invocation selected by a work-with-agent delegation boundary. */
@@ -93,6 +95,8 @@ export interface ReopenTarget {
   readonly harnessRuntimePath?: string;
   readonly harnessSessionId?: string;
   readonly executionId?: string;
+  /** Refreshed for each process because VS Code external URIs are window-scoped. */
+  readonly parentTerminalUri?: string;
   readonly requestId?: string;
   readonly executionMode?: ExecutionMode;
   readonly platform: AgentPlatformId;
@@ -357,7 +361,7 @@ export class DelegationCoordinator {
         executionMode,
         ...(target.focus === undefined ? {} : { focus: target.focus }),
         ...(this.options.startupTimeoutMs === undefined ? {} : { startupTimeoutMs: this.options.startupTimeoutMs }),
-        providerEnvironment: { ...plan.providerEnvironment, ...harnessEnvironment(target), ...(target.harnessSessionId === undefined ? {} : { HARNESS_SESSION_ID: target.harnessSessionId }), ...(target.executionId === undefined ? {} : { HARNESS_EXECUTION_ID: target.executionId }) },
+        providerEnvironment: { ...plan.providerEnvironment, ...harnessEnvironment(target), ...(target.harnessSessionId === undefined ? {} : { HARNESS_SESSION_ID: target.harnessSessionId }), ...(target.executionId === undefined ? {} : { HARNESS_EXECUTION_ID: target.executionId }), ...(target.parentTerminalUri === undefined ? {} : { HARNESS_PARENT_TERMINAL_URI: target.parentTerminalUri }) },
         ...(target.requestId === undefined ? {} : { harnessRequestId: target.requestId }),
       });
       terminalStarted = true;
@@ -571,7 +575,7 @@ export class DelegationCoordinator {
         attended,
         executionMode,
         ...(input.requestId === undefined ? {} : { harnessRequestId: input.requestId }),
-        providerEnvironment: { ...plan.providerEnvironment, ...harnessEnvironment(input), ...(input.harnessSessionId === undefined ? {} : { HARNESS_SESSION_ID: input.harnessSessionId }), ...(input.executionId === undefined ? {} : { HARNESS_EXECUTION_ID: input.executionId }) },
+        providerEnvironment: { ...plan.providerEnvironment, ...harnessEnvironment(input), ...(input.harnessSessionId === undefined ? {} : { HARNESS_SESSION_ID: input.harnessSessionId }), ...(input.executionId === undefined ? {} : { HARNESS_EXECUTION_ID: input.executionId }), ...(input.parentTerminalUri === undefined ? {} : { HARNESS_PARENT_TERMINAL_URI: input.parentTerminalUri }) },
         // Prompted starts and resumes must prove that the platform reached its
         // lifecycle. A fresh idle Codex TUI cannot provide that proof yet.
         ...(startupProofRequired ? { startupTimeoutMs: this.options.startupTimeoutMs } : {}),

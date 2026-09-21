@@ -111,7 +111,7 @@ test("shared delegation asks the selected platform for an executable launch plan
     agentIdFactory: () => "agent-1" as AgentId,
   });
 
-  const launched = await coordinator.launchInteractive({ type: "interactive", description: "shell", harnessStateDirectory: "C:/isolated-state", harnessRuntimePath: "C:/installed-runtime" }, "user");
+  const launched = await coordinator.launchInteractive({ type: "interactive", description: "shell", harnessStateDirectory: "C:/isolated-state", harnessRuntimePath: "C:/installed-runtime", parentTerminalUri: "vscode://aboard.aboard/focus-parent?childSessionId=child" }, "user");
 
   assert.equal(planned.length, 1);
   assert.equal(createdSessions, 1);
@@ -126,6 +126,7 @@ test("shared delegation asks the selected platform for an executable launch plan
   assert.equal(fleet.get("agent-1" as AgentId)?.executionMode, "interactive");
   assert.equal(host.options[0]?.env.HARNESS_STATE_DIR, "C:/isolated-state");
   assert.ok(host.options[0]?.env.PYTHONPATH?.startsWith("C:/installed-runtime"));
+  assert.equal(host.options[0]?.env.HARNESS_PARENT_TERMINAL_URI, "vscode://aboard.aboard/focus-parent?childSessionId=child");
 });
 
 test("a new promptless ChatGPT TUI starts idle without arming an impossible lifecycle proof", async () => {

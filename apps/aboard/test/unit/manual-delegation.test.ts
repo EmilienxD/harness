@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { createDelegationRoutes, continueHarnessDelegation } from "../../src/bridge/manual-delegation.js";
+import { createDelegationRoutes, continueHarnessDelegation, delegationParentSession } from "../../src/bridge/manual-delegation.js";
 
 test("manual delegation maps task identity and explicit execution mode", async () => {
   const launches: unknown[] = [];
@@ -188,15 +188,14 @@ test("caller-driven reopen continues through the child's saved Harness state aft
   } finally { await rm(root, { recursive: true, force: true }); }
 });
 
-test("a completed child delegation focuses its saved parent session", async () => {
+test("a delegated child resolves the saved parent session for an explicit terminal link", async () => {
   const { mkdtemp, rm } = await import("node:fs/promises");
   const { tmpdir } = await import("node:os");
   const { join } = await import("node:path");
   const root = await mkdtemp(join(tmpdir(), "harness-focus-parent-"));
-  const focused: string[] = [];
   const handler = createDelegationRoutes(
     { launch: async () => ({ agentId: "agent-2", sessionId: "native-child", terminalId: "terminal-2" }) },
-    { stateDirectory: root, focusParent: (sessionId) => { focused.push(sessionId); return true; } },
+    { stateDirectory: root },
   );
   const signal = new AbortController().signal;
   try {
@@ -210,16 +209,7 @@ test("a completed child delegation focuses its saved parent session", async () =
     });
     assert.equal(launched.status, 201);
 
-    const response = await handler({
-      authorizationScope: "full",
-      method: "POST",
-      url: new URL("http://127.0.0.1/delegations/focus-parent"),
-      headers: {},
-      body: { childSessionId: "stable-child" },
-      signal,
-    });
-
-    assert.equal(response.status, 204);
-    assert.deepEqual(focused, ["native-parent"]);
+    assert.equal(await delegationParentSession(root, "stable-child"), "native-parent");
+    assert.equal(await delegationParentSession(root, "missing-child"), undefined);
   } finally { await rm(root, { recursive: true, force: true }); }
 });

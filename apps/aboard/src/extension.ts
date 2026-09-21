@@ -12,7 +12,7 @@ import {
 } from "./bridge/server.js";
 import { createTerminalRoutes } from "./bridge/terminal-routes.js";
 import { CommandTerminalService, createCommandRoutes, type CommandTerminalId } from "./bridge/command-terminals.js";
-import { createDelegationRoutes, readDelegationBinding, resumeInOpenTerminal } from "./bridge/manual-delegation.js";
+import { createDelegationRoutes, delegationParentSession, readDelegationBinding, resumeInOpenTerminal } from "./bridge/manual-delegation.js";
 import { FileCommandEndpointRegistry, commandEndpointDirectory } from "./bridge/command-endpoint.js";
 import { TerminalController } from "./platform/terminals.js";
 import type { TerminalId } from "./domain/contracts.js";
@@ -234,6 +234,41 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
   const fleetStore = new FileFleetStore(runtime.root, runtimeAdmission);
   const persistedFleet = await fleetStore.load();
   const fleet = persistedFleet === undefined ? new FleetRegistry() : FleetRegistry.restore(persistedFleet);
+  const delegationStateDirectory = join(runtime.root, "delegations");
+  const parentTerminalUri = async (childSessionId: string): Promise<string | undefined> => {
+    try {
+      const target = Uri.from({
+        scheme: env.uriScheme,
+        authority: context.extension.id,
+        path: "/focus-parent",
+        query: new URLSearchParams({ childSessionId }).toString(),
+      });
+      return (await env.asExternalUri(target)).toString();
+    } catch (error) {
+      output.appendLine(`Could not create the parent-terminal link: ${error instanceof Error ? error.message : "unknown error"}`);
+      return undefined;
+    }
+  };
+  context.subscriptions.push(window.registerUriHandler({
+    handleUri: async (uri) => {
+      if (uri.path !== "/focus-parent") return;
+      const parameters = new URLSearchParams(uri.query);
+      const childSessionId = parameters.get("childSessionId");
+      // asExternalUri may append its own window-routing query parameters.
+      if (childSessionId === null || !childSessionId.trim()) {
+        void window.showWarningMessage("That Aboard terminal link is invalid.");
+        return;
+      }
+      const parentSessionId = await delegationParentSession(delegationStateDirectory, childSessionId).catch(() => undefined);
+      const parent = parentSessionId === undefined ? undefined : fleet.getBySession(parentSessionId as SessionId);
+      const terminalId = parent === undefined ? undefined : terminals.liveTerminalForAgent(parent.identity.agentId);
+      if (terminalId === undefined) {
+        void window.showInformationMessage("The parent agent terminal is no longer open.");
+        return;
+      }
+      terminals.show(terminalId);
+    },
+  }));
   const activityListeners = new Set<() => void>();
   const activity = new ActivityRecorder({
     store: new FileActivityStore(runtime.root, runtimeAdmission),
@@ -573,12 +608,16 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
       createCommandRoutes(commandTerminals),
       createDelegationRoutes({ launch: async (request) => {
         const configured = await launchFile.getDelegationFor(request.provider, request.task);
+        const returnUri = request.executionMode === "interactive" && request.harnessSessionId !== undefined
+          ? await parentTerminalUri(request.harnessSessionId)
+          : undefined;
         return coordinator.launchManual({
           requestId: request.requestId,
           ...(request.harnessStateDirectory === undefined ? {} : { harnessStateDirectory: request.harnessStateDirectory }),
           ...(request.harnessRuntimePath === undefined ? {} : { harnessRuntimePath: request.harnessRuntimePath }),
           ...(request.harnessSessionId === undefined ? {} : { harnessSessionId: request.harnessSessionId }),
           ...(request.executionId === undefined ? {} : { executionId: request.executionId }),
+          ...(returnUri === undefined ? {} : { parentTerminalUri: returnUri }),
           type: request.type,
           prompt: request.prompt,
           ...(request.skill === undefined ? {} : { skill: request.skill }),
@@ -592,6 +631,9 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
         const binding = await readDelegationBinding(join(runtime.root,"delegations"),request.harnessSessionId);
         if (!binding || binding.agentId !== request.resumeAgentId || binding.sessionId !== request.resumeSessionId || binding.provider !== request.provider || binding.executionMode !== request.executionMode || binding.cwd !== request.cwd || binding.parentSessionId !== request.parentSessionId) throw new Error("Delegated session ownership or execution mode does not match");
         const saved = fleet.get(binding.agentId as AgentId);
+        const returnUri = binding.executionMode === "interactive"
+          ? await parentTerminalUri(request.harnessSessionId)
+          : undefined;
         const lockPath = wrapperLayout.lockPathFor(binding.agentId as AgentId);
         if (currentConfiguration.interactiveResumeMode === "reuse-terminal" && lockMarkerLive(lockPath)) {
           const reused = await resumeInOpenTerminal(request, binding, saved, terminals, async (terminalId) => {
@@ -613,6 +655,7 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
             requestId: request.requestId,
             harnessSessionId: request.harnessSessionId,
             ...(request.executionId === undefined ? {} : { executionId: request.executionId }),
+            ...(returnUri === undefined ? {} : { parentTerminalUri: returnUri }),
             ...(request.harnessStateDirectory === undefined ? {} : { harnessStateDirectory: request.harnessStateDirectory }),
             ...(request.harnessRuntimePath === undefined ? {} : { harnessRuntimePath: request.harnessRuntimePath }),
             type: binding.type, prompt: request.prompt, description: binding.description,
@@ -621,18 +664,10 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
           }, binding.executionMode);
         }
         if (lockMarkerLive(lockPath)) throw new Error("Delegated execution is running or uncertain; resume refused");
-        return coordinator.reopen({ platform: binding.provider, agentId: binding.agentId as AgentId, type: binding.type, delegationTask: binding.task, sessionId: binding.sessionId as SessionId, executionMode: binding.executionMode, cwd: binding.cwd, prompt: request.prompt, resultDelivery: saved?.resultDelivery ?? { mode:"none" }, harnessSessionId: request.harnessSessionId, ...(request.executionId === undefined ? {} : { executionId: request.executionId }), ...(request.harnessStateDirectory === undefined ? {} : { harnessStateDirectory: request.harnessStateDirectory }), ...(request.harnessRuntimePath === undefined ? {} : { harnessRuntimePath: request.harnessRuntimePath }), requestId: request.requestId });
+        return coordinator.reopen({ platform: binding.provider, agentId: binding.agentId as AgentId, type: binding.type, delegationTask: binding.task, sessionId: binding.sessionId as SessionId, executionMode: binding.executionMode, cwd: binding.cwd, prompt: request.prompt, resultDelivery: saved?.resultDelivery ?? { mode:"none" }, harnessSessionId: request.harnessSessionId, ...(request.executionId === undefined ? {} : { executionId: request.executionId }), ...(returnUri === undefined ? {} : { parentTerminalUri: returnUri }), ...(request.harnessStateDirectory === undefined ? {} : { harnessStateDirectory: request.harnessStateDirectory }), ...(request.harnessRuntimePath === undefined ? {} : { harnessRuntimePath: request.harnessRuntimePath }), requestId: request.requestId });
       } }, {
         workspaceRoot,
-        stateDirectory: join(runtime.root, "delegations"),
-        focusParent: (sessionId) => {
-          const parent = fleet.getBySession(sessionId as SessionId);
-          if (parent === undefined) return false;
-          const terminalId = terminals.liveTerminalForAgent(parent.identity.agentId);
-          if (terminalId === undefined) return false;
-          terminals.show(terminalId);
-          return true;
-        },
+        stateDirectory: delegationStateDirectory,
       }),
     ),
     logger: { info: (message) => output.appendLine(message), error: (message) => output.appendLine(`Error: ${message}`) },

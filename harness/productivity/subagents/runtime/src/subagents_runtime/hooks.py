@@ -142,6 +142,13 @@ def _processing_context(processed) -> str:
     return "\n".join(labels)
 
 
+def _parent_terminal_message() -> str | None:
+    uri = os.environ.get("HARNESS_PARENT_TERMINAL_URI", "").strip()
+    if not uri or len(uri) > 4096 or any(character in uri for character in "\r\n"):
+        return None
+    return f"Reply sent to the parent. Return to the main agent: {uri}"
+
+
 def handle(
     payload: dict[str, Any], provider: str | None = None
 ) -> dict[str, Any] | None:
@@ -293,8 +300,11 @@ def handle(
             cancelled=event == "SessionEnd",
             execution_id=execution_id,
         )
-        if reported and success and execution_mode == "interactive":
-            sessions.focus_parent_in_aboard(session_id)
+        parent_terminal_message = (
+            _parent_terminal_message()
+            if reported and success and execution_mode == "interactive"
+            else None
+        )
         if event == "Stop":
             delivery = wait_parent_delivery(
                 session_id,
@@ -304,8 +314,14 @@ def handle(
             )
             if delivery is not None:
                 if selected_provider == "claude":
-                    return _context(event, delivery.text)
-                return {"decision": "block", "reason": delivery.text}
+                    response = _context(event, delivery.text)
+                else:
+                    response = {"decision": "block", "reason": delivery.text}
+                if parent_terminal_message is not None:
+                    response["systemMessage"] = parent_terminal_message
+                return response
+        if parent_terminal_message is not None:
+            return {"systemMessage": parent_terminal_message}
         return None
 
     return None

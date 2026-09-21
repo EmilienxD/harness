@@ -639,31 +639,6 @@ def _discover_delegation_endpoint(cwd: Path) -> tuple[str, int, str] | None:
     return host, port, token
 
 
-def focus_parent_in_aboard(child_session_id: str) -> bool:
-    """Best-effort focus handoff for an interactive child launched by Aboard."""
-    port_text = os.environ.get("ABOARD_BRIDGE_PORT")
-    token = os.environ.get("ABOARD_BRIDGE_TOKEN")
-    if not port_text or not token:
-        return False
-    try:
-        port = int(port_text)
-        if not 1 <= port <= 65535:
-            return False
-        request = urllib.request.Request(
-            f"http://127.0.0.1:{port}/delegations/focus-parent",
-            data=json.dumps({"childSessionId": child_session_id}).encode("utf-8"),
-            headers={
-                "Authorization": f"Bearer {token}",
-                "Content-Type": "application/json",
-            },
-            method="POST",
-        )
-        with urllib.request.urlopen(request, timeout=1):
-            return True
-    except (OSError, ValueError, urllib.error.HTTPError):
-        return False
-
-
 def _aboard_error(exc: urllib.error.HTTPError) -> tuple[str | None, str]:
     """The bridge's own words for a refusal, so a caller never has to guess."""
     try:

@@ -106,6 +106,14 @@ export async function readDelegationBinding(directory: string, sessionId: string
   catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined; throw error; }
 }
 
+/** Resolve a delegated child to the provider session owned by its parent terminal. */
+export async function delegationParentSession(directory: string, childSessionId: string): Promise<string | undefined> {
+  const child = await readDelegationBinding(directory, childSessionId);
+  if (child?.parentSessionId === undefined) return undefined;
+  const delegatedParent = await readDelegationBinding(directory, child.parentSessionId);
+  return delegatedParent?.sessionId ?? child.parentSessionId;
+}
+
 export async function continueHarnessDelegation(
   directory: string,
   target: { readonly agentId: string; readonly sessionId: string; readonly platform: AgentPlatformId; readonly prompt?: string },
@@ -172,7 +180,6 @@ export function createDelegationRoutes(
   options: {
     readonly workspaceRoot?: string;
     readonly stateDirectory?: string;
-    readonly focusParent?: (sessionId: string) => boolean;
   } = {},
 ): BridgeRequestHandler {
   const launches = new Map<string, {
@@ -180,28 +187,6 @@ export function createDelegationRoutes(
     readonly outcome: Promise<{ readonly agentId: string; readonly sessionId: string; readonly terminalId: string }>;
   }>();
   return async (request) => {
-    if (request.url.pathname === "/delegations/focus-parent") {
-      if (request.method !== "POST") return protocolError(404, "not-found", "Route not found");
-      if (request.authorizationScope !== undefined && request.authorizationScope !== "full") {
-        return protocolError(403, "forbidden", "Only an Aboard-launched agent can focus its parent");
-      }
-      if (typeof request.body !== "object" || request.body === null || Array.isArray(request.body)) {
-        return protocolError(400, "invalid-request", "Parent focus request is invalid");
-      }
-      const focusBody = request.body as Record<string, unknown>;
-      const childSessionId = focusBody.childSessionId;
-      if (Object.keys(focusBody).length !== 1 || typeof childSessionId !== "string" || !childSessionId.trim()) {
-        return protocolError(400, "invalid-request", "Parent focus request is invalid");
-      }
-      if (options.stateDirectory === undefined || options.focusParent === undefined) {
-        return protocolError(404, "not-found", "Delegation binding is unavailable");
-      }
-      const child = await readDelegationBinding(options.stateDirectory, childSessionId);
-      if (child?.parentSessionId === undefined) return protocolError(404, "not-found", "Delegation parent is unavailable");
-      const parent = await readDelegationBinding(options.stateDirectory, child.parentSessionId);
-      options.focusParent(parent?.sessionId ?? child.parentSessionId);
-      return { status: 204 };
-    }
     if (request.url.pathname !== "/delegations") return protocolError(404, "not-found", "Route not found");
     if (request.method !== "POST") return protocolError(404, "not-found", "Route not found");
     const parsed = parse(request.body);

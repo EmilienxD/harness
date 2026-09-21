@@ -61,38 +61,30 @@ def test_interactive_stop_requires_one_shot_reply_authorization(tmp_path: Path, 
     assert delivery is not None and "The routed answer." in delivery.text
 
 
-def test_successful_interactive_reply_asks_aboard_to_focus_the_parent(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    import io
-    import json
-
+def test_successful_interactive_reply_offers_parent_terminal_link(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     from subagents_runtime.hooks import handle
 
     _parent, _request, child = setup_request(tmp_path, monkeypatch, mode="interactive")
     arm_reply(child)
-    monkeypatch.setenv("ABOARD_BRIDGE_PORT", "4823")
-    monkeypatch.setenv("ABOARD_BRIDGE_TOKEN", "private-token")
     monkeypatch.setenv("HARNESS_EXECUTION_MODE", "interactive")
-    sent = []
+    monkeypatch.setenv(
+        "HARNESS_PARENT_TERMINAL_URI",
+        "vscode://aboard.aboard/focus-parent?childSessionId=child",
+    )
 
-    def response(request, timeout):
-        sent.append((request, timeout))
-        return io.BytesIO(b"")
-
-    monkeypatch.setattr(sessions.urllib.request, "urlopen", response)
-
-    handle({
+    response = handle({
         "session_id": child,
         "cwd": str(tmp_path),
         "hook_event_name": "Stop",
         "last_assistant_message": "The routed answer.",
     })
 
-    assert len(sent) == 1
-    request, timeout = sent[0]
-    assert request.full_url == "http://127.0.0.1:4823/delegations/focus-parent"
-    assert request.headers["Authorization"] == "Bearer private-token"
-    assert json.loads(request.data) == {"childSessionId": child}
-    assert timeout <= 2
+    assert response == {
+        "systemMessage": (
+            "Reply sent to the parent. Return to the main agent: "
+            "vscode://aboard.aboard/focus-parent?childSessionId=child"
+        )
+    }
 
 
 def test_delivery_counts_running_auto_owed_replies_and_idle_children(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
