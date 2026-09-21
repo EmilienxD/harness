@@ -1117,11 +1117,11 @@ def test_every_catalogue_manifest_loads():
     assert {"aboard", "subagents", "issue-readers", "issue-writers"} <= tools.keys()
     assert {
         "address-this", "review-this", "harness-cli", "communication-hooks",
-        "improve-codebase-architecture", "senior-advisor",
+        "improve-codebase-architecture", "senior-advisor", "grill-me-in-lavish",
     }.isdisjoint(tools)
     expected_categories = {
         "planning": {
-            "audit", "breakdown-help-wanted-issue", "grill-me", "grill-me-in-lavish", "lavish", "prototype",
+            "audit", "breakdown-help-wanted-issue", "grill-me", "grill-me-in-cloud", "lavish", "prototype",
             "read-all-adrs", "websearch", "writing-adrs",
         },
         "engineering": {"commit", "resolving-merge-conflicts", "setup-git-worktree-maker"},

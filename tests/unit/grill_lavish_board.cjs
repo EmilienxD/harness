@@ -7,7 +7,7 @@ const packageDir = process.env.PATH.split(path.delimiter)
   .map(bin => path.resolve(bin, '..', 'jsdom'))
   .find(dir => fs.existsSync(path.join(dir, 'package.json')));
 const { JSDOM } = createRequire(path.join(packageDir, 'package.json'))(packageDir);
-const template = fs.readFileSync(path.resolve(__dirname, '../../harness/planning/grill-me-in-lavish/assets/board-template.html'), 'utf8');
+const template = fs.readFileSync(path.resolve(__dirname, '../../harness/planning/grill-me-in-cloud/assets/board-template.html'), 'utf8');
 const question = {
   id: 'Q1', question: 'When should publication happen?',
   explanation_html: '<p>Publishing commits the round.</p><table><tr><th>Mode</th><td>Automatic</td></tr></table><label>Preview<select><option>Before</option><option>After</option></select></label><output>Before</output>',

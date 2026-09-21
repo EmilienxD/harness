@@ -1,7 +1,7 @@
 name = "grill-me-in-lavish"
 version = "1.1.5"
 description = "Runs visual, interactive design interviews in Lavish"
-docs = "https://github.com/EmilienxD/harness/blob/main/README.md#user-invoked-skills"
+docs = "https://github.com/EmilienxD/harness/blob/main/harness/archived/grill-me-in-lavish/SKILL.md"
 requires = ["npx"]
 
 [platforms.claude]
