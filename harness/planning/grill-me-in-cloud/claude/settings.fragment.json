@@ -1,0 +1,6 @@
+{
+  "hooks": {
+    "UserPromptSubmit": [{"hooks": [{"type": "command", "command": "${PYTHON}", "args": ["${CLAUDE_DIR}/hooks/grill-cloud/grill_me_in_cloud_hook.py", "--claude"]}]}],
+    "PostToolUse": [{"hooks": [{"type": "command", "command": "${PYTHON}", "args": ["${CLAUDE_DIR}/hooks/grill-cloud/grill_me_in_cloud_hook.py", "--claude"], "timeout": 86400}]}]
+  }
+}

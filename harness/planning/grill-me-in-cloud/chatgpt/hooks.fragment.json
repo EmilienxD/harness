@@ -1,0 +1,27 @@
+{
+  "hooks": {
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${PYTHON} \"${HOOKS_DIR}/grill-cloud/grill_me_in_cloud_hook.py\" --chatgpt",
+            "additionalContextLimit": 0
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${PYTHON} \"${HOOKS_DIR}/grill-cloud/grill_me_in_cloud_hook.py\" --chatgpt",
+            "timeout": 86400,
+            "additionalContextLimit": 0
+          }
+        ]
+      }
+    ]
+  }
+}

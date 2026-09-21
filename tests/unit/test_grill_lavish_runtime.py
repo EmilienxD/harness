@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 
 ROOT = Path(__file__).resolve().parents[2]
-PACKAGE = ROOT / "harness/planning/grill-me-in-lavish"
+PACKAGE = ROOT / "harness/planning/grill-me-in-cloud"
 sys.path.insert(0, str(PACKAGE))
 
 
@@ -116,9 +116,9 @@ def test_invalid_round_keeps_previous_board_and_reserves_fresh_retry(tmp_path, c
     assert lavish.opened == lavish.polled == []
 
 
-@pytest.mark.parametrize("provider, invocation", [("claude", "/grill-me-in-lavish"), ("chatgpt", "$grill-me-in-lavish")])
+@pytest.mark.parametrize("provider, invocation", [("claude", "/grill-me-in-cloud"), ("chatgpt", "$grill-me-in-cloud")])
 def test_delivered_answers_leave_later_prompts_and_session_events_quiet(tmp_path, provider, invocation):
-    from grill_me_in_lavish_hook import handle
+    from grill_me_in_cloud_hook import handle
     engine = runtime().InterviewRuntime(tmp_path / "runtime")
     lavish = Lavish()
     common = {"session_id": "session", "cwd": str(tmp_path / "project")}
@@ -141,7 +141,7 @@ def test_delivered_answers_leave_later_prompts_and_session_events_quiet(tmp_path
 
 @pytest.mark.parametrize("provider", ["claude", "chatgpt"])
 def test_interrupted_round_is_not_polled_again_by_later_tools(tmp_path, provider):
-    from grill_me_in_lavish_hook import handle
+    from grill_me_in_cloud_hook import handle
     engine = runtime().InterviewRuntime(tmp_path / "runtime")
     interview = engine.start(provider, "session", tmp_path / "project")
     interview.source.write_text(json.dumps(round_data()), encoding="utf-8")
@@ -163,7 +163,7 @@ def test_interrupted_round_is_not_polled_again_by_later_tools(tmp_path, provider
 
 
 def test_chat_revision_uses_a_separate_review_without_old_queued_answers(tmp_path):
-    from grill_me_in_lavish_hook import handle
+    from grill_me_in_cloud_hook import handle
     engine = runtime().InterviewRuntime(tmp_path / "runtime")
     original = engine.start("claude", "session", tmp_path / "project")
     original.source.write_text(json.dumps(round_data()), encoding="utf-8")
@@ -199,7 +199,7 @@ def test_chat_revision_uses_a_separate_review_without_old_queued_answers(tmp_pat
 
 @pytest.mark.parametrize("provider", ["claude", "chatgpt"])
 def test_chat_discards_a_staged_round_instead_of_recovering_it(tmp_path, provider):
-    from grill_me_in_lavish_hook import handle
+    from grill_me_in_cloud_hook import handle
     engine = runtime().InterviewRuntime(tmp_path / "runtime")
     staged = engine.start(provider, "session", tmp_path / "project")
     staged.source.write_text(json.dumps(round_data()), encoding="utf-8")
@@ -215,7 +215,7 @@ def test_chat_discards_a_staged_round_instead_of_recovering_it(tmp_path, provide
 
 @pytest.mark.parametrize("mode", ["open", "poll"])
 def test_transport_failure_is_reported_once_without_later_retries(tmp_path, mode):
-    from grill_me_in_lavish_hook import handle
+    from grill_me_in_cloud_hook import handle
     engine = runtime().InterviewRuntime(tmp_path / "runtime")
     interview = engine.start("chatgpt", "session", tmp_path / "project")
     interview.source.write_text(json.dumps(round_data()), encoding="utf-8")
@@ -237,7 +237,7 @@ def test_transport_failure_is_reported_once_without_later_retries(tmp_path, mode
     {"session": {"status": "feedback", "session_ended": True}, "prompts": [{"prompt": "Last answer"}]},
 ])
 def test_ended_or_disconnected_review_stays_quiet_until_explicit_invocation(tmp_path, feedback):
-    from grill_me_in_lavish_hook import handle
+    from grill_me_in_cloud_hook import handle
     engine = runtime().InterviewRuntime(tmp_path / "runtime")
     interview = engine.start("claude", "session", tmp_path / "project")
     interview.source.write_text(json.dumps(round_data()), encoding="utf-8")
@@ -246,7 +246,7 @@ def test_ended_or_disconnected_review_stays_quiet_until_explicit_invocation(tmp_
     assert handle(common | {"hook_event_name": "PostToolUse"}, "claude", engine, lavish)
     assert handle(common | {"hook_event_name": "UserPromptSubmit", "prompt": "Continue in chat"}, "claude", engine, lavish) is None
     assert lavish.opened == lavish.polled == [interview.board]
-    assert handle(common | {"hook_event_name": "UserPromptSubmit", "prompt": "/grill-me-in-lavish"}, "claude", engine, lavish)
+    assert handle(common | {"hook_event_name": "UserPromptSubmit", "prompt": "/grill-me-in-cloud"}, "claude", engine, lavish)
     new_review = engine.current("claude", "session")
     assert new_review.board != interview.board
     new_review.source.write_text(json.dumps(round_data()), encoding="utf-8")
@@ -255,7 +255,7 @@ def test_ended_or_disconnected_review_stays_quiet_until_explicit_invocation(tmp_
 
 
 def test_large_feedback_is_saved_entirely_with_a_short_hook_response(tmp_path):
-    from grill_me_in_lavish_hook import handle
+    from grill_me_in_cloud_hook import handle
     engine = runtime().InterviewRuntime(tmp_path / "runtime")
     interview = engine.start("chatgpt", "session", tmp_path / "project")
     interview.source.write_text(json.dumps(round_data()), encoding="utf-8")
@@ -274,7 +274,7 @@ def test_rendering_failure_keeps_the_same_round_for_repair(tmp_path):
 
 
 def test_duplicate_hook_execution_cannot_publish_the_same_round(tmp_path):
-    from grill_me_in_lavish_hook import handle
+    from grill_me_in_cloud_hook import handle
     engine = runtime().InterviewRuntime(tmp_path / "runtime")
     interview = engine.start("claude", "session", tmp_path / "project")
     interview.source.write_text(json.dumps(round_data()), encoding="utf-8")
@@ -295,7 +295,7 @@ def test_catalogue_upgrade_removes_recovery_hooks_and_uninstall_removes_payloads
     from harness_cli.receipts import ReceiptStore
 
     tools = discover()
-    tool = tools["grill-me-in-lavish"]
+    tool = tools["grill-me-in-cloud"]
     platform = Platform.parse(provider)
     legacy = copy.deepcopy(tool.fragment_for(platform))
     legacy["hooks"]["Stop"] = copy.deepcopy(legacy["hooks"]["PostToolUse"])
@@ -306,7 +306,7 @@ def test_catalogue_upgrade_removes_recovery_hooks_and_uninstall_removes_payloads
     CatalogueInstaller({tool.name: old_tool}, target, ReceiptStore.load(receipt_path)).reconcile({tool.name})
     installer = CatalogueInstaller(tools, target, ReceiptStore.load(receipt_path))
     installer.reconcile({tool.name})
-    hook = target.destination_path("hooks", "grill-lavish/grill_me_in_lavish_hook.py")
+    hook = target.destination_path("hooks", "grill-cloud/grill_me_in_cloud_hook.py")
     assert hook.is_file()
     result = subprocess.run(
         [sys.executable, "-X", "utf8", "-c", "import json,sys; from grill_lavish_core import render_round; print(render_round(json.load(sys.stdin), 1))"],
@@ -319,6 +319,6 @@ def test_catalogue_upgrade_removes_recovery_hooks_and_uninstall_removes_payloads
     assert active_events == {"UserPromptSubmit", "PostToolUse"}
     installer.reconcile(set())
     assert not hook.exists()
-    assert not target.destination_path("hooks", "grill-lavish/assets/board-template.html").exists()
+    assert not target.destination_path("hooks", "grill-cloud/assets/board-template.html").exists()
     settings = json.loads(target.settings_path.read_text(encoding="utf-8"))
     assert not any(group.get("hooks") for groups in settings.get("hooks", {}).values() for group in groups)
