@@ -1,8 +1,8 @@
 name = "grill-me-in-cloud"
-version = "1.1.5"
-description = "Runs visual, interactive design interviews in Lavish"
+version = "2.0.3"
+description = "Publishes visual design interviews to a persistent hosted board"
 docs = "https://github.com/EmilienxD/harness/blob/main/README.md#user-invoked-skills"
-requires = ["npx"]
+requires = []
 
 [platforms.claude]
 status = "supported"
@@ -18,28 +18,13 @@ dest = "grill-me-in-cloud/SKILL.md"
 root = "skills"
 
 [[files]]
-src = "assets/board-template.html"
-dest = "grill-cloud/assets/board-template.html"
-root = "hooks"
-
-[[files]]
-src = "assets/aboard.svg"
-dest = "grill-cloud/assets/aboard.svg"
-root = "hooks"
-
-[[files]]
 src = "grill_me_in_cloud_hook.py"
 dest = "grill-cloud/grill_me_in_cloud_hook.py"
 root = "hooks"
 
 [[files]]
-src = "grill_lavish_core.py"
-dest = "grill-cloud/grill_lavish_core.py"
-root = "hooks"
-
-[[files]]
-src = "lavish_bridge.cjs"
-dest = "grill-cloud/lavish_bridge.cjs"
+src = "grill_cloud_core.py"
+dest = "grill-cloud/grill_cloud_core.py"
 root = "hooks"
 
 [[files]]

@@ -90,6 +90,7 @@ import { RuntimeLayout } from "./runtime/layout.js";
 import { requireHarnessWorkerSkills } from "./claude/skills.js";
 import { requireChatGptWorkerSkills } from "./chatgpt/skills.js";
 import { FileLaunchConfigurationSource } from "./platform/launch-configuration.js";
+import { createGrillCloudRelay } from "./grill/cloud-relay.js";
 
 let bridge: BridgeRuntime | undefined;
 let commandEndpointRegistry: FileCommandEndpointRegistry | undefined;
@@ -180,6 +181,8 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
         ...bridgeEnvironment,
         workspaceRoot,
         runtimeRoot: runtime.root,
+        ...(process.env.HARNESS_GRILL_URL === undefined ? {} : { HARNESS_GRILL_URL: process.env.HARNESS_GRILL_URL }),
+        ...(process.env.HARNESS_GRILL_CODE === undefined ? {} : { HARNESS_GRILL_CODE: process.env.HARNESS_GRILL_CODE }),
       };
     },
     terminalIdFactory: () => randomUUID() as TerminalId,
@@ -234,6 +237,13 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
   const fleetStore = new FileFleetStore(runtime.root, runtimeAdmission);
   const persistedFleet = await fleetStore.load();
   const fleet = persistedFleet === undefined ? new FleetRegistry() : FleetRegistry.restore(persistedFleet);
+  const grillRelay = createGrillCloudRelay({
+    fleet,
+    terminals,
+    log: (message) => output.appendLine(message),
+  });
+  grillRelay?.start();
+  context.subscriptions.push({ dispose: () => grillRelay?.dispose() });
   const delegationStateDirectory = join(runtime.root, "delegations");
   const parentTerminalUri = async (childSessionId: string): Promise<string | undefined> => {
     try {

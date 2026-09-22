@@ -168,6 +168,8 @@ The available manual delegation keys are `explore`, `prototype`, `websearch`, `b
 
 Worktree mode gives a run its own checkout. Aboard copies ignored local `.claude`, `.agents`, `.codex`, and `.abd` configuration without overwriting tracked files. Optional setup commands live in `.abd/session-setup.ps1` and `.abd/session-setup.sh`.
 
+The hosted Grill-Me board relay is enabled when the VS Code extension host has both `HARNESS_GRILL_URL` (an origin without a trailing slash) and the shared four-digit `HARNESS_GRILL_CODE`. Aboard reports only open, bound provider sessions, claims deliveries only while the exact session is awaiting input, revalidates the terminal binding, and submits the immutable prompt as ordinary bracketed-paste user input. Aboard-launched terminals inherit both values.
+
 ## Development
 
 From `apps/aboard/`:

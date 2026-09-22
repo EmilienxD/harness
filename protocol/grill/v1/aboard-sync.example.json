@@ -1,0 +1,10 @@
+{
+  "request": {
+    "instance_id": "ephemeral-extension-instance",
+    "sessions": [{ "provider": "chatgpt", "session_id": "provider-session-id", "state": "awaiting-user" }],
+    "acknowledgements": [{ "delivery_id": "00000000-0000-4000-8000-000000000001", "status": "submitted-to-terminal" }]
+  },
+  "response": {
+    "deliveries": [{ "delivery_id": "00000000-0000-4000-8000-000000000002", "provider": "chatgpt", "session_id": "provider-session-id", "prompt": "exact immutable prompt snapshot" }]
+  }
+}

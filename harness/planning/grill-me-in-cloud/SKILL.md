@@ -1,6 +1,6 @@
 ---
 name: grill-me-in-cloud
-description: Stress-test a plan through branching interview rounds in an interactive Lavish board.
+description: Stress-test a plan through branching interview rounds on a persistent hosted board.
 argument-hint: "[plan or design]"
 license: MIT
 metadata:
@@ -23,9 +23,9 @@ For each round:
 1. Compose numbered questions with stable IDs. Ask the actual question, then explain why it matters: relevant context, consequences, and uncertainty. Use several concise sentences or a compact visual explanation, scaled to the decision's difficulty.
 2. Provide normally four proposals, A–D; use fewer when further proposals would be artificial. Explain every proposal's behavior and tradeoff. Put the recommendation first as A when practical; its rationale belongs in that proposal's explanation.
 3. Write any supporting assets first in the supplied assets directory. Create the complete round JSON directly at the exact fresh path supplied by the hook. The runtime owns this directory outside the project, creates its parents, and reserves the filename. You are its sole inbox writer; create the file directly without listing the directory or reading a template. Write the round file last: a successful write publishes it automatically.
-4. The write hook renders the board, opens it through Lavish, and waits for submitted feedback in the same tool call. Continue from the returned answers. If the write fails or is interrupted, report the issue in chat. Work through the supplied inbox; hooks own rendering, opening, and polling. Keep the questionnaire in the artifact.
+4. The write hook validates and publishes the round, then returns its hosted URL without waiting for answers. End the turn normally. The user's next message may be a prompt copied or relayed from the board; treat it as ordinary user input, settle only its explicit answers, and recompute the frontier.
 
-When feedback arrives, settle only explicit answers in the submitted batch, retain unanswered questions, and recompute the frontier. Recommendations begin unselected. Local selection and queueing are not submission; silence and omitted questions approve nothing. Freeform answers may replace or supplement a proposal. Fatal artifact errors require a repaired round rather than settling decisions. Validation errors supply a fresh path for the corrected complete payload.
+Recommendations begin unselected. Drafts and omitted questions approve nothing. Freeform answers may replace or supplement a proposal. Publication or validation failures require a complete repaired round at the fresh path supplied by the hook.
 
 ## Round contract
 
@@ -58,7 +58,7 @@ Put script logic in `init_js`, since script tags inserted as HTML do not initial
 
 ## HTML and visual style
 
-The board supplies its style: warm paper (`--paper`), cream cards (`--surface`), charcoal text (`--ink`, `--ink-2`), muted secondary text (`--ink-soft`), and restrained navy emphasis (`--accent`, `--accent-soft`). Headings use `--font-head` (Space Grotesk); body text uses `--font-body` (DM Sans). Match these variables instead of introducing another page theme or a CDN design system. Product UI previews should reproduce the subject product's actual appearance inside this explanation.
+The board supplies its style: warm paper (`--paper`), cream cards (`--surface`), charcoal text (`--ink`, `--ink-2`), muted secondary text (`--ink-soft`), and restrained indigo emphasis (`--accent`, `--accent-soft`). Headings use `--font-head` (Space Grotesk); body text uses `--font-body` (DM Sans). Match these variables instead of introducing another page theme or a CDN design system. Product UI previews should reproduce the subject product's actual appearance inside this explanation.
 
 Use semantic HTML. The explanation automatically styles paragraphs, headings, figures, captions, tables, code blocks, and disclosures. Available helpers:
 
@@ -66,7 +66,7 @@ Use semantic HTML. The explanation automatically styles paragraphs, headings, fi
 - `.note`: a restrained accent callout; `.table-wrap`: a horizontally contained table wrapper.
 - `<details><summary>…</summary>…</details>`: optional supporting detail, with the essential rationale visible.
 
-Use these focused Lavish authoring principles:
+Use these focused board-authoring principles:
 
 - **Comparison:** align the same criteria, show concrete behavior, and make costs as visible as benefits. Keep the recommendation in its proposal.
 - **Table:** use a table when rows share fields. State what the comparison demonstrates before the table; use semantic headers and `.table-wrap` for wide content.
@@ -74,8 +74,6 @@ Use these focused Lavish authoring principles:
 - **Interaction:** native selectors, sliders, and buttons can demonstrate behavior, but changes remain local until the board's explicit answer submission. Label controls and keep explanations understandable without interaction.
 - **Layout:** contain media and code; use `minmax(0, 1fr)` and `min-width: 0` for custom grids. Scope additional CSS beneath `#explanation-Q1` (or the relevant ID). The board disables explanation animations for reduced-motion preferences.
 
-Use real project screenshots when they clarify a UI decision. Tables, SVG, images, or animations should explain the decision, rather than decorate it. For unfamiliar advanced visuals, consult only the matching `npx -y lavish-axi playbook <id>`; the board already provides the page design and input lifecycle. Verify custom visuals at narrow widths; inspect SVG interiors because Lavish's layout audit does not check them.
+Use real project screenshots when they clarify a UI decision. Tables, SVG, images, or animations should explain the decision rather than decorate it. Verify custom visuals at narrow widths and inspect SVG interiors directly.
 
-When the frontier is empty, summarize the agreed solution in chat. If the user cancels or changes tasks, continue in chat. The board stays open for reference; another round file starts another wait.
-
-Chat interrupts waiting. To revise an unsubmitted round, use the fresh path supplied by the hook. The revision opens a separate review; tell the user that unsent answers must be queued again. Ordinary submitted rounds reload the existing board.
+When the frontier is empty, summarize the agreed solution in chat. If the user cancels or changes tasks, continue in chat. Hosted rounds remain available as read-only history; publish a new round only when more frontier decisions exist.

@@ -1,0 +1,105 @@
+import { z } from "zod";
+
+export const SCHEMA_VERSION = 1 as const;
+export const PROVIDERS = ["claude", "chatgpt"] as const;
+export const MEDIA_TYPES = [
+  "image/png",
+  "image/jpeg",
+  "image/webp",
+  "image/gif",
+  "image/avif",
+  "image/svg+xml",
+] as const;
+
+export const optionSchema = z.object({
+  letter: z.string().regex(/^[A-D]$/),
+  label: z.string().trim().min(1),
+  detail: z.string().trim().min(1),
+});
+
+export const questionSchema = z
+  .object({
+    id: z.string().regex(/^Q[1-9][0-9]*$/),
+    question: z.string().trim().min(1),
+    explanation_html: z.string().trim().min(1),
+    recommendation: z.string().regex(/^[A-D]$/),
+    init_js: z.string().optional(),
+    options: z.array(optionSchema).min(1).max(4),
+  })
+  .superRefine((question, context) => {
+    const letters = question.options.map((_option, index) => String.fromCharCode(65 + index));
+    if (question.options.some((option, index) => option.letter !== letters[index])) {
+      context.addIssue({ code: "custom", message: "Option letters must be consecutive from A" });
+    }
+    if (!question.options.some((option) => option.letter === question.recommendation)) {
+      context.addIssue({ code: "custom", message: "Recommendation must name an available option" });
+    }
+  });
+
+export const roundPayloadSchema = z
+  .object({ questions: z.array(questionSchema).min(1) })
+  .superRefine((payload, context) => {
+    const ids = payload.questions.map((question) => question.id);
+    if (new Set(ids).size !== ids.length) context.addIssue({ code: "custom", message: "Question IDs must be unique" });
+  });
+
+export const assetManifestSchema = z.object({
+  reference: z.string().min(1),
+  media_type: z.enum(MEDIA_TYPES),
+  byte_size: z
+    .number()
+    .int()
+    .positive()
+    .max(6 * 1024 * 1024),
+  sha256: z.string().regex(/^[a-f0-9]{64}$/i),
+});
+
+export const publicationSchema = z
+  .object({
+    provider: z.enum(PROVIDERS),
+    session_id: z.string().min(1).max(512),
+    title: z.string().max(200).optional().default(""),
+    project: z
+      .object({
+        name: z.string().trim().min(1).max(200),
+        path: z.string().trim().min(1).max(2_000),
+      })
+      .optional(),
+    schema_version: z.literal(SCHEMA_VERSION),
+    payload: roundPayloadSchema,
+    assets: z.array(assetManifestSchema).max(20).default([]),
+  })
+  .superRefine((publication, context) => {
+    if (publication.assets.reduce((total, asset) => total + asset.byte_size, 0) > 24 * 1024 * 1024) {
+      context.addIssue({ code: "custom", message: "Round assets exceed 24 MiB" });
+    }
+    if (new Set(publication.assets.map((asset) => asset.reference)).size !== publication.assets.length) {
+      context.addIssue({ code: "custom", message: "Asset references must be unique" });
+    }
+  });
+
+export type RoundPayload = z.infer<typeof roundPayloadSchema>;
+export type GrillQuestion = z.infer<typeof questionSchema>;
+export type AnswerDraft = {
+  question_id: string;
+  selected_option: string | null;
+  note: string | null;
+  state: "draft" | "queued";
+};
+
+export function compilePrompt(payload: RoundPayload, answers: readonly AnswerDraft[]): string {
+  const queued = new Map(
+    answers.filter((answer) => answer.state === "queued").map((answer) => [answer.question_id, answer]),
+  );
+  // The agent still holds the round it authored, so the reply only needs the choice itself.
+  const bullets: string[] = [];
+  for (const question of payload.questions) {
+    const answer = queued.get(question.id);
+    if (!answer) continue;
+    const note = answer.note?.trim() ?? "";
+    if (!answer.selected_option && !note) continue;
+    const choice = answer.selected_option ?? "None of these";
+    bullets.push(`- ${question.id}: ${choice}.${note ? ` ${note}` : ""}`);
+  }
+  return bullets.join("\n");
+}

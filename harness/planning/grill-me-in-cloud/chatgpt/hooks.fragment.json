@@ -17,7 +17,7 @@
           {
             "type": "command",
             "command": "${PYTHON} \"${HOOKS_DIR}/grill-cloud/grill_me_in_cloud_hook.py\" --chatgpt",
-            "timeout": 86400,
+            "timeout": 120,
             "additionalContextLimit": 0
           }
         ]

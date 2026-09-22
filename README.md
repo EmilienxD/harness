@@ -59,7 +59,7 @@ Claude Code invokes a skill as `/skill-name`; ChatGPT uses `$skill-name`. The ex
 
 - **`breakdown-help-wanted-issue`**: Explores a request against the codebase and helps you agree on what to build, with questions and concrete recommendations. With no argument, it fetches the oldest open `[AI]-help-wanted` GitHub issue.
 
-- **`grill-me-in-cloud`**: Stress-tests a plan through branching rounds in an interactive Lavish board. Each question explains why the decision matters and normally offers four explained proposals, with a recommendation and no preselection. Queue answers with freeform context, then submit all or part of a round; unanswered questions stay open. Rich explanations support tables, SVG, images, and interactive examples. Hooks supply a fresh round-file path outside your project and handle rendering, opening, and waiting. After submission, the agent continues in chat or writes another round; the board stays open for reference. Chat interrupts waiting, and revising an unsubmitted round opens a separate review where unsent answers must be queued again.
+- **`grill-me-in-cloud`**: Stress-tests a plan through branching rounds on a persistent hosted board. The hook supplies fresh round and asset paths outside the project, uploads local explanation images, publishes without waiting for answers, and returns the session URL. Drafts survive refreshes; only queued answers enter the deterministic prompt. Copy that prompt into any provider session, or let Aboard submit it when the exact session is open and awaiting input.
 
 - **`prototype`**: Builds a throwaway logic or UI prototype in a separate workspace to answer one explicit design question. It keeps prototype code and dependencies outside the repository, exercises only the decisive paths, and reports what the result supports and where its evidence stops.
 
@@ -176,6 +176,20 @@ patterns = ['''(curl|wget).*\|\s*(ba|z)?sh''']
 Aboard is the optional VS Code extension for visible Claude Code and ChatGPT sessions, fleet tracking, and user-controlled Auto Run workflows. Select `aboard` in Harness to install its verified VSIX and required worker assets.
 
 See the [Aboard README](apps/aboard/README.md) for its visual workflow guide, configuration, and development commands.
+
+## Hosted Grill-Me board
+
+The deployable TanStack Start application lives in `apps/grill/`; its Supabase migration is under `apps/grill/supabase/migrations/`. Configure the hosted server with:
+
+- `HARNESS_GRILL_URL`: its canonical HTTPS origin, without a trailing slash.
+- `HARNESS_GRILL_CODE`: the shared four-digit browser and machine-client code.
+- `HARNESS_GRILL_SESSION_SECRET`: a long random value used to sign browser-session cookies.
+- `CRON_SECRET`: a separate bearer secret used by the scheduled cleanup route.
+- `SUPABASE_URL` and `SUPABASE_SECRET_KEY`: server-only Supabase credentials.
+
+Set `HARNESS_GRILL_URL` and `HARNESS_GRILL_CODE` in Claude Code or Codex before installing/running the grill hook. Set the same values in the VS Code extension host to enable Aboard relay; Aboard passes them to terminals it launches. The included Vercel cron calls the cleanup route daily and authenticates with `CRON_SECRET`. The application tables have RLS enabled with no `anon` or `authenticated` grants, and the `grill-assets` bucket is private.
+
+The access cookie is marked `Secure` whenever the request arrives over HTTPS, so local HTTP development needs no override. From `apps/grill/`, run `npm ci`, `npm run dev`, or `npm run build`.
 
 ## Development
 
