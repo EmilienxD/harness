@@ -144,6 +144,20 @@ def test_hook_stays_silent_for_sessions_that_never_used_grill(tmp_path, monkeypa
     assert "not configured" in grill_me_in_cloud_hook.handle(invoked, "claude")["hookSpecificOutput"]["additionalContext"]
 
 
+def test_project_config_overrides_stale_process_environment(tmp_path, monkeypatch):
+    project = tmp_path / "project"
+    config = project / ".harness" / "grill.json"
+    config.parent.mkdir(parents=True)
+    config.write_text(json.dumps({"url": "http://127.0.0.1:4173", "code": "2468"}), encoding="utf-8")
+    monkeypatch.setenv("HARNESS_GRILL_URL", "http://localhost:8080/")
+    monkeypatch.setenv("HARNESS_GRILL_CODE", "0000")
+
+    client = HostedClient.from_environment(project)
+
+    assert client.origin == "http://127.0.0.1:4173"
+    assert client.code == "2468"
+
+
 def test_failed_publication_keeps_one_idempotent_outbox_for_retry(tmp_path):
     project = tmp_path / "project"
     project.mkdir()

@@ -239,11 +239,25 @@ class HostedClient:
         self.timeout = timeout
 
     @classmethod
-    def from_environment(cls) -> "HostedClient":
+    def from_environment(cls, project: Path | None = None) -> "HostedClient":
         origin = os.environ.get("HARNESS_GRILL_URL", "")
         code = os.environ.get("HARNESS_GRILL_CODE", "")
+        config_path = project / ".harness" / "grill.json" if project else None
+        if config_path and config_path.is_file():
+            try:
+                config = json.loads(config_path.read_text(encoding="utf-8"))
+            except (OSError, UnicodeError, json.JSONDecodeError) as error:
+                raise ValueError(f"Invalid hosted grill config at {config_path}: {error}") from error
+            if not isinstance(config, dict):
+                raise ValueError(f"Invalid hosted grill config at {config_path}: expected a JSON object")
+            origin = config.get("url", origin)
+            code = config.get("code", code)
         if not origin or not code:
-            raise ValueError("HARNESS_GRILL_URL and HARNESS_GRILL_CODE are required")
+            raise ValueError(
+                "HARNESS_GRILL_URL and HARNESS_GRILL_CODE are required, or configure .harness/grill.json"
+            )
+        if not isinstance(origin, str) or not isinstance(code, str):
+            raise ValueError("Hosted grill URL and code must be strings")
         return cls(origin, code)
 
     def request(self, method: str, path: str, body: object | None = None, idempotency_key: str | None = None) -> dict:
@@ -298,10 +312,10 @@ class InterviewRuntime:
         self.configuration_error: str | None = None
 
     @classmethod
-    def from_environment(cls, root: Path | None = None) -> "InterviewRuntime":
+    def from_environment(cls, root: Path | None = None, project: Path | None = None) -> "InterviewRuntime":
         """Stay usable without hosted configuration so unrelated sessions see no hook output."""
         try:
-            return cls(root, HostedClient.from_environment())
+            return cls(root, HostedClient.from_environment(project))
         except ValueError as error:
             runtime = cls(root)
             runtime.configuration_error = str(error)

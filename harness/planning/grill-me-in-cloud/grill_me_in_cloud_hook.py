@@ -29,7 +29,8 @@ def handle(payload: dict, provider: str, runtime: InterviewRuntime | None = None
     event = payload.get("hook_event_name")
     if not isinstance(session, str) or not session or event not in {"UserPromptSubmit", "PostToolUse"}:
         return None
-    runtime = runtime or InterviewRuntime.from_environment()
+    project = Path(payload.get("cwd") or Path.cwd())
+    runtime = runtime or InterviewRuntime.from_environment(project=project)
     with runtime.claim(provider, session) as acquired:
         return _handle(payload, provider, runtime) if acquired else None
 
