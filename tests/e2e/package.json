@@ -40,7 +40,9 @@
     "e2e:subagents:build": "npm run e2e:subagents:bridge && esbuild tools/subagents/cli.ts --bundle --platform=node --format=cjs --target=node22 --outfile=dist/tools/subagents/cli.js --sourcemap",
     "e2e:subagents": "npm run e2e:subagents:build && node dist/tools/subagents/cli.js",
     "e2e:redirect-subagents:build": "esbuild tools/redirect-subagents/cli.ts --bundle --platform=node --format=cjs --target=node22 --outfile=dist/tools/redirect-subagents/cli.js --sourcemap",
-    "e2e:redirect-subagents": "npm run e2e:redirect-subagents:build && node dist/tools/redirect-subagents/cli.js"
+    "e2e:redirect-subagents": "npm run e2e:redirect-subagents:build && node dist/tools/redirect-subagents/cli.js",
+    "e2e:mid-prompt-skills:build": "esbuild tools/mid-prompt-skills/cli.ts --bundle --platform=node --format=cjs --target=node22 --outfile=dist/tools/mid-prompt-skills/cli.js --sourcemap",
+    "e2e:mid-prompt-skills": "npm run e2e:mid-prompt-skills:build && node dist/tools/mid-prompt-skills/cli.js"
   },
   "devDependencies": {
     "@types/node": "22.20.1",

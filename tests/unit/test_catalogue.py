@@ -1128,7 +1128,7 @@ def test_every_catalogue_manifest_loads():
         "building": {"issue-readers", "issue-writers", "tdd"},
         "shipping": {"setup-help"},
         "productivity": {
-            "agent-launcher", "caveman", "setup-command-aliases", "handoff", "handoff-grilling", "decisions", "report-gotchas", "subagents", "next-decision",
+            "agent-launcher", "caveman", "setup-command-aliases", "handoff", "handoff-grilling", "mid-prompt-skills", "decisions", "report-gotchas", "subagents", "next-decision",
             "setup-text-replacements", "todo-hitl", "writing-for-agents", "stop-overthinking", "zoom-out",
         },
         "guards": {
