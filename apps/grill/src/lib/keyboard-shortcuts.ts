@@ -8,9 +8,9 @@ export type ShortcutId =
   | "nextQuestion"
   | "selectOption"
   | "focusNote"
-  | "queueAnswer"
+  | "saveAnswer"
   | "reviewPrompt"
-  | "copyPrompt"
+  | "copyPrompt";
 
 type ShortcutDefinition = {
   scope: "Global" | "Rounds" | "Questions" | "Prompt review";
@@ -53,9 +53,9 @@ export const SHORTCUTS: Record<ShortcutId, ShortcutDefinition> = {
     shift: true,
   },
   focusNote: { scope: "Questions", description: "Move to additional context", key: "k", alt: true, shift: true },
-  queueAnswer: { scope: "Questions", description: "Queue or update answer", key: "s", alt: true, shift: true },
+  saveAnswer: { scope: "Questions", description: "Save answer now", key: "s", alt: true, shift: true },
   reviewPrompt: { scope: "Questions", description: "Review prompt", key: "Enter", alt: true, shift: true },
-  copyPrompt: { scope: "Prompt review", description: "Copy prompt", key: "c", alt: true, shift: true }
+  copyPrompt: { scope: "Prompt review", description: "Copy prompt", key: "c", alt: true, shift: true },
 };
 
 const KEY_LABELS: Record<string, string> = {

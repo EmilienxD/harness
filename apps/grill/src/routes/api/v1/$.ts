@@ -481,7 +481,12 @@ async function committedResponse(
 async function saveAnswer(request: Request, roundId: string, questionId: string): Promise<Response> {
   const parsed = answerBody.safeParse(await readJson(request));
   if (!parsed.success) return problem(422, "invalid_answer", "The answer is invalid.");
-  const round = await getRound(roundId);
+  // The board autosaves every edit, so this reads only what validation needs rather than the whole round.
+  const { data: round } = await supabaseAdmin
+    .from("grill_rounds")
+    .select("status,payload,session_id")
+    .eq("id", roundId)
+    .maybeSingle();
   if (!round) return problem(404, "round_not_found", "Round not found.");
   if (round.status !== "active") return problem(409, "stale_round", "Historical rounds are read-only.");
   const question = (
@@ -491,24 +496,31 @@ async function saveAnswer(request: Request, roundId: string, questionId: string)
   if (parsed.data.selected_option && !question.options.some((option) => option.letter === parsed.data.selected_option))
     return problem(422, "invalid_answer", "The selected option is unavailable.");
   const empty = !parsed.data.selected_option && !parsed.data.note?.trim();
+  let answer = null;
   if (parsed.data.state === "queued" && empty) {
     await supabaseAdmin.from("grill_answer_drafts").delete().eq("round_id", roundId).eq("question_id", questionId);
   } else {
-    const { error } = await supabaseAdmin.from("grill_answer_drafts").upsert(
-      {
-        round_id: roundId,
-        question_id: questionId,
-        ...parsed.data,
-        note: parsed.data.note?.trim() || null,
-        queued_at: parsed.data.state === "queued" ? new Date().toISOString() : null,
-        updated_at: new Date().toISOString(),
-      },
-      { onConflict: "round_id,question_id" },
-    );
+    const { data, error } = await supabaseAdmin
+      .from("grill_answer_drafts")
+      .upsert(
+        {
+          round_id: roundId,
+          question_id: questionId,
+          ...parsed.data,
+          // Stored as typed so an echo never trims text mid-edit; the prompt compiler trims instead.
+          note: parsed.data.note?.trim() ? parsed.data.note : null,
+          queued_at: parsed.data.state === "queued" ? new Date().toISOString() : null,
+          updated_at: new Date().toISOString(),
+        },
+        { onConflict: "round_id,question_id" },
+      )
+      .select("question_id,selected_option,note,state,updated_at,queued_at")
+      .single();
     if (error) return problem(500, "save_failed", "The answer could not be saved.");
+    answer = data;
   }
   await touchSession(round.session_id as string);
-  return json({ ok: true, state: empty ? "unanswered" : parsed.data.state });
+  return json({ ok: true, state: empty ? "unanswered" : parsed.data.state, answer });
 }
 
 async function promptOperation(request: Request, roundId: string, operation: string): Promise<Response> {
@@ -520,7 +532,7 @@ async function promptOperation(request: Request, roundId: string, operation: str
     .object({ reason: z.enum(["copy", "aboard"]), expected_prompt: z.string().max(100_000) })
     .safeParse(await readJson(request));
   if (!parsed.success) return problem(422, "invalid_snapshot_reason", "Snapshot reason must be copy or aboard.");
-  if (!result.prompt) return problem(422, "empty_prompt", "Queue an answer first.");
+  if (!result.prompt) return problem(422, "empty_prompt", "Answer a question first.");
   if (parsed.data.expected_prompt !== result.prompt)
     return problem(409, "stale_prompt", "The answers changed. Review the regenerated prompt before continuing.");
   const { data, error } = await supabaseAdmin

@@ -5,9 +5,9 @@ Grill-Me board should feel like a calm, tactile review desk: warm paper, crisp i
 ## Principles
 
 - Keep the current question central. Navigation, history, and delivery status are supporting information.
-- Make state explicit in words as well as color: recommended, selected, queued, read only, online, and error.
+- Make state explicit in words as well as color: recommended, selected, saving, saved, read only, online, and error.
 - Preserve a paper-and-card character through solid borders, restrained shadows, and compact radii.
-- Prefer short labels and direct verbs. Use **Queue answer**, **Update answer**, **Review prompt**, **Copy prompt**, and **Send via Aboard** consistently.
+- Prefer short labels and direct verbs. Use **Review prompt**, **Copy prompt**, and **Send via Aboard** consistently.
 - Keep destructive actions visually separate and require confirmation.
 
 ## Color
@@ -26,11 +26,11 @@ The core palette is:
 | Faint ink | `#736f68` | Low-priority labels and disabled text |
 | Accent | `#5b53ff` | Focus, active selection, links, and recommendations |
 | Accent wash | `#e6e5ff` | Selected and recommendation backgrounds |
-| Success | `#12b76a` | Queued answers and live presence |
-| Success wash | `#dbf4e9` | Queued-state backgrounds |
+| Success | `#12b76a` | Answered questions and live presence |
+| Success wash | `#dbf4e9` | Answered-state backgrounds |
 | Danger | `#c0392b` | Errors and destructive intent |
 
-Use strong ink for the primary action instead of accent purple. Accent identifies focus and choice; success identifies committed answer state. Do not rely on either alone—pair them with a label, icon, or status text.
+Use strong ink for the primary action instead of accent purple. Accent identifies focus and choice; success identifies answered questions. Do not rely on either alone—pair them with a label, icon, or status text.
 
 ## Typography
 
@@ -59,7 +59,7 @@ Buttons follow four conventions:
 
 Disabled buttons retain their shape but lower their opacity and never move on hover. Text links use the accent color and are reserved for low-emphasis actions such as switching to a custom answer.
 
-Options are full-row radio targets. A checked option receives an accent border and wash. Recommendations use an accent badge but never begin selected. A queued selection adds a green **Selected** badge. Historical controls remain visible but disabled so the past decision can still be understood.
+Options are full-row radio targets. A checked option receives an accent border and wash. Recommendations use an accent badge but never begin selected. Answers save automatically: an option at once, a note after a short pause in typing, and any pending edit when the question is left or the prompt is reviewed. The card footer reports **Saving…**, a brief **Saved**, or the error with **Retry**; there is no save button. Historical controls remain visible but disabled so the past decision can still be understood.
 
 ## Feedback and motion
 
@@ -73,7 +73,7 @@ Motion is quick and functional:
 
 Keep control transitions near 120ms. Honor reduced-motion preferences: remove the question transition and all animation or transition supplied inside agent-authored explanations. Loading feedback may remain when needed to communicate ongoing work.
 
-Show errors near the action that caused them when possible; use the page banner for loading or session-level failures. Temporary success feedback should be concise, such as a copied icon or a delivery-queued message. Never describe terminal submission as provider receipt.
+Show errors near the action that caused them when possible; use the page banner for loading or session-level failures. Temporary success feedback should be concise, such as a copied icon, a brief saved label, or a delivery-queued message. Never describe terminal submission as provider receipt.
 
 ## Explanation content
 
@@ -92,4 +92,4 @@ Interactive explanation content is illustrative only. It must not imitate answer
 
 ## Voice
 
-Copy is plain, compact, and literal. Prefer “queued,” “read only,” “submitted to terminal,” and “awaiting input” over celebratory or agent-like language. The board is a review instrument; it should report what happened without claiming more than it knows.
+Copy is plain, compact, and literal. Prefer “saved,” “read only,” “submitted to terminal,” and “awaiting input” over celebratory or agent-like language. The board is a review instrument; it should report what happened without claiming more than it knows.

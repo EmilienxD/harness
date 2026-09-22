@@ -1,6 +1,6 @@
 # Grill-Me board
 
-Grill-Me board is a private, self-hosted review surface for decisions raised during an agent conversation. An agent publishes a round of questions, the board keeps those rounds available across devices, and the user queues answers before reviewing one compact prompt to return to the originating conversation.
+Grill-Me board is a private, self-hosted review surface for decisions raised during an agent conversation. An agent publishes a round of questions, the board keeps those rounds available across devices, and the user answers them before reviewing one compact prompt to return to the originating conversation.
 
 The board is designed for one person. It uses a shared four-digit access code instead of accounts, stores its data and private images in Supabase, and runs as a Vercel application. Aboard can optionally relay a reviewed prompt to the exact open provider session; copying the prompt always remains available.
 
@@ -9,7 +9,7 @@ The board is designed for one person. It uses a shared four-digit access code in
 - Lists recent Claude Code and Codex sessions in one responsive interface.
 - Preserves earlier rounds as read-only history.
 - Shows one question at a time, including the agent's explanation, recommendation, and optional interactive content.
-- Accepts an option, a note, or a custom answer. Only **Queue answer** saves and includes it in the prompt.
+- Accepts an option, a note, or a custom answer. Every edit saves automatically and is included in the prompt.
 - Produces a read-only prompt that can be copied or sent through Aboard when that session is waiting for input.
 - Retains active sessions for 30 days after their latest meaningful activity and removes expired data and stored images through a daily cleanup job.
 
@@ -96,7 +96,7 @@ Published explanation HTML and JavaScript are intentionally trusted. Only connec
 ## Current limits
 
 - The browser workflow has been validated end to end with test sessions, but a complete real agentic session has not yet been validated.
-- Edits are local until **Queue answer** or **Update answer** is pressed. Refreshing first discards those unqueued edits.
+- Answers autosave: options at once, notes after a short pause in typing. Concurrent edits from two devices resolve to whichever saved last.
 - The generated prompt is deliberately compact and refers to answers by question ID and option letter. It works best when returned to the conversation that authored the round; an unrelated conversation may lack enough context.
 - Aboard confirmation means the text was submitted to the terminal, not that the provider received or processed it.
 - The four-digit code is a lightweight gate. It is not a substitute for user accounts or strong public-facing authentication.

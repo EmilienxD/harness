@@ -31,6 +31,8 @@ type SessionSummary = {
 };
 type RoundSummary = { id: string; number: number; status: "active" | "superseded"; created_at: string };
 type Answer = AnswerDraft & { updated_at: string; queued_at: string | null };
+type AnswerBody = { selected_option: string | null; note: string | null };
+type SaveAnswer = (roundId: string, questionId: string, body: AnswerBody, keepalive: boolean) => Promise<void>;
 type Round = {
   id: string;
   session_id: string;
@@ -158,6 +160,8 @@ function GrillBoard() {
   const activeRound = useRef<HTMLDivElement>(null);
   const roundElements = useRef(new Map<string, HTMLDivElement>());
   const scrolledActiveRound = useRef<{ session: string; roundId: string | null } | null>(null);
+  // Answer saves bump the generation when they start and finish, so polls can detect answers read before them.
+  const writes = useRef({ pending: 0, generation: 0 });
 
   useEffect(() => {
     setRailOpen(window.matchMedia("(min-width: 901px)").matches);
@@ -182,6 +186,7 @@ function GrillBoard() {
 
   /** Superseded rounds are frozen, so polling only refetches the round that can still change. */
   const loadRounds = useCallback(async (summaries: RoundSummary[]) => {
+    const generation = writes.current.generation;
     const loaded: Round[] = [];
     for (const summary of summaries) {
       const cached = cache.current.get(summary.id);
@@ -193,7 +198,11 @@ function GrillBoard() {
       cache.current.set(summary.id, result.round);
       loaded.push(result.round);
     }
-    setRounds(loaded);
+    // A save that overlapped this poll makes its answers older than the board's; the next poll catches up.
+    const overlapped = writes.current.pending > 0 || writes.current.generation !== generation;
+    setRounds((current) =>
+      overlapped ? loaded.map((round) => current.find((item) => item.id === round.id) ?? round) : loaded,
+    );
   }, []);
 
   const loadSelected = useCallback(async () => {
@@ -367,6 +376,28 @@ function GrillBoard() {
     setRounds((current) => current.map((item) => (item.id === id ? result.round : item)));
   }, []);
 
+  const saveAnswer = useCallback<SaveAnswer>(async (roundId, questionId, body, keepalive) => {
+    writes.current.pending += 1;
+    writes.current.generation += 1;
+    try {
+      const { answer } = await api<{ answer: Answer | null }>(`rounds/${roundId}/answers/${questionId}`, {
+        method: "PUT",
+        body: JSON.stringify({ ...body, state: "queued" }),
+        keepalive,
+      });
+      const merge = (round: Round): Round => ({
+        ...round,
+        answers: [...round.answers.filter((item) => item.question_id !== questionId), ...(answer ? [answer] : [])],
+      });
+      const cached = cache.current.get(roundId);
+      if (cached) cache.current.set(roundId, merge(cached));
+      setRounds((current) => current.map((item) => (item.id === roundId ? merge(item) : item)));
+    } finally {
+      writes.current.pending -= 1;
+      writes.current.generation += 1;
+    }
+  }, []);
+
   if (authorized === null)
     return (
       <div className="center">
@@ -430,7 +461,7 @@ function GrillBoard() {
                     <span>Round {session.active_round_number ?? "—"}</span>
                     <span aria-hidden="true">•</span>
                     <span>
-                      {session.answered_count}/{session.question_count} queued
+                      {session.answered_count}/{session.question_count} answered
                     </span>
                   </span>
                 </button>
@@ -527,7 +558,7 @@ function GrillBoard() {
                             shortcutActive={
                               item.id === displayedRoundId && !reviewed && !shortcutsOpen && !deleteTarget
                             }
-                            onReload={() => reloadRound(item.id)}
+                            onSave={saveAnswer}
                             onReview={async () => {
                               const result = await api<{ prompt: string }>(`rounds/${item.id}/prompt-preview`, {
                                 method: "POST",
@@ -652,7 +683,7 @@ function DeleteSessionModal({
           <dd>
             Round {session.active_round_number ?? "—"}
             <span aria-hidden="true"> · </span>
-            {session.answered_count}/{session.question_count} queued
+            {session.answered_count}/{session.question_count} answered
           </dd>
         </div>
         <div>
@@ -830,20 +861,38 @@ function CodeGate({ onSuccess }: { onSuccess: () => void }) {
   );
 }
 
+/** Idle time after the last keystroke before a note saves, and how long continuous typing may defer it. */
+const NOTE_SAVE_DELAY = 800;
+const NOTE_SAVE_MAX_WAIT = 4_000;
+
+type Draft = { selection: string; note: string };
+
+/** The draft as the server stores it, so local edits and server echoes compare equal. */
+function storedDraft(draft: Draft, noneLetter: string): Draft {
+  const note = draft.note.trim() ? draft.note : "";
+  const option = draft.selection !== noneLetter ? draft.selection : "";
+  // An empty answer is deleted, and a note without an option is stored as "None of these".
+  if (!option && !note) return { selection: "", note: "" };
+  return { selection: option || noneLetter, note };
+}
+
+const draftKey = (draft: Draft) => JSON.stringify([draft.selection, draft.note]);
+
 function Questionnaire({
   round,
   shortcutActive,
-  onReload,
+  onSave,
   onReview,
 }: {
   round: Round;
   shortcutActive: boolean;
-  onReload: () => Promise<void>;
+  onSave: SaveAnswer;
   onReview: () => Promise<void>;
 }) {
   const readOnly = round.status !== "active";
   const [active, setActive] = useState(0);
   const [reviewing, setReviewing] = useState(false);
+  const flushers = useRef(new Map<string, () => Promise<boolean>>());
   const questions = round.payload.questions;
 
   useEffect(() => {
@@ -851,16 +900,32 @@ function Questionnaire({
   }, [round.id]);
 
   const answerFor = (id: string) => round.answers.find((answer) => answer.question_id === id);
-  const queuedCount = round.answers.filter((answer) => answer.state === "queued").length;
+  const answeredCount = round.answers.filter((answer) => answer.state === "queued").length;
+  // An active round's newest edit may still be saving, so its review stays available and saves first.
+  const canReview = !readOnly || answeredCount > 0;
+
+  const registerFlush = useCallback((id: string, flush: () => Promise<boolean>) => {
+    flushers.current.set(id, flush);
+    return () => {
+      flushers.current.delete(id);
+    };
+  }, []);
 
   const reviewPrompt = useCallback(async () => {
     setReviewing(true);
     try {
+      // The server compiles the preview, so every pending edit must land before it is requested.
+      const saved = await Promise.all(questions.map((question) => flushers.current.get(question.id)?.() ?? true));
+      const failed = saved.indexOf(false);
+      if (failed >= 0) {
+        setActive(failed);
+        return;
+      }
       await onReview();
     } finally {
       setReviewing(false);
     }
-  }, [onReview]);
+  }, [onReview, questions]);
 
   useEffect(() => {
     if (!shortcutActive) return;
@@ -876,22 +941,14 @@ function Questionnaire({
         setActive((current) => Math.min(questions.length - 1, current + 1));
         return;
       }
-      if (matchesShortcut(event, "reviewPrompt") && queuedCount > 0 && !reviewing) {
+      if (matchesShortcut(event, "reviewPrompt") && canReview && !reviewing) {
         event.preventDefault();
         void reviewPrompt();
       }
     };
     window.addEventListener("keydown", handleShortcut, true);
     return () => window.removeEventListener("keydown", handleShortcut, true);
-  }, [questions.length, queuedCount, reviewPrompt, reviewing, shortcutActive]);
-
-  const advance = (index: number) => {
-    const next = questions.findIndex(
-      (question, position) => position > index && answerFor(question.id)?.state !== "queued",
-    );
-    const target = next >= 0 ? next : questions.findIndex((question) => answerFor(question.id)?.state !== "queued");
-    if (target >= 0 && target !== index) window.setTimeout(() => setActive(target), 420);
-  };
+  }, [canReview, questions.length, reviewPrompt, reviewing, shortcutActive]);
 
   const map = useMemo(() => {
     const size = Math.min(7, questions.length);
@@ -912,7 +969,7 @@ function Questionnaire({
             answer={answerFor(question.id)}
             readOnly={readOnly}
             hidden={index !== active}
-            canReview={queuedCount > 0}
+            canReview={canReview}
             reviewing={reviewing}
             shortcutsEnabled={shortcutActive && index === active}
             map={
@@ -929,8 +986,8 @@ function Questionnaire({
                 ))}
               </div>
             }
-            onReload={onReload}
-            onQueued={() => advance(index)}
+            onSave={onSave}
+            registerFlush={registerFlush}
             onReview={reviewPrompt}
           />
         ))}
@@ -949,8 +1006,8 @@ function QuestionCard({
   reviewing,
   shortcutsEnabled,
   map,
-  onReload,
-  onQueued,
+  onSave,
+  registerFlush,
   onReview,
 }: {
   round: Round;
@@ -962,69 +1019,153 @@ function QuestionCard({
   reviewing: boolean;
   shortcutsEnabled: boolean;
   map: React.ReactNode;
-  onReload: () => Promise<void>;
-  onQueued: () => void;
+  onSave: SaveAnswer;
+  registerFlush: (id: string, flush: () => Promise<boolean>) => () => void;
   onReview: () => Promise<void>;
 }) {
-  const [selection, setSelection] = useState(answer?.selected_option ?? "");
-  const [note, setNote] = useState(answer?.note ?? "");
-  const [busy, setBusy] = useState(false);
-  const [message, setMessage] = useState("");
-  const noteField = useRef<HTMLTextAreaElement>(null);
   // "None of these" takes the letter after the last option; it is stored as no selected option.
   const noneLetter = String.fromCharCode(
     Math.max(64, ...question.options.map((option) => option.letter.toUpperCase().charCodeAt(0))) + 1,
   );
-  const savedSelection = answer ? (answer.selected_option ?? noneLetter) : "";
+  const { selection: serverSelection, note: serverNote } = storedDraft(
+    answer ? { selection: answer.selected_option ?? noneLetter, note: answer.note ?? "" } : { selection: "", note: "" },
+    noneLetter,
+  );
+  const [selection, setSelection] = useState(serverSelection);
+  const [note, setNote] = useState(serverNote);
+  const [syncedKey, setSyncedKey] = useState(() => draftKey({ selection: serverSelection, note: serverNote }));
+  const [saving, setSaving] = useState(false);
+  const [failure, setFailure] = useState("");
+  const [saved, confirmSaved] = useConfirmation();
+  const noteField = useRef<HTMLTextAreaElement>(null);
+  // Timers, page-hide listeners, and unmounting read these refs so they always save the newest edit.
+  const latest = useRef<Draft>({ selection: serverSelection, note: serverNote });
+  const synced = useRef(syncedKey);
+  const inFlight = useRef(false);
+  const queue = useRef(Promise.resolve(true));
+  const timer = useRef<number>(undefined);
+  const firstEdit = useRef(0);
 
+  const stored = storedDraft({ selection, note }, noneLetter);
+  const dirty = draftKey(stored) !== syncedKey;
+  // A note without an option is answered as "None of these", so that radio shows it.
+  const shownSelection = stored.selection || selection;
+
+  // Another device's change replaces the fields only when this card has nothing unsaved of its own.
   useEffect(() => {
-    setSelection(savedSelection);
-    setNote(answer?.note ?? "");
-  }, [savedSelection, answer?.note, round.id]);
+    const key = draftKey({ selection: serverSelection, note: serverNote });
+    if (key === synced.current || inFlight.current || draftKey(latest.current) !== synced.current) return;
+    latest.current = { selection: serverSelection, note: serverNote };
+    synced.current = key;
+    setSyncedKey(key);
+    setSelection(serverSelection);
+    setNote(serverNote);
+  }, [serverSelection, serverNote]);
 
-  const queued = answer?.state === "queued";
-  const unchanged = selection === savedSelection && note === (answer?.note ?? "");
+  const sendLatest = useCallback(
+    async (keepalive: boolean): Promise<boolean> => {
+      const target = latest.current;
+      const key = draftKey(target);
+      if (key === synced.current) {
+        setFailure("");
+        return true;
+      }
+      inFlight.current = true;
+      setSaving(true);
+      try {
+        await onSave(
+          round.id,
+          question.id,
+          {
+            selected_option: target.selection && target.selection !== noneLetter ? target.selection : null,
+            note: target.note || null,
+          },
+          keepalive,
+        );
+        synced.current = key;
+        setSyncedKey(key);
+        setFailure("");
+        if (draftKey(latest.current) === key) confirmSaved();
+        return true;
+      } catch (cause) {
+        setFailure((cause as Error).message);
+        return false;
+      } finally {
+        inFlight.current = false;
+        setSaving(false);
+      }
+    },
+    [confirmSaved, noneLetter, onSave, question.id, round.id],
+  );
 
-  // Only queueing touches the database; radio and note edits stay local until then.
-  const canQueue = !readOnly && !busy && !(queued && unchanged) && Boolean(answer || selection || note.trim());
+  const flush = useCallback(
+    (keepalive = false) => {
+      window.clearTimeout(timer.current);
+      firstEdit.current = 0;
+      // Saves run one at a time, so a slow response can never land after a newer edit.
+      const run = queue.current.then(() => sendLatest(keepalive));
+      queue.current = run;
+      return run;
+    },
+    [sendLatest],
+  );
 
-  const queue = useCallback(async () => {
-    setBusy(true);
-    setMessage("");
-    try {
-      await api(`rounds/${round.id}/answers/${question.id}`, {
-        method: "PUT",
-        body: JSON.stringify({
-          selected_option: selection && selection !== noneLetter ? selection : null,
-          note: note || null,
-          state: "queued",
-        }),
-      });
-      await onReload();
-      onQueued();
-    } catch (cause) {
-      setMessage((cause as Error).message);
-    } finally {
-      setBusy(false);
-    }
-  }, [noneLetter, note, onQueued, onReload, question.id, round.id, selection]);
-
-  const chooseNone = useCallback(() => {
-    setSelection(noneLetter);
-    noteField.current?.focus();
-  }, [noneLetter]);
-
-  useEffect(() => {
-    if (!shortcutsEnabled) return;
-    const handleShortcut = (event: KeyboardEvent) => {
-      if (ignoresShortcuts(event)) return;
-      if (matchesShortcut(event, "queueAnswer")) {
-        if (!canQueue) return;
-        event.preventDefault();
-        void queue();
+  const edit = useCallback(
+    (next: Draft, delay: number) => {
+      setSelection(next.selection);
+      setNote(next.note);
+      latest.current = storedDraft(next, noneLetter);
+      if (!delay) {
+        void flush();
         return;
       }
-      if (readOnly) return;
+      const now = Date.now();
+      firstEdit.current ||= now;
+      window.clearTimeout(timer.current);
+      // Continuous typing still saves every few seconds instead of waiting for a pause.
+      const wait = Math.min(delay, firstEdit.current + NOTE_SAVE_MAX_WAIT - now);
+      timer.current = window.setTimeout(() => void flush(), Math.max(0, wait));
+    },
+    [flush, noneLetter],
+  );
+
+  const chooseNone = useCallback(() => {
+    edit({ selection: noneLetter, note }, 0);
+    noteField.current?.focus();
+  }, [edit, noneLetter, note]);
+
+  useEffect(() => registerFlush(question.id, flush), [flush, question.id, registerFlush]);
+
+  // Leaving the question saves at once instead of waiting out the typing delay.
+  useEffect(() => {
+    if (hidden) void flush();
+  }, [flush, hidden]);
+
+  useEffect(() => {
+    if (readOnly) return;
+    // keepalive lets the final save outlive a closing tab or a switch to another session.
+    const hide = () => {
+      if (document.visibilityState === "hidden") void flush(true);
+    };
+    const leave = () => void flush(true);
+    document.addEventListener("visibilitychange", hide);
+    window.addEventListener("pagehide", leave);
+    return () => {
+      document.removeEventListener("visibilitychange", hide);
+      window.removeEventListener("pagehide", leave);
+      void flush(true);
+    };
+  }, [flush, readOnly]);
+
+  useEffect(() => {
+    if (!shortcutsEnabled || readOnly) return;
+    const handleShortcut = (event: KeyboardEvent) => {
+      if (ignoresShortcuts(event)) return;
+      if (matchesShortcut(event, "saveAnswer")) {
+        event.preventDefault();
+        void flush();
+        return;
+      }
       if (matchesShortcut(event, "focusNote")) {
         event.preventDefault();
         noteField.current?.focus();
@@ -1040,11 +1181,11 @@ function QuestionCard({
       const option = question.options.find((item) => item.letter.toLocaleLowerCase() === letter);
       if (!option) return;
       event.preventDefault();
-      setSelection(option.letter);
+      edit({ selection: option.letter, note }, 0);
     };
     window.addEventListener("keydown", handleShortcut, true);
     return () => window.removeEventListener("keydown", handleShortcut, true);
-  }, [canQueue, chooseNone, noneLetter, question.options, queue, readOnly, shortcutsEnabled]);
+  }, [chooseNone, edit, flush, noneLetter, note, question.options, readOnly, shortcutsEnabled]);
 
   return (
     <article className="question" hidden={hidden} inert={hidden}>
@@ -1055,23 +1196,17 @@ function QuestionCard({
         </div>
         <h2>{question.question}</h2>
         <Explanation question={question} />
-        <form
-          className="answer-form"
-          onSubmit={(event) => {
-            event.preventDefault();
-            if (!readOnly && !busy) void queue();
-          }}
-        >
+        <div className="answer-form">
           <div className="options">
             {question.options.map((option) => (
               <label key={option.letter} className="option">
                 <input
                   type="radio"
                   name={`${round.id}-${question.id}`}
-                  checked={selection === option.letter}
+                  checked={shownSelection === option.letter}
                   disabled={readOnly}
                   aria-keyshortcuts={shortcutAria("selectOption", option.letter)}
-                  onChange={() => setSelection(option.letter)}
+                  onChange={() => edit({ selection: option.letter, note }, 0)}
                 />
                 <span className="option__copy">
                   <span className="option__label">
@@ -1081,7 +1216,6 @@ function QuestionCard({
                 </span>
                 <span className="option__badges">
                   {option.letter === question.recommendation && <span className="rec-badge">Recommended</span>}
-                  {queued && answer?.selected_option === option.letter && <span className="sel-badge">Selected</span>}
                 </span>
               </label>
             ))}
@@ -1089,7 +1223,7 @@ function QuestionCard({
               <input
                 type="radio"
                 name={`${round.id}-${question.id}`}
-                checked={selection === noneLetter}
+                checked={shownSelection === noneLetter}
                 disabled={readOnly}
                 aria-keyshortcuts={shortcutAria("selectOption", noneLetter)}
                 onChange={chooseNone}
@@ -1097,9 +1231,6 @@ function QuestionCard({
               <span className="option__copy">
                 <span className="option__label">{noneLetter}. None of these</span>
                 <span className="option__detail">Write your own answer below.</span>
-              </span>
-              <span className="option__badges">
-                {queued && answer?.selected_option == null && <span className="sel-badge">Selected</span>}
               </span>
             </label>
           </div>
@@ -1112,24 +1243,35 @@ function QuestionCard({
               aria-label="Add context or write your own answer"
               aria-keyshortcuts={shortcutAria("focusNote")}
               title={shortcutTitle("Additional context", "focusNote")}
-              onChange={(event) => setNote(event.target.value)}
+              onChange={(event) => edit({ selection, note: event.target.value }, NOTE_SAVE_DELAY)}
+              onBlur={() => void flush()}
               placeholder="Add context or write your own answer..."
             />
           </div>
           <div className="question__foot">
-            <button
-              type="submit"
-              className="submit"
-              disabled={!canQueue}
-              aria-keyshortcuts={shortcutAria("queueAnswer")}
-              title={shortcutTitle(queued ? "Update answer" : "Queue answer", "queueAnswer")}
-            >
-              {busy ? <LoaderCircle className="spin" size={16} /> : readOnly ? <Lock size={16} /> : <Check size={16} />}
-              {queued ? "Update answer" : "Queue answer"}
-            </button>
+            {readOnly ? null : failure ? (
+              <span className="save-status is-error" role="alert">
+                {failure}
+                <button type="button" onClick={() => void flush()}>
+                  Retry
+                </button>
+              </span>
+            ) : (
+              <span className="save-status" role="status">
+                {saving || dirty ? (
+                  <>
+                    <LoaderCircle className="spin" size={14} /> Saving…
+                  </>
+                ) : saved ? (
+                  <>
+                    <Check size={14} /> Saved
+                  </>
+                ) : null}
+              </span>
+            )}
             <button
               type="button"
-              className="submit round-submit is-ghost"
+              className="submit round-submit"
               disabled={!canReview || reviewing}
               aria-keyshortcuts={shortcutAria("reviewPrompt")}
               title={shortcutTitle("Review prompt", "reviewPrompt")}
@@ -1137,11 +1279,8 @@ function QuestionCard({
             >
               {reviewing ? <LoaderCircle className="spin" size={16} /> : null} Review prompt
             </button>
-            <span className="form-message" role="alert">
-              {message}
-            </span>
           </div>
-        </form>
+        </div>
       </div>
     </article>
   );
@@ -1293,7 +1432,7 @@ function PromptModal({
             )}
           </button>
         </div>
-        <pre>{prompt || "Nothing is queued yet."}</pre>
+        <pre>{prompt || "Nothing is answered yet."}</pre>
         <div className="modal__foot">
           {message && (
             <span className="modal__message" role="alert">
