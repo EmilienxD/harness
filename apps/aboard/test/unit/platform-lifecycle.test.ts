@@ -8,6 +8,7 @@ import { FleetRegistry } from "../../src/domain/fleet.js";
 import { WriteLease } from "../../src/domain/lease.js";
 import type { AgentPlatform } from "../../src/platform/agent-platform.js";
 import { ClaudeAgentPlatform } from "../../src/claude/platform.js";
+import { PromptSubmissions } from "../../src/platform/prompt-submissions.js";
 
 const at = "2026-09-08T10:00:00.000Z" as IsoTimestamp;
 const original = "6b1e3f7a-2c4d-4a8b-9f10-2c3d4e5f6071" as SessionId;
@@ -148,5 +149,35 @@ test("an attended session Stop records final output without settling the live co
   assert.deepEqual(response, { status: 200, body: { ok: true, accepted: true } });
   assert.equal(workerStops, 0);
   assert.equal(fleet.get(agentId)?.lastObservedAssistantMessage, "A final attended answer.");
+  assert.equal(fleet.get(agentId)?.lifecycle.status, "running");
+});
+
+test("a submitted Claude prompt confirms only a delivery waiting on that exact session", async () => {
+  const fleet = new FleetRegistry();
+  fleet.register({ ...registered(), sessionId: actual, sessionBinding: "bound", lifecycle: { status: "starting", startedAt: at } }, at);
+  fleet.transition(agentId, { status: "running", startedAt: at }, at);
+  const prompts = new PromptSubmissions();
+  const platform = new ClaudeAgentPlatform({
+    commandRunner: async () => ({ code: 0, stdout: "2.1.199", stderr: "" }),
+    lifecycleAssets: { settings: "hooks.json", script: "hook.py" },
+  });
+  const route = createPlatformLifecycleRoutes({
+    fleet, platforms: new Map([["claude", platform]]), prompts,
+    sessions: { sessionStarted: () => false, sessionEnded: () => false },
+    workers: { stop: async () => true, failure: async () => false },
+    compactions: { compact: () => undefined },
+    now: () => new Date(at),
+  });
+  const post = (body: unknown) => route({
+    method: "POST", url: new URL("/hooks/prompt-submit", "http://127.0.0.1"), headers: {}, body, signal: AbortSignal.abort(),
+  } as AuthenticatedBridgeRequest);
+
+  // The user's own prompts land here constantly; nobody is waiting on them.
+  assert.deepEqual(await post({ agentId, sessionId: actual }), { status: 200, body: { ok: true, accepted: false } });
+
+  const expectation = prompts.expect(actual, 60_000);
+  assert.deepEqual(await post({ agentId, sessionId: original }), { status: 200, body: { ok: true, accepted: false } });
+  assert.deepEqual(await post({ agentId, sessionId: actual }), { status: 200, body: { ok: true, accepted: true } });
+  assert.equal(await expectation.confirmed, true);
   assert.equal(fleet.get(agentId)?.lifecycle.status, "running");
 });

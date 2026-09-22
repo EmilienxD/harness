@@ -1,12 +1,13 @@
 import type { AgentType } from "../domain/contracts.js";
 
-type CodexHookEvent = "SessionStart" | "SessionEnd" | "Stop" | "StopFailure" | "PostCompact" | "PreToolUse";
-type AboardHookRoute = "session-start" | "session-end" | "worker-stop" | "worker-stop-failure" | "worker-reground" | "worker-post-compact" | "worker-guard";
+type CodexHookEvent = "SessionStart" | "UserPromptSubmit" | "SessionEnd" | "Stop" | "StopFailure" | "PostCompact" | "PreToolUse";
+type AboardHookRoute = "session-start" | "prompt-submit" | "session-end" | "worker-stop" | "worker-stop-failure" | "worker-reground" | "worker-post-compact" | "worker-guard";
 
 interface CodexCommandHook {
   readonly type: "command";
   readonly command: string;
   readonly timeout?: number;
+  readonly async?: boolean;
 }
 
 interface CodexHookGroup {
@@ -21,12 +22,13 @@ export interface CodexHookDefinition {
 
 const RESULT_REPORTING_TYPES: ReadonlySet<AgentType> = new Set(["explore", "address", "review"]);
 
-function command(script: string, route: AboardHookRoute, timeout?: number): CodexCommandHook {
+function command(script: string, route: AboardHookRoute, options: { readonly timeout?: number; readonly async?: boolean } = {}): CodexCommandHook {
   if (/["\r\n]/u.test(script)) throw new Error("Codex hook script paths cannot contain quotes or newlines");
   return {
     type: "command",
     command: `uv run --no-project --no-managed-python "${script}" ${route}`,
-    ...(timeout === undefined ? {} : { timeout }),
+    ...(options.timeout === undefined ? {} : { timeout: options.timeout }),
+    ...(options.async === true ? { async: true } : {}),
   };
 }
 
@@ -38,10 +40,12 @@ export function codexHookDefinitions(script: string, agentType: AgentType, guard
       event: "SessionStart",
       groups: [
         { matcher: "startup|resume|fork", hooks: [command(script, "session-start")] },
-        ...(reporting ? [{ matcher: "compact", hooks: [command(script, "worker-reground", 120)] }] : []),
+        ...(reporting ? [{ matcher: "compact", hooks: [command(script, "worker-reground", { timeout: 120 })] }] : []),
       ],
     },
-    { event: "SessionEnd", groups: [{ hooks: [command(script, "session-end", 3)] }] },
+    // Confirms a prompt Aboard typed; in the background so it never delays the user's own prompts.
+    { event: "UserPromptSubmit", groups: [{ hooks: [command(script, "prompt-submit", { async: true })] }] },
+    { event: "SessionEnd", groups: [{ hooks: [command(script, "session-end", { timeout: 3 })] }] },
     { event: "Stop", groups: [{ hooks: [command(script, "worker-stop")] }] },
     ...(reporting ? [
       { event: "StopFailure" as const, groups: [{ hooks: [command(script, "worker-stop-failure")] }] },

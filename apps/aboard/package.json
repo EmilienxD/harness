@@ -3,7 +3,7 @@
   "displayName": "aboard; visible coding agents",
   "publisher": "aboard",
   "description": "VS Code integration for visible Claude Code and ChatGPT sessions, fleet tracking, and Auto Run orchestration.",
-  "version": "0.3.0",
+  "version": "0.3.5",
   "icon": "assets/aboard.png",
   "private": true,
   "repository": {
@@ -495,7 +495,10 @@
         },
         "aboard.sessions.interactiveResumeMode": {
           "type": "string",
-          "enum": ["fork", "reuse-terminal"],
+          "enum": [
+            "fork",
+            "reuse-terminal"
+          ],
           "default": "fork",
           "enumDescriptions": [
             "Continue a live delegated conversation in a fork in a new terminal.",

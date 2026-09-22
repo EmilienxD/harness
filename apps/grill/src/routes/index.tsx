@@ -1,9 +1,10 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Check, ChevronLeft, CircleHelp, Folder, LoaderCircle, Lock, PanelLeft, Send, Trash2, X } from "lucide-react";
 import type { AnswerDraft, GrillQuestion } from "@/lib/grill-contract";
 import {
-  isShortcutEditingTarget,
+  ignoresShortcuts,
+  shortcutLetter,
   matchesShortcut,
   shortcutAria,
   shortcutLabel,
@@ -26,7 +27,7 @@ type SessionSummary = {
   active_round_number: number | null;
   answered_count: number;
   question_count: number;
-  aboard: { terminal_state: string } | null;
+  aboard: { workspace_name: string | null; workspace_path: string | null } | null;
 };
 type RoundSummary = { id: string; number: number; status: "active" | "superseded"; created_at: string };
 type Answer = AnswerDraft & { updated_at: string; queued_at: string | null };
@@ -37,11 +38,16 @@ type Round = {
   status: "active" | "superseded";
   payload: { questions: GrillQuestion[] };
   answers: Answer[];
+  prompt_snapshots: Array<{ reason: "copy" | "aboard"; grill_deliveries: Array<{ status: string }> }>;
 };
 type SessionDetail = {
   session: SessionSummary;
   rounds: RoundSummary[];
-  aboard: { terminal_state: string; last_heartbeat_at: string } | null;
+  aboard: {
+    workspace_name: string | null;
+    workspace_path: string | null;
+    last_heartbeat_at: string;
+  } | null;
 };
 
 class ApiError extends Error {
@@ -66,6 +72,35 @@ async function api<T>(path: string, init?: RequestInit): Promise<T> {
 function requestedSession(): string | null {
   if (typeof window === "undefined") return null;
   return new URLSearchParams(window.location.search).get("session");
+}
+
+/** A two-second in-place checkmark, shared by every action that confirms without a message. */
+function useConfirmation(): [boolean, () => void] {
+  const [confirmed, setConfirmed] = useState(false);
+  const timer = useRef<number>(undefined);
+  // The timer has to outlive re-renders, so only unmounting cancels it.
+  useEffect(() => () => window.clearTimeout(timer.current), []);
+  const confirm = useCallback(() => {
+    setConfirmed(true);
+    window.clearTimeout(timer.current);
+    timer.current = window.setTimeout(() => setConfirmed(false), 2_000);
+  }, []);
+  return [confirmed, confirm];
+}
+
+/** Resolves once Aboard reports that the provider confirmed the prompt; the server expires deliveries after 30 seconds. */
+async function awaitDelivery(id: string): Promise<void> {
+  const deadline = Date.now() + 45_000;
+  for (;;) {
+    const { delivery } = await api<{ delivery: { status: string; failure_message: string | null } }>(
+      `deliveries/${id}`,
+    );
+    if (delivery.status === "submitted-to-terminal") return;
+    if (delivery.status === "failed") throw new Error(delivery.failure_message ?? "Aboard could not send the prompt.");
+    if (delivery.status === "expired" || Date.now() >= deadline)
+      throw new Error("Aboard did not confirm the prompt in time.");
+    await new Promise((resolve) => window.setTimeout(resolve, 1_000));
+  }
 }
 
 const PROVIDERS: Record<string, { name: string; icon: string }> = {
@@ -114,13 +149,15 @@ function GrillBoard() {
   const [review, setReview] = useState<{ roundId: string; prompt: string } | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<SessionSummary | null>(null);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
+  const [displayedRoundId, setDisplayedRoundId] = useState<string | null>(null);
   const [railOpen, setRailOpen] = useState(false);
   const [switching, setSwitching] = useState(false);
   const [error, setError] = useState("");
   const cache = useRef(new Map<string, Round>());
   const page = useRef<HTMLElement>(null);
   const activeRound = useRef<HTMLDivElement>(null);
-  const scrolledSession = useRef<string | null>(null);
+  const roundElements = useRef(new Map<string, HTMLDivElement>());
+  const scrolledActiveRound = useRef<{ session: string; roundId: string | null } | null>(null);
 
   useEffect(() => {
     setRailOpen(window.matchMedia("(min-width: 901px)").matches);
@@ -193,14 +230,17 @@ function GrillBoard() {
         await loadSessions();
         await loadSelected();
       })();
-    }, 5_000);
+    }, 1_000);
     return () => window.clearInterval(timer);
   }, [authorized, loadSessions, loadSelected]);
 
   useLayoutEffect(() => {
-    if (!selected || rounds.length === 0 || scrolledSession.current === selected) return;
+    if (!selected || rounds.length === 0) return;
     const scroller = page.current;
     if (!scroller) return;
+    const active = rounds.find((round) => round.status === "active") ?? rounds.at(-1);
+    const previous = scrolledActiveRound.current;
+    if (previous?.session === selected && previous.roundId === (active?.id ?? null)) return;
     const target = activeRound.current;
     if (target) {
       const targetTop = target.getBoundingClientRect().top - scroller.getBoundingClientRect().top + scroller.scrollTop;
@@ -208,8 +248,44 @@ function GrillBoard() {
     } else {
       scroller.scrollTop = scroller.scrollHeight;
     }
-    scrolledSession.current = selected;
-  }, [rounds.length, selected]);
+    setDisplayedRoundId(active?.id ?? null);
+    scrolledActiveRound.current = { session: selected, roundId: active?.id ?? null };
+  }, [rounds, selected]);
+
+  useEffect(() => {
+    const scroller = page.current;
+    if (!scroller || rounds.length === 0) return;
+    let frame = 0;
+    const updateDisplayedRound = () => {
+      window.cancelAnimationFrame(frame);
+      frame = window.requestAnimationFrame(() => {
+        const anchor = scroller.getBoundingClientRect().top + 24;
+        let closest: { id: string; distance: number } | null = null;
+        for (const round of rounds) {
+          const element = roundElements.current.get(round.id);
+          if (!element) continue;
+          const distance = Math.abs(element.getBoundingClientRect().top - anchor);
+          if (!closest || distance < closest.distance) closest = { id: round.id, distance };
+        }
+        if (closest) setDisplayedRoundId(closest.id);
+      });
+    };
+    updateDisplayedRound();
+    scroller.addEventListener("scroll", updateDisplayedRound, { passive: true });
+    return () => {
+      window.cancelAnimationFrame(frame);
+      scroller.removeEventListener("scroll", updateDisplayedRound);
+    };
+  }, [rounds]);
+
+  const scrollToRound = useCallback((id: string) => {
+    const scroller = page.current;
+    const target = roundElements.current.get(id);
+    if (!scroller || !target) return;
+    setDisplayedRoundId(id);
+    const targetTop = target.getBoundingClientRect().top - scroller.getBoundingClientRect().top + scroller.scrollTop;
+    scroller.scrollTo({ top: Math.max(0, targetTop - 24), behavior: "auto" });
+  }, []);
 
   const chooseSession = useCallback(
     (session: SessionSummary) => {
@@ -219,6 +295,7 @@ function GrillBoard() {
       if (key === selected) return;
       setSelected(key);
       setRounds([]);
+      setDisplayedRoundId(null);
       setReview(null);
       setSwitching(true);
       window.history.replaceState(null, "", `/?session=${encodeURIComponent(key)}`);
@@ -228,7 +305,7 @@ function GrillBoard() {
 
   useEffect(() => {
     const handleShortcut = (event: KeyboardEvent) => {
-      if (event.isComposing || isShortcutEditingTarget(event.target) || deleteTarget || review || shortcutsOpen) return;
+      if (ignoresShortcuts(event) || deleteTarget || review || shortcutsOpen) return;
       if (matchesShortcut(event, "help")) {
         event.preventDefault();
         setShortcutsOpen(true);
@@ -244,20 +321,20 @@ function GrillBoard() {
         setRailOpen(false);
         return;
       }
-      const direction = matchesShortcut(event, "previousSession") ? -1 : matchesShortcut(event, "nextSession") ? 1 : 0;
-      if (!direction || sessions.length === 0) return;
-      const current = sessions.findIndex(
-        (session) => `${session.provider}:${session.provider_session_id}` === selected,
-      );
-      const target = current < 0 ? 0 : Math.min(sessions.length - 1, Math.max(0, current + direction));
-      if (target === current) return;
+      const direction = matchesShortcut(event, "previousRound") ? -1 : matchesShortcut(event, "nextRound") ? 1 : 0;
+      if (!direction || rounds.length === 0) return;
       event.preventDefault();
-      const session = sessions[target];
-      if (session) chooseSession(session);
+      const ordered = [...rounds].sort((left, right) => left.number - right.number);
+      const fallback = ordered.findIndex((round) => round.status === "active");
+      const current = ordered.findIndex((round) => round.id === displayedRoundId);
+      const origin = current >= 0 ? current : fallback >= 0 ? fallback : ordered.length - 1;
+      const target = Math.min(ordered.length - 1, Math.max(0, origin + direction));
+      const round = ordered[target];
+      if (round) scrollToRound(round.id);
     };
-    window.addEventListener("keydown", handleShortcut);
-    return () => window.removeEventListener("keydown", handleShortcut);
-  }, [chooseSession, deleteTarget, railOpen, review, selected, sessions, shortcutsOpen]);
+    window.addEventListener("keydown", handleShortcut, true);
+    return () => window.removeEventListener("keydown", handleShortcut, true);
+  }, [deleteTarget, displayedRoundId, railOpen, review, rounds, scrollToRound, shortcutsOpen]);
 
   const closeReview = useCallback(() => setReview(null), []);
 
@@ -299,7 +376,6 @@ function GrillBoard() {
   if (!authorized) return <CodeGate onSuccess={() => void loadSessions()} />;
 
   const online = Boolean(detail?.aboard);
-  const aboardReady = detail?.aboard?.terminal_state === "awaiting-user";
   const reviewed = review && rounds.find((item) => item.id === review.roundId);
   const orderedRounds = [...rounds].sort((left, right) => left.number - right.number);
   // One divider marks where frozen history ends and the current round begins.
@@ -356,7 +432,6 @@ function GrillBoard() {
                     <span>
                       {session.answered_count}/{session.question_count} queued
                     </span>
-                    {session.aboard ? <em>• {session.aboard.terminal_state}</em> : null}
                   </span>
                 </button>
                 <button
@@ -397,7 +472,11 @@ function GrillBoard() {
             <span
               className={`aboard-badge ${online ? "is-online" : ""}`}
               role="status"
-              title={online ? `Aboard ${detail.aboard?.terminal_state ?? "online"}` : "Aboard offline"}
+              title={
+                online
+                  ? `Aboard online in ${detail.aboard?.workspace_path ?? detail.aboard?.workspace_name ?? "an unknown project"}`
+                  : "Aboard offline"
+              }
             >
               <span className="aboard-badge__dot" aria-hidden="true" />
               ABOARD
@@ -436,12 +515,18 @@ function GrillBoard() {
                           </div>
                         )}
                         <div
-                          ref={item.status === "active" ? activeRound : undefined}
+                          ref={(element) => {
+                            if (element) roundElements.current.set(item.id, element);
+                            else roundElements.current.delete(item.id);
+                            if (item.status === "active") activeRound.current = element;
+                          }}
                           className={item.status === "active" ? "round-card is-active" : "round-card"}
                         >
                           <Questionnaire
                             round={item}
-                            shortcutActive={item.status === "active" && !reviewed && !shortcutsOpen && !deleteTarget}
+                            shortcutActive={
+                              item.id === displayedRoundId && !reviewed && !shortcutsOpen && !deleteTarget
+                            }
                             onReload={() => reloadRound(item.id)}
                             onReview={async () => {
                               const result = await api<{ prompt: string }>(`rounds/${item.id}/prompt-preview`, {
@@ -460,7 +545,7 @@ function GrillBoard() {
                       round={reviewed}
                       session={detail.session}
                       prompt={review.prompt}
-                      aboardReady={aboardReady}
+                      aboardReady={online}
                       onClose={closeReview}
                       onReload={() => reloadRound(reviewed.id)}
                     />
@@ -497,8 +582,8 @@ function ShortcutHelpModal({ onClose }: { onClose: () => void }) {
         onClose();
       }
     };
-    window.addEventListener("keydown", close);
-    return () => window.removeEventListener("keydown", close);
+    window.addEventListener("keydown", close, true);
+    return () => window.removeEventListener("keydown", close, true);
   }, [onClose]);
 
   return (
@@ -507,7 +592,6 @@ function ShortcutHelpModal({ onClose }: { onClose: () => void }) {
       <div className="shortcut-modal__card">
         <div className="shortcut-modal__top">
           <div>
-            <span className="eyebrow">Reference</span>
             <h2 id="shortcut-title">Keyboard shortcuts</h2>
           </div>
           <button
@@ -531,7 +615,6 @@ function ShortcutHelpModal({ onClose }: { onClose: () => void }) {
             </div>
           ))}
         </div>
-        <p>Shortcuts are paused while you type or interact with question content.</p>
       </div>
     </div>
   );
@@ -546,9 +629,62 @@ function DeleteSessionModal({
   onCancel: () => void;
   onConfirm: () => Promise<void>;
 }) {
+  return (
+    <ConfirmModal
+      title="Delete this session?"
+      cancelLabel="Cancel session deletion"
+      onCancel={onCancel}
+      onConfirm={onConfirm}
+    >
+      <dl className="delete-modal__facts">
+        <div>
+          <dt>Session</dt>
+          <dd>{sessionTitle(session)}</dd>
+        </div>
+        <div>
+          <dt>Provider</dt>
+          <dd>
+            <ProviderTag provider={session.provider} />
+          </dd>
+        </div>
+        <div>
+          <dt>Progress</dt>
+          <dd>
+            Round {session.active_round_number ?? "—"}
+            <span aria-hidden="true"> · </span>
+            {session.answered_count}/{session.question_count} queued
+          </dd>
+        </div>
+        <div>
+          <dt>Auto-purge</dt>
+          <dd>In {daysUntilPurge(session)} days</dd>
+        </div>
+      </dl>
+    </ConfirmModal>
+  );
+}
+
+/** A confirmation card: Cancel takes focus, Escape cancels, and a failed confirm keeps the card open with its error. */
+function ConfirmModal({
+  title,
+  cancelLabel,
+  tone = "danger",
+  onCancel,
+  onConfirm,
+  children,
+}: {
+  title: string;
+  /** Names what the scrim cancels, for assistive technology. */
+  cancelLabel: string;
+  tone?: "danger" | "neutral";
+  onCancel: () => void;
+  onConfirm: () => Promise<void>;
+  children: ReactNode;
+}) {
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
   const cancelButton = useRef<HTMLButtonElement>(null);
+  const titleId = useId();
 
   useEffect(() => {
     cancelButton.current?.focus();
@@ -558,8 +694,8 @@ function DeleteSessionModal({
         onCancel();
       }
     };
-    window.addEventListener("keydown", close);
-    return () => window.removeEventListener("keydown", close);
+    window.addEventListener("keydown", close, true);
+    return () => window.removeEventListener("keydown", close, true);
   }, [busy, onCancel]);
 
   const confirm = async () => {
@@ -574,46 +710,28 @@ function DeleteSessionModal({
   };
 
   return (
-    <div className="delete-modal" role="alertdialog" aria-modal="true" aria-labelledby="delete-session-title">
+    <div className="delete-modal" role="alertdialog" aria-modal="true" aria-labelledby={titleId}>
       <button
         type="button"
         className="delete-modal__scrim"
-        aria-label="Cancel session deletion"
+        aria-label={cancelLabel}
         disabled={busy}
         onClick={onCancel}
       />
       <div className="delete-modal__card">
-        <h2 id="delete-session-title">Delete this session?</h2>
-        <dl className="delete-modal__facts">
-          <div>
-            <dt>Session</dt>
-            <dd>{sessionTitle(session)}</dd>
-          </div>
-          <div>
-            <dt>Provider</dt>
-            <dd>
-              <ProviderTag provider={session.provider} />
-            </dd>
-          </div>
-          <div>
-            <dt>Progress</dt>
-            <dd>
-              Round {session.active_round_number ?? "—"}
-              <span aria-hidden="true"> · </span>
-              {session.answered_count}/{session.question_count} queued
-            </dd>
-          </div>
-          <div>
-            <dt>Auto-purge</dt>
-            <dd>In {daysUntilPurge(session)} days</dd>
-          </div>
-        </dl>
+        <h2 id={titleId}>{title}</h2>
+        {children}
         {message && <span className="delete-modal__error">{message}</span>}
         <div className="delete-modal__actions">
           <button ref={cancelButton} type="button" className="delete-modal__cancel" disabled={busy} onClick={onCancel}>
             Cancel
           </button>
-          <button type="button" className="delete-modal__confirm" disabled={busy} onClick={() => void confirm()}>
+          <button
+            type="button"
+            className={tone === "neutral" ? "delete-modal__confirm is-neutral" : "delete-modal__confirm"}
+            disabled={busy}
+            onClick={() => void confirm()}
+          >
             {busy ? <LoaderCircle className="spin" size={16} /> : null}
             Confirm
           </button>
@@ -747,7 +865,7 @@ function Questionnaire({
   useEffect(() => {
     if (!shortcutActive) return;
     const handleShortcut = (event: KeyboardEvent) => {
-      if (event.isComposing || isShortcutEditingTarget(event.target)) return;
+      if (ignoresShortcuts(event)) return;
       if (matchesShortcut(event, "previousQuestion")) {
         event.preventDefault();
         setActive((current) => Math.max(0, current - 1));
@@ -763,8 +881,8 @@ function Questionnaire({
         void reviewPrompt();
       }
     };
-    window.addEventListener("keydown", handleShortcut);
-    return () => window.removeEventListener("keydown", handleShortcut);
+    window.addEventListener("keydown", handleShortcut, true);
+    return () => window.removeEventListener("keydown", handleShortcut, true);
   }, [questions.length, queuedCount, reviewPrompt, reviewing, shortcutActive]);
 
   const advance = (index: number) => {
@@ -853,14 +971,19 @@ function QuestionCard({
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
   const noteField = useRef<HTMLTextAreaElement>(null);
+  // "None of these" takes the letter after the last option; it is stored as no selected option.
+  const noneLetter = String.fromCharCode(
+    Math.max(64, ...question.options.map((option) => option.letter.toUpperCase().charCodeAt(0))) + 1,
+  );
+  const savedSelection = answer ? (answer.selected_option ?? noneLetter) : "";
 
   useEffect(() => {
-    setSelection(answer?.selected_option ?? "");
+    setSelection(savedSelection);
     setNote(answer?.note ?? "");
-  }, [answer?.selected_option, answer?.note, round.id]);
+  }, [savedSelection, answer?.note, round.id]);
 
   const queued = answer?.state === "queued";
-  const unchanged = selection === (answer?.selected_option ?? "") && note === (answer?.note ?? "");
+  const unchanged = selection === savedSelection && note === (answer?.note ?? "");
 
   // Only queueing touches the database; radio and note edits stay local until then.
   const canQueue = !readOnly && !busy && !(queued && unchanged) && Boolean(answer || selection || note.trim());
@@ -871,7 +994,11 @@ function QuestionCard({
     try {
       await api(`rounds/${round.id}/answers/${question.id}`, {
         method: "PUT",
-        body: JSON.stringify({ selected_option: selection || null, note: note || null, state: "queued" }),
+        body: JSON.stringify({
+          selected_option: selection && selection !== noneLetter ? selection : null,
+          note: note || null,
+          state: "queued",
+        }),
       });
       await onReload();
       onQueued();
@@ -880,28 +1007,44 @@ function QuestionCard({
     } finally {
       setBusy(false);
     }
-  }, [note, onQueued, onReload, question.id, round.id, selection]);
+  }, [noneLetter, note, onQueued, onReload, question.id, round.id, selection]);
+
+  const chooseNone = useCallback(() => {
+    setSelection(noneLetter);
+    noteField.current?.focus();
+  }, [noneLetter]);
 
   useEffect(() => {
     if (!shortcutsEnabled) return;
     const handleShortcut = (event: KeyboardEvent) => {
-      if (event.isComposing) return;
-      const editing = isShortcutEditingTarget(event.target);
-      if (matchesShortcut(event, "queueAnswer") && (!editing || event.target === noteField.current)) {
+      if (ignoresShortcuts(event)) return;
+      if (matchesShortcut(event, "queueAnswer")) {
         if (!canQueue) return;
         event.preventDefault();
         void queue();
         return;
       }
-      if (editing || !matchesShortcut(event, "selectOption") || readOnly) return;
-      const option = question.options.find((item) => item.letter.toLocaleLowerCase() === event.key.toLocaleLowerCase());
+      if (readOnly) return;
+      if (matchesShortcut(event, "focusNote")) {
+        event.preventDefault();
+        noteField.current?.focus();
+        return;
+      }
+      if (!matchesShortcut(event, "selectOption")) return;
+      const letter = shortcutLetter(event);
+      if (letter === noneLetter.toLocaleLowerCase()) {
+        event.preventDefault();
+        chooseNone();
+        return;
+      }
+      const option = question.options.find((item) => item.letter.toLocaleLowerCase() === letter);
       if (!option) return;
       event.preventDefault();
       setSelection(option.letter);
     };
-    window.addEventListener("keydown", handleShortcut);
-    return () => window.removeEventListener("keydown", handleShortcut);
-  }, [canQueue, question.options, queue, readOnly, shortcutsEnabled]);
+    window.addEventListener("keydown", handleShortcut, true);
+    return () => window.removeEventListener("keydown", handleShortcut, true);
+  }, [canQueue, chooseNone, noneLetter, question.options, queue, readOnly, shortcutsEnabled]);
 
   return (
     <article className="question" hidden={hidden} inert={hidden}>
@@ -942,25 +1085,33 @@ function QuestionCard({
                 </span>
               </label>
             ))}
+            <label className="option">
+              <input
+                type="radio"
+                name={`${round.id}-${question.id}`}
+                checked={selection === noneLetter}
+                disabled={readOnly}
+                aria-keyshortcuts={shortcutAria("selectOption", noneLetter)}
+                onChange={chooseNone}
+              />
+              <span className="option__copy">
+                <span className="option__label">{noneLetter}. None of these</span>
+                <span className="option__detail">Write your own answer below.</span>
+              </span>
+              <span className="option__badges">
+                {queued && answer?.selected_option == null && <span className="sel-badge">Selected</span>}
+              </span>
+            </label>
           </div>
           <div className="freeform">
-            <button
-              type="button"
-              className="text-link"
-              disabled={readOnly}
-              onClick={() => {
-                setSelection("");
-                noteField.current?.focus();
-              }}
-            >
-              Write my own answer
-            </button>
             <textarea
               ref={noteField}
               disabled={readOnly}
               maxLength={2000}
               value={note}
               aria-label="Add context or write your own answer"
+              aria-keyshortcuts={shortcutAria("focusNote")}
+              title={shortcutTitle("Additional context", "focusNote")}
               onChange={(event) => setNote(event.target.value)}
               placeholder="Add context or write your own answer..."
             />
@@ -1037,19 +1188,16 @@ function PromptModal({
   onReload: () => Promise<void>;
 }) {
   const [busy, setBusy] = useState("");
-  const [copied, setCopied] = useState(false);
+  const [copied, confirmCopy] = useConfirmation();
+  const [sent, confirmSend] = useConfirmation();
+  const [confirmingResend, setConfirmingResend] = useState(false);
   const [message, setMessage] = useState("");
   const readOnly = round.status !== "active";
-  const confirmation = useRef<number>(undefined);
-
-  // The confirmation timer has to outlive re-renders, so only unmounting cancels it.
-  useEffect(() => () => window.clearTimeout(confirmation.current), []);
-
-  const confirmCopy = useCallback(() => {
-    setCopied(true);
-    window.clearTimeout(confirmation.current);
-    confirmation.current = window.setTimeout(() => setCopied(false), 2_000);
-  }, []);
+  // Only a confirmed delivery counts: retrying after a failed send needs no warning.
+  const alreadySent = round.prompt_snapshots.some(
+    (item) =>
+      item.reason === "aboard" && item.grill_deliveries.some((delivery) => delivery.status === "submitted-to-terminal"),
+  );
 
   const snapshot = useCallback(
     async (reason: "copy" | "aboard") => {
@@ -1070,8 +1218,12 @@ function PromptModal({
           await navigator.clipboard.writeText(result.snapshot.prompt);
           confirmCopy();
         } else {
-          await api(`prompt-snapshots/${result.snapshot.id}/deliveries`, { method: "POST", body: "{}" });
-          setMessage("Delivery queued for Aboard.");
+          const { delivery } = await api<{ delivery: { id: string } }>(
+            `prompt-snapshots/${result.snapshot.id}/deliveries`,
+            { method: "POST", body: "{}" },
+          );
+          await awaitDelivery(delivery.id);
+          confirmSend();
         }
         await onReload();
       } catch (cause) {
@@ -1080,12 +1232,13 @@ function PromptModal({
         setBusy("");
       }
     },
-    [confirmCopy, onReload, prompt, readOnly, round.id],
+    [confirmCopy, confirmSend, onReload, prompt, readOnly, round.id],
   );
 
   useEffect(() => {
     const handleShortcut = (event: KeyboardEvent) => {
-      if (event.isComposing || isShortcutEditingTarget(event.target)) return;
+      // This listener registers before the warning's, so it must stand down or Escape would close both.
+      if (ignoresShortcuts(event) || confirmingResend) return;
       if (matchesShortcut(event, "closeOverlay")) {
         event.preventDefault();
         onClose();
@@ -1096,19 +1249,21 @@ function PromptModal({
         void snapshot("copy");
         return;
       }
-      if (matchesShortcut(event, "sendPrompt") && prompt && !readOnly && aboardReady && !busy) {
-        event.preventDefault();
-        void snapshot("aboard");
-      }
     };
-    window.addEventListener("keydown", handleShortcut);
-    return () => window.removeEventListener("keydown", handleShortcut);
-  }, [aboardReady, busy, onClose, prompt, readOnly, snapshot]);
+    window.addEventListener("keydown", handleShortcut, true);
+    return () => window.removeEventListener("keydown", handleShortcut, true);
+  }, [aboardReady, busy, confirmingResend, onClose, prompt, readOnly, snapshot]);
 
   return (
     <div className="modal" role="dialog" aria-modal="true" aria-label="Prompt review">
-      <button type="button" className="modal__scrim" aria-label="Back to questions" onClick={onClose} />
-      <div className="modal__card">
+      <button
+        type="button"
+        className="modal__scrim"
+        aria-label="Back to questions"
+        inert={confirmingResend ? true : undefined}
+        onClick={onClose}
+      />
+      <div className="modal__card" inert={confirmingResend ? true : undefined}>
         <div className="modal__top">
           <button type="button" className="icon-button" aria-label="Back to questions" onClick={onClose}>
             <ChevronLeft size={17} />
@@ -1149,20 +1304,43 @@ function PromptModal({
             type="button"
             className="submit modal__send"
             disabled={!prompt || readOnly || !aboardReady || Boolean(busy)}
-            aria-keyshortcuts={shortcutAria("sendPrompt")}
             title={
               readOnly
                 ? "Historical rounds cannot be sent"
-                : aboardReady
-                  ? shortcutTitle("Send via Aboard", "sendPrompt")
-                  : "Aboard is not awaiting input"
+                : sent
+                  ? "Prompt sent"
+                  : aboardReady
+                    ? "Send via Aboard"
+                    : "Aboard is not connected to this session"
             }
-            onClick={() => void snapshot("aboard")}
+            onClick={() => (alreadySent ? setConfirmingResend(true) : void snapshot("aboard"))}
           >
-            {busy === "aboard" ? <LoaderCircle className="spin" size={14} /> : <Send size={14} />} Send via Aboard
+            {busy === "aboard" ? (
+              <LoaderCircle className="spin" size={14} />
+            ) : sent ? (
+              <Check size={14} />
+            ) : (
+              <Send size={14} />
+            )}{" "}
+            Send via Aboard
           </button>
         </div>
       </div>
+      {confirmingResend && (
+        <ConfirmModal
+          title="Re-send for this round?"
+          cancelLabel="Cancel re-send"
+          tone="neutral"
+          onCancel={() => setConfirmingResend(false)}
+          onConfirm={async () => {
+            // The send reports its own progress on the button, so the warning closes first.
+            setConfirmingResend(false);
+            void snapshot("aboard");
+          }}
+        >
+          <p className="delete-modal__note">This round&apos;s prompt was already sent to the session.</p>
+        </ConfirmModal>
+      )}
     </div>
   );
 }

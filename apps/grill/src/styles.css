@@ -873,24 +873,6 @@ kbd {
   letter-spacing: 0.12em;
   text-transform: uppercase;
 }
-.text-link {
-  display: block;
-  margin-bottom: 7px;
-  padding: 0;
-  border: 0;
-  color: var(--accent);
-  background: transparent;
-  cursor: pointer;
-  font-size: 12px;
-}
-.text-link:disabled {
-  color: var(--ink-faint);
-  cursor: not-allowed;
-}
-.text-link:focus-visible {
-  outline: none;
-  box-shadow: var(--focus);
-}
 .freeform textarea {
   width: 100%;
   min-height: 84px;
@@ -1186,7 +1168,7 @@ kbd {
   line-height: 1.45;
 }
 
-/* Destructive confirmation is separate from prompt review so its actions stay compact and unambiguous. */
+/* Confirmation cards are separate from prompt review so their actions stay compact and unambiguous. */
 .delete-modal {
   position: fixed;
   inset: 0;
@@ -1254,6 +1236,13 @@ kbd {
   font-size: 13px;
   letter-spacing: 0;
 }
+.delete-modal__note {
+  margin: 0 0 22px;
+  color: var(--ink-soft);
+  text-align: center;
+  font-size: 14px;
+  line-height: 1.5;
+}
 .delete-modal__error {
   display: block;
   margin: -10px 0 18px;
@@ -1310,6 +1299,14 @@ kbd {
 .delete-modal__confirm:hover:not(:disabled) {
   background: #941b1f;
   border-color: #941b1f;
+}
+.delete-modal__confirm.is-neutral {
+  background: #111;
+  border-color: #111;
+}
+.delete-modal__confirm.is-neutral:hover:not(:disabled) {
+  background: var(--ink);
+  border-color: var(--ink);
 }
 .center {
   min-height: 100vh;

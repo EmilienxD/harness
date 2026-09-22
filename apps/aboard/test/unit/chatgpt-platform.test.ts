@@ -34,8 +34,11 @@ test("Codex grants every new terminal, fork, and resume access to stable session
   assert.deepEqual(addedDirectories(platform.planSessionResume(next).args), first);
   for (const plan of [platform.planLaunch(request), platform.planLaunch({ ...next, forkSessionId: provisional }), platform.planSessionResume(next)]) {
     const hooks = hookConfigurations(plan.args);
-    assert.deepEqual(Object.keys(hooks).sort(), ["hooks.SessionEnd", "hooks.SessionStart", "hooks.Stop"]);
+    assert.deepEqual(Object.keys(hooks).sort(), ["hooks.SessionEnd", "hooks.SessionStart", "hooks.Stop", "hooks.UserPromptSubmit"]);
     assert.match(hooks["hooks.SessionStart"]!, /matcher="startup\|resume\|fork"/u);
+    // Delivery confirmation must never hold up the user's own prompt.
+    assert.match(hooks["hooks.UserPromptSubmit"]!, /prompt-submit/u);
+    assert.match(hooks["hooks.UserPromptSubmit"]!, /async=true/u);
     assert.ok(hooks["hooks.SessionStart"]!.includes(
       'command="uv run --no-project --no-managed-python \\"C:/aboard/runtime/scripts/abd_hook.py\\" session-start"',
     ));
@@ -43,6 +46,14 @@ test("Codex grants every new terminal, fork, and resume access to stable session
     const definitions = Object.values(hooks).join("\n");
     assert.doesNotMatch(definitions, /ABOARD_RUNTIME_ROOT|interactive-[12]|6b1e3f7a|af817a6c/u);
   }
+});
+
+test("a Codex prompt-submit report becomes the provider-neutral prompt observation", () => {
+  const platform = new ChatGptAgentPlatform({
+    lifecycleAssets: { settings: "hooks.json", script: "hook.py" },
+    commandRunner: async () => ({ code: 0, stdout: "codex-cli 0.153.4", stderr: "" }),
+  });
+  assert.deepEqual(platform.normalizeLifecycle("prompt", { agentId, session_id: actual }), { type: "prompt", agentId, sessionId: actual });
 });
 
 test("Codex registers worker reporting and guard hooks only for launches that need them", () => {
@@ -57,7 +68,7 @@ test("Codex registers worker reporting and guard hooks only for launches that ne
   };
   const unguarded = hookConfigurations(platform.planLaunch(common).args);
   assert.deepEqual(Object.keys(unguarded).sort(), [
-    "hooks.PostCompact", "hooks.SessionEnd", "hooks.SessionStart", "hooks.Stop", "hooks.StopFailure",
+    "hooks.PostCompact", "hooks.SessionEnd", "hooks.SessionStart", "hooks.Stop", "hooks.StopFailure", "hooks.UserPromptSubmit",
   ]);
   assert.match(unguarded["hooks.SessionStart"]!, /worker-reground/u);
   assert.match(unguarded["hooks.PostCompact"]!, /worker-post-compact/u);

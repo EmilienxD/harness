@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 import signal
 import sys
@@ -22,6 +23,39 @@ def instructions(interview: Interview) -> str:
         f"Write supporting images first under {interview.assets} and reference them with the URL prefix "
         f"{interview.assets_url}. Write the JSON last; that write triggers hosted publication."
     )
+
+
+def _last_jsonl_value(path: Path, match: str, key: str, value: str) -> str:
+    """Return the latest non-empty string under `key` in records whose `match` field equals `value`."""
+    title = ""
+    try:
+        with path.open(encoding="utf-8", errors="replace") as stream:
+            for line in stream:
+                if value not in line:
+                    continue
+                try:
+                    record = json.loads(line)
+                except ValueError:
+                    continue
+                if isinstance(record, dict) and record.get(match) == value:
+                    found = record.get(key)
+                    if isinstance(found, str) and found.strip():
+                        title = " ".join(found.split())
+    except OSError:
+        pass
+    return title
+
+
+def session_title(payload: dict, provider: str) -> str:
+    """Read the provider's generated session name; empty when it has not produced one yet."""
+    session = payload["session_id"]
+    if provider == "chatgpt":
+        home = Path(os.environ.get("CODEX_HOME") or Path.home() / ".codex")
+        return _last_jsonl_value(home / "session_index.jsonl", "id", "thread_name", session)
+    transcript = payload.get("transcript_path")
+    if not isinstance(transcript, str) or not transcript:
+        return ""
+    return _last_jsonl_value(Path(transcript), "sessionId", "aiTitle", session)
 
 
 def handle(payload: dict, provider: str, runtime: InterviewRuntime | None = None) -> dict | None:
@@ -71,7 +105,7 @@ def _handle(payload: dict, provider: str, runtime: InterviewRuntime) -> dict | N
         published = runtime.publish(
             provider,
             session,
-            str(payload.get("project_name") or project.name),
+            session_title(payload, provider) or session,
             project=project,
         )
         if published is None:

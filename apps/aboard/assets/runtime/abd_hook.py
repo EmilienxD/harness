@@ -22,6 +22,7 @@ ROUTES: dict[str, str] = {
     "worker-stop": "/hooks/stop",
     "worker-stop-failure": "/hooks/stop-failure",
     "session-start": "/hooks/session-start",
+    "prompt-submit": "/hooks/prompt-submit",
     "session-end": "/hooks/session-end",
 }
 
@@ -220,6 +221,12 @@ def main() -> int:
         if event != "SessionStart":
             return 0
         body = {"agentId": agent_id, "sessionId": session_id, "source": payload.get("source")}
+    elif endpoint == "/hooks/prompt-submit":
+        # Every agent type reports this: it confirms that a prompt Aboard typed
+        # reached the provider, and one nobody is waiting on is ignored.
+        if event != "UserPromptSubmit":
+            return 0
+        body = {"agentId": agent_id, "sessionId": session_id}
     elif endpoint == "/hooks/session-end":
         if event != "SessionEnd":
             return 0

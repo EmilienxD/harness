@@ -64,7 +64,7 @@ HARNESS_GRILL_URL=https://your-production-origin.example
 HARNESS_GRILL_CODE=1234
 ```
 
-Use the same values in the VS Code extension host if you want Aboard delivery. Aboard reports only recent, exact-session presence and enables delivery only while that terminal is awaiting user input.
+Use the same values in the VS Code extension host if you want Aboard delivery. Each initialized project relays separately and labels its presence with its own project name and home-relative path. Aboard reports only recent, exact-session presence, and a delivery succeeds only once the provider's own prompt-submit hook confirms the prompt arrived.
 
 Open the deployed URL, enter the four-digit code, and publish a test round before relying on the board for active work.
 

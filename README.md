@@ -59,7 +59,7 @@ Claude Code invokes a skill as `/skill-name`; ChatGPT uses `$skill-name`. The ex
 
 - **`breakdown-help-wanted-issue`**: Explores a request against the codebase and helps you agree on what to build, with questions and concrete recommendations. With no argument, it fetches the oldest open `[AI]-help-wanted` GitHub issue.
 
-- **`grill-me-in-cloud`**: Stress-tests a plan through branching rounds on a persistent hosted board. The hook supplies fresh round and asset paths outside the project, uploads local explanation images, publishes without waiting for answers, and returns the session URL. Drafts survive refreshes; only queued answers enter the deterministic prompt. Copy that prompt into any provider session, or let Aboard submit it when the exact session is open and awaiting input.
+- **`grill-me-in-cloud`**: Stress-tests a plan through branching rounds on a persistent hosted board. The hook supplies fresh round and asset paths outside the project, uploads local explanation images, publishes without waiting for answers, and returns the session URL. Drafts survive refreshes; only queued answers enter the deterministic prompt. Copy that prompt into any provider session, or let Aboard submit it into the exact session's open terminal; the send completes only once the provider confirms it received the prompt.
 
 - **`prototype`**: Builds a throwaway logic or UI prototype in a separate workspace to answer one explicit design question. It keeps prototype code and dependencies outside the repository, exercises only the decisive paths, and reports what the result supports and where its evidence stops.
 
@@ -187,7 +187,7 @@ The deployable TanStack Start application lives in `apps/grill/`; its Supabase m
 - `CRON_SECRET`: a separate bearer secret used by the scheduled cleanup route.
 - `SUPABASE_URL` and `SUPABASE_SECRET_KEY`: server-only Supabase credentials.
 
-Set `HARNESS_GRILL_URL` and `HARNESS_GRILL_CODE` in Claude Code or Codex before installing/running the grill hook. Set the same values in the VS Code extension host to enable Aboard relay; Aboard passes them to terminals it launches. The included Vercel cron calls the cleanup route daily and authenticates with `CRON_SECRET`. The application tables have RLS enabled with no `anon` or `authenticated` grants, and the `grill-assets` bucket is private.
+Set `HARNESS_GRILL_URL` and `HARNESS_GRILL_CODE` in Claude Code or Codex before installing/running the grill hook. Set the same values in the VS Code extension host to enable Aboard relay; each initialized project relays on its own, and Aboard passes the values to terminals it launches. The included Vercel cron calls the cleanup route daily and authenticates with `CRON_SECRET`. The application tables have RLS enabled with no `anon` or `authenticated` grants, and the `grill-assets` bucket is private.
 
 The access cookie is marked `Secure` whenever the request arrives over HTTPS, so local HTTP development needs no override. From `apps/grill/`, run `npm ci`, `npm run dev`, or `npm run build`.
 

@@ -4,7 +4,6 @@
   "round": ["active", "superseded"],
   "answer": ["draft", "queued"],
   "publication": ["prepared", "uploading", "committed", "failed", "expired"],
-  "presence": ["running", "awaiting-user"],
   "snapshot_reason": ["copy", "aboard"],
   "delivery": ["pending", "claimed", "submitted-to-terminal", "failed", "expired"]
 }

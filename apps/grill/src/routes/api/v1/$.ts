@@ -45,12 +45,12 @@ const answerBody = z.object({
 });
 const syncBody = z.object({
   instance_id: z.string().min(1).max(200),
+  workspace: z.object({ name: z.string().min(1).max(200), path: z.string().min(1).max(1000) }).optional(),
   sessions: z
     .array(
       z.object({
         provider: z.enum(["claude", "chatgpt"]),
         session_id: z.string().min(1).max(512),
-        state: z.enum(["running", "awaiting-user"]),
       }),
     )
     .max(200),
@@ -115,6 +115,8 @@ async function handle(request: Request, path: string, method: string): Promise<R
 
   const deliveryMatch = /^prompt-snapshots\/([0-9a-f-]+)\/deliveries$/u.exec(path);
   if (deliveryMatch && method === "POST") return createDelivery(deliveryMatch[1] ?? "");
+  const deliveryStatusMatch = /^deliveries\/([0-9a-f-]+)$/u.exec(path);
+  if (deliveryStatusMatch && method === "GET") return deliveryStatus(deliveryStatusMatch[1] ?? "");
 
   if (path === "aboard/sync" && method === "POST") return syncAboard(request);
   return problem(404, "not_found", "Endpoint not found.");
@@ -132,7 +134,7 @@ async function listSessions(): Promise<Response> {
   const cutoff = new Date(Date.now() - 15_000).toISOString();
   const { data: presence } = await supabaseAdmin
     .from("grill_aboard_presence")
-    .select("provider,provider_session_id,terminal_state,last_heartbeat_at")
+    .select("provider,provider_session_id,workspace_name,workspace_path,last_heartbeat_at")
     .gte("last_heartbeat_at", cutoff);
   const presenceMap = new Map((presence ?? []).map((item) => [`${item.provider}:${item.provider_session_id}`, item]));
   const sessions = (data ?? []).map((session) => {
@@ -181,7 +183,7 @@ async function readSession(provider: string, sessionId: string): Promise<Respons
   const cutoff = new Date(Date.now() - 15_000).toISOString();
   const { data: presence } = await supabaseAdmin
     .from("grill_aboard_presence")
-    .select("instance_id,terminal_state,last_heartbeat_at")
+    .select("instance_id,workspace_name,workspace_path,last_heartbeat_at")
     .eq("provider", provider)
     .eq("provider_session_id", sessionId)
     .gte("last_heartbeat_at", cutoff)
@@ -554,11 +556,10 @@ async function createDelivery(snapshotId: string): Promise<Response> {
     .select("instance_id")
     .eq("provider", round.grill_sessions.provider)
     .eq("provider_session_id", round.grill_sessions.provider_session_id)
-    .eq("terminal_state", "awaiting-user")
     .gte("last_heartbeat_at", cutoff)
     .limit(1)
     .maybeSingle();
-  if (!presence) return problem(409, "aboard_unavailable", "Aboard is not currently waiting for this exact session.");
+  if (!presence) return problem(409, "aboard_unavailable", "Aboard is not connected to this exact session.");
   const { data, error } = await supabaseAdmin
     .from("grill_deliveries")
     .insert({
@@ -571,6 +572,15 @@ async function createDelivery(snapshotId: string): Promise<Response> {
   if (error) return problem(500, "delivery_failed", "The delivery could not be created.");
   await touchSession(round.session_id);
   return json({ delivery: data }, 201);
+}
+
+async function deliveryStatus(id: string): Promise<Response> {
+  const { data } = await supabaseAdmin
+    .from("grill_deliveries")
+    .select("id,status,failure_message")
+    .eq("id", id)
+    .maybeSingle();
+  return data ? json({ delivery: data }) : problem(404, "delivery_not_found", "Delivery not found.");
 }
 
 async function syncAboard(request: Request): Promise<Response> {
@@ -591,7 +601,8 @@ async function syncAboard(request: Request): Promise<Response> {
         instance_id: input.instance_id,
         provider: session.provider,
         provider_session_id: session.session_id,
-        terminal_state: session.state,
+        workspace_name: input.workspace?.name ?? null,
+        workspace_path: input.workspace?.path ?? null,
         last_heartbeat_at: now,
       })),
       { onConflict: "instance_id,provider,provider_session_id" },

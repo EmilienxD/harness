@@ -22,6 +22,8 @@ export function normalizeChatGptLifecycle(kind: PlatformLifecycleKind, input: un
       };
     case "compaction":
       return { type: "compaction", agentId, sessionId };
+    case "prompt":
+      return { type: "prompt", agentId, sessionId };
     case "failure":
       throw new Error(`ChatGPT does not support ${kind} lifecycle observations in this release`);
   }

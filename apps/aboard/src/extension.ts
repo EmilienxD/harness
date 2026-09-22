@@ -90,7 +90,8 @@ import { RuntimeLayout } from "./runtime/layout.js";
 import { requireHarnessWorkerSkills } from "./claude/skills.js";
 import { requireChatGptWorkerSkills } from "./chatgpt/skills.js";
 import { FileLaunchConfigurationSource } from "./platform/launch-configuration.js";
-import { createGrillCloudRelay } from "./grill/cloud-relay.js";
+import { createGrillCloudRelay, type GrillCloudRelay } from "./grill/cloud-relay.js";
+import { PromptSubmissions } from "./platform/prompt-submissions.js";
 
 let bridge: BridgeRuntime | undefined;
 let commandEndpointRegistry: FileCommandEndpointRegistry | undefined;
@@ -237,12 +238,25 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
   const fleetStore = new FileFleetStore(runtime.root, runtimeAdmission);
   const persistedFleet = await fleetStore.load();
   const fleet = persistedFleet === undefined ? new FleetRegistry() : FleetRegistry.restore(persistedFleet);
-  const grillRelay = createGrillCloudRelay({
-    fleet,
-    terminals,
-    log: (message) => output.appendLine(message),
-  });
-  grillRelay?.start();
+  // Presence belongs to this project, so the relay lives exactly as long as the
+  // project is initialized: an uninitialized workspace neither reports nor polls.
+  let grillRelay: GrillCloudRelay | undefined;
+  // Tracked separately from the relay itself: an unconfigured host yields no
+  // relay, and retrying that on every `.abd/` write would repeat its diagnostic.
+  let grillRelayResolved = false;
+  const promptSubmissions = new PromptSubmissions();
+  const syncGrillRelay = (): void => {
+    if (initialized === grillRelayResolved) return;
+    grillRelayResolved = initialized;
+    if (!initialized) { grillRelay?.dispose(); grillRelay = undefined; return; }
+    grillRelay = createGrillCloudRelay({ fleet, terminals, workspaceRoot, prompts: promptSubmissions, log: (message) => output.appendLine(message) });
+    grillRelay?.start();
+    // A window reload reuses the existing host environment, so pointing at a
+    // reload here would send the user in a circle when the variables are new.
+    output.appendLine(grillRelay === undefined
+      ? "Grill relay is inactive: HARNESS_GRILL_URL and HARNESS_GRILL_CODE are not in this VS Code process's environment. Setting them for the agent alone (for example in .claude/settings.local.json) does not reach the extension host; set them for the user or shell that starts VS Code and restart VS Code entirely."
+      : `Grill relay started for this project as instance ${grillRelay.instanceId}.`);
+  };
   context.subscriptions.push({ dispose: () => grillRelay?.dispose() });
   const delegationStateDirectory = join(runtime.root, "delegations");
   const parentTerminalUri = async (childSessionId: string): Promise<string | undefined> => {
@@ -612,7 +626,7 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
           return autoRun.start(options);
         },
       }),
-      createPlatformLifecycleRoutes({ fleet, platforms, sessions: sessionLifecycle, workers: lifecycle, compactions: workerHooks, sessionBindings: [lease, terminals], proofs: sessionProofs }),
+      createPlatformLifecycleRoutes({ fleet, platforms, sessions: sessionLifecycle, workers: lifecycle, compactions: workerHooks, sessionBindings: [lease, terminals], proofs: sessionProofs, prompts: promptSubmissions }),
       createWorkerHookRoutes(workerHooks),
       createTerminalRoutes(terminals),
       createCommandRoutes(commandTerminals),
@@ -846,6 +860,7 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
 
     }
     if (initialized) await startRuntimeBridge();
+    syncGrillRelay();
     await commands.executeCommand("setContext", "aboard.initialized", next);
     await commands.executeCommand("setContext", "aboard.scaffoldUpdateRequired", scaffoldState === "update-required");
     if (scaffoldState !== "update-required") scaffoldUpdateWarningShown = false;

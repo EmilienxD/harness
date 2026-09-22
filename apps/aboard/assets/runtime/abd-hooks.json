@@ -7,6 +7,11 @@
       { "type": "command", "command": "uv", "args": ["run", "--no-project", "--no-managed-python", "__ABOARD_HOOK_SCRIPT__", "worker-reground"], "timeout": 120 }
     ] }
   ],
+  "UserPromptSubmit": [
+    { "hooks": [
+      { "type": "command", "command": "uv", "args": ["run", "--no-project", "--no-managed-python", "__ABOARD_HOOK_SCRIPT__", "prompt-submit"], "async": true }
+    ] }
+  ],
   "SessionEnd": [
     { "hooks": [
       { "type": "command", "command": "uv", "args": ["run", "--no-project", "--no-managed-python", "__ABOARD_HOOK_SCRIPT__", "session-end"], "timeout": 10 }

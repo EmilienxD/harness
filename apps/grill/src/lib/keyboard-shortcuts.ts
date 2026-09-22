@@ -2,18 +2,18 @@ export type ShortcutId =
   | "help"
   | "toggleSessions"
   | "closeOverlay"
-  | "previousSession"
-  | "nextSession"
+  | "previousRound"
+  | "nextRound"
   | "previousQuestion"
   | "nextQuestion"
   | "selectOption"
+  | "focusNote"
   | "queueAnswer"
   | "reviewPrompt"
   | "copyPrompt"
-  | "sendPrompt";
 
 type ShortcutDefinition = {
-  scope: "Global" | "Sessions" | "Questions" | "Prompt review";
+  scope: "Global" | "Rounds" | "Questions" | "Prompt review";
   description: string;
   key: string | "Letter";
   alt?: boolean;
@@ -29,8 +29,8 @@ export const SHORTCUTS: Record<ShortcutId, ShortcutDefinition> = {
   help: { scope: "Global", description: "Show keyboard shortcuts", key: "h", alt: true, shift: true },
   toggleSessions: { scope: "Global", description: "Toggle session list", key: "m", alt: true, shift: true },
   closeOverlay: { scope: "Global", description: "Close dialog or session list", key: "Escape" },
-  previousSession: { scope: "Sessions", description: "Previous session", key: "ArrowUp", alt: true, shift: true },
-  nextSession: { scope: "Sessions", description: "Next session", key: "ArrowDown", alt: true, shift: true },
+  previousRound: { scope: "Rounds", description: "Previous round", key: "ArrowUp", alt: true, shift: true },
+  nextRound: { scope: "Rounds", description: "Next round", key: "ArrowDown", alt: true, shift: true },
   previousQuestion: {
     scope: "Questions",
     description: "Previous question",
@@ -45,11 +45,17 @@ export const SHORTCUTS: Record<ShortcutId, ShortcutDefinition> = {
     alt: true,
     shift: true,
   },
-  selectOption: { scope: "Questions", description: "Select matching option", key: "Letter", alt: true, shift: true },
-  queueAnswer: { scope: "Questions", description: "Queue or update answer", key: "Enter", alt: true, shift: true },
-  reviewPrompt: { scope: "Questions", description: "Review prompt", key: "r", alt: true, shift: true },
-  copyPrompt: { scope: "Prompt review", description: "Copy prompt", key: "c", alt: true, shift: true },
-  sendPrompt: { scope: "Prompt review", description: "Send via Aboard", key: "s", alt: true, shift: true },
+  selectOption: {
+    scope: "Questions",
+    description: "Select matching option, or None of these to write your own",
+    key: "Letter",
+    alt: true,
+    shift: true,
+  },
+  focusNote: { scope: "Questions", description: "Move to additional context", key: "k", alt: true, shift: true },
+  queueAnswer: { scope: "Questions", description: "Queue or update answer", key: "s", alt: true, shift: true },
+  reviewPrompt: { scope: "Questions", description: "Review prompt", key: "Enter", alt: true, shift: true },
+  copyPrompt: { scope: "Prompt review", description: "Copy prompt", key: "c", alt: true, shift: true }
 };
 
 const KEY_LABELS: Record<string, string> = {
@@ -80,10 +86,13 @@ export function shortcutAria(id: ShortcutId, letter?: string): string {
 
 export function matchesShortcut(event: KeyboardEvent | React.KeyboardEvent, id: ShortcutId): boolean {
   const shortcut = SHORTCUTS[id];
+  const letter = shortcutLetter(event);
   const keyMatches =
     shortcut.key === "Letter"
-      ? /^[a-z]$/iu.test(event.key)
-      : event.key.toLocaleLowerCase() === shortcut.key.toLocaleLowerCase();
+      ? letter !== null
+      : shortcut.key.length === 1
+        ? letter === shortcut.key.toLocaleLowerCase()
+        : event.key.toLocaleLowerCase() === shortcut.key.toLocaleLowerCase();
   return (
     keyMatches &&
     event.altKey === Boolean(shortcut.alt) &&
@@ -92,9 +101,27 @@ export function matchesShortcut(event: KeyboardEvent | React.KeyboardEvent, id: 
   );
 }
 
-export function isShortcutEditingTarget(target: EventTarget | null): boolean {
-  if (!(target instanceof Element)) return false;
-  return Boolean(target.closest("input, textarea, select, [contenteditable='true'], .explanation"));
+/**
+ * Letter of the physical key. Alt/Option and Shift rewrite `event.key` on macOS and many
+ * layouts (Option+Shift+A is "Å"), so letters come from `event.code` instead.
+ */
+export function shortcutLetter(event: KeyboardEvent | React.KeyboardEvent): string | null {
+  const match = /^Key([A-Z])$/u.exec(event.code);
+  return match?.[1]?.toLocaleLowerCase() ?? null;
+}
+
+const TEXT_ENTRY =
+  "textarea, select, [contenteditable='true'], .explanation, input:not([type='radio'], [type='checkbox'], [type='button'], [type='submit'], [type='reset'])";
+
+/**
+ * Whether a board shortcut must stay out of this event. Modified shortcuts never produce
+ * text, so they work whatever holds focus (radios, buttons, the note field); bare keys
+ * such as Escape still yield to text entry.
+ */
+export function ignoresShortcuts(event: KeyboardEvent): boolean {
+  if (event.isComposing) return true;
+  if (event.altKey || event.ctrlKey || event.metaKey) return false;
+  return event.target instanceof Element && Boolean(event.target.closest(TEXT_ENTRY));
 }
 
 export function shortcutTitle(label: string, id: ShortcutId): string {
