@@ -1320,6 +1320,9 @@ function QuestionCard({
 function Explanation({ question }: { question: GrillQuestion }) {
   const root = useRef<HTMLDivElement>(null);
   const [failed, setFailed] = useState(false);
+  // React 19 rewrites innerHTML whenever this object's identity changes, which would reset open
+  // <details>, dropdowns, and init_js listeners on every poll; only new HTML may replace the DOM.
+  const html = useMemo(() => ({ __html: question.explanation_html }), [question.explanation_html]);
   useEffect(() => {
     setFailed(false);
     if (!question.init_js || !root.current) return;
@@ -1335,7 +1338,7 @@ function Explanation({ question }: { question: GrillQuestion }) {
         ref={root}
         id={`explanation-${question.id}`}
         className="explanation"
-        dangerouslySetInnerHTML={{ __html: question.explanation_html }}
+        dangerouslySetInnerHTML={html}
       />
       {failed && <div className="explanation-error">This question's interactive explanation could not initialize.</div>}
     </>
