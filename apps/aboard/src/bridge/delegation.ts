@@ -1,8 +1,10 @@
 import type { AgentPlatform, AgentPlatformId, ConfiguredLaunch, EffortLevel, PromptSpillStore, ResolvedPrompt, SessionWrapperLayout, ShellKind, TerminalController } from "../platform/agent-platform.js";
-import { dirname } from "node:path";
+import { delimiter, dirname } from "node:path";
+import { existsSync } from "node:fs";
 import type { LaunchRestrictions, WriteCapability } from "../domain/capability.js";
 import {
-
+  agentLabel,
+  isAutoRunWorkerType,
   isNonRestorablePersistedAgentType,
   type AgentId,
   type AgentSession,
@@ -26,6 +28,14 @@ import {
 import { AUTO_RUN_RESTRICTIONS } from "../auto/permissions.js";
 import { isolationProtectedPaths, worktreeGitMetadataRoots } from "../auto/worktree.js";
 import type { IssueDifficulty } from "../shared/labels.js";
+import type { DelegationTask } from "../platform/launch-configuration.js";
+
+function harnessEnvironment(input: { readonly harnessStateDirectory?: string; readonly harnessRuntimePath?: string }): Record<string, string> {
+  return {
+    ...(input.harnessStateDirectory === undefined ? {} : { HARNESS_STATE_DIR: input.harnessStateDirectory }),
+    ...(input.harnessRuntimePath === undefined ? {} : { PYTHONPATH: [input.harnessRuntimePath, process.env.PYTHONPATH].filter(Boolean).join(delimiter) }),
+  };
+}
 
 export interface LaunchIsolation {
   readonly cwd: string;
@@ -34,8 +44,15 @@ export interface LaunchIsolation {
 }
 
 export interface DelegationLaunchInput {
+  readonly forkSessionId?: SessionId;
+  readonly harnessStateDirectory?: string;
+  readonly harnessRuntimePath?: string;
   /** Stable Harness request identity for idempotency and child hook binding. */
   readonly requestId?: string;
+  readonly harnessSessionId?: string;
+  readonly executionId?: string;
+  /** Window-scoped link that lets an interactive child reveal its parent terminal. */
+  readonly parentTerminalUri?: string;
   readonly type: AgentType;
   readonly prompt?: string;
   /** Trusted skill invocation selected by a work-with-agent delegation boundary. */
@@ -48,10 +65,10 @@ export interface DelegationLaunchInput {
   readonly issues?: readonly number[];
   /** How many relation levels of issue context the resolved prompt preloads. */
   readonly issueContextDepth?: number;
-  /** Fresh bounded codebase evidence supplied only to an implementer. */
+  /** Fresh bounded codebase evidence supplied only to an address. */
   readonly codebaseContext?: string;
   readonly pullRequest?: number;
-  /** Set only by auto-run when the implementer's frozen issue has `[AI]-chrome`. */
+  /** Set only by auto-run when the worker's frozen issue has `[AI]-chrome`. */
   readonly chrome?: true;
   /** Set only by the auto-run engine, and only when the run has its own checkout. */
   readonly isolation?: LaunchIsolation;
@@ -59,7 +76,7 @@ export interface DelegationLaunchInput {
   readonly executionMode?: ExecutionMode;
   /** Pinned parent for a worker whose successful turn must add exactly one commit. */
   readonly completionCommitStartingSha?: string;
-  /** Immutable implementation range for a reviewer working from an uncommitted HITL handoff. */
+  /** Immutable implementation range for a review working from an uncommitted HITL handoff. */
   readonly reviewRange?: string;
   /** A provider-explicit manual launch may bypass the project's default provider. */
   readonly configuration?: ConfiguredLaunch;
@@ -74,13 +91,20 @@ export interface AutomatedLaunchOutcome {
 }
 
 export interface ReopenTarget {
+  readonly harnessStateDirectory?: string;
+  readonly harnessRuntimePath?: string;
+  readonly harnessSessionId?: string;
+  readonly executionId?: string;
+  /** Refreshed for each process because VS Code external URIs are window-scoped. */
+  readonly parentTerminalUri?: string;
+  readonly requestId?: string;
+  readonly executionMode?: ExecutionMode;
   readonly platform: AgentPlatformId;
   readonly agentId: AgentId;
   readonly type: AgentType;
+  readonly delegationTask?: DelegationTask;
   readonly sessionId: SessionId;
   readonly resultDelivery?: AgentSession["resultDelivery"]; 
-  /** The terminal name, already carrying aboard's own prefix. */
-  readonly terminalName: string;
   readonly issueNumbers?: readonly number[];
   readonly difficulty?: IssueDifficulty;
   readonly chromeEnabled?: true;
@@ -113,6 +137,7 @@ export interface DelegationConfigurationSource {
   get(type: AgentType): Promise<ConfiguredLaunch>;
   /** Resolves one explicit or session-owned provider without consulting the Auto Run default. */
   getFor(platform: AgentPlatformId, type: AgentType): Promise<ConfiguredLaunch>;
+  getDelegationFor?(platform: AgentPlatformId, task: DelegationTask): Promise<ConfiguredLaunch>;
 }
 
 export interface DelegationPromptResolver {
@@ -133,7 +158,7 @@ export interface DelegationCoordinatorOptions {
   readonly sessions?: { observe(agentId: AgentId): SessionObservation };
   readonly onStaleLeaseRecovered?: (holder: WriteLeaseHolder, observation: LeaseHolderObservation) => void;
   readonly configurations: DelegationConfigurationSource;
-  /** Installed runtime integrations, selected explicitly by launch.json. */
+  /** Installed runtime integrations, selected explicitly by config.json. */
   readonly platforms: ReadonlyMap<AgentPlatformId, AgentPlatform>;
   readonly prompts: DelegationPromptResolver;
   readonly spills: PromptSpillStore;
@@ -148,6 +173,8 @@ export interface DelegationCoordinatorOptions {
   readonly maxInlinePromptChars?: number;
   readonly startupTimeoutMs?: number;
   readonly wrapper?: SessionWrapperLayout;
+  /** Whether a wrapper marker still stands for a live process; a bare file by default. */
+  readonly lockProbe?: (lockFile: string) => boolean;
   readonly resolveWorktreeGitMetadataRoots?: (worktreeRoot: string, projectRoot: string) => Promise<readonly string[]>;
 }
 
@@ -235,7 +262,6 @@ export class DelegationCoordinator {
       type: session.identity.type,
       sessionId: session.sessionId,
 
-      terminalName: session.terminal.name,
       ...(session.issueNumbers === undefined ? {} : { issueNumbers: session.issueNumbers }),
       ...(session.chromeEnabled === true ? { chromeEnabled: true as const } : {}),
       ...(session.cwd === undefined ? {} : { cwd: session.cwd }),
@@ -247,12 +273,20 @@ export class DelegationCoordinator {
   }
 
   public async reopen(target: ReopenTarget): Promise<InteractiveLaunchHandles> {
-    const configured = await this.options.configurations.getFor(target.platform, target.type);
+    if (this.options.terminals.liveTerminalForAgent(target.agentId) !== undefined || this.options.sessions?.observe(target.agentId) === "live" || (this.options.wrapper !== undefined && (this.options.lockProbe ?? existsSync)(this.options.wrapper.lockPathFor(target.agentId)))) {
+      throw new DelegationError("agent-active", `Agent ${target.agentId} still has a live or uncertain execution`);
+    }
+    const saved = this.options.fleet.get(target.agentId);
+    const executionMode = target.executionMode ?? saved?.executionMode ?? "interactive";
+    if (executionMode !== "interactive" && !target.prompt?.trim()) throw new DelegationError("unresumable-session", "Background continuation requires a next message");
+    const configured = target.delegationTask === undefined || this.options.configurations.getDelegationFor === undefined
+      ? await this.options.configurations.getFor(target.platform, target.type)
+      : await this.options.configurations.getDelegationFor(target.platform, target.delegationTask);
     const platform = this.#platform(target.platform);
     // Where the session ran is where its conversation is: a session that ran in
     // an auto-run's own checkout has no transcript under the workspace at all.
     const cwd = target.cwd ?? this.options.workspaceRoot;
-    const attended = target.attended ?? true;
+    const attended = executionMode === "interactive";
     const writableRoots = target.autoRunRestricted === true && target.cwd !== undefined
       ? await (this.options.resolveWorktreeGitMetadataRoots ?? worktreeGitMetadataRoots)(target.cwd, this.options.workspaceRoot)
       : [];
@@ -263,8 +297,9 @@ export class DelegationCoordinator {
       agentType: target.type,
       shell: this.options.shell,
       attended,
+      executionMode,
       ...(target.autoRunRestricted === true ? { autoRunRestricted: true as const } : {}),
-      ...(target.type === "implementer" && target.chromeEnabled === true ? { chrome: true } : {}),
+      ...(isAutoRunWorkerType(target.type) && target.chromeEnabled === true ? { chrome: true } : {}),
       configuration: configured.settings,
       runtimeDirectory: this.options.runtimeDirectory ?? (this.options.wrapper === undefined ? undefined : dirname(dirname(this.options.wrapper.lockPathFor(target.agentId)))),
       ...(this.options.promptRoot === undefined ? {} : { promptRoot: this.options.promptRoot }),
@@ -314,17 +349,20 @@ export class DelegationCoordinator {
         agentId: target.agentId,
         sessionId: target.sessionId,
         agentType: target.type,
+        provider: target.platform,
         ...(target.issueNumbers === undefined ? {} : { issueNumbers: target.issueNumbers }),
         ...(target.completionCommitStartingSha === undefined ? {} : { completionCommitStartingSha: target.completionCommitStartingSha }),
         ...(target.reviewRange === undefined ? {} : { reviewRange: target.reviewRange }),
         ...(target.workerContinuation === true ? { workerContinuation: true as const } : {}),
-        name: target.terminalName,
+        name: agentLabel({ agentId: target.agentId, type: target.type }),
         ...(target.cwd === undefined ? {} : { cwd: target.cwd }),
         initialCommand: plan.commandLine,
         attended,
+        executionMode,
         ...(target.focus === undefined ? {} : { focus: target.focus }),
         ...(this.options.startupTimeoutMs === undefined ? {} : { startupTimeoutMs: this.options.startupTimeoutMs }),
-        ...(plan.providerEnvironment === undefined ? {} : { providerEnvironment: plan.providerEnvironment }),
+        providerEnvironment: { ...plan.providerEnvironment, ...harnessEnvironment(target), ...(target.harnessSessionId === undefined ? {} : { HARNESS_SESSION_ID: target.harnessSessionId }), ...(target.executionId === undefined ? {} : { HARNESS_EXECUTION_ID: target.executionId }), ...(target.parentTerminalUri === undefined ? {} : { HARNESS_PARENT_TERMINAL_URI: target.parentTerminalUri }) },
+        ...(target.requestId === undefined ? {} : { harnessRequestId: target.requestId }),
       });
       terminalStarted = true;
       startedTerminalId = terminal.terminalId;
@@ -338,6 +376,7 @@ export class DelegationCoordinator {
           terminal: fleetTerminal,
           lifecycle: { status: "starting", startedAt: occurredAt },
           resultDelivery,
+          executionMode,
           ...(attended ? { attended: true as const } : {}),
           telemetry: EMPTY_TELEMETRY,
           ...(target.chromeEnabled === true ? { chromeEnabled: true as const } : {}),
@@ -353,6 +392,7 @@ export class DelegationCoordinator {
           target.sessionId,
           attended,
           resultDelivery,
+          executionMode,
         );
       } else {
         this.options.fleet.reattach(
@@ -362,9 +402,10 @@ export class DelegationCoordinator {
           target.sessionId,
           resultDelivery,
           attended,
+          executionMode,
         );
       }
-      if (platform.capabilities.sessionIdentity === "runtime-assigned" && this.options.startupTimeoutMs !== undefined) {
+      if (this.options.startupTimeoutMs !== undefined) {
         const startup = this.options.terminals.waitForStartup(target.agentId);
         if (startup === undefined) throw new Error(`No startup proof was armed for runtime-assigned ${platform.id} session ${target.agentId}`);
         await startup;
@@ -401,7 +442,6 @@ export class DelegationCoordinator {
       agentId: session.identity.agentId,
       type: session.identity.type,
       sessionId: session.sessionId,
-      terminalName: session.terminal.name,
       ...(session.issueNumbers === undefined ? {} : { issueNumbers: session.issueNumbers }),
       ...(difficulty === undefined ? {} : { difficulty }),
       ...(session.chromeEnabled === true ? { chromeEnabled: true as const } : {}),
@@ -471,15 +511,17 @@ export class DelegationCoordinator {
     ]);
     const platform = this.#platform(configured.platform);
     const createdSession = platform.createSession();
-    const { sessionId } = createdSession;
+    const sessionId = (input.forkSessionId === undefined ? input.harnessSessionId ?? createdSession.sessionId : createdSession.sessionId) as SessionId;
     const plan = platform.planLaunch({
+      ...(input.forkSessionId === undefined ? {} : { forkSessionId: input.forkSessionId }),
       agentId,
       sessionId,
       agentType,
       shell: this.options.shell,
       attended,
+      executionMode,
       ...(origin === "auto-run" ? { autoRunRestricted: true as const } : {}),
-      ...(agentType === "implementer" && input.chrome === true ? { chrome: true } : {}),
+      ...(isAutoRunWorkerType(agentType) && input.chrome === true ? { chrome: true } : {}),
       configuration: configured.settings,
       runtimeDirectory: this.options.runtimeDirectory ?? (this.options.wrapper === undefined ? undefined : dirname(dirname(this.options.wrapper.lockPathFor(agentId)))),
       ...(this.options.promptRoot === undefined ? {} : { promptRoot: this.options.promptRoot }),
@@ -497,6 +539,16 @@ export class DelegationCoordinator {
       maxInlinePromptChars: this.options.maxInlinePromptChars,
       ...(this.options.wrapper === undefined ? {} : { wrapper: this.options.wrapper }),
     });
+    // Codex creates an empty TUI before it starts an agentic turn. Its
+    // SessionStart hook therefore cannot fire until the user submits the first
+    // prompt. Admit that idle terminal under its provisional identity; the
+    // lifecycle hook binds the real conversation id on first use.
+    const startupProofRequired = this.options.startupTimeoutMs !== undefined && !(
+      platform.id === "chatgpt"
+      && executionMode === "interactive"
+      && plan.promptDelivery === "none"
+      && input.forkSessionId === undefined
+    );
     await platform.preflight(plan);
     const occurredAt = this.#timestamp();
     if (leaseRequired(origin, attended)) {
@@ -513,19 +565,20 @@ export class DelegationCoordinator {
         agentId,
         sessionId,
         agentType,
+        provider: platform.id,
         ...(input.issues === undefined ? {} : { issueNumbers: input.issues }),
         ...(input.completionCommitStartingSha === undefined ? {} : { completionCommitStartingSha: input.completionCommitStartingSha }),
         ...(input.reviewRange === undefined ? {} : { reviewRange: input.reviewRange }),
-        name: `aboard: ${input.description}`,
+        name: agentLabel({ agentId, type: agentType }),
         ...(cwd === undefined ? {} : { cwd }),
         initialCommand: plan.commandLine,
         attended,
         executionMode,
         ...(input.requestId === undefined ? {} : { harnessRequestId: input.requestId }),
-        // A failed launch prints to the terminal and exits before any hook; the
-        // platform's start observation is the only trustworthy proof the session is up.
-        ...(this.options.startupTimeoutMs === undefined ? {} : { startupTimeoutMs: this.options.startupTimeoutMs }),
-        ...(plan.providerEnvironment === undefined ? {} : { providerEnvironment: plan.providerEnvironment }),
+        providerEnvironment: { ...plan.providerEnvironment, ...harnessEnvironment(input), ...(input.harnessSessionId === undefined ? {} : { HARNESS_SESSION_ID: input.harnessSessionId }), ...(input.executionId === undefined ? {} : { HARNESS_EXECUTION_ID: input.executionId }), ...(input.parentTerminalUri === undefined ? {} : { HARNESS_PARENT_TERMINAL_URI: input.parentTerminalUri }) },
+        // Prompted starts and resumes must prove that the platform reached its
+        // lifecycle. A fresh idle Codex TUI cannot provide that proof yet.
+        ...(startupProofRequired ? { startupTimeoutMs: this.options.startupTimeoutMs } : {}),
       }, (createdTerminal) => {
         this.options.fleet.register({
           platform: platform.id,
@@ -540,14 +593,14 @@ export class DelegationCoordinator {
           telemetry: EMPTY_TELEMETRY,
           ...(input.chrome === true ? { chromeEnabled: true as const } : {}),
           ...(input.issues === undefined ? {} : { issueNumbers: input.issues }),
-          // This policy is not derivable from the stable reviewer identity: a
+          // This policy is not derivable from the stable review identity: a
           // manual review is user-driven and deliberately unrestricted.
           ...(origin === "auto-run" ? { autoRunRestricted: true as const } : {}),
           ...(cwd === undefined ? {} : { cwd }),
         }, occurredAt);
       });
       terminalStarted = true;
-      if (platform.capabilities.sessionIdentity === "runtime-assigned" && this.options.startupTimeoutMs !== undefined) {
+      if (startupProofRequired) {
         const startup = this.options.terminals.waitForStartup(agentId);
         if (startup === undefined) throw new Error(`No startup proof was armed for runtime-assigned ${platform.id} session ${agentId}`);
         await startup;

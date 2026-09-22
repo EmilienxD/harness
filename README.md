@@ -16,6 +16,14 @@ uvx --from "git+https://github.com/EmilienxD/harness" harness
 
 The interactive catalogue asks for Claude Code and/or ChatGPT, project or user scope, and the packages you want. Rerun it to add, upgrade, or remove selections. Existing selections start checked, dependencies are handled automatically, user-edited starter files are preserved, and the final plan is shown before anything changes. Removing a selection retains reusable dependencies as independent selections; dependencies declared as coupled components are removed when nothing else requires them. When a package would land on a file Harness does not own, the installer lists those files and asks whether to overwrite them or abandon the installation; approved files become Harness-owned and are removed again on uninstall. A machine-level product a package installs — a `uv` tool or a VS Code extension — gets the same treatment: if one is already present and no Harness receipt accounts for it, the installer names it and asks whether to take ownership, which replaces it with the pinned version and removes it again on uninstall.
 
+When rerunning the interactive catalogue, optional updates appear in a separate
+dot picker with nothing selected. Leave a package unselected there to keep its
+installed version. Updates required by a newly selected or updated package are
+explained before the final confirmation. Adding or removing selections preserves
+other installed packages and their dependencies. In scripts, `install` updates
+only explicitly named packages and any required dependencies; `uninstall`
+preserves the packages being kept. Use `upgrade` to update all installed selections.
+
 For scripts and agents, use the non-interactive commands:
 
 ```bash
@@ -49,15 +57,17 @@ Claude Code invokes a skill as `/skill-name`; ChatGPT uses `$skill-name`. The ex
 
 - **`audit`**: Performs a read-only general, security, architecture, quality, performance, reliability, testing, dependency, or privacy audit of a codebase or selected path. Findings include file-and-line evidence, severity, confidence, remediation difficulty, and a recommended order of work; larger scopes can be partitioned across explorer agents.
 
-- **`breakdown-help-wanted-issue`**: Investigates a vague request against the codebase, challenges its scope, and returns a report for your approval. With no supplied request, it can use the oldest open `[AI]-help-wanted` GitHub issue. It does not implement or publish anything.
+- **`breakdown-help-wanted-issue`**: Explores a request against the codebase and helps you agree on what to build, with questions and concrete recommendations. With no argument, it fetches the oldest open `[AI]-help-wanted` GitHub issue.
+
+- **`grill-me-in-cloud`**: Stress-tests a plan through branching rounds on a persistent hosted board. The hook supplies fresh round and asset paths outside the project, uploads local explanation images, publishes without waiting for answers, and returns the session URL. Drafts survive refreshes; only queued answers enter the deterministic prompt. Copy that prompt into any provider session, or let Aboard submit it into the exact session's open terminal; the send completes only once the provider confirms it received the prompt.
 
 - **`prototype`**: Builds a throwaway logic or UI prototype in a separate workspace to answer one explicit design question. It keeps prototype code and dependencies outside the repository, exercises only the decisive paths, and reports what the result supports and where its evidence stops.
 
 - **`read-all-adrs`**: Reads every Markdown ADR under `docs/adr/` from start to finish so the current work is informed by the project's recorded architectural decisions.
 
-- **`websearch`**: Researches a question using relevant web and documentation sources, then returns a concise, cited synthesis in chat. It maintains a user-editable index of trusted sources while leaving the rest of the workspace unchanged.
+- **`websearch`**: Researches a question using relevant web and documentation sources, then returns a concise, cited synthesis. It maintains a user-editable index of trusted sources while leaving the rest of the workspace unchanged.
 
-- **`issue-writers`**: Provides `draft-issue`, `draft-issues`, `draft-audit-issues`, `to-spec`, and `to-spec-draft-issue`, followed by the explicit `publish-issues` step. Drafts remain editable local Markdown until you publish them; the publishing hook creates GitHub issues, resolves batch dependencies and parent links, and avoids another model call. Use `publish-issues --discard-current` to discard the current session's drafts, `publish-issues --gc --dry` to preview abandoned gateway data, or `publish-issues --gc --older-than 30d` to explicitly discard drafts older than a duration. Unknown files and ambiguous publication-recovery records are retained and reported.
+- **`issue-writers`**: Provides `draft-issue`, `draft-issues`, `to-spec`, and `to-spec-draft-issue`, followed by the explicit `publish-issues` step. Drafts remain editable local Markdown until you publish them; the publishing hook creates GitHub issues, resolves batch dependencies and parent links, and avoids another model call. Add `--dry` to preview what would be created without touching the tracker. Drafts are flat files in `.harness/issue-drafts/`; a published draft is deleted, an abandoned one is swept after a week of inactivity, and the publishing lock lives outside the repository, so there is no cleanup command to learn and nothing but drafts in your working tree.
 
 - **`issue-readers`**: Installs `address-this` and `review-this`, plus a hook that prepares bounded issue or commit context. Their user-owned starter bodies describe implementation, review, and validation without assuming commit policy; callers such as Aboard add the completion contract for each turn.
 
@@ -79,18 +89,20 @@ Claude Code invokes a skill as `/skill-name`; ChatGPT uses `$skill-name`. The ex
 
 - **`setup-help`**: Guides any installation or configuration one verified step at a time. Every response gives the current action and a short view of what remains, keeping the complete setup checklist synchronized as new prerequisites appear.
 
-- **`subagents`**: Launches separate, visible Claude Code or ChatGPT sessions through `work-with-agent` and the Explore, Prototype, Web Search, Brainstorm, Address, and Review variants. `reply-to-agent` explicitly returns an interactive child's result. The package includes its persistent runtime and hooks; those internal pieces are not separate catalogue choices.
+- **`subagents`**: Launches separate Claude Code or ChatGPT conversations, using background processes for automatic work and visible terminals for interactive work through `work-with-agent` and the explore, prototype, websearch, brainstorm, address, and review variants. Prototype delegation supports only `interactive` mode; `auto` is rejected. `reply-to-agent` explicitly returns an interactive child's result. The package includes its persistent runtime and hooks; those internal pieces are not separate catalogue choices.
 
 The `subagents` package also installs persistent session commands. These are separate from the ephemeral installer commands above:
 
 ```bash
 harness run --provider claude|chatgpt [initial prompt]
-harness ask <grant-id>
+harness ask <session-id>
 harness reply
-harness resume <session-id>
+harness resume <session-id|agent-i> [next message...]
 ```
 
-`run` opens an independent visible terminal. Delegation is authorized only by a live invocation of a `*-with-agent` skill; direct `harness ask` calls without that grant are rejected. Launch settings come from `.harness/launch.json`, then the user-level file, then built-in defaults. Version 3 configures both `providers.claude` and `providers.chatgpt`; `autoRun.provider` defaults to Claude and does not limit explicit `harness run --provider ...` launches. The optional provider-neutral `session.stopWaitHours` controls how long a parent Stop hook waits for an outstanding reply.
+`run` opens an independent visible terminal. The first explicit delegation skill invocation enables one persistent inbox for the saved conversation, shared across all task types. Request files and execution logs live under `~/.harness/runtime/sessions/` (`HARNESS_STATE_DIR` overrides `~/.harness`), never in the project. Automatic children run headlessly with native provider permissions; interactive children open visible sessions. Children receive stable `agent-i` identifiers scoped to the parent. After an Aboard-launched interactive child sends its reply, its hook shows a VS Code link that returns to the exact parent terminal without switching focus automatically. Use `resume-agent` or `harness resume agent-i "next message"` inside the parent to continue a child, preserving its provider, mode, directory, and conversation. A child whose session is still live, such as an idle terminal, normally continues in a fork of its transcript that keeps the same `agent-i` identifier and leaves the original session open. Aboard's `aboard.sessions.interactiveResumeMode` setting can instead use `reuse-terminal` to send the next message into a matching live interactive terminal; the default remains `fork`. Results survive parent shutdown and replay after interrupted delivery. Full delegation instructions are reinjected after successful compaction.
+
+Launch settings come from `.harness/config.json`, then the user-level file, then built-in defaults. A file containing only `{ "version": 1 }` is valid; add provider sections only for project-specific overrides. Manual delegation profiles live under `providers.<provider>.delegations` with independent `explore`, `prototype`, `websearch`, `brainstorm`, `address`, `review`, and `general` keys. Exploration defaults to Haiku/low for Claude and GPT-5.6 Luna/low for ChatGPT; the other manual profiles inherit native provider settings. `autoRun.provider` defaults to Claude and does not limit explicit `harness run --provider ...` launches. The optional provider-neutral `session.stopWaitHours` controls how long a parent Stop hook waits for an outstanding reply.
 
 ### Model-invoked skills
 
@@ -117,7 +129,10 @@ Hooks do not need a skill invocation. Select them in the catalogue and restart t
 | `prefer-edit-tool` | Claude Code | Nudges the agent toward Write/Edit after shell-based file changes. |
 | `prefer-fewer-comments` | Claude Code, ChatGPT | Flags newly written comments or docstrings that exceed an editable budget. |
 | `redirect-subagents` | Claude Code | Redirects built-in Agent tool work to configured alternate providers and returns the result to the parent session. |
+| `remove-anthropic-coauthor` | Claude Code | Amends new Git commits to remove `Co-Authored-By: Claude … <noreply@anthropic.com>`, preserving human co-authors. |
 | `usage-limit-wait` | Claude Code, ChatGPT | Pauses at an exhausted subscription window and resumes after reset; usage-reader failures always fail open. |
+
+`remove-anthropic-coauthor` runs after successful Bash/PowerShell calls that report a Git commit. It checks that the reported commit is still HEAD, removes matching lines from the final trailer paragraph, and reports the new hash to Claude. The amend preserves the tree, parents, original author, index, and worktree; commit hooks are not rerun, and configured commit signing is honored. Keep commit and push in separate tool calls so the hook can clean the message before it is pushed. Quiet commits or redirected commit output cannot be detected. Repository lookup supports the hook's working directory and literal `cd` or `git -C` paths; shell variables and computed paths are not expanded.
 
 #### Guard configuration
 
@@ -162,6 +177,20 @@ Aboard is the optional VS Code extension for visible Claude Code and ChatGPT ses
 
 See the [Aboard README](apps/aboard/README.md) for its visual workflow guide, configuration, and development commands.
 
+## Hosted Grill-Me board
+
+The deployable TanStack Start application lives in `apps/grill/`; its Supabase migration is under `apps/grill/supabase/migrations/`. Configure the hosted server with:
+
+- `HARNESS_GRILL_URL`: its canonical HTTPS origin, without a trailing slash.
+- `HARNESS_GRILL_CODE`: the shared four-digit browser and machine-client code.
+- `HARNESS_GRILL_SESSION_SECRET`: a long random value used to sign browser-session cookies.
+- `CRON_SECRET`: a separate bearer secret used by the scheduled cleanup route.
+- `SUPABASE_URL` and `SUPABASE_SECRET_KEY`: server-only Supabase credentials.
+
+Set `HARNESS_GRILL_URL` and `HARNESS_GRILL_CODE` in Claude Code or Codex before installing/running the grill hook. Set the same values in the VS Code extension host to enable Aboard relay; each initialized project relays on its own, and Aboard passes the values to terminals it launches. The included Vercel cron calls the cleanup route daily and authenticates with `CRON_SECRET`. The application tables have RLS enabled with no `anon` or `authenticated` grants, and the `grill-assets` bucket is private.
+
+The access cookie is marked `Secure` whenever the request arrives over HTTPS, so local HTTP development needs no override. From `apps/grill/`, run `npm ci`, `npm run dev`, or `npm run build`.
+
 ## Development
 
 For the Python installer and catalogue:
@@ -172,6 +201,23 @@ uv run pytest
 uv run harness --help
 ```
 
+To try an unpushed checkout against another project, use `--local` before the
+installer subcommand (or omit the subcommand for the interactive menu):
+
+```powershell
+$checkout = "C:\Users\emb\Desktop\dev\projects\harness"
+uvx --no-cache --from "$checkout" harness --local "$checkout" --root "C:\Users\emb\dev\unloopedit"
+# Non-interactive installation:
+uvx --no-cache --from "$checkout" harness --local "$checkout" install report-gotchas subagents --root "C:\Users\emb\dev\unloopedit"
+```
+
+`--local` reads the checkout's catalogue and installs its Python runtime tools
+from local directories, including uncommitted changes. Without it, runtime tools
+use the GitHub commits pinned in the manifests. `--no-cache` rebuilds the installer
+from the current checkout; local runtime installations also bypass the build cache.
+Host tools are installed for your user even when the selected scope is Project.
+Aboard still uses its published VSIX; see its README for extension development.
+
 The shared deterministic E2E core uses the real Claude Code or ChatGPT CLI and replaces only model inference with an authenticated loopback endpoint. Tool journeys live under `tests/e2e/`; Aboard-specific journeys stay under `apps/aboard/test/e2e/`.
 
 ```bash
@@ -180,3 +226,5 @@ npm install
 npm run check
 npm test
 ```
+
+Run `npm run e2e:remove-anthropic-coauthor` from `tests/e2e/` to verify the attribution-removal hook with the real `claude -p` CLI and the fake Anthropic endpoint. This journey requires the ownership-recorded `EmilienxD/harness-e2e` checkout; set `HARNESS_E2E_FIXTURE_ROOT` to its runtime directory (defaults to `ABOARD_E2E_ROOT`, then `~/dev/harness-e2e-runtime`). It commits in a temporary clone, verifies two model trailers are removed while human co-authors and staged changes survive, and leaves the shared checkout and remote unchanged.

@@ -3,7 +3,7 @@
   "displayName": "aboard; visible coding agents",
   "publisher": "aboard",
   "description": "VS Code integration for visible Claude Code and ChatGPT sessions, fleet tracking, and Auto Run orchestration.",
-  "version": "0.1.3",
+  "version": "0.3.5",
   "icon": "assets/aboard.png",
   "private": true,
   "repository": {
@@ -32,8 +32,8 @@
   "contributes": {
     "jsonValidation": [
       {
-        "fileMatch": "**/.harness/launch.json",
-        "url": "./assets/launch.schema.json"
+        "fileMatch": "**/.harness/config.json",
+        "url": "./assets/config.schema.json"
       }
     ],
     "commands": [
@@ -249,6 +249,11 @@
     "menus": {
       "view/title": [
         {
+          "command": "aboard.startAutoRun",
+          "when": "view == aboard.autoRun && aboard.initialized && !aboard.autoRunActive",
+          "group": "navigation@0"
+        },
+        {
           "command": "aboard.updateProject",
           "when": "view == aboard.fleet",
           "group": "navigation@1"
@@ -309,7 +314,7 @@
         },
         {
           "command": "aboard.startAutoRun",
-          "when": "aboard.initialized && aboard.autoRunCard == forecast"
+          "when": "aboard.initialized && !aboard.autoRunActive"
         },
         {
           "command": "aboard.stopAutoRun",
@@ -329,7 +334,7 @@
         },
         {
           "command": "aboard.discardAutoRun",
-          "when": "aboard.initialized && (aboard.autoRunCard == recoverable || aboard.autoRunCard == broken || aboard.autoRunCard == unsupported)"
+          "when": "aboard.initialized && (aboard.autoRunCard == recoverable || aboard.autoRunCard == broken)"
         },
         {
           "command": "aboard.autoRun.refresh",
@@ -393,11 +398,12 @@
         },
         {
           "command": "aboard.focusAgent",
-          "when": "viewItem == aboard.agent.active"
+          "when": "viewItem == aboard.agent.interactive"
         },
         {
           "command": "aboard.killAgent",
-          "when": "viewItem == aboard.agent.active"
+          "when": "viewItem == aboard.agent.interactive || viewItem == aboard.agent.background",
+          "group": "inline@1"
         },
         {
           "command": "aboard.startAutoRun",
@@ -431,7 +437,7 @@
         },
         {
           "command": "aboard.discardAutoRun",
-          "when": "viewItem =~ /aboard.autoRun.(recoverable|broken|unsupported)/",
+          "when": "viewItem =~ /aboard.autoRun.(recoverable|broken)/",
           "group": "inline@2"
         },
         {
@@ -487,10 +493,23 @@
           "default": false,
           "description": "Close an agent's terminal when its session ends. Off by default: exiting the session and closing the terminal are separate gestures, so the terminal is left at a shell prompt for you to reuse or close. The agent leaves the fleet either way, and relaunching it is never blocked by the leftover terminal."
         },
+        "aboard.sessions.interactiveResumeMode": {
+          "type": "string",
+          "enum": [
+            "fork",
+            "reuse-terminal"
+          ],
+          "default": "fork",
+          "enumDescriptions": [
+            "Continue a live delegated conversation in a fork in a new terminal.",
+            "Send the next message into the matching live interactive agent terminal. Fall back to a new terminal when it is unavailable."
+          ],
+          "description": "How resume-agent continues interactive Claude Code and ChatGPT delegations. Existing terminals retain their launch configuration. Auto execution is unaffected."
+        },
         "aboard.autoRun.review": {
           "type": "boolean",
           "default": false,
-          "description": "Launch an Auto Run reviewer after each issue is addressed."
+          "description": "Launch an Auto Run review after each issue is addressed."
         },
         "aboard.autoRun.branchMode": {
           "type": "string",
@@ -501,10 +520,10 @@
           "default": "per-issue",
           "description": "Use one branch and pull request per issue, or commit all issues directly to the run session branch and use only its cumulative pull request."
         },
-        "aboard.autoRun.exploreBeforeImplement": {
+        "aboard.autoRun.exploreBeforeAddress": {
           "type": "boolean",
           "default": false,
-          "description": "Launch a visible read-only Explore agent immediately before each fresh auto-run implementer. Its bounded codebase report is passed directly to the implementer and published best-effort on the issue. The setting is frozen when a run starts and preserved across resume."
+          "description": "Launch a visible read-only explore agent immediately before each fresh auto-run address worker. Its bounded codebase report is passed directly to that worker and published best-effort on the issue. The setting is frozen when a run starts and preserved across resume."
         },
         "aboard.autoRun.issueContextDepth": {
           "type": "integer",
@@ -516,7 +535,7 @@
         "aboard.autoRun.prompt": {
           "type": "string",
           "default": "",
-          "markdownDescription": "Persistent note added near the end of every Auto Run implementer and reviewer prompt. It is inserted before the per-run note supplied after `/auto`, so that dynamic note remains last and can refine the configured guidance. The value is frozen when a run starts and preserved across resume."
+          "markdownDescription": "Persistent note added near the end of every Auto Run address and review prompt. It is inserted before the per-run note supplied after `/auto`, so that dynamic note remains last and can refine the configured guidance. The value is frozen when a run starts and preserved across resume."
         },
         "aboard.autoRun.mergeStrategy": {
           "type": "string",
@@ -574,7 +593,8 @@
     }
   },
   "activationEvents": [
-    "onStartupFinished"
+    "onStartupFinished",
+    "onUri"
   ],
   "main": "./dist/extension.js",
   "files": [
@@ -582,9 +602,11 @@
     "dist/extension.js.map",
     "assets/aboard.png",
     "assets/aboard.svg",
-    "assets/launch.schema.json",
+    "assets/config.schema.json",
     "assets/scaffold/",
-    "assets/runtime/",
+    "assets/runtime/abd_hook.py",
+    "assets/runtime/abd-hooks.json",
+    "assets/runtime/abd_wrapper.py",
     "README.md",
     "LICENSE"
   ],

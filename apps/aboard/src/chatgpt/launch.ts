@@ -1,13 +1,14 @@
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { isAbsolute, join, resolve } from "node:path";
 
 import type { WriteCapability } from "../domain/capability.js";
-import { isAutoRunWorkerType, type AgentId, type AgentType, type SessionId } from "../domain/contracts.js";
+import { isAutoRunWorkerType, isHeadlessExecution, type AgentId, type AgentType, type SessionId } from "../domain/contracts.js";
 import { buildCommandLine, canQuoteArgument, type ShellKind } from "../platform/shell.js";
 import { promptFileReference, skillInvocation } from "../platform/prompts.js";
 import { BY_DIFFICULTY, MAX_COMMAND_LINE_CHARS, promptSpillRoot, requiresWriteLease, taskPromptPath, type LaunchPlan, LaunchPlanError, type PromptDelivery, type RuntimeFile, type SessionWrapperLayout } from "../platform/launch.js";
 import type { PlatformLaunchPlan, PlatformLaunchRequest, PlatformResumeRequest } from "../platform/agent-platform.js";
 import type { IssueDifficulty } from "../shared/labels.js";
+import { codexHookConfigArguments } from "./hooks.js";
 
 export const DEFAULT_CHATGPT_COMMAND = ["codex"] as const;
 
@@ -64,7 +65,7 @@ export function planChatGptSessionResume(request: PlatformResumeRequest): Platfo
 
 function planChatGptSession(request: PlatformLaunchRequest | PlatformResumeRequest, kind: "start" | "resume"): PlatformLaunchPlan {
   const configuration = request.configuration as ChatGptLaunchConfiguration;
-  const explore = request.agentType === "Explore";
+  const explore = request.agentType === "explore";
   const worker = isAutoRunWorkerType(request.agentType);
   const autoRunRestricted = request.autoRunRestricted === true;
   assertShape(request.agentType, configuration);
@@ -78,16 +79,12 @@ function planChatGptSession(request: PlatformLaunchRequest | PlatformResumeReque
   if (!Number.isInteger(threshold) || threshold < 0) throw new LaunchPlanError("invalid-threshold", "maxInlinePromptChars must be a non-negative integer");
   const chrome = request.chrome === true;
   if (chrome && !worker) throw new LaunchPlanError("shape-not-allowed", `The Chrome browser backend is available only to [AI]-chrome auto-run workers: ${request.agentType}`);
-  const runtimeRoot = request.runtimeDirectory ?? join(tmpdir(), "abd-runtime");
+  const requestedRuntimeRoot = request.runtimeDirectory ?? join(tmpdir(), "abd-runtime");
+  const runtimeRoot = isAbsolute(requestedRuntimeRoot) || /^[A-Za-z]:[\\/]/u.test(requestedRuntimeRoot)
+    ? requestedRuntimeRoot
+    : resolve(requestedRuntimeRoot);
   const runtimeDirectory = `${runtimeRoot.replaceAll("\\", "/").replace(/\/+$/u, "")}/agents/${request.agentId}`;
-  const hookScript = `${runtimeDirectory}/scripts/abd_hook.py`;
-  const hook = (route: string): string => `uv run --no-project --no-managed-python "${hookScript.replaceAll('"', '\\"')}" ${route}`;
-  const hookEntry = (route: string, matcher?: string): string =>
-    `{${matcher === undefined ? "" : `matcher=${JSON.stringify(matcher)},`}hooks=[{type="command",command=${JSON.stringify(hook(route))}}]}`;
-  const config = (event: string, entries: readonly string[]): readonly string[] => [
-    "-c",
-    `hooks.${event}=[${entries.join(",")}]`,
-  ];
+  const hookScript = `${runtimeRoot.replaceAll("\\", "/").replace(/\/+$/u, "")}/scripts/abd_hook.py`;
   const subagentsDenied = request.restrictions?.denySubagents === true || configuration.subagents === "denied";
   const denyCommands = [...new Set(request.restrictions?.deniedCommands ?? [])];
   const readOnlyFiles = [...new Set(request.restrictions?.protectedPaths ?? [])];
@@ -104,6 +101,7 @@ function planChatGptSession(request: PlatformLaunchRequest | PlatformResumeReque
     : permissionProfileArguments(readOnlyFiles, explore, worker ? request.writableRoots ?? [] : []);
   const fixed = [
     "--dangerously-bypass-hook-trust",
+    "--add-dir", runtimeRoot,
     "-c", "features.hooks=true",
     ...(explore && readOnlyFiles.length === 0 ? READ_ONLY_POLICY : []),
     ...permissionProfile,
@@ -111,16 +109,12 @@ function planChatGptSession(request: PlatformLaunchRequest | PlatformResumeReque
       ? ["-c", 'web_search="disabled"']
       : configuration.webSearch === undefined ? [] : ["-c", `web_search=${JSON.stringify(configuration.webSearch)}`]),
     ...(subagentsDenied ? ["-c", "features.multi_agent=false", "-c", "agents.enabled=false"] : []),
-    ...config("SessionStart", [hookEntry("session-start", "startup|resume"), hookEntry("worker-reground", "compact")]),
-    ...config("SessionEnd", [hookEntry("session-end")]),
-    ...config("Stop", [hookEntry("worker-stop")]),
-    ...config("PostCompact", [hookEntry("worker-post-compact", "manual|auto")]),
-    ...(guard === undefined ? [] : config("PreToolUse", [hookEntry("worker-guard", "Bash|Agent")])),
+    ...codexHookConfigArguments(hookScript, request.agentType, guard !== undefined),
     ...(policy.model === undefined ? [] : ["--model", policy.model]),
     ...(policy.effort === undefined ? [] : ["-c", `model_reasoning_effort=${JSON.stringify(policy.effort)}`]),
   ];
   const task = typeof request.prompt === "string" ? request.prompt : request.prompt?.text;
-  if (explore && (task === undefined || task.length === 0)) throw new LaunchPlanError("missing-prompt", "Explore cannot launch without its exploration task");
+  if (explore && (task === undefined || task.length === 0)) throw new LaunchPlanError("missing-prompt", "explore cannot launch without its exploration task");
   if (worker && kind === "start" && (task === undefined || task.length === 0)) throw new LaunchPlanError("missing-prompt", `${request.agentType} cannot launch without its initial prompt`);
   const text = task === undefined || task.trim().length === 0 ? undefined : task;
   // Only a launch owns the frozen task; a resume message must not replace the
@@ -153,7 +147,11 @@ function planChatGptSession(request: PlatformLaunchRequest | PlatformResumeReque
         promptArgs = ["--", invocation === undefined ? reference : `${invocation} ${reference}`];
       }
     }
-    const args = [...(kind === "resume" ? ["resume", request.sessionId] : []), ...fixed, ...promptArgs];
+    const background = isHeadlessExecution(request.agentType, request.executionMode);
+    const conversation = request.forkSessionId === undefined
+      ? kind === "resume" ? ["resume", request.sessionId] : []
+      : ["fork", request.forkSessionId];
+    const args = [...(background ? ["exec", "--json"] : []), ...fixed, ...conversation, ...promptArgs];
     const wrapped = wrap(command, args, request.wrapper, request.agentId, request.sessionId, runtimeRoot);
     return {
       promptDelivery,
@@ -182,6 +180,10 @@ function planChatGptSession(request: PlatformLaunchRequest | PlatformResumeReque
     requiresWriteLease: requiresWriteLease(request.agentType, writeCapability),
     promptDelivery: built.promptDelivery,
     runtimeDirectory,
+    providerEnvironment: {
+      ...(guard === undefined ? {} : { ABOARD_GUARD_PATH: guard.relativePath }),
+      ...(isHeadlessExecution(request.agentType, request.executionMode) ? { ABOARD_HEADLESS_CHATGPT: "1" } : {}),
+    },
     ...(chrome ? { chromeRequired: true as const } : {}),
     ...(guard === undefined ? {} : { guard }),
     ...(readOnlyFiles.length === 0 ? {} : { permissionProfile: WORKTREE_PERMISSION_PROFILE }),
@@ -194,24 +196,24 @@ function planChatGptSession(request: PlatformLaunchRequest | PlatformResumeReque
 function assertShape(agentType: AgentType, configuration: ChatGptLaunchConfiguration): void {
   switch (agentType) {
     case "interactive":
-    case "Prototype":
-    case "Web Search":
-    case "Brainstorm":
-    case "General":
+    case "prototype":
+    case "websearch":
+    case "brainstorm":
+    case "general":
       if (configuration.shape !== "default") throw new LaunchPlanError("shape-not-allowed", "interactive launches as Codex's default session");
       return;
-    case "Explore":
-      if (configuration.shape !== "explore") throw new LaunchPlanError("shape-not-allowed", "Explore launches as a read-only Codex session");
+    case "explore":
+      if (configuration.shape !== "explore") throw new LaunchPlanError("shape-not-allowed", "explore launches as a read-only Codex session");
       return;
-    case "implementer":
+    case "address":
       if (configuration.shape !== "skill" || configuration.skillName !== "address-this") {
-        throw new LaunchPlanError("shape-not-allowed", "implementer must launch through $address-this");
+        throw new LaunchPlanError("shape-not-allowed", "address must launch through $address-this");
       }
       return;
-    case "reviewer":
+    case "review":
       // One skill for both dispositions: AFK and HITL differ in orchestration.
       if (configuration.shape !== "skill" || configuration.skillName !== "review-this") {
-        throw new LaunchPlanError("shape-not-allowed", "reviewer must launch through $review-this");
+        throw new LaunchPlanError("shape-not-allowed", "review must launch through $review-this");
       }
       return;
   }

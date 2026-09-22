@@ -1,4 +1,4 @@
-import { window } from "vscode";
+import { ThemeIcon, window } from "vscode";
 
 import type { TerminalHost } from "../platform/terminals.js";
 
@@ -9,6 +9,7 @@ export function createVsCodeTerminalHost(): TerminalHost {
     createTerminal: (options) => window.createTerminal({
       cwd: options.cwd,
       env: { ...options.env },
+      ...(options.provider === undefined ? {} : { iconPath: new ThemeIcon(options.provider === "claude" ? "claude" : "openai") }),
       ...(options.name === undefined ? {} : { name: options.name }),
       ...(options.shellPath === undefined ? {} : { shellPath: options.shellPath }),
       ...(options.shellArgs === undefined ? {} : { shellArgs: [...options.shellArgs] }),

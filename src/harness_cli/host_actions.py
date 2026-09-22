@@ -163,6 +163,8 @@ def apply(prepared: PreparedAction) -> None:
             _required_string(action, "source"),
             _required_string(action, "package"),
         ]
+        if Path(_required_string(action, "source")).is_dir():
+            command.append("--no-cache")
     else:
         executable = _vscode_executable()
         if not executable:

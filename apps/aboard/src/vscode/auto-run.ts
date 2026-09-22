@@ -1,13 +1,10 @@
 
 import {
   completedCount,
-  isUnsupportedRecord,
   issueProgress,
-  UNSUPPORTED_RECORD_REASON,
   type AutoRunRecord,
   type FrozenIssue,
   type IssueProgress,
-  type PersistedAutoRunRecord,
   type RecoveryEligibility,
 } from "../domain/run-plan.js";
 import type { AutoRunState } from "../auto/engine.js";
@@ -102,13 +99,11 @@ export type AutoRunCard =
   /** A record exists and its eligibility is still being computed. */
   | { readonly kind: "checking"; readonly record: AutoRunRecord }
   | { readonly kind: "recoverable"; readonly record: AutoRunRecord }
-  | { readonly kind: "broken"; readonly record: AutoRunRecord; readonly reason: string }
-  /** An unsupported pre-v4 record: nothing to continue, only something to forget. */
-  | { readonly kind: "unsupported"; readonly reason: string };
+  | { readonly kind: "broken"; readonly record: AutoRunRecord; readonly reason: string };
 
 export type AutoRunNode =
   | { readonly kind: "card"; readonly card: AutoRunCard }
-  | { readonly kind: "issue"; readonly issue: FrozenIssue; readonly progress: IssueProgress; readonly title: string; readonly handoff?: { readonly type: "implementer" | "reviewer"; readonly agentId: string }; readonly workingBranch: string }
+  | { readonly kind: "issue"; readonly issue: FrozenIssue; readonly progress: IssueProgress; readonly title: string; readonly handoff?: { readonly type: "address" | "review"; readonly agentId: string }; readonly workingBranch: string }
   | { readonly kind: "forecast-issue"; readonly issue: PlannedIssue; readonly position: number; readonly total: number; readonly branchMode: "per-issue" | "single-branch" };
 
 export interface AutoRunTreeItem {
@@ -125,20 +120,17 @@ export interface AutoRunViewSources {
   readonly starting: () => boolean;
   readonly forecast: () => AutoRunForecast;
   readonly state: () => AutoRunState | undefined;
-  readonly persisted: () => PersistedAutoRunRecord | undefined;
+  readonly persisted: () => AutoRunRecord | undefined;
   readonly eligibility: () => RecoveryEligibility | undefined;
   /** Live issue titles, for display only; the plan's frozen titles do the work. */
   readonly titles: () => Readonly<Record<string, string>>;
   /** The live worker conversation currently available as this issue's handoff. */
-  readonly liveHandoff?: (issueNumber: number) => { readonly type: "implementer" | "reviewer"; readonly agentId: string } | undefined;
+  readonly liveHandoff?: (issueNumber: number) => { readonly type: "address" | "review"; readonly agentId: string } | undefined;
 }
 
 export function autoRunCard(sources: AutoRunViewSources): AutoRunCard {
   const persisted = sources.persisted();
   const state = sources.state();
-  if (persisted !== undefined && isUnsupportedRecord(persisted)) {
-    return { kind: "unsupported", reason: UNSUPPORTED_RECORD_REASON };
-  }
   if (state !== undefined && persisted !== undefined) {
     return { kind: state.waiting ? "waiting" : "active", state, record: persisted };
   }
@@ -175,7 +167,7 @@ export function autoRunCardMenuState(card: AutoRunCard): string {
 
 /** The record behind the card, when there is one. */
 export function cardRecord(card: AutoRunCard): AutoRunRecord | undefined {
-  return card.kind === "idle" || card.kind === "starting" || card.kind === "checking-next" || card.kind === "forecast" || card.kind === "unavailable" || card.kind === "unsupported"
+  return card.kind === "idle" || card.kind === "starting" || card.kind === "checking-next" || card.kind === "forecast" || card.kind === "unavailable"
     ? undefined
     : card.record;
 }
@@ -332,15 +324,6 @@ function cardItem(card: AutoRunCard): AutoRunTreeItem & { readonly command?: nev
         contextValue: "aboard.autoRun.broken",
         collapsible: true,
       };
-    case "unsupported":
-      return {
-        label: "Interrupted auto-run",
-        description: `cannot be resumed; ${card.reason}`,
-        tooltip: "This record predates human-acceptance persistence version 4 and cannot be resumed. Its branches and pull requests are untouched; discard the record when you have finished with them.",
-        icon: "error",
-        contextValue: "aboard.autoRun.unsupported",
-        collapsible: false,
-      };
   }
 }
 
@@ -394,7 +377,7 @@ function forecastIssueItem(node: Extract<AutoRunNode, { kind: "forecast-issue" }
 
 function waitingHandoff(record: AutoRunRecord, issueNumber: number | undefined): string {
   const worker = record.workerSession;
-  return worker === undefined || worker.issueNumber !== issueNumber || (worker.type !== "implementer" && worker.type !== "reviewer")
+  return worker === undefined || worker.issueNumber !== issueNumber || (worker.type !== "address" && worker.type !== "review")
     ? ""
     : `\n\nHandoff session: ${worker.type} ${worker.agentId} (${worker.sessionId}).`;
 }
@@ -411,7 +394,7 @@ function forecastTooltip(forecast: AutoRunForecast & { readonly preview: AutoRun
     preview.branchMode === "single-branch" ? "All issues are committed to the session branch; one cumulative pull request is used." : "Each issue uses its own branch and pull request.",
     ...preview.warnings.map((warning) => `Warning: ${warning}`),
     preview.isolatedWorkspace ? "Would work in a separate checkout" : "Would work in your checkout",
-    `Fresh Explore context ${preview.exploresBeforeImplement ? "on" : "off"}`,
+    `Fresh explore context ${preview.exploresBeforeAddress ? "on" : "off"}`,
     `Review ${preview.reviewMode ? "on" : "off"}`,
     preview.permanentPrompt === undefined ? "" : "Configured auto-run note will be included",
     preview.additionalGuideline === undefined ? "" : "Per-run auto note will be included after the configured note",
@@ -464,7 +447,7 @@ function runTooltip(record: AutoRunRecord, state?: AutoRunState): string {
     progress?.state === "current" && progress.beforeSha !== undefined && progress.implementationSha !== undefined ? `Accepted range: ${progress.beforeSha}..${progress.implementationSha}` : "",
     progress?.state === "current" && progress.reviewedSha !== undefined ? `Reviewed through: ${progress.reviewedSha}` : "",
     record.settings.workspaceRoot === undefined ? "Working in your checkout" : `Working in ${record.settings.workspaceRoot}`,
-    `Fresh Explore context ${record.settings.exploreBeforeImplement ? "on" : "off"}`,
+    `Fresh explore context ${record.settings.exploreBeforeAddress ? "on" : "off"}`,
     `Review ${record.settings.review ? "on" : "off"}`,
     record.runPullRequest === undefined ? "" : `Run pull request: #${record.runPullRequest}`,
     state?.currentPullRequest === undefined ? "" : `Current pull request: #${state.currentPullRequest}`,

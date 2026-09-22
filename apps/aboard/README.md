@@ -1,12 +1,13 @@
 # Aboard
 
-Aboard is a VS Code extension for visible Claude Code and ChatGPT sessions. It keeps agent work in terminals the user can inspect, gives the user one place to track active and recent sessions, and runs issue-driven AUTO RUN workflows without hiding the work from the user.
+Aboard is a VS Code extension for Claude Code and ChatGPT conversations. It opens interactive work and AUTO RUN workers in visible terminals, and one-shot work you never take over — automatic delegations and AUTO RUN's read-only exploration — in background processes, with fleet and activity tracking for both.
 
 Install it through the [Harness catalogue](../../README.md#installation) by selecting `aboard`. Harness verifies the VSIX and installs the worker assets Aboard needs.
 
 ## At a glance
 
-Aboard launches Claude Code or ChatGPT through visible VS Code terminals. Its Fleet shows live sessions,
+Aboard launches interactive Claude Code or ChatGPT sessions through visible VS Code terminals. One-shot
+work uses detached processes with structured output and execution logs. Its Fleet shows live sessions,
 Recent Activity records useful completed work, and AUTO RUN coordinates the local Git checkout with GitHub
 issues and pull requests. An authenticated loopback bridge carries lifecycle events back to the extension.
 
@@ -15,21 +16,27 @@ issues and pull requests. An authenticated loopback bridge carries lifecycle eve
 Initialize the project once, then use **Run Agent** to choose Claude or ChatGPT and open an empty, attended
 terminal. The **Run Agent** view above the Fleet lists **Run Claude Code** and **Run Codex**; clicking either
 opens the same session with that provider already chosen. Each provider's command, model, and reasoning
-effort come from `.harness/launch.json`. Aboard reads
-that file for every new launch, resume, or reopen, so existing processes keep their configuration while
-future sessions use your latest choices.
+effort come from `.harness/config.json`. Aboard reads
+that file whenever a launch, resume, or reopen starts a new process, so existing processes keep their
+configuration while future sessions use your latest choices.
 
 The Fleet shows live sessions. Recent Activity keeps completed work available for inspection and supported reopen flows.
 
-Focusing a live session reveals its existing terminal. Reopening an ended session asks that session's
-recorded provider to resume the conversation with its latest launch configuration; if that conversation is
+Focusing a live interactive session reveals its existing terminal. Background sessions have no terminal.
+Reopening an ended session preserves its provider, working directory, and conversation, and opens an
+interactive terminal ready for you to type. If that conversation is
 no longer available, its activity remains visible but cannot be reopened.
 
-Interactive and manually delegated sessions inherit your native Claude Code or ChatGPT settings. Exploration sessions are read-only. AUTO RUN workers use stricter, extension-owned Git and GitHub restrictions.
+Interactive sessions and manual delegation tasks have independent launch profiles. Their omitted model and
+effort settings inherit your native Claude Code or ChatGPT configuration, except exploration, which defaults
+to Haiku/low for Claude and GPT-5.6 Luna/low for ChatGPT. Exploration sessions are read-only, run headlessly,
+and cannot be stopped, taken over, or resumed. AUTO RUN workers use separate profiles and stricter,
+extension-owned Git and GitHub restrictions.
 
 ## AUTO RUN
 
-AUTO RUN turns labelled GitHub issues into a visible, recoverable queue. Review the forecast in the panel or run `/auto --dry`; start from the panel or run `/auto` when the plan looks right.
+AUTO RUN turns labelled GitHub issues into a recoverable queue of unattended workers, each in its own
+visible terminal. Review the forecast in the panel or run `/auto --dry`; start from the panel or run `/auto` when the plan looks right.
 
 ### Full Workflow
 
@@ -60,7 +67,7 @@ flowchart TD
 ```mermaid
 flowchart TD
     EXPLORE{Exploration enabled?}
-    EXPLORE -->|Yes| X[Run read-only exploration<br/>and pass its report]
+    EXPLORE -->|Yes| X[Run one-shot headless<br/>read-only exploration<br/>and pass its report]
     EXPLORE -->|No| MODE{4 modes}
     X --> MODE
 
@@ -69,7 +76,7 @@ flowchart TD
     AFK -->|Yes| A1["/address-this<br/>Commit once"]
     A1 --> APUB[Push accepted implementation<br/>to its issue branch / PR]
     APUB --> AR["/review-this<br/>Commit once"]
-    AR --> ARPUB[Publish reviewer commit]
+    AR --> ARPUB[Publish review commit]
 
     MODE -->|HITL| HITL{Review enabled?}
     HITL -->|No| H0["/address-this<br/>Leave work uncommitted"]
@@ -93,11 +100,12 @@ flowchart TD
 
 - **HITL** publishes nothing until the user accept the final code by creating exactly 1 (non-empty) commit with a completely clean checkout. Aboard detects ordinary acceptance automatically.
 - **AFK** accepts only a successful worker result with exactly 1 clean descendant commit.
-- **Review** is mode-specific: an AFK reviewer contributes one fix or empty approval commit after publication; a HITL reviewer examines the uncommitted pinned code and leaves its fixes uncommitted for the user.
+- **Review** is mode-specific: an AFK review contributes one fix or empty approval commit after publication; a HITL review examines the uncommitted pinned code and leaves its fixes uncommitted for the user.
 - Aboard owns branch changes, publication, integration, and GitHub mutations. Workers may inspect, edit, stage, and commit within their assigned checkout.
 
-While HITL waits, focus the named implementer or reviewer handoff to inspect, continue, or ask that same
-conversation to create the acceptance commit. Stopping preserves recoverable state and the exact failed worker
+While HITL waits, inspect the worker's checkout and create the acceptance commit when the changes are ready.
+The worker that handed off keeps its terminal, so you can also ask it for changes before you accept; closing
+that terminal before the acceptance commit stops the run recoverably instead of waiting forever. Stopping preserves recoverable state and the exact failed worker
 conversation. Resume is for stopped or interrupted attempts; a normal acceptance commit advances without it.
 Discard follows the configured cleanup policy and never removes dirty or moved work it can no longer prove it owns.
 
@@ -105,28 +113,62 @@ Discard follows the configured cleanup policy and never removes dirty or moved w
 
 | Location | Purpose |
 | --- | --- |
-| `.harness/launch.json` | Configures Claude and ChatGPT equally; `autoRun.provider` selects the Auto Run default. |
+| `.harness/config.json` | Configures Claude and ChatGPT equally; `autoRun.provider` selects the Auto Run default. |
 | `.abd/settings.json` | Stores project-level Aboard settings. |
 | VS Code settings | Supplies user and profile defaults under `aboard.*`. |
 
 Non-launch settings resolve from VS Code workspace settings, then `.abd/settings.json`, then user or profile settings and defaults. AUTO RUN freezes RUN-specific settings for recovery; it reads launch configuration again whenever it starts or resumes an agent.
 
-The scaffold configures both providers. Claude is only the default for AUTO RUN; **Run Agent** asks for a
-provider explicitly, the **Run Claude Code** and **Run Codex** rows each name one, and reopening follows the
-provider stored with the session:
+`aboard.sessions.interactiveResumeMode` controls interactive `resume-agent` continuations for Claude Code and ChatGPT. The default, `fork`, opens a new terminal with a copy of a live child's conversation. Set it to `reuse-terminal` to paste and submit the next message into the child's matching live terminal. Aboard focuses that terminal and preserves the conversation and reply tracking. If that session is no longer open or tracked, Aboard uses the existing fork/reopen flow. Reused processes retain their launch settings; auto execution is unaffected.
+
+The scaffold is intentionally sparse. Omitted settings use product defaults, including Claude as the AUTO RUN provider and the native `claude` and `codex` commands:
 
 ```json
 {
-  "version": 3,
-  "autoRun": { "provider": "claude" },
+  "version": 1
+}
+```
+
+Add only the overrides the project needs. Delegation profiles are independent from interactive sessions and AUTO RUN workers. Every profile can override its provider's `command`; omitted task commands inherit the provider command:
+
+```json
+{
+  "version": 1,
   "providers": {
-    "claude": { "command": ["claude"] },
-    "chatgpt": { "command": ["codex"] }
+    "chatgpt": {
+      "delegations": {
+        "websearch": {
+          "command": ["codex-wrapper", "search"],
+          "model": "gpt-5.6-sol",
+          "effort": "high"
+        }
+      }
+    }
   }
 }
 ```
 
+For example, Claude Auto Run can explore through Kiro while its address and review workers keep using native Claude Code:
+
+```json
+{
+  "version": 1,
+  "providers": {
+    "claude": {
+      "command": ["claude"],
+      "autoRun": {
+        "explore": { "command": ["clauder", "run", "kiro"] }
+      }
+    }
+  }
+}
+```
+
+The available manual delegation keys are `explore`, `prototype`, `websearch`, `brainstorm`, `address`, `review`, and `general`. Prototype delegation supports only `interactive` mode; `auto` is rejected. AUTO RUN has separate `explore`, `address`, and `review` keys under each provider's `autoRun` object. The JSON schema supplies completion and documents key defaults; Aboard resolves the effective values in code.
+
 Worktree mode gives a run its own checkout. Aboard copies ignored local `.claude`, `.agents`, `.codex`, and `.abd` configuration without overwriting tracked files. Optional setup commands live in `.abd/session-setup.ps1` and `.abd/session-setup.sh`.
+
+The hosted Grill-Me board relay runs per project: the VS Code extension host must have both `HARNESS_GRILL_URL` (an origin without a trailing slash) and the shared four-digit `HARNESS_GRILL_CODE`, and the workspace must be initialized. A project without a ready `.abd/` neither reports presence nor polls the board, and removing `.abd/` stops its relay. Each relay reports its own project name and home-relative path alongside presence, so the board's Aboard status names the project it belongs to. Aboard reports only open, bound provider sessions, revalidates the terminal binding, submits the immutable prompt as ordinary bracketed-paste user input, and acknowledges the delivery only after the provider's `UserPromptSubmit` hook confirms it arrived; an unconfirmed prompt is reported as failed after 15 seconds. Aboard-launched terminals inherit both values.
 
 ## Development
 
@@ -143,3 +185,5 @@ npm run package
 Use `npm run test:integration` for unit and VS Code integration tests. `npm run e2e:full` runs the complete disposable real-CLI journey.
 
 Aboard keeps its npm build and `aboard-v<version>` release history independent from the Python installer. The packaged VSIX includes this README and the extension runtime, never the Harness skill catalogue.
+
+Harness delegation uses persistent conversation inboxes outside the workspace. Children retain their Harness identities and execution modes across continuation. A caller-driven resume requires a next message. Live children normally continue in a fork; interactive children can instead receive the message in their existing terminal through `aboard.sessions.interactiveResumeMode`. Delegation request IDs are stored in extension runtime storage so restarting Aboard cannot blindly launch a request twice; conflicting reuse of an ID is refused.

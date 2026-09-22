@@ -19,7 +19,7 @@ interface Manifest {
   };
 }
 
-test("launch command, model, effort, and denials live only in .harness/launch.json", async () => {
+test("launch command, model, effort, and denials live only in .harness/config.json", async () => {
   const { contributes } = await manifest();
   const settings = Object.keys(contributes.configuration.properties);
   assert.equal(settings.includes("aboard.launch.claudeCommand"), false);
@@ -111,10 +111,10 @@ test("each provider is launched from its own row above the fleet, not a title ic
   }
 });
 
-test("the launch file has editor validation for the version 3 provider schema", async () => {
+test("the launch file has editor validation for the provider schema", async () => {
   const { contributes, files } = await manifest();
-  assert.deepEqual(contributes.jsonValidation, [{ fileMatch: "**/.harness/launch.json", url: "./assets/launch.schema.json" }]);
-  assert.ok(files.includes("assets/launch.schema.json"), "the registered schema must ship in the VSIX");
+  assert.deepEqual(contributes.jsonValidation, [{ fileMatch: "**/.harness/config.json", url: "./assets/config.schema.json" }]);
+  assert.ok(files.includes("assets/config.schema.json"), "the registered schema must ship in the VSIX");
 });
 
 test("every action rendered inline in a panel has an icon", async () => {
@@ -162,11 +162,11 @@ test("the auto-run card offers exactly the actions its state allows", async () =
   const inline = contributes.menus["view/item/context"] ?? [];
   const action = (command: string) => inline.find((entry) => entry.command === command);
 
-  // Start lives on the card itself as its inline action; repeating it in the
-  // view title would only duplicate the button one row below.
+  // The title keeps Start discoverable when the card cannot offer it.
   const start = action("aboard.startAutoRun");
   assert.match(start?.group ?? "", /^inline@/, "Start Auto Run must be the card's inline action");
-  assert.equal(title.some((entry) => entry.command === "aboard.startAutoRun"), false, "Start Auto Run must not also sit in the view title");
+  assert.equal(title.find((entry) => entry.command === "aboard.startAutoRun")?.when,
+    "view == aboard.autoRun && aboard.initialized && !aboard.autoRunActive");
 
   // Start is offered only for a successfully checked, ready preview. Idle,
   // failed, refreshing, empty, and blocked forecasts must be reviewed first.
@@ -178,7 +178,7 @@ test("the auto-run card offers exactly the actions its state allows", async () =
   const resume = action("aboard.resumeAutoRun");
   assert.match(resume?.when ?? "", /aboard\.autoRun\.recoverable/);
   assert.match(resume?.group ?? "", /^inline@1$/);
-  for (const state of ["checking", "broken", "unsupported", "idle"]) {
+  for (const state of ["checking", "broken", "idle"]) {
     assert.doesNotMatch(resume?.when ?? "", new RegExp(`aboard\\.autoRun\\.${state}`), state);
   }
   // Discard is the card's inline action, never a 3-dots menu entry: it is the
@@ -186,7 +186,7 @@ test("the auto-run card offers exactly the actions its state allows", async () =
   assert.equal(title.some((entry) => entry.command === "aboard.discardAutoRun"), false, "Discard must not sit in the view title");
   const discardInline = action("aboard.discardAutoRun");
   assert.match(discardInline?.group ?? "", /^inline@/, "Discard Auto Run must be the card's inline action");
-  for (const state of ["recoverable", "broken", "unsupported"]) {
+  for (const state of ["recoverable", "broken"]) {
     assert.match(discardInline?.when ?? "", new RegExp(state), state);
   }
   const stop = action("aboard.stopAutoRun");
@@ -204,10 +204,9 @@ test("the auto-run card offers exactly the actions its state allows", async () =
   const issueButtons = inline.filter((entry) => entry.command === "aboard.openIssue" && (entry.when ?? "").includes("aboard.autoRun.issue"));
   assert.equal(issueButtons.length, 1, "each issue row must contribute one GitHub issue button");
 
-  // The palette mirrors the same gating, so neither surface can offer a Start
-  // the other refuses.
+  // The palette remains discoverable while there is no active run.
   const palette = new Map((contributes.menus.commandPalette ?? []).map((entry) => [entry.command, entry.when]));
-  assert.equal(palette.get("aboard.startAutoRun"), "aboard.initialized && aboard.autoRunCard == forecast");
+  assert.equal(palette.get("aboard.startAutoRun"), "aboard.initialized && !aboard.autoRunActive");
   assert.match(palette.get("aboard.resumeAutoRun") ?? "", /aboard\.autoRunCard == recoverable/);
 });
 

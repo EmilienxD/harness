@@ -4,10 +4,66 @@ import { tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
 import { spawn, spawnSync } from "node:child_process";
 import test from "node:test";
+import { createBackgroundProcess } from "../../src/platform/background.js";
 
-import { lockMarkerDirectory, lockMarkerPresent, sessionExitFailure, sessionLaunchFailure, sessionWrapperLayout, takeSessionExitRecord, watchLockMarkers } from "../../src/runtime/lock-markers.js";
+import { lockMarkerDirectory, lockMarkerLive, lockMarkerPresent, sessionExitFailure, sessionLaunchFailure, sessionWrapperLayout, takeSessionExitRecord, watchLockMarkers } from "../../src/runtime/lock-markers.js";
 
 const WRAPPER = join(process.cwd(), "assets", "runtime", "abd_wrapper.py");
+
+test("Windows headless provider has no console window", { skip: process.platform !== "win32", timeout: 10_000 }, async () => {
+  const root = mkdtempSync(join(tmpdir(), "aboard-headless-console-"));
+  try {
+    let done!: () => void;
+    const exited = new Promise<void>((resolve) => { done = resolve; });
+    const handle = createBackgroundProcess({ cwd: root, env: {
+      ABOARD_RUNTIME_ROOT: root, ABOARD_AGENT_ID: "probe", HARNESS_EXECUTION_ID: "", ABOARD_HEADLESS_CHATGPT: "",
+    } }, "powershell", () => done());
+    const quote = (value: string) => `'${value.replaceAll("'", "''")}'`;
+    handle.sendText(`& uv run --no-project python ${quote(WRAPPER)} ${quote(join(root, "agent.lock"))} -- uv run --no-project python -c ${quote("import ctypes; print(ctypes.windll.kernel32.GetConsoleWindow())")}`, true);
+    await exited;
+    assert.equal(handle.exitStatus?.code, 0, readFileSync(join(root, "executions", "stderr.log"), "utf8"));
+    assert.equal(readFileSync(join(root, "executions", "stdout.jsonl"), "utf8").trim(), "0", "headless provider must not allocate a console");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("headless ChatGPT wrapper reports native stream startup and completion without CLI hooks", async () => {
+  const { createServer } = await import("node:http");
+  const root = mkdtempSync(join(tmpdir(), "aboard-native-stream-"));
+  const events: { route: string; body: Record<string, unknown> }[] = [];
+  const server = createServer((request, response) => {
+    let body = "";
+    request.on("data", (chunk) => { body += chunk; });
+    request.on("end", () => {
+      events.push({ route: request.url!, body: JSON.parse(body) as Record<string, unknown> });
+      response.end(JSON.stringify({ ok: true, accepted: true }));
+    });
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const port = (server.address() as { port: number }).port;
+  const sessionId = "af817a6c-cd41-41e2-a4db-44d3f43cd560";
+  const stream = [
+    { type: "thread.started", thread_id: sessionId },
+    { type: "item.completed", item: { type: "agent_message", text: "Native result" } },
+    { type: "turn.completed" },
+  ].map((event) => JSON.stringify(event)).join("\n") + "\n";
+  const child = spawn("uv", ["run", "--no-project", "python", WRAPPER, join(root, "agent.lock"), "--", process.execPath, "-e", `process.stdout.write(${JSON.stringify(stream)})`], {
+    env: { ...process.env, HARNESS_EXECUTION_ID: "", HARNESS_EXECUTION_MODE: "auto", ABOARD_HEADLESS: "1", ABOARD_HEADLESS_CHATGPT: "1", ABOARD_AGENT_ID: "7", ABOARD_SESSION_ID: "provisional", ABOARD_BRIDGE_PORT: String(port), ABOARD_BRIDGE_TOKEN: "dummy" },
+    stdio: "ignore",
+  });
+  try {
+    const code = await new Promise<number | null>((resolve) => child.once("close", resolve));
+    assert.equal(code, 0);
+    assert.deepEqual(events.map((event) => event.route), ["/hooks/session-start", "/hooks/stop"]);
+    assert.equal(events[0]?.body.sessionId, sessionId);
+    assert.equal(events[1]?.body.lastAssistantMessage, "Native result");
+  } finally {
+    child.kill();
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+    rmSync(root, { recursive: true, force: true });
+  }
+});
 
 test("each Aboard launch gets a fresh one-time code", () => {
   const layout = sessionWrapperLayout("C:\\storage\\runtime", WRAPPER);
@@ -18,7 +74,7 @@ test("each Aboard launch gets a fresh one-time code", () => {
 });
 
 function uv(args: readonly string[], options: { readonly input?: string; readonly env?: NodeJS.ProcessEnv } = {}) {
-  return spawnSync("uv", ["run", "--no-project", "python", ...args], { input: options.input, encoding: "utf8", env: options.env });
+  return spawnSync("uv", ["run", "--no-project", "python", ...args], { input: options.input, encoding: "utf8", env: options.env, windowsHide: true });
 }
 
 test("wrapper owns the marker for exactly the child's lifetime", async () => {
@@ -55,6 +111,30 @@ test("wrapper owns the marker for exactly the child's lifetime", async () => {
     assert.equal(takeSessionExitRecord(lock), undefined, "the record is consumed");
   } finally {
     child.kill();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("a marker left by a killed wrapper is no longer evidence of a live execution", () => {
+  const root = mkdtempSync(join(tmpdir(), "aboard-markers-"));
+  const directory = lockMarkerDirectory(root);
+  mkdirSync(directory, { recursive: true });
+  const lock = join(directory, "a1.lock");
+  try {
+    // A terminal closed from the title bar kills the wrapper before its cleanup runs.
+    writeFileSync(lock, JSON.stringify({ agentId: "a1", wrapperPid: 0x7fff_ffff, childPid: 0x7fff_fffe }));
+    assert.equal(lockMarkerPresent(lock), true);
+    assert.equal(lockMarkerLive(lock), false);
+
+    writeFileSync(lock, JSON.stringify({ agentId: "a1", wrapperPid: process.pid, childPid: 0x7fff_fffe }));
+    assert.equal(lockMarkerLive(lock), true);
+
+    // Without recorded identities the marker is all the evidence there is.
+    writeFileSync(lock, "{}");
+    assert.equal(lockMarkerLive(lock), true);
+    rmSync(lock);
+    assert.equal(lockMarkerLive(lock), false);
+  } finally {
     rmSync(root, { recursive: true, force: true });
   }
 });
@@ -189,7 +269,7 @@ test("Windows wrapper preserves exact argv through an npm command shim", { skip:
   const entry = join(root, "node_modules", "example-cli", "bin", "cli.js");
   const args = [
     "-c",
-    'hooks.SessionStart=[{matcher="startup|resume",hooks=[{command="echo (ready) ^ now"}]}]',
+    'model_instructions_file="echo (ready) ^ now"',
     "prompt with spaces & punctuation",
   ];
   try {

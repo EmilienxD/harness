@@ -11,6 +11,11 @@ from subagents_runtime.cli import build_parser
 
 def configured(tmp_path, monkeypatch, launches):
     monkeypatch.setenv("HARNESS_STATE_DIR", str(tmp_path))
+    from subagents_runtime import processes
+    def start(execution_id,argv,environment,cwd,visible):
+        launches.append((argv,environment,cwd))
+        processes.confirm_startup(execution_id)
+    monkeypatch.setattr(processes,"start",start)
     monkeypatch.setattr(sessions, "_visible_terminal", lambda argv, environment, cwd: launches.append((argv, environment, cwd)))
     monkeypatch.setattr(sessions, "_command_from_config", lambda _config, _provider: ["claude"])
 
@@ -19,6 +24,8 @@ def test_resume_uses_registered_provider_session(tmp_path, monkeypatch):
     launches = []
     configured(tmp_path, monkeypatch, launches)
     session_id = sessions.launch(provider="claude")
+    with sessions._connect() as connection:
+        connection.execute("UPDATE executions SET state='exited' WHERE session_id=?",(session_id,))
     sessions.resume(session_id)
     assert launches[-1][0] == ["claude", "--resume", session_id]
     assert launches[-1][1]["HARNESS_SESSION_ID"] == session_id
@@ -42,6 +49,7 @@ def test_array_commands_are_argv_and_preserve_token_contents():
 
 
 def test_delegated_launch_prefers_the_scoped_aboard_endpoint(tmp_path, monkeypatch):
+    monkeypatch.setenv("HARNESS_STATE_DIR",str(tmp_path / "state"))
     project = tmp_path / "project"
     project.mkdir()
     monkeypatch.setattr(
@@ -59,42 +67,55 @@ def test_delegated_launch_prefers_the_scoped_aboard_endpoint(tmp_path, monkeypat
     monkeypatch.setattr(sessions.urllib.request, "urlopen", urlopen)
     monkeypatch.setattr(sessions, "_visible_terminal", lambda *_args: pytest.fail("native fallback used"))
     request = type("Request", (), {"task": "prototype", "provider": "chatgpt", "mode": "auto", "prompt": "Build it."})()
-    assert sessions.launch_delegated(request, "request", 1, project) == "aboard-child"
+    assert sessions._launch_through_aboard(request, "request", project) == "aboard-child"
     assert captured["authorization"] == "Bearer scoped-secret"
     assert captured["body"]["requestId"] == "request"
     assert captured["body"]["cwd"] == str(project.resolve())
 
 
-@pytest.mark.parametrize(("task", "skill"), [
-    ("websearch", "websearch"),
-    ("implement", "address-this"),
-    ("review", "review-this"),
-])
-def test_native_provider_adapter_injects_the_requested_skill_and_exact_cwd(task, skill, tmp_path, monkeypatch):
+@pytest.mark.parametrize("provider", ["claude","chatgpt"])
+@pytest.mark.parametrize("mode", ["interactive","auto"])
+def test_native_provider_adapter_uses_reserved_id_mode_and_cwd(provider,mode,tmp_path,monkeypatch):
     launches = []
-    monkeypatch.setenv("HARNESS_STATE_DIR", str(tmp_path / "state"))
-    monkeypatch.setattr(sessions, "_discover_delegation_endpoint", lambda _cwd: None)
-    monkeypatch.setattr(sessions, "_command_from_config", lambda _config, provider="claude": ["codex" if provider == "chatgpt" else "claude"])
-    monkeypatch.setattr(sessions, "_visible_terminal", lambda argv, environment, cwd: launches.append((argv, environment, cwd)))
-    request = type("Request", (), {"task": task, "provider": "chatgpt", "mode": "interactive", "prompt": "Do it."})()
-    sessions.launch_delegated(request, "request", 2, tmp_path)
-    argv, environment, cwd = launches[0]
-    assert argv[-2:] == ["--", f"${skill}\n\nDo it."]
-    assert environment["HARNESS_EXECUTION_MODE"] == "interactive"
-    assert cwd == tmp_path.resolve()
+    configured(tmp_path / "state",monkeypatch,launches)
+    monkeypatch.setattr(sessions,"_discover_delegation_endpoint",lambda _: None)
+    from subagents_runtime.delegation import enable_delegation,process_inbox
+    sessions.register_observed("parent",tmp_path,provider)
+    inbox = enable_delegation("parent","work-with-agent").inbox
+    source = inbox / "work.md"
+    source.write_text(f"---\ntask: general\nmode: {mode}\n---\nWork.",encoding="utf-8")
+    [result] = process_inbox("parent",launch=sessions.launch_delegated)
+    assert result.status == "launched"
+    assert launches[-1][1]['HARNESS_SESSION_ID'] == result.child_session_id
+    assert launches[-1][1]['HARNESS_EXECUTION_MODE'] == mode
+    assert launches[-1][2] == tmp_path.resolve()
+    if mode == 'auto':
+        assert ('-p' in launches[-1][0]) if provider == 'claude' else ('exec' in launches[-1][0])
 
 
-def test_native_claude_launch_names_the_session_after_its_agent_number(tmp_path, monkeypatch):
+def test_interactive_claude_child_does_not_inherit_nested_session_marker(
+    tmp_path, monkeypatch
+):
     launches = []
-    configured(tmp_path, monkeypatch, launches)
-    monkeypatch.setattr(sessions, "_discover_delegation_endpoint", lambda _cwd: None)
-    request = type("Request", (), {"task": "explore", "provider": "claude", "mode": "auto", "prompt": "Look."})()
-    sessions.launch_delegated(request, "request", 3, tmp_path)
-    argv = launches[0][0]
-    assert argv[argv.index("--name") + 1] == "Agent 3 (explore)"
+    configured(tmp_path / "state", monkeypatch, launches)
+    monkeypatch.setattr(sessions, "_discover_delegation_endpoint", lambda _: None)
+    monkeypatch.setenv("CLAUDE_CODE_CHILD_SESSION", "1")
+    from subagents_runtime.delegation import enable_delegation, process_inbox
+
+    sessions.register_observed("parent", tmp_path, "claude")
+    inbox = enable_delegation("parent", "work-with-agent").inbox
+    (inbox / "work.md").write_text(
+        "---\ntask: general\nmode: interactive\n---\nWork.", encoding="utf-8"
+    )
+
+    [result] = process_inbox("parent", launch=sessions.launch_delegated)
+
+    assert result.status == "launched"
+    assert "CLAUDE_CODE_CHILD_SESSION" not in launches[-1][1]
 
 
 def test_scoped_aboard_launch_refreshes_endpoint_after_unauthorized_response(tmp_path, monkeypatch):
+    monkeypatch.setenv("HARNESS_STATE_DIR",str(tmp_path / "state"))
     endpoints = iter([
         ("127.0.0.1", 4823, "expired"),
         ("127.0.0.1", 4923, "fresh"),
@@ -111,7 +132,7 @@ def test_scoped_aboard_launch_refreshes_endpoint_after_unauthorized_response(tmp
     monkeypatch.setattr(sessions.urllib.request, "urlopen", urlopen)
     request = type("Request", (), {"task": "general", "provider": "claude", "mode": "auto", "prompt": "Do it."})()
 
-    assert sessions.launch_delegated(request, "request", 1, tmp_path) == "aboard-child"
+    assert sessions._launch_through_aboard(request, "request", tmp_path) == "aboard-child"
     assert calls == [
         ("http://127.0.0.1:4823/delegations", "Bearer expired"),
         ("http://127.0.0.1:4923/delegations", "Bearer fresh"),
@@ -124,7 +145,7 @@ def test_cli_requires_an_explicit_run_provider_and_keeps_other_commands_narrow()
     assert parser.parse_args(["run", "--provider", "chatgpt"]).provider == "chatgpt"
     with pytest.raises(SystemExit):
         parser.parse_args(["run"])
-    assert parser.parse_args(["ask", "grant-123"]).grant_id == "grant-123"
+    assert parser.parse_args(["ask", "session-123"]).session_id == "session-123"
     assert parser.parse_args(["reply"]).command == "reply"
     with pytest.raises(SystemExit):
         parser.parse_args(["reply", "embedded answer"])
@@ -138,6 +159,8 @@ def test_runtime_assigned_chatgpt_identity_binds_for_resume(tmp_path, monkeypatc
     monkeypatch.setenv("HARNESS_SESSION_ID", stable)
 
     assert sessions.bind_observed("runtime-codex-id", tmp_path, "chatgpt") == stable
+    with sessions._connect() as connection:
+        connection.execute("UPDATE executions SET state='exited' WHERE session_id=?",(stable,))
     sessions.resume(stable)
 
     assert launches[-1][0] == ["codex", "resume", "runtime-codex-id"]
@@ -169,45 +192,94 @@ def test_launch_configuration_resolves_project_then_global_then_defaults(tmp_pat
     monkeypatch.setenv("HARNESS_STATE_DIR", str(state))
     monkeypatch.setattr(sessions.shutil, "which", lambda command: command)
 
-    assert sessions.launch_configuration(project) == {
-        "version": 3,
-        "autoRun": {"provider": "claude"},
-        "providers": {"claude": {}, "chatgpt": {}},
-    }
+    assert sessions.launch_configuration(project) == {"version": 1}
     state.mkdir()
-    (state / "launch.json").write_text(
-        '{"version":3,"autoRun":{"provider":"claude"},"providers":{"claude":{},"chatgpt":{"command":["global-codex"]}}}', encoding="utf-8"
+    (state / "config.json").write_text(
+        '{"version":1,"autoRun":{"provider":"claude"},"providers":{"claude":{},"chatgpt":{"command":["global-codex"]}}}', encoding="utf-8"
     )
     assert sessions._provider_command(sessions.launch_configuration(project), "chatgpt") == ["global-codex"]
 
     (project / ".harness").mkdir()
-    (project / ".harness" / "launch.json").write_text(
-        '{"version":3,"autoRun":{"provider":"claude"},"providers":{"claude":{"command":["project-claude"]},"chatgpt":{}}}', encoding="utf-8"
+    (project / ".harness" / "config.json").write_text(
+        '{"version":1,"autoRun":{"provider":"claude"},"providers":{"claude":{"command":["project-claude"]},"chatgpt":{}}}', encoding="utf-8"
     )
     assert sessions._provider_command(sessions.launch_configuration(project), "claude") == ["project-claude"]
     assert sessions._provider_command(sessions.launch_configuration(project), "chatgpt") == ["codex"]
 
 
-def test_launch_configuration_validates_v3_provider_and_session_shapes(tmp_path, monkeypatch):
+def test_launch_configuration_validates_sparse_provider_and_session_shapes(tmp_path, monkeypatch):
     project = tmp_path / "project"
-    launch = project / ".harness" / "launch.json"
+    launch = project / ".harness" / "config.json"
     launch.parent.mkdir(parents=True)
     monkeypatch.setenv("HARNESS_STATE_DIR", str(tmp_path / "state"))
 
     for value in (
         {"version": 2, "platform": "claude"},
-        {"version": 3, "autoRun": {"provider": "claude"}, "providers": {"claude": {}}},
-        {"version": 3, "autoRun": {"provider": "codex"}, "providers": {"claude": {}, "chatgpt": {}}},
-        {"version": 3, "autoRun": {"provider": "claude"}, "providers": {"claude": {}, "chatgpt": {}}, "session": {"stopWaitHours": -1}},
+        {"version": 1, "autoRun": {"provider": "codex"}, "providers": {"claude": {}, "chatgpt": {}}},
+        {"version": 1, "autoRun": {"provider": "claude"}, "providers": {"claude": {}, "chatgpt": {}}, "session": {"stopWaitHours": -1}},
     ):
         launch.write_text(json.dumps(value), encoding="utf-8")
         with pytest.raises(sessions.SessionError):
             sessions.launch_configuration(project)
 
     launch.write_text(json.dumps({
-        "version": 3,
+        "version": 1,
         "autoRun": {"provider": "claude"},
         "providers": {"claude": {}, "chatgpt": {}},
         "session": {"stopWaitHours": 1.5},
     }), encoding="utf-8")
     assert sessions.launch_configuration(project)["session"]["stopWaitHours"] == 1.5
+
+
+def test_standalone_delegation_profiles_use_task_defaults_and_sparse_overrides():
+    sparse = {"version": 1}
+    assert sessions.delegation_profile_arguments(sparse, "chatgpt", "explore") == [
+        "--model", "gpt-5.6-luna", "-c", 'model_reasoning_effort="low"'
+    ]
+    assert sessions.delegation_profile_arguments(sparse, "chatgpt", "prototype") == []
+    configured = {
+        "version": 1,
+        "providers": {"claude": {"delegations": {"review": {"model": "opus", "effort": "high"}}}},
+    }
+    assert sessions.delegation_profile_arguments(configured, "claude", "review") == [
+        "--model", "opus", "--effort", "high"
+    ]
+
+
+def test_standalone_claude_delegation_profile_applies_tool_denials():
+    configured = {
+        "version": 1,
+        "providers": {
+            "claude": {
+                "delegations": {
+                    "review": {"deniedTools": ["Agent", "WebSearch", "Agent"]}
+                }
+            }
+        },
+    }
+
+    assert sessions.delegation_profile_arguments(
+        configured, "claude", "review"
+    ) == ["--disallowedTools", "Agent,WebSearch"]
+
+
+@pytest.mark.parametrize(
+    ("provider", "profile"),
+    [
+        ("claude", {"model": "gpt-5.6-sol"}),
+        ("claude", {"effort": "minimal"}),
+        ("chatgpt", {"model": "opus"}),
+        ("chatgpt", {"model": "by-difficulty"}),
+        ("chatgpt", {"effort": "max"}),
+    ],
+)
+def test_standalone_delegation_profiles_reject_provider_invalid_values(
+    provider, profile
+):
+    configured = {
+        "version": 1,
+        "providers": {provider: {"delegations": {"review": profile}}},
+    }
+
+    with pytest.raises(sessions.SessionError):
+        sessions.delegation_profile_arguments(configured, provider, "review")

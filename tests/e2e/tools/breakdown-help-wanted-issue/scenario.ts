@@ -1,29 +1,11 @@
 import { createHash } from "node:crypto";
+import { join } from "node:path";
 import { E2eProtocolError, isRecord, type AnthropicMessagesRequest, type AnthropicScenarioResponse } from "../../core/anthropic-protocol.js";
 import { OpenAiProtocolError, type OpenAiResponseOutput, type OpenAiResponsesRequest, type OpenAiScenarioResponse } from "../../core/openai-server.js";
 
 export const FIXTURE_FILE = "retry-imports.txt";
 export const FIXTURE_CONTENT = "Imports are retried by uploading the source file again.\n";
-export const REPORT = `## Request and purpose
-
-Issue #17 asks to let users retry failed imports without uploading the source file again.
-
-## Current behavior and evidence
-
-The fixture states that retries currently require another upload.
-
-## Proposed scope
-
-Preserve the uploaded source for a retry and expose a retry action for failed imports.
-
-## Blockers and open decisions
-
-The retention lifetime and authorization rules still need a product decision.
-
-## Recommendation
-
-Revise the request to specify retention and authorization, then proceed. Please validate or correct this report.
-`;
+export const REPORT = "Retries currently require another upload. I recommend preserving the source and exposing a retry action. How long should we retain the source, and who may retry?";
 export const scenarioCatalogHash = createHash("sha256").update("breakdown-help-wanted-issue:v1").digest("hex");
 const CLAUDE_READ = "toolu_e2e_breakdown_read";
 const CODEX_READ = "call_e2e_breakdown_read";
@@ -36,11 +18,13 @@ export function claudeTransition(request: AnthropicMessagesRequest, repoRoot: st
   return response("report-complete", "end_turn", [{ type: "text", text: REPORT }]);
 }
 
-export function codexTransition(request: OpenAiResponsesRequest): OpenAiScenarioResponse {
+export function codexTransition(request: OpenAiResponsesRequest, repoRoot: string): OpenAiScenarioResponse {
   const text = deepText([request.instructions, request.input]);
   const outputs = request.input.filter((item) => item.type === "custom_tool_call_output" || item.type === "function_call_output");
   if (!outputs.some((item) => item.call_id === CODEX_READ)) {
-    const args = { cmd: `git show HEAD:${FIXTURE_FILE}`, yield_time_ms: 10_000, max_output_tokens: 2_000 };
+    const fixturePath = Buffer.from(join(repoRoot, FIXTURE_FILE), "utf8").toString("base64");
+    const readScript = "const fs=require('node:fs'),p=Buffer.from(process.argv[1],'base64').toString('utf8');process.stdout.write(fs.readFileSync(p,'utf8'))";
+    const args = { cmd: `node -e \"${readScript}\" ${fixturePath}`, workdir: repoRoot, yield_time_ms: 10_000, max_output_tokens: 2_000 };
     const output: OpenAiResponseOutput = request.codeMode
       ? { type: "custom_tool_call", id: `ctc_${CODEX_READ}`, call_id: CODEX_READ, name: "exec", status: "completed", input: `const result = await tools.exec_command(${JSON.stringify(args)}); text(result.output);` }
       : { type: "function_call", id: `fc_${CODEX_READ}`, call_id: CODEX_READ, name: "exec_command", status: "completed", arguments: JSON.stringify(args) };

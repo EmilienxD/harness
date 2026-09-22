@@ -135,7 +135,7 @@ def _validate_selectable(names: set[str], available: dict[str, Tool]) -> None:
 
 
 def run_install(args: Namespace) -> int:
-    available = discover()
+    available = discover(local=args.local) if getattr(args, "local", None) is not None else discover()
     requested = set(args.packages)
     if args.all and requested:
         raise UsageError("--all cannot be combined with package names")
@@ -170,6 +170,7 @@ def run_install(args: Namespace) -> int:
             for name in sorted(requested - compatible_requested)
         ]
         installer = CatalogueInstaller(available, target, store)
+        installer.update_packages = compatible_requested
         _, changes = installer.plan(selected)
         result = {
             "platform": target.platform.value,
@@ -212,7 +213,7 @@ def run_uninstall(args: Namespace) -> int:
     if not args.all and not requested:
         raise UsageError("specify package names or use --all")
 
-    available = discover()
+    available = discover(local=args.local) if getattr(args, "local", None) is not None else discover()
     platforms = _selected_platforms(args)
     targets = _targets(args, platforms)
     store = ReceiptStore.load()
@@ -241,6 +242,7 @@ def run_uninstall(args: Namespace) -> int:
             for name in sorted(requested - roots)
         ]
         installer = CatalogueInstaller(available, target, store)
+        installer.update_packages = set()
         _, changes = installer.plan(selected)
         result = {
             "platform": target.platform.value,
@@ -270,7 +272,7 @@ def run_uninstall(args: Namespace) -> int:
 
 
 def run_upgrade(args: Namespace) -> int:
-    available = discover()
+    available = discover(local=args.local) if getattr(args, "local", None) is not None else discover()
     platforms = _selected_platforms(args)
     targets = _targets(args, platforms)
     store = ReceiptStore.load()
@@ -326,7 +328,7 @@ def _support(tool: Tool, platforms: tuple[Platform, ...]) -> dict[str, dict[str,
 
 
 def run_list(args: Namespace) -> int:
-    available = discover()
+    available = discover(local=args.local) if getattr(args, "local", None) is not None else discover()
     platforms = _selected_platforms(args)
     targets = _targets(args, platforms)
     store = ReceiptStore.load()
@@ -418,7 +420,7 @@ def run_list(args: Namespace) -> int:
 
 
 def run_info(args: Namespace) -> int:
-    available = discover()
+    available = discover(local=args.local) if getattr(args, "local", None) is not None else discover()
     requested = set(args.packages)
     unknown = sorted(requested - available.keys())
     if unknown:

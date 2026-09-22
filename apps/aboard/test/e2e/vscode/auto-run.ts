@@ -72,7 +72,7 @@ export async function runAutoRunJourney(platform: E2ePlatform): Promise<void> {
       });
       if (phase === "initialize") await commitInitializedScaffold(config.cloneRoot, {
         "aboard.autoRun.review": true,
-        "aboard.autoRun.exploreBeforeImplement": true,
+        "aboard.autoRun.exploreBeforeAddress": true,
         "aboard.autoRun.issueContextDepth": 2,
         "aboard.autoRun.prompt": AUTO_RUN_PERMANENT_NOTE,
         "aboard.autoRun.mergeStrategy": "merge",
@@ -94,7 +94,7 @@ export async function runAutoRunJourney(platform: E2ePlatform): Promise<void> {
 }
 
 async function commitInitializedScaffold(root: string, settings: Readonly<Record<string, unknown>>, platform: E2ePlatform): Promise<void> {
-  const launchPath = join(root, ".harness", "launch.json");
+  const launchPath = join(root, ".harness", "config.json");
   const launch = JSON.parse(await readFile(launchPath, "utf8")) as {
     autoRun: { provider: E2ePlatform };
     providers: Record<E2ePlatform, { command: string[] }>;
@@ -102,7 +102,7 @@ async function commitInitializedScaffold(root: string, settings: Readonly<Record
   launch.autoRun.provider = platform;
   launch.providers[platform].command = platform === "claude" ? [
     "claude", "--permission-mode", "acceptEdits", "--allowedTools", "Bash(git add*),Bash(git commit*)",
-  ] : ["codex"];
+  ] : ["codex", "--dangerously-bypass-hook-trust"];
   await writeFile(launchPath, `${JSON.stringify(launch, null, 2)}\n`, "utf8");
   const settingsPath = join(root, ".vscode", "settings.json");
   await mkdir(join(root, ".vscode"), { recursive: true });
@@ -110,7 +110,7 @@ async function commitInitializedScaffold(root: string, settings: Readonly<Record
   if (settings["aboard.autoRun.worktree.enabled"] === true) await installWorktreeTrustSetup(root, platform);
   const hooks = join(root, ".git", "e2e-empty-hooks");
   await mkdir(hooks, { recursive: true });
-  await execFileAsync("git", ["add", "--", ".abd", ".harness/launch.json", ".vscode/settings.json", ...(platform === "chatgpt" ? [".agents"] : [])], { cwd: root, encoding: "utf8", windowsHide: true });
+  await execFileAsync("git", ["add", "--", ".abd", ".harness/config.json", ".vscode/settings.json", ...(platform === "chatgpt" ? [".agents"] : [])], { cwd: root, encoding: "utf8", windowsHide: true });
   await execFileAsync("git", ["-c", `core.hooksPath=${hooks}`, "-c", "commit.gpgSign=false", "commit", "--message", "Initialize aboard E2E fixture"], {
     cwd: root,
     encoding: "utf8",
@@ -268,7 +268,7 @@ async function runHitlJourney(platform: E2ePlatform, branchMode: "per-issue" | "
       if (phase === "initialize") await commitInitializedScaffold(config.cloneRoot, {
         "aboard.autoRun.branchMode": branchMode,
         "aboard.autoRun.review": review,
-        "aboard.autoRun.exploreBeforeImplement": false,
+        "aboard.autoRun.exploreBeforeAddress": false,
         "aboard.autoRun.issueContextDepth": 1,
         "aboard.autoRun.mergeStrategy": "rebase",
         "aboard.autoRun.mergeRunPullRequest": false,
@@ -283,9 +283,9 @@ async function runHitlJourney(platform: E2ePlatform, branchMode: "per-issue" | "
     const assertions = server.assertions();
     const expectedCheckpoints = review ? [
       "auto-hitl-read", "auto-hitl-edit", "auto-hitl-commit", "auto-hitl-complete",
-      "auto-hitl-review-read", "auto-hitl-review-complete", "auto-hitl-accept-commit", "auto-hitl-accept-complete",
+      "auto-hitl-review-read", "auto-hitl-review-complete",
     ] : [
-      "auto-hitl-read", "auto-hitl-edit", "auto-hitl-handoff", "auto-hitl-commit", "auto-hitl-complete",
+      "auto-hitl-read", "auto-hitl-edit", "auto-hitl-handoff",
       "auto-followup-read", "auto-followup-edit", "auto-followup-commit", "auto-followup-complete",
     ];
     for (const checkpoint of expectedCheckpoints) {
@@ -293,7 +293,7 @@ async function runHitlJourney(platform: E2ePlatform, branchMode: "per-issue" | "
       const expected = platform === "chatgpt" ? `${scenario}:${checkpoint}` : checkpoint;
       if (!assertions.checkpoints.includes(expected)) throw new Error(`HITL auto-run did not reach ${checkpoint}`);
     }
-    const expectedRequests = review ? 8 : 9;
+    const expectedRequests = review ? 6 : 7;
     if (assertions.inferenceRequests !== expectedRequests || assertions.unexpectedRequests !== 0) throw new Error("Unexpected HITL inference activity");
   } finally {
     await server.close();

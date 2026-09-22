@@ -58,7 +58,8 @@ export async function run(): Promise<void> {
   const fleetModel = new FleetTreeModel(fleet, new WriteLease(), { refresh: () => {} }, () => true);
   const row = fleetModel.roots().find((node) => node.kind === "agent" && node.session.identity.agentId === agentId);
   assert.ok(row, "the interactive session has an Agents row");
-  assert.equal(fleetModel.item(row).description, "running");
+  assert.equal(fleetModel.item(row).description, "Claude · running");
+  assert.equal(fleetModel.item(row).icon, "eye");
   fleetModel.dispose();
 
   const available = await commands.getCommands(true);
@@ -84,6 +85,7 @@ export async function run(): Promise<void> {
   const titleProbe = createVsCodeTerminalHost().createTerminal({
     cwd: root,
     env: {},
+    provider: "claude",
     // pwsh is an optional install; Windows PowerShell ships with the OS and
     // writes the same OSC title sequence, so either one proves the API works.
     shellPath: process.platform === "win32" ? (onPath("pwsh") ? "pwsh" : "powershell.exe") : "/bin/sh",

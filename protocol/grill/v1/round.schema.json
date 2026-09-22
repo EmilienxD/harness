@@ -1,0 +1,42 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/EmilienxD/harness/protocol/grill/v1/round.schema.json",
+  "title": "Harness hosted grill round v1",
+  "$comment": "Question IDs must also be unique; option letters must be consecutive from A; recommendation must name one option.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["questions"],
+  "properties": {
+    "questions": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "question", "explanation_html", "recommendation", "options"],
+        "properties": {
+          "id": { "type": "string", "pattern": "^Q[1-9][0-9]*$" },
+          "question": { "type": "string", "minLength": 1 },
+          "explanation_html": { "type": "string", "minLength": 1 },
+          "recommendation": { "type": "string", "pattern": "^[A-D]$" },
+          "init_js": { "type": "string" },
+          "options": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 4,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["letter", "label", "detail"],
+              "properties": {
+                "letter": { "type": "string", "pattern": "^[A-D]$" },
+                "label": { "type": "string", "minLength": 1 },
+                "detail": { "type": "string", "minLength": 1 }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

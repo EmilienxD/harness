@@ -1,6 +1,6 @@
 name = "aboard"
 version = "0.0.5"
-description = "Aboard VS Code integration for visible agents and Auto Run"
+description = "Aboard VS Code integration for interactive and background agents and Auto Run"
 docs = "https://github.com/EmilienxD/harness/blob/main/apps/aboard/README.md"
 dependencies = [
   { name = "auto", version = ">=1.0.0,<2.0.0", lifecycle = "coupled" },

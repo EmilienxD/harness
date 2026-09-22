@@ -1,10 +1,11 @@
 ---
 name: report-gotchas
-description: Report noteworthy post-implementation gotchas to the user. Use when a task is complete but gotchas, caveats, unverified work, unrelated errors, bugs, failed tests, or incomplete work still require the user's attention.
-allowed-tools: Bash(harness-report-gotchas submit *) PowerShell(harness-report-gotchas submit *)
+description: Report consequential caveats remaining after implementation. Use when incomplete verification, failures, risks, or unrelated problems require the user's attention.
+argument-hint: "[gotchas to report]"
+license: MIT
+metadata:
+  author: EMB
 ---
-
-# Report Gotchas
 
 After completing an ambiguous task, if there are remaining gotchas, caveats, unverified work, unrelated errors, bugs, failed tests, or incomplete work, notify the user by submitting a Markdown gotcha report.
 

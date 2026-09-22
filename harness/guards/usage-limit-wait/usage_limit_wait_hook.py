@@ -458,7 +458,7 @@ def _app_server_messages() -> list[dict[str, Any]]:
         {
             "method": "initialize",
             "id": 1,
-            "params": {"clientInfo": {"name": "usage-limit-wait", "version": "1.2.0"}},
+            "params": {"clientInfo": {"name": "usage-limit-wait", "version": "1.3.1"}},
         },
         {"method": "notifications/initialized"},
         {
@@ -606,7 +606,15 @@ def snapshot_from_app_server(payload: dict[str, Any]) -> dict[str, Any] | None:
             "enabled": unlimited or has_credits or positive_balance,
             "exhausted": not (unlimited or positive_balance),
         }
-    return {"source": "codex-app-server", "windows": windows, "credits": credits}
+    ordinary_usage_allowed = payload.get("ordinaryUsageAllowed")
+    if not isinstance(ordinary_usage_allowed, bool):
+        ordinary_usage_allowed = None
+    return {
+        "source": "codex-app-server",
+        "windows": windows,
+        "credits": credits,
+        "ordinary_usage_allowed": ordinary_usage_allowed,
+    }
 
 
 def read_chatgpt_snapshot(now: float) -> dict[str, Any] | None:
@@ -632,6 +640,8 @@ def cache_ttl(snapshot: dict[str, Any] | None) -> float:
     base = _number("CACHE_TTL")
     if snapshot is None:
         return base
+    if snapshot.get("ordinary_usage_allowed") is False:
+        return min(BLOCKED_CACHE_TTL, base)
     peak = max((window["percent"] for window in snapshot["windows"]), default=0.0)
     if peak >= _number("THRESHOLD"):
         return min(BLOCKED_CACHE_TTL, base)
@@ -712,12 +722,19 @@ def evaluate(snapshot: dict[str, Any] | None) -> Verdict:
             # pay with: the session keeps working on credits.
             return Verdict(False, None, None)
 
-    threshold = _number("THRESHOLD")
     ignored = _ignored_kinds()
-    blocked = [
+    available = [
         window for window in snapshot["windows"]
-        if window["percent"] >= threshold and str(window.get("kind", "")).lower() not in ignored
+        if str(window.get("kind", "")).lower() not in ignored
     ]
+    ordinary_usage_allowed = snapshot.get("ordinary_usage_allowed")
+    if ordinary_usage_allowed is True:
+        return Verdict(False, None, None)
+    if ordinary_usage_allowed is False:
+        blocked = available
+    else:
+        threshold = _number("THRESHOLD")
+        blocked = [window for window in available if window["percent"] >= threshold]
     if not blocked:
         return Verdict(False, None, None)
 
@@ -760,6 +777,9 @@ def wait_for_reset(
     deadline = started + _number("MAX_WAIT")
     verdict = evaluate(snapshot)
     waited_for = verdict.kind
+    requires_explicit_recovery = (
+        isinstance(snapshot, dict) and snapshot.get("ordinary_usage_allowed") is False
+    )
 
     while verdict.blocked:
         if verdict.reset_at is None or verdict.reset_at > deadline:
@@ -778,6 +798,16 @@ def wait_for_reset(
             # unreadable. Absence of a reading is not evidence that usage
             # dropped. Keep the last valid verdict until the reset it
             # announced, then fail open if it still cannot be verified.
+            if now() < verdict.reset_at + GRACE_SECONDS:
+                continue
+            break
+        if requires_explicit_recovery and refreshed.get("ordinary_usage_allowed") is not True:
+            if refreshed.get("ordinary_usage_allowed") is False:
+                snapshot = refreshed
+                verdict = evaluate(refreshed)
+                if verdict.blocked and verdict.kind:
+                    waited_for = verdict.kind
+                continue
             if now() < verdict.reset_at + GRACE_SECONDS:
                 continue
             break
@@ -846,21 +876,24 @@ def assess(snapshot: dict[str, Any] | None, now: float) -> Notice | None:
         return None
 
     peak = max(windows, key=lambda window: window["percent"])
+    verdict = evaluate(snapshot)
+    window = next((item for item in windows if item.get("kind") == verdict.kind), peak)
+    if verdict.blocked:
+        if verdict.reset_at is None:
+            return Notice("no-reset", verdict.kind, window["percent"], None)
+        if verdict.reset_at - now > _number("MAX_WAIT"):
+            return Notice("too-far", verdict.kind, window["percent"], verdict.reset_at)
+        return Notice("waiting", verdict.kind, window["percent"], verdict.reset_at)
+
     if peak["percent"] < _number("THRESHOLD"):
         if peak["percent"] < _number("WARN"):
             return None
         return Notice("warn", peak.get("kind"), peak["percent"], peak.get("resets_at"))
 
-    verdict = evaluate(snapshot)
-    window = next((item for item in windows if item.get("kind") == verdict.kind), peak)
-    if not verdict.blocked:
-        # The only way past `evaluate` at this level is the credits opt-out.
-        return Notice("credits", window.get("kind"), window["percent"], window.get("resets_at"))
-    if verdict.reset_at is None:
-        return Notice("no-reset", verdict.kind, window["percent"], None)
-    if verdict.reset_at - now > _number("MAX_WAIT"):
-        return Notice("too-far", verdict.kind, window["percent"], verdict.reset_at)
-    return Notice("waiting", verdict.kind, window["percent"], verdict.reset_at)
+    if snapshot.get("ordinary_usage_allowed") is True:
+        return Notice("warn", peak.get("kind"), peak["percent"], peak.get("resets_at"))
+    # The only remaining way past `evaluate` at this level is the credits opt-out.
+    return Notice("credits", window.get("kind"), window["percent"], window.get("resets_at"))
 
 
 def _clock(epoch: float) -> str:

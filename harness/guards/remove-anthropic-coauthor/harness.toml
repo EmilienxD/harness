@@ -1,0 +1,19 @@
+name = "remove-anthropic-coauthor"
+version = "1.0.1"
+description = "Removes Claude's Anthropic co-author trailer after Git commits"
+docs = "https://github.com/EmilienxD/harness/blob/main/README.md#hooks"
+
+[platforms.claude]
+status = "supported"
+fragment = "claude/settings.fragment.json"
+
+[platforms.chatgpt]
+status = "unsupported"
+reason = "Claude Code's automatic Anthropic commit attribution is Claude-specific."
+
+[[files]]
+src = "remove_anthropic_coauthor_hook.py"
+dest = "remove_anthropic_coauthor_hook.py"
+root = "hooks"
+platforms = ["claude"]
+executable = true

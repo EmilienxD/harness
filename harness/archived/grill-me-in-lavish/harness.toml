@@ -1,0 +1,49 @@
+name = "grill-me-in-lavish"
+version = "1.1.5"
+description = "Runs visual, interactive design interviews in Lavish"
+docs = "https://github.com/EmilienxD/harness/blob/main/harness/archived/grill-me-in-lavish/SKILL.md"
+requires = ["npx"]
+
+[platforms.claude]
+status = "supported"
+fragment = "claude/settings.fragment.json"
+
+[platforms.chatgpt]
+status = "supported"
+fragment = "chatgpt/hooks.fragment.json"
+
+[[files]]
+src = "SKILL.md"
+dest = "grill-me-in-lavish/SKILL.md"
+root = "skills"
+
+[[files]]
+src = "assets/board-template.html"
+dest = "grill-lavish/assets/board-template.html"
+root = "hooks"
+
+[[files]]
+src = "assets/aboard.svg"
+dest = "grill-lavish/assets/aboard.svg"
+root = "hooks"
+
+[[files]]
+src = "grill_me_in_lavish_hook.py"
+dest = "grill-lavish/grill_me_in_lavish_hook.py"
+root = "hooks"
+
+[[files]]
+src = "grill_lavish_core.py"
+dest = "grill-lavish/grill_lavish_core.py"
+root = "hooks"
+
+[[files]]
+src = "lavish_bridge.cjs"
+dest = "grill-lavish/lavish_bridge.cjs"
+root = "hooks"
+
+[[files]]
+src = "chatgpt/openai.yaml"
+dest = "grill-me-in-lavish/agents/openai.yaml"
+root = "skills"
+platforms = ["chatgpt"]

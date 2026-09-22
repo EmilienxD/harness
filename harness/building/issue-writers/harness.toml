@@ -1,5 +1,5 @@
 name = "issue-writers"
-version = "1.2.2"
+version = "2.2.0"
 description = "Draft and publish GitHub issues"
 requires = ["git", "gh"]
 docs = "https://github.com/EmilienxD/harness/blob/main/README.md#user-invoked-skills"
@@ -35,11 +35,6 @@ dest = "draft-issues"
 root = "skills"
 
 [[files]]
-src = "draft-audit-issues"
-dest = "draft-audit-issues"
-root = "skills"
-
-[[files]]
 src = "publish-issues"
 dest = "publish-issues"
 root = "skills"
@@ -62,12 +57,6 @@ platforms = ["chatgpt"]
 [[files]]
 src = "chatgpt/agents/draft-issues.yaml"
 dest = "draft-issues/agents/openai.yaml"
-root = "skills"
-platforms = ["chatgpt"]
-
-[[files]]
-src = "chatgpt/agents/draft-audit-issues.yaml"
-dest = "draft-audit-issues/agents/openai.yaml"
 root = "skills"
 platforms = ["chatgpt"]
 

@@ -1,6 +1,10 @@
 ---
 name: setup-text-replacements
 description: Add or change always-on AutoHotkey text replacements when the user asks for a new trigger or expansion.
+argument-hint: "[trigger and expansion]"
+license: MIT
+metadata:
+  author: EMB
 disable-model-invocation: true
 ---
 

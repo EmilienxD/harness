@@ -117,7 +117,7 @@ def blocked(prompt, cwd, monkeypatch, capsys):
     ("/address-this\nFull issue text", "Full issue text"),
 ])
 def test_invocation_argument_is_everything_after_the_reference(prompt, argument):
-    assert hook.parse_invocation(prompt) == argument
+    assert hook.parse_invocation(prompt, hook.ADDRESS_INVOCATION) == argument
 
 
 @pytest.mark.parametrize("prompt", [
@@ -127,7 +127,7 @@ def test_invocation_argument_is_everything_after_the_reference(prompt, argument)
 ])
 def test_unrelated_prompts_are_ignored(prompt, tmp_path, monkeypatch, capsys):
     fake_github(monkeypatch, {})
-    assert hook.parse_invocation(prompt) is None
+    assert hook.parse_invocation(prompt, hook.ADDRESS_INVOCATION) is None
     assert run_hook(prompt, tmp_path, monkeypatch, capsys) is None
 
 
@@ -188,7 +188,7 @@ def test_any_pre_existing_change_blocks_before_model_invocation(
     assert "completely clean Git worktree" in error
 
 
-def test_aboard_continuation_keeps_the_exact_dirty_implementer_handoff(
+def test_aboard_continuation_keeps_the_exact_dirty_address_handoff(
     tmp_path, monkeypatch, capsys,
 ):
     root = repository(tmp_path)
@@ -234,24 +234,6 @@ def test_bare_numbers_preload_full_context_from_the_current_repository(
         (REPOSITORY, 42), (REPOSITORY, 51),
         (REPOSITORY, 7), (REPOSITORY, 43), (REPOSITORY, 9),
     ]
-    assert context
-
-
-def test_preloaded_context_omits_legacy_gateway_markers(
-    tmp_path, monkeypatch, capsys,
-):
-    root = repository(tmp_path)
-    marker = (
-        "<!-- issues-gateway:3b08c3cd-2726-471d-b4cc-18248cec7eeb/7:"
-        "sha256:da4f1703b26558394463b5e6a78dd43297469a99019a4665b75fb4798d4c83e5:"
-        "part:1/1 -->"
-    )
-    value = issue(42, body=f"Body of 42.\n\n{marker}", comments=1)
-    value["comments"]["nodes"][0]["body"] = f"Useful comment.\n\n{marker}"
-    fake_github(monkeypatch, {(REPOSITORY, 42): value})
-
-    context = run_hook("/address-this 42", root, monkeypatch, capsys)
-
     assert context
 
 

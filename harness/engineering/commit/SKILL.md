@@ -1,6 +1,10 @@
 ---
 name: commit
-description: Create a git commit with the files changed by the current session. Supports a dry-run preview, AI-generated messages with optional guidance, or an explicit commit message. Explicit invocation only.
+description: Commit the files changed during the current session. Use when the user requests a commit, generated message, or dry-run preview.
+argument-hint: "[--dry | --ai [guidance] | <message>]"
+license: MIT
+metadata:
+  author: EMB
 disable-model-invocation: true
 ---
 

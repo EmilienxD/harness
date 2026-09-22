@@ -22,16 +22,17 @@ ROUTES: dict[str, str] = {
     "worker-stop": "/hooks/stop",
     "worker-stop-failure": "/hooks/stop-failure",
     "session-start": "/hooks/session-start",
+    "prompt-submit": "/hooks/prompt-submit",
     "session-end": "/hooks/session-end",
 }
 
-RESULT_REPORTING_TYPES: frozenset[str] = frozenset({"Explore", "implementer", "reviewer"})
-IMPLEMENTER_COMMIT_REMINDER = (
+RESULT_REPORTING_TYPES: frozenset[str] = frozenset({"explore", "address", "review"})
+ADDRESS_COMMIT_REMINDER = (
     'You have modified files without committing them. Is there a real reason for this? '
     'Did you discover any blockers along the way? If so, immediatly answer '
     '"Yes, there is blockers, as described above". Otherwise if the task is complete: Commit the changes.'
 )
-REVIEWER_COMMIT_REMINDER = (
+REVIEW_COMMIT_REMINDER = (
     "You have not modified any files or created a review commit. If the review is complete and approved, "
     "create an empty commit; otherwise report the blockers and leave the repository unchanged."
 )
@@ -104,9 +105,11 @@ def command_candidates(segment: str) -> list[str]:
 
 
 def guard(payload: dict[str, Any]) -> int:
+    path = os.environ.get("ABOARD_GUARD_PATH")
+    if not path:
+        return 0
     if payload.get("hook_event_name") != "PreToolUse":
         return 0
-    path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "guard.json")
     try:
         with open(path, encoding="utf-8") as handle:
             rules: Any = json.load(handle)
@@ -138,7 +141,7 @@ def stop_reminder(payload: dict[str, Any]) -> str | None:
     if payload.get("stop_hook_active") is True or not starting_sha:
         return None
     role = os.environ.get("ABOARD_AGENT_TYPE")
-    if role not in {"implementer", "reviewer"}:
+    if role not in {"address", "review"}:
         return None
     cwd = payload.get("cwd")
     if not isinstance(cwd, str) or not cwd:
@@ -156,8 +159,8 @@ def stop_reminder(payload: dict[str, Any]) -> str | None:
         return None
     if status.returncode != 0:
         return None
-    if role == "implementer":
-        return IMPLEMENTER_COMMIT_REMINDER if status.stdout else None
+    if role == "address":
+        return ADDRESS_COMMIT_REMINDER if status.stdout else None
     if status.stdout:
         return None
     try:
@@ -171,7 +174,7 @@ def stop_reminder(payload: dict[str, Any]) -> str | None:
         )
     except (OSError, subprocess.SubprocessError):
         return None
-    return REVIEWER_COMMIT_REMINDER if head.returncode == 0 and head.stdout.strip() == starting_sha else None
+    return REVIEW_COMMIT_REMINDER if head.returncode == 0 and head.stdout.strip() == starting_sha else None
 
 
 def main() -> int:
@@ -218,6 +221,12 @@ def main() -> int:
         if event != "SessionStart":
             return 0
         body = {"agentId": agent_id, "sessionId": session_id, "source": payload.get("source")}
+    elif endpoint == "/hooks/prompt-submit":
+        # Every agent type reports this: it confirms that a prompt Aboard typed
+        # reached the provider, and one nobody is waiting on is ignored.
+        if event != "UserPromptSubmit":
+            return 0
+        body = {"agentId": agent_id, "sessionId": session_id}
     elif endpoint == "/hooks/session-end":
         if event != "SessionEnd":
             return 0

@@ -1,5 +1,5 @@
 name = "zoom-out"
-version = "1.0.4"
+version = "1.0.5"
 description = "Gives a higher-level map of a codebase area"
 docs = "https://github.com/EmilienxD/harness/blob/main/harness/productivity/zoom-out/SKILL.md"
 

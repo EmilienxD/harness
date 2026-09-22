@@ -1,6 +1,10 @@
 ---
 name: review-this
-description: Review a pinned target, fix clear local problems, validate the result, and report blockers.
+description: Review a pinned change, fix clear local problems, and validate the result. Use when the user invokes the review workflow for a specific target.
+argument-hint: "[review target or expectations]"
+license: MIT
+metadata:
+  author: EMB
 disable-model-invocation: true
 ---
 

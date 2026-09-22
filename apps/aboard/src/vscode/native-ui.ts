@@ -88,17 +88,17 @@ export function registerNativeFleetUi(context: ExtensionContext, options: Native
   const engine = options.autoRun.engine;
   let autoRunStarting = false;
   const forecast = new AutoRunForecastController(() => renderAutoRun());
-  const handoffFor = (issueNumber: number): { readonly terminalId: TerminalId; readonly type: "implementer" | "reviewer"; readonly agentId: string } | undefined => {
+  const handoffFor = (issueNumber: number): { readonly terminalId: TerminalId; readonly type: "address" | "review"; readonly agentId: string } | undefined => {
     const persisted = engine.persisted();
-    const recorded = persisted?.version === 4 && persisted.workerSession?.issueNumber === issueNumber
-      && (persisted.workerSession.type === "implementer" || persisted.workerSession.type === "reviewer")
+    const recorded = persisted?.workerSession?.issueNumber === issueNumber
+      && (persisted.workerSession.type === "address" || persisted.workerSession.type === "review")
       ? persisted.workerSession
       : undefined;
     const sessions = recorded === undefined
       ? fleet.list()
       : [fleet.get(recorded.agentId)].filter((session): session is AgentSession => session !== undefined && session.sessionId === recorded.sessionId);
     for (const session of sessions) {
-      if (session.identity.type !== "implementer" && session.identity.type !== "reviewer") continue;
+      if (session.identity.type !== "address" && session.identity.type !== "review") continue;
       if (session.issueNumbers?.includes(issueNumber) !== true) continue;
       if (!isTerminalOpen(session.terminal.terminalId)) continue;
       return { terminalId: session.terminal.terminalId, type: session.identity.type, agentId: session.identity.agentId };
@@ -224,8 +224,15 @@ export function registerNativeFleetUi(context: ExtensionContext, options: Native
     }),
     commands.registerCommand("aboard.startAutoRun", async () => {
       if (autoRunStarting) return;
+      await checkAutoRun(true);
       const card = autoRunCard(autoRunSources);
-      if (card.kind !== "forecast" || autoRunCardMenuState(card) !== "forecast") return;
+      if (card.kind !== "forecast" || autoRunCardMenuState(card) !== "forecast") {
+        const reason = card.kind === "forecast"
+          ? card.forecast.error ?? (card.forecast.preview.blockers.join("; ") || card.forecast.preview.emptyReason || "The preview is still being checked.")
+          : card.kind === "unavailable" ? card.error : "Review the current run in the Auto Run panel before starting another.";
+        void window.showWarningMessage(`aboard cannot start an auto-run: ${reason}`);
+        return;
+      }
       autoRunStarting = true;
       renderAutoRun();
       let warning: string | undefined;
@@ -268,7 +275,7 @@ export function registerNativeFleetUi(context: ExtensionContext, options: Native
         return;
       }
       const persisted = engine.persisted();
-      const candidate = persisted?.version === 4 ? continuationSessionFor(persisted, fleet.list()) : undefined;
+      const candidate = persisted === undefined ? undefined : continuationSessionFor(persisted, fleet.list());
       const cwd = candidate?.cwd ?? workspace.workspaceFolders?.[0]?.uri.fsPath;
       const canContinue = candidate !== undefined && cwd !== undefined
         ? await options.isResumable(candidate.platform, candidate.sessionId, cwd, candidate.identity.type)

@@ -4,20 +4,21 @@ import test from "node:test";
 import { AutoRunForecastController, AutoRunTreeModel, autoRunCard, autoRunCardMenuState, cardPullRequest, type AutoRunForecast, type AutoRunPreview, type AutoRunViewSources } from "../../src/vscode/auto-run.js";
 import type { AutoRunState } from "../../src/auto/engine.js";
 import type { AutoRunDryRunResult } from "../../src/domain/auto-run.js";
-import type { AutoRunRecord, PersistedAutoRunRecord, RecoveryEligibility } from "../../src/domain/run-plan.js";
+import type { AutoRunRecord, RecoveryEligibility } from "../../src/domain/run-plan.js";
 
 const SESSION = "run/test";
 
 function record(overrides: Partial<AutoRunRecord> = {}): AutoRunRecord {
   return {
-    version: 4,
+    version: 1,
     runId: "run_test",
     startedAt: "2026-01-01T00:00:00.000Z",
     updatedAt: "2026-01-01T00:00:00.000Z",
     attempt: 1,
     settings: {
+      branchMode: "per-issue",
       review: false,
-      exploreBeforeImplement: false,
+      exploreBeforeAddress: false,
       issueContextDepth: 1,
       mergeStrategy: "squash",
       mergeRunPullRequest: false,
@@ -61,10 +62,10 @@ function sources(overrides: {
   readonly state?: AutoRunState | undefined;
   readonly starting?: boolean;
   readonly forecast?: AutoRunForecast;
-  readonly persisted?: PersistedAutoRunRecord | undefined;
+  readonly persisted?: AutoRunRecord | undefined;
   readonly eligibility?: RecoveryEligibility | undefined;
   readonly titles?: Readonly<Record<string, string>>;
-  readonly liveHandoff?: (issueNumber: number) => { readonly type: "implementer" | "reviewer"; readonly agentId: string } | undefined;
+  readonly liveHandoff?: (issueNumber: number) => { readonly type: "address" | "review"; readonly agentId: string } | undefined;
 } = {}): AutoRunViewSources {
   return {
     starting: () => overrides.starting ?? false,
@@ -86,7 +87,7 @@ function preview(overrides: Partial<AutoRunPreview> = {}): AutoRunPreview {
     warnings: [],
     emptyReason: undefined,
     reviewMode: false,
-    exploresBeforeImplement: false,
+    exploresBeforeAddress: false,
     isolatedWorkspace: false,
     keepsWorkspace: false,
     sessionBranch: "run/<run-id>",
@@ -152,7 +153,7 @@ test("the live forecast shows loading feedback, then the planned issues in execu
   const formatted = new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" })
     .format(new Date("2026-01-01T00:00:00.000Z"));
   assert.match(item.tooltip, new RegExp(`Updated at: ${formatted.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`));
-  assert.match(item.tooltip, /Fresh Explore context off/);
+  assert.match(item.tooltip, /Fresh explore context off/);
   assert.doesNotMatch(item.tooltip, /Live forecast|2026-01-01T00:00:00\.000Z/);
   assert.equal(item.collapsible, true);
   const rows = model.children(root).map((node) => model.item(node));
@@ -353,15 +354,15 @@ test("a live run outranks any recovery question about its own record", () => {
 
 test("a run waiting for the user names the acceptance boundary and handoff session", () => {
   const waiting = record({ workerSession: {
-    agentId: "reviewer-35" as never,
+    agentId: "review-35" as never,
     sessionId: "session-review-35" as never,
-    type: "reviewer",
+    type: "review",
     issueNumber: 35,
   } });
   const { item } = rootItem({ persisted: waiting, state: state({ waiting: true }) });
   assert.equal(item.contextValue, "aboard.autoRun.waiting");
   assert.match(item.description, /Waiting for acceptance commit · issue #35/);
-  assert.match(item.tooltip, /Handoff session: reviewer reviewer-35 \(session-review-35\)/);
+  assert.match(item.tooltip, /Handoff session: review review-35 \(session-review-35\)/);
   assert.match(item.tooltip, /continues automatically once the checkout is clean/);
 });
 
@@ -412,7 +413,6 @@ test("every auto-run card is a status display with no row action", () => {
     { persisted: record({ outcome: { kind: "interrupted" } }), eligibility: { state: "resumable" } },
     { persisted: record({ outcome: { kind: "failed", reason: "push rejected" } }), eligibility: { state: "resumable" } },
     { persisted: record(), eligibility: { state: "broken", reason: "branch moved" } },
-    { persisted: { version: 1, runId: "old", startedAt: "2026-01-01T00:00:00.000Z" } },
   ];
   const statusIcons = new Set(["tasklist", "loading~spin", "sync~spin", "person", "error", "warning", "circle-slash"]);
   for (const input of cases) {
@@ -427,14 +427,6 @@ test("a broken run shows the short reason and nothing to resume with", () => {
   assert.equal(item.contextValue, "aboard.autoRun.broken");
   assert.match(item.description, /cannot be resumed; run\/test has moved/);
   assert.match(item.tooltip, /Nothing has been rolled back/);
-});
-
-test("a pre-v4 record is broken with the one reason it can have, and no plan to show", () => {
-  const { item, model, root } = rootItem({ persisted: { version: 1, runId: "run_old", startedAt: "2026-01-01T00:00:00.000Z" } });
-  assert.equal(item.contextValue, "aboard.autoRun.unsupported");
-  assert.match(item.description, /predates human-acceptance persistence version 4/);
-  assert.equal(item.collapsible, false);
-  assert.deepEqual(model.children(root), []);
 });
 
 test("the whole frozen plan renders in its immutable order, whatever its progress", () => {
@@ -458,17 +450,17 @@ test("the whole frozen plan renders in its immutable order, whatever its progres
   assert.deepEqual(rows[2]?.command, { command: "aboard.autoRun.focusWorker", title: "Focus Handoff Session", arguments: [36] });
 });
 
-test("a row with a live reviewer handoff focuses it on click instead of opening the issue", () => {
+test("a row with a live review handoff focuses it on click instead of opening the issue", () => {
   const { model, root } = rootItem({
     persisted: record(),
     state: state(),
-    liveHandoff: (number) => number === 35 ? { type: "reviewer", agentId: "reviewer-35" } : undefined,
+    liveHandoff: (number) => number === 35 ? { type: "review", agentId: "review-35" } : undefined,
   });
   const rows = model.children(root).map((node) => model.item(node));
-  // The current issue has a live reviewer: click focuses the terminal.
+  // The current issue has a live review: click focuses the terminal.
   assert.deepEqual(rows[1]?.command, { command: "aboard.autoRun.focusWorker", title: "Focus Handoff Session", arguments: [35] });
   assert.equal(rows[1]?.contextValue, "aboard.autoRun.issue.current.handoff");
-  assert.match(rows[1]?.tooltip ?? "", /Handoff session: reviewer reviewer-35/);
+  assert.match(rows[1]?.tooltip ?? "", /Handoff session: review review-35/);
   // Done and pending rows use the same terminal-only command; without a live
   // handoff the command quietly does nothing.
   assert.deepEqual(rows[0]?.command, { command: "aboard.autoRun.focusWorker", title: "Focus Handoff Session", arguments: [34] });
@@ -504,13 +496,13 @@ test("a row shows the latest observed title while the plan keeps the one it froz
 });
 
 test("the tooltip names where the work goes and what the run froze", () => {
-  const isolated = record({ settings: { ...record().settings, workspaceRoot: "C:/checkouts/run_test/repo", review: true, exploreBeforeImplement: true } });
+  const isolated = record({ settings: { ...record().settings, workspaceRoot: "C:/checkouts/run_test/repo", review: true, exploreBeforeAddress: true } });
   const { item } = rootItem({ persisted: isolated, state: state() });
   assert.match(item.tooltip, /Session branch: run\/test/);
   assert.match(item.tooltip, /Target branch: feature\/wip/);
   assert.match(item.tooltip, /Working in C:\/checkouts\/run_test\/repo/);
   assert.match(item.tooltip, /Review on/);
-  assert.match(item.tooltip, /Fresh Explore context on/);
+  assert.match(item.tooltip, /Fresh explore context on/);
 
   const inPlace = rootItem({ persisted: record(), state: state() });
   assert.match(inPlace.item.tooltip, /Working in your checkout/);

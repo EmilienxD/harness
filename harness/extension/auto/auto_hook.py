@@ -10,7 +10,7 @@ import urllib.error
 import urllib.request
 
 
-COMMAND = re.compile(r"^\s*/auto(?:\s[\s\S]*)?$")
+COMMAND = re.compile(r"^\s*(?:/auto|\$auto|\[\$auto\]\([^\r\n]+\))(?P<arguments>\s[\s\S]*)?$")
 
 
 def deny(message: str) -> int:
@@ -24,8 +24,10 @@ def main() -> int:
     except (OSError, ValueError):
         return 0
     prompt = payload.get("prompt")
-    if not isinstance(prompt, str) or not COMMAND.match(prompt):
+    match = COMMAND.fullmatch(prompt) if isinstance(prompt, str) else None
+    if match is None:
         return 0
+    prompt = "/auto" + (match.group("arguments") or "")
     try:
         port = int(os.environ["ABOARD_BRIDGE_PORT"])
         token = os.environ["ABOARD_BRIDGE_TOKEN"]

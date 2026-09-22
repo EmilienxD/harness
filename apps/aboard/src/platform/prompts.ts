@@ -57,7 +57,7 @@ export interface ResolvedPrompt {
 
 export type PromptResolutionRequest =
   | {
-      readonly kind: "implementation";
+      readonly kind: "address";
       readonly instruction: string;
       readonly issueNumbers: readonly number[];
       readonly codebaseContext?: string;
@@ -95,7 +95,7 @@ export const DEFAULT_PROMPT_RESOLUTION_LIMITS: PromptResolutionLimits = {
 export const DEFAULT_REVIEW_CHANGE_INSTRUCTION =
   "Review the supplied change against its contract.";
 
-export const DEFAULT_IMPLEMENTATION_INSTRUCTION =
+export const DEFAULT_ADDRESS_INSTRUCTION =
   "Address the following issue.";
 
 export const DEFAULT_CONTINUATION_INSTRUCTION =
@@ -117,13 +117,13 @@ export function freshCodebaseContextPrompt(codebaseContext: string): string {
 /** Complete opening user messages for Auto Run workers. */
 export function autoRunExplorePrompt(issue: Pick<IssueSnapshot, "number" | "title">): string {
   return (
-    `Explore the current checkout for issue #${issue.number}; ${issue.title} and identify the codebase context needed to address this issue. ` +
+    `explore the current checkout for issue #${issue.number}; ${issue.title} and identify the codebase context needed to address this issue. ` +
     "Report the relevant facts, code locations, usefull grep/glob patterns. Do not modify the checkout. " +
     "And do not provide instructions, judgment, recommendations on what to do; report evidence only."
   );
 }
 
-export function autoRunImplementerPrompt(
+export function autoRunAddressPrompt(
   issue: Pick<IssueSnapshot, "number" | "title">,
   options: {
     readonly completionCommitStartingSha?: string;
@@ -152,22 +152,28 @@ export function autoRunReviewGuideline(issueNumber: number, exactRange: string):
   );
 }
 
-export function autoRunReviewerPrompt(
+export function autoRunReviewPrompt(
   issue: Pick<IssueSnapshot, "number" | "title">,
   pullRequestNumber: number,
+  options: { readonly chrome: boolean } = { chrome: false },
 ): string {
   return (
     `Review pull request #${pullRequestNumber} for issue #${issue.number}; ${issue.title}. ` +
     "On successful completion, create exactly one commit. If the review needs no fixes, create an empty commit. " +
-    "If blocked, do not commit."
+    "If blocked, do not commit." +
+    (options.chrome ? `\n\n${REAL_BROWSER_INSTRUCTION}` : "")
   );
 }
 
-export function autoRunHitlReviewerPrompt(
+export function autoRunHitlReviewPrompt(
   issue: Pick<IssueSnapshot, "number" | "title">,
   exactRange: string,
+  options: { readonly chrome: boolean } = { chrome: false },
 ): string {
-  return `Review issue #${issue.number}; ${issue.title} in the exact range ${exactRange}. Leave the code and any review fixes uncommitted.`;
+  return (
+    `Review issue #${issue.number}; ${issue.title} in the exact range ${exactRange}. Leave the code and any review fixes uncommitted.` +
+    (options.chrome ? `\n\n${REAL_BROWSER_INSTRUCTION}` : "")
+  );
 }
 
 export type PromptResolutionErrorCode =
@@ -301,10 +307,10 @@ export function workerContinuationPrompt(
   return `${continuation}\n\nReminder: Perform the task described in @${task.path}.\n\n${task.contents}`;
 }
 
-/** Rejects an empty Explore handoff before implementation starts. */
+/** Rejects an empty explore handoff before address starts. */
 export function requireExploreReport(value: string): string {
   const report = value.trim();
-  if (report.length === 0) throw new Error("Explore returned no codebase context");
+  if (report.length === 0) throw new Error("explore returned no codebase context");
   return report;
 }
 
@@ -326,8 +332,8 @@ export class PromptResolver {
     request: PromptResolutionRequest,
   ): Promise<ResolvedPrompt | undefined> {
     switch (request.kind) {
-      case "implementation":
-        return this.#resolveImplementation(request);
+      case "address":
+        return this.#resolveAddress(request);
       case "exploration":
         return this.#resolveExploration(request);
       case "review":
@@ -452,8 +458,8 @@ export class PromptResolver {
     }
   }
 
-  async #resolveImplementation(
-    request: Extract<PromptResolutionRequest, { kind: "implementation" }>,
+  async #resolveAddress(
+    request: Extract<PromptResolutionRequest, { kind: "address" }>,
   ): Promise<ResolvedPrompt> {
     const instruction = requireInstruction(request.instruction);
     const issues = await this.#fetchIssues(request.issueNumbers);

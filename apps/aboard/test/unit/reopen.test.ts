@@ -64,3 +64,31 @@ test("conversation inspection failures remain actionable instead of looking like
   assert.equal(direct.action === "unresumable" ? direct.reason : undefined, "inspection-failed");
   assert.match(describeReopenOutcome(direct), /failed to decode rollout/u);
 });
+
+test("reopening workers and delegated sessions waits for user input in an interactive terminal", async () => {
+  const targets: import("../../src/bridge/delegation.js").ReopenTarget[] = [];
+  const coordinator = new ReopenCoordinator({
+    activity: { entries: endedActivity }, fleet: new FleetRegistry(),
+    terminals: { isOpen: () => false, liveTerminalFor: () => undefined, show: () => undefined },
+    launcher: { reopen: async (target) => {
+      targets.push(target);
+      return { agentId, sessionId, terminalId: "terminal-2" as TerminalId };
+    } },
+    isResumable: async () => true,
+  });
+  const candidate = { platform: "claude" as const, agentId, sessionId, description: "worker", origin: "ended" as const, at };
+  for (const session of [
+    { type: "address" as const, executionMode: "auto-run" as const },
+    { type: "general" as const, executionMode: "auto" as const },
+    { type: "general" as const, executionMode: "interactive" as const },
+  ]) {
+    const outcome = await coordinator.reopen({ ...candidate, ...session });
+    assert.equal(outcome.action, "reopened");
+    const target = targets.at(-1)!;
+    assert.equal(target.executionMode, "interactive");
+    assert.equal(target.prompt, undefined);
+    assert.equal(target.sessionId, sessionId);
+    assert.equal(target.type, session.type);
+    assert.match(describeReopenOutcome(outcome), /handed it back to you/u);
+  }
+});

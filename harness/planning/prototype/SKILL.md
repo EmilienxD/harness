@@ -1,6 +1,10 @@
 ---
 name: prototype
-description: Build a throwaway prototype outside the codebase to answer a design question.
+description: Build a disposable prototype outside the codebase to answer a design question. Use when implementation evidence is needed before choosing a design.
+argument-hint: "[design question]"
+license: MIT
+metadata:
+  author: EMB
 disable-model-invocation: true
 ---
 

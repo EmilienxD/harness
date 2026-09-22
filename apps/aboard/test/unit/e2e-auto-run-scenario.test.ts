@@ -32,7 +32,7 @@ function request(messages: readonly Message[], tools: readonly string[] = ["Read
   }, true);
 }
 
-test("auto-run AFK implementer reads, edits, and reports a valid completion", () => {
+test("auto-run AFK address reads, edits, and reports a valid completion", () => {
   const initial: Message[] = [{ role: "user", content: `Address issue. ${AUTO_RUN_AFK_MARKER} ${AUTO_RUN_PERMANENT_NOTE} ${AUTO_RUN_NESTED_CONTEXT}` }];
   const read = transition(request(initial), root);
   assert.equal(read.scenario, "auto-run-afk");
@@ -77,8 +77,8 @@ test("auto-run AFK implementer reads, edits, and reports a valid completion", ()
   assert.doesNotMatch(String(complete.content[0]?.text), /<commit>/u);
 });
 
-test("auto-run Explore reads the checkout before returning bounded context", () => {
-  const initial: Message[] = [{ role: "user", content: `Explore implementation context. ${AUTO_RUN_AFK_MARKER} ${AUTO_RUN_NESTED_CONTEXT}` }];
+test("auto-run explore reads the checkout before returning bounded context", () => {
+  const initial: Message[] = [{ role: "user", content: `<work-to-explore>${AUTO_RUN_AFK_MARKER} ${AUTO_RUN_NESTED_CONTEXT}</work-to-explore>` }];
   const read = transition(request(initial, ["Read"]), root);
   assert.equal(read.checkpoint, "auto-explore-read");
   const complete = transition(request([
@@ -90,7 +90,7 @@ test("auto-run Explore reads the checkout before returning bounded context", () 
   assert.deepEqual(complete.content, [{ type: "text", text: AUTO_RUN_EXPLORE_REPORT }]);
 });
 
-test("auto-run AFK reviewer creates an empty approval commit when no fixes are needed", () => {
+test("auto-run AFK review creates an empty approval commit when no fixes are needed", () => {
   const initial: Message[] = [{ role: "user", content: `Review pull request. ${AUTO_RUN_PERMANENT_NOTE}` }];
   const commit = transition(request(initial, ["Read", "Edit", "Bash"]), root);
   assert.equal(commit.checkpoint, "auto-review-commit");
@@ -132,10 +132,10 @@ test("single-branch HITL and follow-up workers apply sequential edits", () => {
   }
 });
 
-test("HITL reviewer inspects the reset implementation without committing, then accepts only on user request", () => {
+test("HITL review inspects the reset implementation without committing, then accepts only on user request", () => {
   const initial: Message[] = [{
     role: "user",
-    content: `Review ${AUTO_RUN_HITL_REVIEW_MARKER}. Aboard pinned abc..def as the immutable review scope.`,
+    content: `Review issue #42; Accept deterministic single-branch change after review in the exact range abc..def. Leave the code and any review fixes uncommitted.`,
   }];
   const read = transition(request(initial), root);
   assert.equal(read.checkpoint, "auto-hitl-review-read");

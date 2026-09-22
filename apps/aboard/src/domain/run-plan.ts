@@ -19,16 +19,16 @@ export interface FrozenIssue {
   readonly branch: string;
   readonly disposition: IssueDisposition;
   readonly difficulty?: IssueDifficulty;
-  /** Whether this issue's implementer requires the Chrome browser capability. */
+  /** Whether this issue's workers require browser tooling. */
   readonly chrome?: true;
   readonly dependsOn: readonly number[];
 }
 
 /** The settings a run is bound to for its whole life, including every resume. */
 export interface FrozenRunSettings {
-  readonly branchMode?: AutoRunBranchMode;
+  readonly branchMode: AutoRunBranchMode;
   readonly review: boolean;
-  readonly exploreBeforeImplement: boolean;
+  readonly exploreBeforeAddress: boolean;
   readonly issueContextDepth: number;
   readonly mergeStrategy: MergeStrategy;
   readonly mergeRunPullRequest: boolean;
@@ -36,7 +36,7 @@ export interface FrozenRunSettings {
   readonly workspaceRoot?: string;
   /** Configured note added before any per-run guidance. */
   readonly permanentPrompt?: string;
-  /** Appended to every implementer and reviewer prompt for this run. */
+  /** Appended to every address and review prompt for this run. */
   readonly additionalGuideline?: string;
 }
 
@@ -67,11 +67,11 @@ export type IssueProgress =
       readonly headSha?: string;
       readonly reviewed?: true;
       readonly beforeSha?: string;
-      /** Temporary local checkpoint created only by a HITL implementer when review is enabled. */
-      readonly implementerCommitSha?: string;
+      /** Temporary local checkpoint created only by a HITL address when review is enabled. */
+      readonly addressCommitSha?: string;
       /** The checkpoint was mixed-reset back to `beforeSha` and its tree is the handoff. */
       readonly resetCompleted?: true;
-      /** The normal non-committing HITL reviewer turn completed. */
+      /** The normal non-committing HITL review turn completed. */
       readonly hitlReviewCompleted?: true;
       /** Final accepted implementation commit; never the temporary HITL checkpoint. */
       readonly implementationSha?: string;
@@ -88,7 +88,7 @@ export type IssueProgress =
       readonly issueClosed: boolean;
       readonly beforeSha?: string;
       /** Retained as audit evidence; this local checkpoint was never published. */
-      readonly implementerCommitSha?: string;
+      readonly addressCommitSha?: string;
       readonly resetCompleted?: true;
       readonly hitlReviewCompleted?: true;
       readonly implementationSha?: string;
@@ -106,8 +106,8 @@ export type PendingAction =
   | { readonly kind: "close-issue"; readonly issue: number; readonly prNumber: number; readonly comment: string }
   | { readonly kind: "cleanup-issue"; readonly issue: number; readonly branch: string; readonly sha: string }
   | { readonly kind: "create-branch"; readonly branch: string; readonly base: string; readonly baseSha: string }
-  | { readonly kind: "worker-turn"; readonly branch: string; readonly parentSha: string; readonly role: "implementer" | "reviewer"; readonly completion: "commit" | "uncommitted"; readonly outcome?: "succeeded" | "failed" }
-  | { readonly kind: "reset-implementation"; readonly branch: string; readonly beforeSha: string; readonly implementerCommitSha: string }
+  | { readonly kind: "worker-turn"; readonly branch: string; readonly parentSha: string; readonly role: "address" | "review"; readonly completion: "commit" | "uncommitted"; readonly outcome?: "succeeded" | "failed" }
+  | { readonly kind: "reset-implementation"; readonly branch: string; readonly beforeSha: string; readonly addressCommitSha: string }
   | { readonly kind: "push"; readonly branch: string; readonly sha: string }
   | { readonly kind: "create-issue-pr"; readonly issue: number; readonly head: string; readonly base: string }
   | { readonly kind: "merge-issue-pr"; readonly prNumber: number; readonly head: string; readonly base: string; readonly headSha: string; readonly baseSha: string }
@@ -116,7 +116,7 @@ export type PendingAction =
   | { readonly kind: "merge-run-pr"; readonly prNumber: number; readonly head: string; readonly base: string; readonly headSha: string; readonly baseSha: string };
 
 export interface AutoRunRecord {
-  readonly version: 4;
+  readonly version: 1;
   readonly runId: string;
   readonly startedAt: string;
   readonly updatedAt: string;
@@ -137,7 +137,7 @@ export interface AutoRunRecord {
   readonly currentIssue: number | undefined;
   readonly checkpoint: RunCheckpoint;
   readonly runPullRequest?: number;
-  /** Issues a reviewer has already checked; a review that finds nothing leaves no trace. */
+  /** Issues a review has already checked; a review that finds nothing leaves no trace. */
   readonly reviewedIssues: readonly number[];
   readonly pendingAction?: PendingAction;
   readonly outcome?: RunAttemptOutcome;
@@ -147,7 +147,7 @@ export interface AutoRunRecord {
   readonly workerSession?: {
     readonly agentId: AgentId;
     readonly sessionId: SessionId;
-    readonly type: "implementer" | "reviewer" | "Explore";
+    readonly type: "address" | "review" | "explore";
     readonly issueNumber: number;
     /** The worker itself failed or returned an unusable completion, rather than a later phase failing. */
     readonly continuable?: true;
@@ -158,21 +158,6 @@ export type RecoveryEligibility =
   | { readonly state: "checking" }
   | { readonly state: "resumable" }
   | { readonly state: "broken"; readonly reason: string };
-
-/** Approval-oriented records are shown as broken rather than migrated. */
-export const UNSUPPORTED_RECORD_REASON = "run predates human-acceptance persistence version 4; discard this unsupported record";
-
-export interface UnsupportedAutoRunRecord {
-  readonly version: 1 | 2 | 3;
-  readonly runId: string;
-  readonly startedAt: string;
-}
-
-export type PersistedAutoRunRecord = AutoRunRecord | UnsupportedAutoRunRecord;
-
-export function isUnsupportedRecord(record: PersistedAutoRunRecord): record is UnsupportedAutoRunRecord {
-  return record.version !== 4;
-}
 
 export function issueProgress(record: AutoRunRecord, issueNumber: number): IssueProgress {
   return record.progress[String(issueNumber)] ?? { state: "pending" };

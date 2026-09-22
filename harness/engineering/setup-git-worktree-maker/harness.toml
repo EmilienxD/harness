@@ -1,5 +1,5 @@
 name = "setup-git-worktree-maker"
-version = "1.0.2"
+version = "1.0.4"
 description = "Creates a project-native command for fully initialized Git worktrees"
 docs = "https://github.com/EmilienxD/harness/blob/main/harness/engineering/setup-git-worktree-maker/SKILL.md"
 
@@ -12,11 +12,6 @@ status = "supported"
 [[files]]
 src = "SKILL.md"
 dest = "setup-git-worktree-maker/SKILL.md"
-root = "skills"
-
-[[files]]
-src = "references"
-dest = "setup-git-worktree-maker/references"
 root = "skills"
 
 [[files]]

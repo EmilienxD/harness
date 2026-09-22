@@ -5,9 +5,10 @@ from __future__ import annotations
 import json
 import re
 import tomllib
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from enum import Enum
 from pathlib import Path
+from urllib.parse import parse_qs, urlsplit
 
 from harness_cli.platforms import DESTINATION_ROOTS, Platform
 
@@ -393,14 +394,33 @@ def load_tool(directory: Path) -> Tool:
     )
 
 
-def discover(root: Path | None = None) -> dict[str, Tool]:
-    base = root or tools_root()
+def discover(root: Path | None = None, *, local: Path | None = None) -> dict[str, Tool]:
+    checkout = local.expanduser().resolve() if local is not None else None
+    if checkout is not None and not (checkout / "harness").is_dir():
+        raise ManifestError(f"local checkout has no harness catalogue: {checkout}")
+    base = checkout / "harness" if checkout is not None else root or tools_root()
     found: dict[str, Tool] = {}
     for manifest_path in sorted(base.rglob("harness.toml")):
         if manifest_path.relative_to(base).parts[0] in {"archived", "deprecated"}:
             continue
         directory = manifest_path.parent
         tool = load_tool(directory)
+        if checkout is not None:
+            actions = []
+            for action in tool.actions:
+                source = str(action.data.get("source", ""))
+                if action.type == "uv-tool" and source.startswith(
+                    "git+https://github.com/EmilienxD/harness@"
+                ):
+                    subdirectory = parse_qs(urlsplit(source).fragment).get("subdirectory", [])
+                    if len(subdirectory) != 1:
+                        raise ManifestError(f"{tool.name}: local runtime requires a subdirectory")
+                    runtime = (checkout / subdirectory[0]).resolve()
+                    if checkout not in runtime.parents or not (runtime / "pyproject.toml").is_file():
+                        raise ManifestError(f"{tool.name}: invalid local runtime: {runtime}")
+                    action = replace(action, data={**action.data, "source": str(runtime)})
+                actions.append(action)
+            tool = replace(tool, actions=tuple(actions))
         if tool.name in found:
             first = found[tool.name].root
             raise ManifestError(

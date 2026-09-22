@@ -1,0 +1,9 @@
+{
+  "schema_version": 1,
+  "providers": ["claude", "chatgpt"],
+  "round": ["active", "superseded"],
+  "answer": ["draft", "queued"],
+  "publication": ["prepared", "uploading", "committed", "failed", "expired"],
+  "snapshot_reason": ["copy", "aboard"],
+  "delivery": ["pending", "claimed", "submitted-to-terminal", "failed", "expired"]
+}

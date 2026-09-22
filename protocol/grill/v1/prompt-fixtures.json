@@ -1,0 +1,23 @@
+{
+  "schema_version": 1,
+  "cases": [
+    {
+      "name": "queued-answers-only",
+      "payload": {
+        "questions": [
+          { "id": "Q1", "question": "When should the round become visible?", "explanation_html": "<p>Timing.</p>", "recommendation": "A", "options": [{ "letter": "A", "label": "Publish after upload", "detail": "Durable first." }] },
+          { "id": "Q2", "question": "How should retry work?", "explanation_html": "<p>Retries.</p>", "recommendation": "A", "options": [{ "letter": "A", "label": "Automatic outbox retry", "detail": "Retry later." }, { "letter": "B", "label": "Discard", "detail": "Lose it." }, { "letter": "C", "label": "Manual retry", "detail": "Ask first." }] },
+          { "id": "Q3", "question": "What should the button say?", "explanation_html": "<p>Label.</p>", "recommendation": "A", "options": [{ "letter": "A", "label": "Review prompt", "detail": "Review first." }] },
+          { "id": "Q4", "question": "Which color?", "explanation_html": "<p>Color.</p>", "recommendation": "A", "options": [{ "letter": "A", "label": "Navy", "detail": "Use navy." }] }
+        ]
+      },
+      "answers": [
+        { "question_id": "Q1", "selected_option": "A", "note": "Keep the failure visible.", "state": "queued" },
+        { "question_id": "Q2", "selected_option": "C", "note": null, "state": "queued" },
+        { "question_id": "Q3", "selected_option": null, "note": "Use Review and send instead.", "state": "queued" },
+        { "question_id": "Q4", "selected_option": "A", "note": null, "state": "draft" }
+      ],
+      "expected_prompt": "- Q1: A. Keep the failure visible.\n- Q2: C.\n- Q3: None of these. Use Review and send instead."
+    }
+  ]
+}

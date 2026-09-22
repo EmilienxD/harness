@@ -66,7 +66,58 @@ function isOwnedAssetPath(path: string): boolean {
   const segments = path.split("/");
   const safe = segments.every((segment) => segment.length > 0 && segment !== "." && segment !== ".." && !segment.includes("\\"));
   return safe && ((segments.length >= 2 && segments[0] === ".abd")
-    || (segments.length === 2 && segments[0] === ".harness" && segments[1] === "launch.json"));
+    || (segments.length === 2 && segments[0] === ".codex" && segments[1] === "hooks.json")
+    || (segments.length === 2 && segments[0] === ".harness" && segments[1] === "config.json"));
+}
+
+const CODEX_HOOKS_PATH = ".codex/hooks.json";
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function isAboardHook(value: unknown): boolean {
+  if (!isRecord(value)) return false;
+  if (value.type !== "command" || typeof value.command !== "string") return false;
+  const commandWindows = typeof value.commandWindows === "string" ? value.commandWindows : "";
+  const command = `${value.command}\n${commandWindows}`;
+  return command.includes("ABOARD_RUNTIME_ROOT")
+    && command.includes("abd_hook.py")
+    && /(?:session-start|session-end|worker-stop|worker-stop-failure|worker-reground|worker-post-compact|worker-guard)(?:["']?\s*)$/u.test(command.trim());
+}
+
+function withoutAboardHooks(value: unknown): { readonly value: unknown; readonly changed: boolean } {
+  if (!Array.isArray(value)) return { value, changed: false };
+  let changed = false;
+  const groups = value.flatMap((candidate) => {
+    if (!isRecord(candidate) || !Array.isArray(candidate.hooks)) return [candidate];
+    const hooks = candidate.hooks.filter((hook) => !isAboardHook(hook));
+    if (hooks.length !== candidate.hooks.length) changed = true;
+    return hooks.length === 0 ? [] : [{ ...candidate, hooks }];
+  });
+  return { value: groups, changed };
+}
+
+async function migrateLegacyCodexHooks(projectRoot: string, updated: string[], removed: string[]): Promise<void> {
+  const path = join(projectRoot, ...CODEX_HOOKS_PATH.split("/"));
+  if (!await exists(path)) return;
+  const existing = parseObject(await readFile(path, "utf8"), path);
+  if (!isRecord(existing.hooks)) return;
+  const hooks: Record<string, unknown> = {};
+  let changed = false;
+  for (const [event, groups] of Object.entries(existing.hooks)) {
+    const kept = withoutAboardHooks(groups);
+    changed ||= kept.changed;
+    if (!Array.isArray(kept.value) || kept.value.length > 0) hooks[event] = kept.value;
+  }
+  if (!changed) return;
+  if (Object.keys(existing).length === 1 && Object.keys(hooks).length === 0) {
+    await rm(path);
+    removed.push(CODEX_HOOKS_PATH);
+    return;
+  }
+  await writeJson(path, { ...existing, hooks });
+  updated.push(CODEX_HOOKS_PATH);
 }
 
 async function loadManifest(path: string): Promise<Manifest> {
@@ -135,6 +186,8 @@ export async function scaffoldProject(options: ScaffoldOptions): Promise<Scaffol
   const previous = await loadManifest(manifestPath);
   const next: Record<string, InstalledAsset> = {};
 
+  await migrateLegacyCodexHooks(projectRoot, updated, removed);
+
   const catalog = await sourceCatalog(assetRoot);
   const currentPaths = new Set(catalog.assets.map((asset) => asset.path));
   for (const { path, content, sourceHash } of catalog.assets) {
@@ -165,6 +218,8 @@ export async function scaffoldProject(options: ScaffoldOptions): Promise<Scaffol
 
   for (const [path, previousAsset] of Object.entries(previous.assets)) {
     if (currentPaths.has(path)) continue;
+    // Legacy Codex hook ownership is retired by migrateLegacyCodexHooks.
+    if (path === CODEX_HOOKS_PATH) continue;
     const destination = join(projectRoot, ...path.split("/"));
     if (!await exists(destination)) continue;
     const current = await readFile(destination, "utf8");

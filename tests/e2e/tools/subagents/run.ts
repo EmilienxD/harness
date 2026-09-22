@@ -15,6 +15,8 @@ import {
   CHILD_REPLY,
   PARENT_MARKER,
   PARENT_REPLY,
+  NEXT_MARKER,
+  NEXT_REPLY,
   claudeTransition,
   codexTransition,
   scenarioCatalogHash,
@@ -38,7 +40,7 @@ export interface SubagentsJourneyResult {
   readonly unexpectedRequests: number;
 }
 
-export async function runSubagentsJourney(platform: Platform): Promise<SubagentsJourneyResult> {
+export async function runSubagentsJourney(platform: Platform, mode: "interactive" | "auto" = "interactive"): Promise<SubagentsJourneyResult> {
   if (platform === "claude") await validateClaudeCli(); else await validateCodexCli();
   const root = await canonicalMkdtemp(join(tmpdir(), `harness-subagents-${platform}-e2e-`));
   const projectRoot = join(root, "project");
@@ -59,27 +61,19 @@ export async function runSubagentsJourney(platform: Platform): Promise<Subagents
 
     const bridge = join(harnessRoot, "tests", "e2e", "dist", "tools", "subagents", "cli-bridge.js");
     await readFile(bridge, "utf8");
-    const providerCommand = platform === "claude"
-      ? spawnableCommand("claude", [
-          "-p", "--output-format", "stream-json", "--verbose", "--permission-prompts", "none",
-          "--dangerously-skip-permissions", "--prompt-suggestions", "false",
-          "--tools", "Write,Bash", "--allowedTools", "Write,Bash",
-        ])
-      : spawnableCommand("codex", [
-          "exec", "--json", "--dangerously-bypass-hook-trust",
-          "--dangerously-bypass-approvals-and-sandbox", "--skip-git-repo-check",
-        ]);
+    const providerCommand = spawnableCommand(platform === "claude" ? "claude" : "codex", []);
+    const configuredCommand = [process.execPath,bridge,"--provider",platform,providerCommand.file,...providerCommand.args];
     await mkdir(join(projectRoot, ".harness"), { recursive: true });
     await mkdir(stateRoot, { recursive: true });
     await writeFile(join(stateRoot, "config.json"), `${JSON.stringify({
       terminalCommand: [process.execPath, bridge, "--spawn"],
     }, null, 2)}\n`, "utf8");
-    await writeFile(join(projectRoot, ".harness", "launch.json"), `${JSON.stringify({
-      version: 3,
+    await writeFile(join(projectRoot, ".harness", "config.json"), `${JSON.stringify({
+      version: 1,
       autoRun: { provider: "claude" },
       providers: {
-        claude: platform === "claude" ? { command: [providerCommand.file, ...providerCommand.args] } : {},
-        chatgpt: platform === "chatgpt" ? { command: [providerCommand.file, ...providerCommand.args] } : {},
+        claude: platform === "claude" ? { command: configuredCommand } : {},
+        chatgpt: platform === "chatgpt" ? { command: configuredCommand } : {},
       },
       session: { stopWaitHours: 0.025 },
     }, null, 2)}\n`, "utf8");
@@ -113,7 +107,7 @@ export async function runSubagentsJourney(platform: Platform): Promise<Subagents
         diagnosticsPath,
         scenarioCatalogHash,
         parseRequest: parseAnthropicMessagesRequest,
-        transition: claudeTransition,
+        transition: (request,repoRoot) => claudeTransition(request,repoRoot,mode),
       });
       environment = isolatedClaudeEnvironment(commonEnvironment, {
         HOME: home,
@@ -134,7 +128,7 @@ export async function runSubagentsJourney(platform: Platform): Promise<Subagents
       const codexServer = await startFakeOpenAiServer({
         diagnosticsPath,
         scenarioCatalogHash,
-        transition: (request) => codexTransition(request, projectRoot),
+        transition: (request) => codexTransition(request, projectRoot,mode),
       });
       server = codexServer;
       const codexHome = await prepareCodexHome({
@@ -146,7 +140,7 @@ export async function runSubagentsJourney(platform: Platform): Promise<Subagents
       environment = isolatedCodexEnvironment(commonEnvironment, codexHome, codexServer.authToken);
     }
 
-    const prompt = `${platform === "claude" ? "/" : "$"}work-with-agent ${PARENT_MARKER} Delegate the deterministic inspection to one interactive child.`;
+    const prompt = `${platform === "claude" ? "/" : "$"}work-with-agent ${PARENT_MARKER} Delegate the deterministic inspection to one ${mode} child.`;
     const launch = await execFileAsync(python, [
       "-c", "from subagents_runtime.cli import main; raise SystemExit(main())",
       "run", "--provider", platform, prompt,
@@ -166,16 +160,27 @@ export async function runSubagentsJourney(platform: Platform): Promise<Subagents
     requireCompleted(childStatus);
     requireCompleted(parentStatus);
 
+    const parentId = /Started visible session ([0-9a-f-]+)/u.exec(launch.stdout)?.[1];
+    if (!parentId) throw new Error('Parent launch did not expose its stable identity');
+    await rm(join(cliStatusRoot,'child.json'),{force:true});
+    const nextEnvironment = { ...environment, HARNESS_SESSION_ID: parentId, HARNESS_E2E_CHILD_COMPLETE: NEXT_REPLY.split(':',1)[0]! };
+    // The original child process has exited. Continue the same provider transcript.
+    await execFileAsync(python,["-c","from subagents_runtime.cli import main; raise SystemExit(main())","resume","agent-1",NEXT_MARKER],{cwd:projectRoot,env:nextEnvironment,encoding:"utf8",windowsHide:true,timeout:30_000});
+    const [resumedChild] = await waitForStatuses(cliStatusRoot);
+    requireCompleted(resumedChild);
+    const visible = JSON.parse(await readFile(join(cliStatusRoot,'visible.json'),'utf8')) as { parent: number; child: number };
+    if (visible.parent !== 1 || visible.child !== (mode === 'interactive' ? 2 : 0)) throw new Error('Execution mode did not preserve visible-terminal behavior');
     const assertions = server.assertions();
-    const expectedCheckpoints = ["parent-request-write", "parent-waiting", "child-reply-armed", "child-complete", "parent-received-reply"];
+    const expectedCheckpoints = ["parent-request-write", "parent-waiting", ...(mode === "interactive" ? ["child-reply-armed"] : []), "child-complete", "parent-received-reply", ...(mode === "interactive" ? ["child-resume-reply-armed"] : []), "child-resume-complete"];
     const checkpoints = assertions.observations.flatMap((item) => typeof item.checkpoint === "string" ? [item.checkpoint] : []);
-    if (JSON.stringify(checkpoints) !== JSON.stringify(expectedCheckpoints)) {
-      throw new Error(`subagents checkpoint order changed: ${checkpoints.join(", ")}`);
+    const required = expectedCheckpoints.filter((item) => item !== "parent-waiting");
+    if (checkpoints.some((item) => !expectedCheckpoints.includes(item)) || required.some((item) => !checkpoints.includes(item)) || checkpoints[0] !== "parent-request-write" || checkpoints.at(-1) !== "child-resume-complete") {
+      throw new Error(`subagents checkpoint contract changed: ${checkpoints.join(", ")}`);
     }
     return {
       checkpoints,
       completedClis: [childStatus.role, parentStatus.role],
-      requestFilesRemaining: await countRequestFiles(join(projectRoot, ".harness", "runtime", "sessions")),
+      requestFilesRemaining: await countRequestFiles(join(stateRoot, "runtime", "sessions")),
       unexpectedRequests: assertions.unexpectedRequests,
     };
   } finally {
@@ -300,7 +305,7 @@ function requireCompleted(status: CliStatus): void {
 async function countRequestFiles(root: string): Promise<number> {
   try {
     const entries = await readdir(root, { recursive: true, withFileTypes: true });
-    return entries.filter((entry) => entry.isFile() && entry.name.endsWith(".md")).length;
+    return entries.filter((entry) => entry.isFile() && /\.md(?:\.running)?$/u.test(entry.name)).length;
   } catch (error) {
     if (typeof error === "object" && error !== null && "code" in error && error.code === "ENOENT") return 0;
     throw error;

@@ -124,6 +124,64 @@ def test_catalogue_installs_the_hook_at_both_codex_request_boundaries():
     assert "usage_limit_wait_hook.py" in destinations
 
 
+def test_codex_backend_permission_is_authoritative():
+    reset_at = 1_800_000_000
+    payload = {
+        "ordinaryUsageAllowed": False,
+        "rateLimits": {
+            "primary": {"usedPercent": 97, "resetsAt": reset_at},
+        },
+    }
+
+    denied = hook.snapshot_from_app_server(payload)
+    assert denied is not None
+    assert hook.evaluate(denied) == hook.Verdict(True, reset_at, "session")
+
+    payload["ordinaryUsageAllowed"] = True
+    allowed = hook.snapshot_from_app_server(payload)
+    assert allowed is not None
+    assert hook.evaluate(allowed) == hook.Verdict(False, None, None)
+
+
+def test_percent_dip_does_not_end_wait_without_explicit_codex_recovery(monkeypatch):
+    class Clock:
+        def __init__(self):
+            self.now = 1_000_000.0
+            self.slept = []
+
+        def time(self):
+            return self.now
+
+        def sleep(self, seconds):
+            self.slept.append(seconds)
+            self.now += seconds
+
+    clock = Clock()
+    reset_at = clock.now + 3600
+
+    def codex_snapshot(percent, allowed):
+        return {
+            "source": "codex-app-server",
+            "windows": [{"kind": "session", "percent": percent, "resets_at": reset_at}],
+            "credits": None,
+            "ordinary_usage_allowed": allowed,
+        }
+
+    answers = [codex_snapshot(97, None), codex_snapshot(0, True)]
+    monkeypatch.setenv("USAGE_LIMIT_WAIT_POLL", "60")
+
+    waited, kind = hook.wait_for_reset(
+        codex_snapshot(100, False),
+        now=clock.time,
+        sleep=clock.sleep,
+        refresh=lambda: answers.pop(0),
+    )
+
+    assert clock.slept == [60, 60]
+    assert waited == 120
+    assert kind == "session"
+
+
 def test_a_manually_redeemed_ticket_ends_the_wait_on_the_next_poll(monkeypatch):
     class Clock:
         def __init__(self):

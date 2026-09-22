@@ -1,0 +1,34 @@
+name = "grill-me-in-cloud"
+version = "2.0.7"
+description = "Publishes visual design interviews to a persistent hosted board"
+docs = "https://github.com/EmilienxD/harness/blob/main/README.md#user-invoked-skills"
+requires = []
+
+[platforms.claude]
+status = "supported"
+fragment = "claude/settings.fragment.json"
+
+[platforms.chatgpt]
+status = "supported"
+fragment = "chatgpt/hooks.fragment.json"
+
+[[files]]
+src = "SKILL.md"
+dest = "grill-me-in-cloud/SKILL.md"
+root = "skills"
+
+[[files]]
+src = "grill_me_in_cloud_hook.py"
+dest = "grill-cloud/grill_me_in_cloud_hook.py"
+root = "hooks"
+
+[[files]]
+src = "grill_cloud_core.py"
+dest = "grill-cloud/grill_cloud_core.py"
+root = "hooks"
+
+[[files]]
+src = "chatgpt/openai.yaml"
+dest = "grill-me-in-cloud/agents/openai.yaml"
+root = "skills"
+platforms = ["chatgpt"]

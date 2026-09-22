@@ -1,0 +1,140 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://aboard.dev/schemas/config.json",
+  "title": "Aboard configuration",
+  "description": "Sparse overrides for Aboard launches. Omitted settings use product defaults.",
+  "type": "object",
+  "required": ["version"],
+  "properties": {
+    "version": { "const": 1 },
+    "autoRun": {
+      "type": "object",
+      "description": "Auto Run selects Claude when provider is omitted.",
+      "properties": { "provider": { "enum": ["claude", "chatgpt"], "default": "claude" } }
+    },
+    "session": {
+      "type": "object",
+      "properties": { "stopWaitHours": { "type": "number", "minimum": 0 } }
+    },
+    "providers": {
+      "type": "object",
+      "properties": {
+        "claude": { "$ref": "#/$defs/claudeProvider" },
+        "chatgpt": { "$ref": "#/$defs/chatgptProvider" }
+      }
+    }
+  },
+  "$defs": {
+    "command": { "type": "array", "minItems": 1, "items": { "type": "string", "minLength": 1 } },
+    "claudeProfile": {
+      "type": "object",
+      "properties": {
+        "command": { "$ref": "#/$defs/command" },
+        "model": { "enum": ["inherit", "haiku", "sonnet", "opus"] },
+        "effort": { "enum": ["inherit", "low", "medium", "high", "xhigh", "max"] },
+        "deniedTools": { "type": "array", "items": { "type": "string", "minLength": 1 }, "uniqueItems": true }
+      }
+    },
+    "claudeExploreProfile": {
+      "type": "object",
+      "description": "Defaults to Haiku with low effort.",
+      "properties": {
+        "command": { "$ref": "#/$defs/command" },
+        "model": { "enum": ["inherit", "haiku", "sonnet", "opus"], "default": "haiku" },
+        "effort": { "enum": ["inherit", "low", "medium", "high", "xhigh", "max"], "default": "low" }
+      }
+    },
+    "claudeWorkerProfile": {
+      "type": "object",
+      "properties": {
+        "command": { "$ref": "#/$defs/command" },
+        "model": { "enum": ["by-difficulty", "haiku", "sonnet", "opus"], "default": "by-difficulty" },
+        "effort": { "enum": ["by-difficulty", "low", "medium", "high", "xhigh", "max"], "default": "by-difficulty" },
+        "deniedTools": { "type": "array", "items": { "type": "string", "minLength": 1 }, "uniqueItems": true }
+      }
+    },
+    "chatgptProfile": {
+      "type": "object",
+      "properties": {
+        "command": { "$ref": "#/$defs/command" },
+        "model": { "type": "string", "minLength": 1, "not": { "enum": ["haiku", "sonnet", "opus", "by-difficulty"] } },
+        "effort": { "enum": ["inherit", "minimal", "low", "medium", "high", "xhigh"] }
+      }
+    },
+    "chatgptExploreProfile": {
+      "type": "object",
+      "description": "Defaults to GPT-5.6 Luna with low effort.",
+      "properties": {
+        "command": { "$ref": "#/$defs/command" },
+        "model": { "type": "string", "minLength": 1, "not": { "enum": ["haiku", "sonnet", "opus", "by-difficulty"] }, "default": "gpt-5.6-luna" },
+        "effort": { "enum": ["inherit", "minimal", "low", "medium", "high", "xhigh"], "default": "low" }
+      }
+    },
+    "chatgptWorkerProfile": {
+      "type": "object",
+      "properties": {
+        "command": { "$ref": "#/$defs/command" },
+        "model": { "anyOf": [{ "const": "by-difficulty" }, { "type": "string", "minLength": 1, "not": { "enum": ["haiku", "sonnet", "opus"] } }], "default": "by-difficulty" },
+        "effort": { "enum": ["by-difficulty", "inherit", "minimal", "low", "medium", "high", "xhigh"], "default": "by-difficulty" },
+        "webSearch": { "enum": ["disabled", "cached", "indexed", "live"] },
+        "subagents": { "enum": ["allowed", "denied"] }
+      }
+    },
+    "claudeDelegations": {
+      "type": "object",
+      "properties": {
+        "explore": { "$ref": "#/$defs/claudeExploreProfile" },
+        "prototype": { "$ref": "#/$defs/claudeProfile" },
+        "websearch": { "$ref": "#/$defs/claudeProfile" },
+        "brainstorm": { "$ref": "#/$defs/claudeProfile" },
+        "address": { "$ref": "#/$defs/claudeProfile" },
+        "review": { "$ref": "#/$defs/claudeProfile" },
+        "general": { "$ref": "#/$defs/claudeProfile" }
+      }
+    },
+    "chatgptDelegations": {
+      "type": "object",
+      "properties": {
+        "explore": { "$ref": "#/$defs/chatgptExploreProfile" },
+        "prototype": { "$ref": "#/$defs/chatgptProfile" },
+        "websearch": { "$ref": "#/$defs/chatgptProfile" },
+        "brainstorm": { "$ref": "#/$defs/chatgptProfile" },
+        "address": { "$ref": "#/$defs/chatgptProfile" },
+        "review": { "$ref": "#/$defs/chatgptProfile" },
+        "general": { "$ref": "#/$defs/chatgptProfile" }
+      }
+    },
+    "claudeProvider": {
+      "type": "object",
+      "properties": {
+        "command": { "$ref": "#/$defs/command" },
+        "interactive": { "$ref": "#/$defs/claudeProfile" },
+        "delegations": { "$ref": "#/$defs/claudeDelegations" },
+        "autoRun": {
+          "type": "object",
+          "properties": {
+            "explore": { "$ref": "#/$defs/claudeExploreProfile" },
+            "address": { "$ref": "#/$defs/claudeWorkerProfile" },
+            "review": { "$ref": "#/$defs/claudeWorkerProfile" }
+          }
+        }
+      }
+    },
+    "chatgptProvider": {
+      "type": "object",
+      "properties": {
+        "command": { "$ref": "#/$defs/command" },
+        "interactive": { "$ref": "#/$defs/chatgptProfile" },
+        "delegations": { "$ref": "#/$defs/chatgptDelegations" },
+        "autoRun": {
+          "type": "object",
+          "properties": {
+            "explore": { "$ref": "#/$defs/chatgptExploreProfile" },
+            "address": { "$ref": "#/$defs/chatgptWorkerProfile" },
+            "review": { "$ref": "#/$defs/chatgptWorkerProfile" }
+          }
+        }
+      }
+    }
+  }
+}

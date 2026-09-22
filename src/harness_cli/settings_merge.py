@@ -137,21 +137,6 @@ def _merge_lists(base: list, incoming: list, *, hook_event: bool | None = None) 
     if hook_event is None:
         hook_event = any(_is_group(v) for v in (*base, *incoming))
     out = list(base)
-    if hook_event and not any(_is_group(v) for v in (*base, *incoming)):
-        # This is the command list inside one matcher group.  Older merging
-        # could already have left two shell-form spellings of the same hook in
-        # the base file.  Normalize the base itself so a reinstall heals that
-        # state instead of merely updating one of the duplicate entries.
-        deduped: list = []
-        positions: dict[tuple, int] = {}
-        for entry in out:
-            key = identity(entry)
-            if key in positions:
-                deduped[positions[key]] = entry
-            else:
-                positions[key] = len(deduped)
-                deduped.append(entry)
-        out = deduped
     index = {normalize_scope(v) or identity(v): i for i, v in enumerate(out)}
     for item in incoming:
         key = normalize_scope(item) or identity(item)
@@ -165,22 +150,7 @@ def _merge_lists(base: list, incoming: list, *, hook_event: bool | None = None) 
             index[key] = len(out)
             out.append(item)
     if hook_event:
-        # Coalesce same-scope groups into their first sibling. A file can
-        # already carry twins (e.g. one group written with an explicit ""
-        # matcher, back when only exact identity matched) whose hooks would
-        # otherwise keep firing once per group; folding them through merge
-        # dedupes shared hooks by identity and keeps each group's own hooks.
-        first: dict[tuple, int] = {}
-        collapsed: list = []
-        for group in out:
-            scope = normalize_scope(group)
-            if scope is None or scope not in first:
-                if scope is not None:
-                    first[scope] = len(collapsed)
-                collapsed.append(group)
-            else:
-                collapsed[first[scope]] = merge(collapsed[first[scope]], group)
-        out = [_flatten_group(v) if _is_group(v) else v for v in collapsed]
+        out = [_flatten_group(v) if _is_group(v) else v for v in out]
     return out
 
 

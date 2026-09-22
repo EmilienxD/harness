@@ -1,5 +1,5 @@
 name = "resolving-merge-conflicts"
-version = "1.0.0"
+version = "1.0.1"
 description = "Resolves in-progress Git merge and rebase conflicts"
 docs = "https://github.com/EmilienxD/harness/blob/main/harness/engineering/resolving-merge-conflicts/SKILL.md"
 

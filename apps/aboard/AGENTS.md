@@ -41,25 +41,35 @@ points.
 ## Session and Runtime Model
 
 - `interactive`: empty, user-controlled Claude Code or Codex TUI.
-- `Explore`: read-only exploration; Claude's built-in agent or a top-level Codex session enforced with
+- `explore`: read-only exploration; Claude's built-in Explore agent or a top-level Codex session enforced with
   `sandbox_mode="read-only"` and `approval_policy="never"`.
-- `Prototype`, `Web Search`, `Brainstorm`, and `General`: manual delegation identities. Their explicit
+- `prototype`, `websearch`, `brainstorm`, and `general`: manual delegation identities. Their explicit
   `interactive` or `auto` execution mode is separate from Auto Run worker semantics.
-- `implementer`: Auto Run worker invoking `/address-this` on Claude or `$address-this` on ChatGPT.
-- `reviewer`: Auto Run worker invoking `/review-this` on Claude or `$review-this` on ChatGPT. AFK and
+- `address`: Auto Run worker invoking `/address-this` on Claude or `$address-this` on ChatGPT.
+- `review`: Auto Run worker invoking `/review-this` on Claude or `$review-this` on ChatGPT. AFK and
   HITL are orchestration modes, not separate skills.
+
+Headless execution is one-shot: a detached provider process with no terminal, no takeover, and no resume.
+It covers `auto` delegations and Auto Run exploration, whose report is read once. Auto Run workers keep an
+unfocused visible terminal even in AFK mode, because the user takes them over, continues them, and accepts
+their work. `isHeadlessExecution` in `domain/contracts.ts` is the one decision the terminal controller and
+both launch adapters ask, so a mode never means headless in one of them and visible in another.
 
 `.abd/scaffold.json` is the initialized-project marker; when absent, runtime surfaces and the command
 endpoint are closed. Mutable runtime state belongs in VS Code storage, not the workspace.
 
-`.harness/launch.json` version 3 is the launch authority and is re-read for every new launch, resume, and
-reopen. `providers.claude` and `providers.chatgpt` are equal, independently validated configurations;
-neither is inferred from the wrapper-friendly `command` array. **Run Agent** asks which provider to launch,
+`.harness/config.json` is a sparse launch authority and is re-read whenever launch, resume, or reopen
+starts a new process. Resuming into an existing terminal retains that process's configuration.
+Omitted fields use code-owned defaults. `providers.claude` and `providers.chatgpt` are equal,
+independently validated configurations; neither is inferred from the wrapper-friendly `command` array. **Run Agent** asks which provider to launch,
 the Run Agent view above the fleet offers one row per provider that launches the same interactive session
 without the prompt, and `autoRun.provider` selects the Auto Run default and is scaffolded as `claude`. Reopen always uses the
 provider recorded by the session, even when the Auto Run default changes. Existing processes retain their
-configuration. Profiles select model and effort independently and may use `inherit`; Auto Run workers may
-use `by-difficulty`. Platform-specific values must be validated before a terminal is created.
+configuration. Interactive, manual-delegation, and Auto Run profiles select model and effort independently.
+Manual delegation keys are `explore`, `prototype`, `websearch`, `brainstorm`, `address`, `review`, and
+`general`; their task identity must survive launch and resume instead of collapsing configuration to the
+runtime `general` identity. Profiles may use `inherit`; Auto Run workers may use `by-difficulty`.
+Platform-specific values must be validated before a terminal is created.
 
 Difficulty routing:
 
@@ -71,10 +81,14 @@ Difficulty routing:
 | `[AI]-expert-difficulty` or none | `opus`, high | `gpt-5.6-sol`, high |
 
 Interactive and manual sessions inherit the user's native Claude Code or Codex tool settings, including
-built-in subagents and web search. Auto Run workers deny those tools regardless of permissive launch-profile
-settings, with extension-owned Git/GitHub restrictions enforced by a guard hook. ChatGPT Explore must pass
-managed-policy checks for read-only sandboxing, `never` approval, and managed hooks. `[AI]-chrome` workers
-require `chrome` in `BROWSER_USE_AVAILABLE_BACKENDS` before launch.
+built-in subagents and web search, when their exact profile omits an override. Claude exploration defaults
+to Haiku/low and ChatGPT exploration defaults to GPT-5.6 Luna/low. Auto Run workers deny those tools
+regardless of permissive launch-profile settings, with extension-owned Git/GitHub restrictions enforced by
+a guard hook. ChatGPT explore must pass managed-policy checks for read-only sandboxing, `never` approval,
+and managed hooks. `[AI]-chrome` is an issue property, so both of that issue's workers are told to use
+browser tooling when they have a tool for it and to skip the step otherwise; Claude workers additionally
+launch with `--chrome`. Codex `BROWSER_USE_AVAILABLE_BACKENDS` enforcement is retained in
+`chatgpt/browser.ts` but disabled, because a backend requirement contradicts that skip-if-absent policy.
 
 Worktree runs copy ignored local `.claude`, `.agents`, `.codex`, and `.abd` configuration without
 overwriting checkout files or copying live session state. Refuse the run when a copied path is not ignored.
@@ -90,9 +104,10 @@ user/profile/default settings. `.abd/settings.json` accepts flat or nested keys,
 | `aboard.bridge.port` | `4823` | Preferred loopback bridge port. |
 | `aboard.launch.maxInlinePromptChars` | `4000` | Spill longer prompts to one-use temporary files. |
 | `aboard.terminals.closeOnSessionEnd` | `false` | Leave exited session terminals available. |
+| `aboard.sessions.interactiveResumeMode` | `fork` | Fork live interactive delegations, or use `reuse-terminal` to send the next message into their tracked live terminal. |
 | `aboard.autoRun.review` | `false` | Add the mode-specific automated review turn. |
 | `aboard.autoRun.branchMode` | `per-issue` | Per-issue PRs or one cumulative branch. |
-| `aboard.autoRun.exploreBeforeImplement` | `false` | Run read-only Explore before a fresh worker. |
+| `aboard.autoRun.exploreBeforeAddress` | `false` | Run read-only explore before a fresh worker. |
 | `aboard.autoRun.issueContextDepth` | `1` | Related-issue traversal depth. |
 | `aboard.autoRun.prompt` | `""` | Persistent worker guidance. |
 | `aboard.autoRun.mergeStrategy` | `squash` | PR merge method. |
@@ -104,7 +119,7 @@ user/profile/default settings. `.abd/settings.json` accepts flat or nested keys,
 | `aboard.autoRun.worktree.setupTimeoutSeconds` | `600` | Limit scaffold setup time. |
 
 Auto Run freezes run-specific settings for recovery. Launch configuration is not frozen; resumes use the
-latest valid `.harness/launch.json`.
+latest valid `.harness/config.json`.
 
 ## Command Terminal API
 
@@ -145,23 +160,24 @@ are outside workspaces, permissioned `0600`, and removed on window close.
   prompt surface is easy for humans to find and review.
 - Auto Run injects its commit contract and pinned review scope at launch; the user-owned worker skills
   supply reusable implementation and review behavior.
-  AFK implementers and reviewers require successful turns and exactly one clean descendant commit; an AFK
-  reviewer uses an empty commit when no fixes are needed. HITL without review leaves implementation edits
-  uncommitted. HITL with review creates one clean local implementer checkpoint, mixed-resets it, and gives a
-  non-committing reviewer the immutable checkpoint range. Every HITL path advances only after exactly one
+  AFK address and review workers require successful turns and exactly one clean descendant commit; an AFK
+  review uses an empty commit when no fixes are needed. HITL without review leaves implementation edits
+  uncommitted. HITL with review creates one clean local address checkpoint, mixed-resets it, and gives a
+  non-committing review the immutable checkpoint range. Every HITL path advances only after exactly one
   non-empty, clean user acceptance commit.
 - Workers receive read-only Git commands plus `git add` and `git commit`; Aboard owns every other
   Auto Run Git and GitHub mutation. Aboard observes acceptance commits and never creates them.
 - HITL waits in `await-commit` on its recorded branch and `beforeSha`. No commit is ordinary waiting; a dirty
-  partial acceptance commit is a recoverable failure that must be amended before explicit resume. Per-issue
+  partial acceptance commit is a recoverable failure that must be amended before explicit resume, and so is
+  closing the terminal of the worker the user is expected to accept. Per-issue
   runs automatically integrate their internal issue PRs after acceptance. Single-branch runs publish each
   accepted commit directly to the run branch and update the cumulative PR. Only the final run PR into the
   original target may need manual merging; `mergeRunPullRequest` controls its automatic merge.
 - File and Git changes, view refresh, and window focus wake acceptance observation; an internal timer
-  supplies a one-second fallback. Recovery uses version-4 records; versions 1–3 remain discardable but cannot
-  resume. Persist mutation intent, then observed postconditions, before clearing the journal. The HITL mixed
+  supplies a one-second fallback. Recovery uses version-1 records. Persist mutation intent, then observed
+  postconditions, before clearing the journal. The HITL mixed
   reset has its own pending action whose postcondition includes an index reset to `beforeSha`, and the
-  temporary implementer checkpoint must never be published.
+  temporary address checkpoint must never be published.
 - Determine worker success only from process outcome, commit ancestry/count, and worktree cleanliness.
   Never parse final-response markup or generate/read worker commit messages.
 - Auto Run adds non-removable Git/GitHub restrictions and, for worktrees, original-checkout path
@@ -171,6 +187,9 @@ are outside workspaces, permissioned `0600`, and removed on window close.
   its checkout behind.
 - Keep TypeScript strict, preserve Windows path behavior, and place cross-platform rules in `domain/` or
   `platform/` rather than duplicating them in adapters.
+- Interactive delegation resumes may submit input to a matching live provider terminal when
+  `sessions.interactiveResumeMode` is `reuse-terminal`. Bind Harness reply ownership before submitting
+  the message. When no live session matches, use the existing fork/reopen path.
 
 ## Commands and Tests
 

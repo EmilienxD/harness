@@ -1,6 +1,10 @@
 ---
 name: address-this
-description: Address whatever the user provides and validate the completed work.
+description: Implement a pinned request and validate the completed work. Use when the user invokes the address workflow for a supplied target.
+argument-hint: "[request or pinned target]"
+license: MIT
+metadata:
+  author: EMB
 disable-model-invocation: true
 ---
 

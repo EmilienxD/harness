@@ -547,6 +547,8 @@ class TerminalUI:
                 if indices and count == len(indices)
                 else self._paint("◐", self.YELLOW)
                 if count
+                else self._paint("○", self.RED)
+                if kind == "option" and options[indices[0]].installed
                 else self._paint("○", self.DIM)
             )
             if kind == "all":
@@ -892,14 +894,27 @@ class TerminalUI:
 
 
 def _matching(options: Sequence[MenuOption], query: str) -> list[int]:
+    """Rank name matches before metadata matches, preserving order within ties."""
     if not query:
         return list(range(len(options)))
     needle = query.lower()
-    return [
+    matches = [
         index
         for index, option in enumerate(options)
         if needle in f"{option.label} {option.group} {option.detail}".lower()
     ]
+
+    def rank(index: int) -> int:
+        label = options[index].label.lower()
+        if label == needle:
+            return 0
+        if label.startswith(needle):
+            return 1
+        if needle in label:
+            return 2
+        return 3
+
+    return sorted(matches, key=rank)
 
 
 def _rows(options: Sequence[MenuOption], visible: Sequence[int]) -> list[tuple[str, object]]:

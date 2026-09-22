@@ -10,6 +10,7 @@ import { TerminalController, type StartupProofTracker, type TerminalCreationOpti
 import type { AgentId, IsoTimestamp, SessionId, TerminalId } from "../../src/domain/contracts.js";
 import { FleetRegistry } from "../../src/domain/fleet.js";
 import { WriteLease } from "../../src/domain/lease.js";
+import { parseFleetPersistenceDto } from "../../src/domain/validation.js";
 import type { AgentPlatform, ConfiguredLaunch, PlatformLaunchRequest } from "../../src/platform/agent-platform.js";
 
 const resolved = (text: string): ResolvedPrompt => ({ text, sources: [] });
@@ -30,6 +31,10 @@ class FakeTerminal implements TerminalHandle {
 class FakeTerminalHost implements TerminalHost {
   public readonly terminals: FakeTerminal[] = [];
   public readonly options: TerminalCreationOptions[] = [];
+  public createBackgroundProcess(options: TerminalCreationOptions): TerminalHandle {
+    return this.createTerminal(options);
+  }
+
   public createTerminal(options: TerminalCreationOptions): TerminalHandle {
     const terminal = new FakeTerminal();
     this.options.push(options);
@@ -106,7 +111,7 @@ test("shared delegation asks the selected platform for an executable launch plan
     agentIdFactory: () => "agent-1" as AgentId,
   });
 
-  const launched = await coordinator.launchInteractive({ type: "interactive", description: "shell" }, "user");
+  const launched = await coordinator.launchInteractive({ type: "interactive", description: "shell", harnessStateDirectory: "C:/isolated-state", harnessRuntimePath: "C:/installed-runtime", parentTerminalUri: "vscode://aboard.aboard/focus-parent?childSessionId=child" }, "user");
 
   assert.equal(planned.length, 1);
   assert.equal(createdSessions, 1);
@@ -119,14 +124,16 @@ test("shared delegation asks the selected platform for an executable launch plan
   assert.equal(fleet.get("agent-1" as AgentId)?.platform, "claude");
   assert.equal(fleet.get("agent-1" as AgentId)?.sessionBinding, "bound");
   assert.equal(fleet.get("agent-1" as AgentId)?.executionMode, "interactive");
+  assert.equal(host.options[0]?.env.HARNESS_STATE_DIR, "C:/isolated-state");
+  assert.ok(host.options[0]?.env.PYTHONPATH?.startsWith("C:/installed-runtime"));
+  assert.equal(host.options[0]?.env.HARNESS_PARENT_TERMINAL_URI, "vscode://aboard.aboard/focus-parent?childSessionId=child");
 });
 
-test("shared delegation does not report a runtime-assigned session until its actual id is bound", async () => {
+test("a new promptless ChatGPT TUI starts idle without arming an impossible lifecycle proof", async () => {
   const provisional = "6b1e3f7a-2c4d-4a8b-9f10-2c3d4e5f6071" as SessionId;
-  const actual = "af817a6c-cd41-41e2-a4db-44d3f43cd560" as SessionId;
-  let resolveProof: ((value: unknown) => void) | undefined;
+  let proofsArmed = 0;
   const proofs: StartupProofTracker = {
-    awaitStarted: () => new Promise((resolve) => { resolveProof = resolve; }),
+    awaitStarted: () => { proofsArmed += 1; return new Promise(() => undefined); },
     cancel: () => undefined,
   };
   const platform: AgentPlatform = {
@@ -158,20 +165,14 @@ test("shared delegation does not report a runtime-assigned session until its act
     agentIdFactory: () => "agent-1" as AgentId, startupTimeoutMs: 60_000,
   });
 
-  let settled = false;
-  const launched = coordinator.launchInteractive({ type: "interactive", description: "ChatGPT" }, "user").then((value) => { settled = true; return value; });
-  await new Promise((resolve) => setImmediate(resolve));
-  assert.equal(settled, false);
-  assert.equal(fleet.get("agent-1" as AgentId)?.lifecycle.status, "starting");
-  terminals.bindSession("agent-1" as AgentId, provisional, actual);
-  assert.equal(fleet.bindSession("agent-1" as AgentId, provisional, actual, new Date().toISOString() as IsoTimestamp), true);
-  resolveProof?.({ agentId: "agent-1", sessionId: actual });
+  const launched = await coordinator.launchInteractive({ type: "interactive", description: "ChatGPT" }, "user");
 
-  assert.equal((await launched).sessionId, actual);
+  assert.equal(proofsArmed, 0);
+  assert.equal(launched.sessionId, provisional);
   assert.equal(fleet.get("agent-1" as AgentId)?.lifecycle.status, "running");
 });
 
-test("an auto-run ChatGPT Explore runs read-only and reports through the shared completion contract", async () => {
+test("an auto-run ChatGPT explore runs read-only and reports through the shared completion contract", async () => {
   const agentId = "agent-1" as AgentId;
   const delivered: string[] = [];
   const platform = new ChatGptAgentPlatform({
@@ -196,7 +197,7 @@ test("an auto-run ChatGPT Explore runs read-only and reports through the shared 
     agentIdFactory: () => agentId, runtimeDirectory: "C:/runtime",
   });
 
-  const run = coordinator.runAutomated({ type: "Explore", description: "explore issue 14", issues: [14] });
+  const run = coordinator.runAutomated({ type: "explore", description: "explore issue 14", issues: [14] });
   while (fleet.get(agentId) === undefined) await new Promise((resolve) => setImmediate(resolve));
   const command = host.terminals[0]?.sent.at(-1) ?? "";
   assert.match(command, /--sandbox read-only/u);
@@ -216,7 +217,7 @@ test("an auto-run ChatGPT Explore runs read-only and reports through the shared 
   assert.equal(fleet.get(agentId)?.lifecycle.status, "completed");
 });
 
-test("an auto-run ChatGPT implementer invokes the implement skill under the run's write lease and restrictions", async () => {
+test("an auto-run ChatGPT address invokes the address skill under the run's write lease and restrictions", async () => {
   const agentId = "agent-1" as AgentId;
   const sessionId = "6b1e3f7a-2c4d-4a8b-9f10-2c3d4e5f6071" as SessionId;
   const delivered: string[] = [];
@@ -247,7 +248,7 @@ test("an auto-run ChatGPT implementer invokes the implement skill under the run'
   });
 
   const run = coordinator.runAutomated({
-    type: "implementer",
+    type: "address",
     description: "address issue 15",
     issues: [15],
     difficulty: "expert",
@@ -285,7 +286,7 @@ test("an auto-run ChatGPT implementer invokes the implement skill under the run'
   assert.equal(lease.current(), undefined);
 });
 
-test("an auto-run ChatGPT reviewer invokes the review skill its mode selects and settles through the shared contract", async () => {
+test("an auto-run ChatGPT review invokes the review skill its mode selects and settles through the shared contract", async () => {
   const agentId = "agent-1" as AgentId;
   const sessionId = "6b1e3f7a-2c4d-4a8b-9f10-2c3d4e5f6071" as SessionId;
   const requested: (string | undefined)[] = [];
@@ -317,10 +318,10 @@ test("an auto-run ChatGPT reviewer invokes the review skill its mode selects and
     shell: "powershell", agentIdFactory: () => agentId, runtimeDirectory: "C:/runtime",
   });
 
-  const run = coordinator.runAutomated({ type: "reviewer", description: "review pull request 42", issues: [15], pullRequest: 42, difficulty: "advanced" });
+  const run = coordinator.runAutomated({ type: "review", description: "review pull request 42", issues: [15], pullRequest: 42, difficulty: "advanced" });
   while (fleet.get(agentId) === undefined) await new Promise((resolve) => setImmediate(resolve));
   const command = host.terminals[0]?.sent.at(-1) ?? "";
-  assert.deepEqual(requested, ["reviewer"]);
+  assert.deepEqual(requested, ["review"]);
   assert.match(command, /\$review-this/u);
   assert.match(command, /web_search="disabled"/u);
   assert.equal(lease.current()?.agentId, agentId);
@@ -338,7 +339,7 @@ test("an auto-run ChatGPT reviewer invokes the review skill its mode selects and
   assert.equal(lease.current(), undefined);
 });
 
-test("an explicitly interactive ChatGPT reviewer remains attended", async () => {
+test("an explicitly interactive ChatGPT review remains attended", async () => {
   const agentId = "agent-1" as AgentId;
   const sessionId = "6b1e3f7a-2c4d-4a8b-9f10-2c3d4e5f6071" as SessionId;
   const requested: (string | undefined)[] = [];
@@ -370,9 +371,9 @@ test("an explicitly interactive ChatGPT reviewer remains attended", async () => 
     shell: "powershell", agentIdFactory: () => agentId, runtimeDirectory: "C:/runtime",
   });
 
-  const handles = await coordinator.launchInteractive({ type: "reviewer", description: "review pull request 42", issues: [15], pullRequest: 42 }, "auto-run");
+  const handles = await coordinator.launchInteractive({ type: "review", description: "review pull request 42", issues: [15], pullRequest: 42 }, "auto-run");
 
-  assert.deepEqual(requested, ["reviewer"]);
+  assert.deepEqual(requested, ["review"]);
   const command = host.terminals[0]?.sent.at(-1) ?? "";
   assert.match(command, /\$review-this/u);
   assert.match(command, /web_search="disabled"/u);
@@ -444,7 +445,7 @@ test("a ChatGPT reopen uses ChatGPT configuration even when Claude is the Auto R
 
   let settled = false;
   const reopened = coordinator.reopen({
-    platform: "chatgpt", agentId, type: "interactive", sessionId, terminalName: "aboard: ChatGPT", cwd: "C:/work",
+    platform: "chatgpt", agentId, type: "interactive", sessionId, cwd: "C:/work",
   }).then((value) => { settled = true; return value; });
   await new Promise((resolve) => setImmediate(resolve));
   assert.equal(settled, false);
@@ -475,7 +476,7 @@ test("an isolated auto-run ChatGPT continuation reapplies the original checkout 
   const metadataRoots = [join(workspaceRoot, ".git", "worktrees", "work"), join(workspaceRoot, ".git", "objects")];
   fleet.register({
     platform: "chatgpt",
-    identity: { agentId, type: "implementer" },
+    identity: { agentId, type: "address" },
     sessionId,
     sessionBinding: "bound",
     terminal: { terminalId: "old-terminal" as TerminalId, name: "aboard: address issue 15" },
@@ -539,4 +540,83 @@ test("an isolated auto-run ChatGPT continuation reapplies the original checkout 
     telemetry: { totalTokens: 0, totalDurationMs: 0, totalToolUseCount: 0, compactionCount: 0 },
   });
   assert.equal((await resumed).result.outcome, "succeeded");
+});
+
+test("a review delegation carries [AI]-chrome to its adapter and survives persistence", async () => {
+  const planned: PlatformLaunchRequest[] = [];
+  const reviewerId = "agent-9" as AgentId;
+  const platform: AgentPlatform = {
+    id: "claude",
+    lifecycleAssets: { settings: "hooks.json", script: "hook.py" },
+    capabilities: {
+      sessionIdentity: "client-assigned",
+      promptDelivery: ["none", "inline", "spilled"],
+      lifecycle: ["start", "stop", "end"],
+      models: ["test-model"],
+      reasoningEfforts: ["test-effort"],
+    },
+    createSession: () => ({ sessionId: "6b1e3f7a-2c4d-4a8b-9f10-2c3d4e5f6071" as SessionId, binding: "bound" }),
+    bindSession: (current, observed) => current.sessionId === observed ? observed : undefined,
+    normalizeLifecycle: () => { throw new Error("not used"); },
+    requireEnforceableRestrictions: () => undefined,
+    planLaunch: (request) => {
+      planned.push(request);
+      return {
+        platform: "claude",
+        kind: "start",
+        agentId: request.agentId,
+        sessionId: request.sessionId,
+        agentType: request.agentType,
+        shell: request.shell,
+        command: ["runtime-wrapper", "profile"],
+        args: ["--start"],
+        commandLine: "runtime-wrapper profile --start",
+        writeCapability: "write-capable",
+        requiresWriteLease: false,
+        promptDelivery: "none",
+        runtimeDirectory: "C:/runtime/agents/agent-9",
+      };
+    },
+    planSessionResume: () => { throw new Error("not used"); },
+    preflight: async () => undefined,
+    isResumable: async () => false,
+  };
+  const host = new FakeTerminalHost();
+  const fleet = new FleetRegistry();
+  const terminals = new TerminalController({
+    host,
+    shell: "powershell",
+    environment: () => ({ port: 4823, token: "token", workspaceRoot: "C:\work" }),
+    terminalIdFactory: () => "terminal-1" as TerminalId,
+  });
+  const coordinator = new DelegationCoordinator({
+    workspaceRoot: "C:\work",
+    fleet,
+    lease: new WriteLease(),
+    terminals,
+    configurations: configurationSource(async () => ({ platform: "claude", settings: { ownedBy: "adapter" } })),
+    platforms: new Map([["claude", platform]]),
+    prompts: { resolve: async () => resolved("Review issue #34.") },
+    spills: { prepare: async () => undefined, write: async () => "unused" },
+    shell: "powershell",
+    agentIdFactory: () => reviewerId,
+    runtimeDirectory: "C:/runtime",
+  });
+
+  const run = coordinator.runAutomated({ type: "review", description: "review issue 34", issues: [34], chrome: true });
+  while (fleet.get(reviewerId) === undefined) await new Promise((resolve) => setImmediate(resolve));
+
+  assert.equal(planned[0]?.chrome, true, "the adapter decides how to enable the browser, so the request must reach it");
+  assert.equal(fleet.get(reviewerId)?.chromeEnabled, true);
+  // A recorded capability the reloader rejects would strand the session on restart.
+  const serialized: unknown = JSON.parse(JSON.stringify(fleet.toPersistenceDto()));
+  assert.equal(parseFleetPersistenceDto(serialized).ok, true);
+
+  coordinator.complete(reviewerId, {
+    outcome: "succeeded",
+    exitCode: 0,
+    lastAssistantMessage: "Reviewed issue #34.",
+    telemetry: { totalTokens: 0, totalDurationMs: 0, totalToolUseCount: 0, compactionCount: 0 },
+  });
+  assert.equal((await run).result.outcome, "succeeded");
 });

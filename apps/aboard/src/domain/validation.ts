@@ -4,6 +4,7 @@ import {
   INTERACTIVE_AGENT_TYPES,
   WORKER_FAILURE_TYPES,
   isAutomatedAgentType,
+  isAutoRunWorkerType,
   type AgentId,
   type AgentPlatformId,
   type AgentIdentity,
@@ -447,8 +448,8 @@ export function parseAgentSession(value: unknown): ValidationResult<AgentSession
     : (issues.push("session.compactSummaries must be an array"), undefined);
 
   if (identity !== undefined && resultDelivery !== undefined) {
-    if (chromeEnabled === true && identity.type !== "implementer") {
-      issues.push("session.chromeEnabled is only legal for implementer agents");
+    if (chromeEnabled === true && !isAutoRunWorkerType(identity.type)) {
+      issues.push("session.chromeEnabled is only legal for auto-run worker agents");
     }
     if (
       isAutomatedAgentType(identity.type) && executionMode !== "auto" &&
@@ -757,6 +758,7 @@ function parseReopenable(value: unknown): ReopenableSession | undefined {
   return {
     platform,
     sessionId,
+    ...(value.executionMode === "interactive" || value.executionMode === "auto" || value.executionMode === "auto-run" ? { executionMode: value.executionMode } : {}),
     ...(issueNumbers === undefined ? {} : { issueNumbers }),
     ...(value.chromeEnabled === true ? { chromeEnabled: true as const } : {}),
     ...(typeof value.cwd === "string" && value.cwd.trim().length > 0 ? { cwd: value.cwd } : {}),

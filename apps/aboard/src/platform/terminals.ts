@@ -2,10 +2,15 @@ import {
   buildChangeDirectoryCommandLine,
   type ShellKind,
 } from "./shell.js";
+import { randomUUID } from "node:crypto";
+import { createBackgroundProcess } from "./background.js";
 
 import {
+  agentLabel,
+  isHeadlessExecution,
   isInteractiveAgentType,
   type AgentId,
+  type AgentPlatformId,
   type AgentType,
   type ExecutionMode,
   type SessionId,
@@ -58,8 +63,14 @@ export interface TerminalHandle {
   dispose(): void;
 }
 
+export function validateResumeMessage(message: string): void {
+  if (!message.trim()) throw new Error("Resume message must not be empty");
+  if (/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/u.test(message)) throw new Error("Resume message contains terminal control characters");
+}
+
 export interface TerminalCreationOptions {
   readonly cwd: string;
+  readonly provider?: AgentPlatformId;
   readonly name?: string;
   readonly shellPath?: string;
   readonly shellArgs?: readonly string[];
@@ -68,6 +79,7 @@ export interface TerminalCreationOptions {
 
 export interface TerminalHost {
   createTerminal(options: TerminalCreationOptions): TerminalHandle;
+  createBackgroundProcess?(options: TerminalCreationOptions): TerminalHandle;
   onDidCloseTerminal(listener: (terminal: TerminalHandle) => void): { dispose(): void };
 }
 
@@ -82,6 +94,7 @@ export interface CreateAboardTerminalRequest {
   readonly agentId: AgentId;
   readonly sessionId: SessionId;
   readonly agentType: AgentType;
+  readonly provider?: AgentPlatformId;
   readonly issueNumbers?: readonly number[];
   readonly name?: string;
   readonly cwd?: string;
@@ -121,6 +134,7 @@ export type TerminalLifecycleEvent =
     };
 
 export interface TerminalSnapshot {
+  readonly backend?: "terminal" | "process";
   readonly terminalId: TerminalId;
   readonly agentId: AgentId;
   readonly sessionId: SessionId;
@@ -224,17 +238,20 @@ export class TerminalController {
 
     const environment = this.options.environment();
     const terminalId = this.options.terminalIdFactory();
-    const name = request.name ?? `aboard: ${request.agentType}`;
+    const name = request.name ?? agentLabel({ agentId: request.agentId, type: request.agentType });
     const cwd = request.cwd ?? environment.workspaceRoot;
     const env: Record<string, string> = {
       ABOARD_BRIDGE_PORT: String(environment.port),
       ABOARD_BRIDGE_TOKEN: environment.token,
       ABOARD_AGENT_ID: request.agentId,
+      ABOARD_EXECUTION_ID: randomUUID(),
       ABOARD_SESSION_ID: request.sessionId,
       ABOARD_AGENT_TYPE: request.agentType,
       ABOARD_WORKSPACE_ROOT: cwd,
       ...(request.providerEnvironment ?? {}),
     };
+    // Detached-process logging still uses this internal runtime location. Hook
+    // discovery and hook commands do not depend on it.
     if (environment.runtimeRoot !== undefined) env.ABOARD_RUNTIME_ROOT = environment.runtimeRoot;
     if (request.issueNumbers !== undefined && request.issueNumbers.length > 0) {
       env.ABOARD_ISSUE_NUMBERS = request.issueNumbers.join(",");
@@ -249,12 +266,19 @@ export class TerminalController {
     const creationOptions: TerminalCreationOptions = {
       cwd,
       env,
+      ...(request.provider === undefined ? {} : { provider: request.provider }),
+      name,
       ...(request.shellPath === undefined ? {} : { shellPath: request.shellPath }),
       ...(request.shellArgs === undefined ? {} : { shellArgs: request.shellArgs }),
     };
-    const handle = this.options.host.createTerminal(creationOptions);
+    const headless = isHeadlessExecution(request.agentType, request.executionMode);
+    const handle = headless
+      ? this.options.host.createBackgroundProcess?.(creationOptions)
+        ?? createBackgroundProcess(creationOptions, this.options.shell, (closed) => this.#onClosed(closed))
+      : this.options.host.createTerminal(creationOptions);
     const createdAt = this.#now().toISOString();
     const record: TerminalRecord = {
+      backend: headless ? "process" : "terminal",
       terminalId,
       agentId: request.agentId,
       sessionId: request.sessionId,
@@ -303,10 +327,10 @@ export class TerminalController {
 
     beforeCommand?.(this.#snapshot(record));
 
-    if (isUserFacing(request)) handle.show(false);
+    if (!headless && isUserFacing(request)) handle.show(false);
     // VS Code receives cwd too; this visible belt-and-braces cd prevents a
     // shell that starts elsewhere from launching an agent against another tree.
-    handle.sendText(buildChangeDirectoryCommandLine(this.options.shell, cwd), true);
+    if (!headless) handle.sendText(buildChangeDirectoryCommandLine(this.options.shell, cwd), true);
     if (request.initialCommand !== undefined) handle.sendText(request.initialCommand, true);
 
     return this.#snapshot(record);
@@ -379,8 +403,18 @@ export class TerminalController {
     handle.dispose();
   }
 
-  // These methods are intentionally takeover-specific. Automated prompt delivery
-  // belongs in provider launch/resume arguments, never in terminal input.
+  /** Paste into the provider composer, then allow paste detection to finish before Enter. */
+  public async sendResumeMessage(terminalId: TerminalId, message: string): Promise<void> {
+    const record = this.#requireRecord(terminalId);
+    if (record.backend === "process") throw new Error("Resume messages require an interactive terminal");
+    validateResumeMessage(message);
+    this.#requireOpenHandle(terminalId).sendText(`\u001b[200~${message.replace(/\r\n?/gu, "\n")}\u001b[201~`, false);
+    await this.#sleep(100);
+    this.#requireOpenHandle(terminalId).sendText("\r", false);
+    this.show(terminalId);
+  }
+
+  // Explicit user takeover remains separate from resume delivery.
   public sendUserTakeoverText(terminalId: TerminalId, text: string, addNewLine = true): void {
     this.#requireOpenHandle(terminalId).sendText(text, addNewLine);
   }

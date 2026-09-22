@@ -1,21 +1,21 @@
 /**
  * Aboard session types after the REFACTOR.md redesign:
  * - interactive: Ordinary user-controlled agent TUI
- * - Explore: Read-only exploration session
- * - Prototype, Web Search, Brainstorm, General: manual delegation identities whose
+ * - explore: Read-only exploration session (Claude's builtin Explore agent on Claude)
+ * - prototype, websearch, brainstorm, general: manual delegation identities whose
  *   execution mode is recorded separately from Auto Run worker semantics
- * - implementer: Auto Run worker that implements one frozen issue
- * - reviewer: Auto Run worker that reviews (both AFK and HITL use this profile)
+ * - address: Auto Run worker that addresses one frozen issue
+ * - review: Auto Run worker that reviews (both AFK and HITL use this profile)
  */
 export const AGENT_TYPES = [
   "interactive",
-  "Explore",
-  "Prototype",
-  "Web Search",
-  "Brainstorm",
-  "General",
-  "implementer",
-  "reviewer",
+  "explore",
+  "prototype",
+  "websearch",
+  "brainstorm",
+  "general",
+  "address",
+  "review",
 ] as const;
 
 export type AgentType = (typeof AGENT_TYPES)[number];
@@ -33,29 +33,40 @@ export function isInteractiveAgentType(type: AgentType): boolean {
   return (INTERACTIVE_AGENT_TYPES as readonly AgentType[]).includes(type);
 }
 
-/** Explore is the stable provider-neutral read-only role. */
-export const NAMED_BUILTIN_AGENT_TYPES = ["Explore"] as const;
+/** explore is the stable provider-neutral read-only session type. */
+export const NAMED_BUILTIN_AGENT_TYPES = ["explore"] as const;
 
 export function isNamedBuiltinAgentType(type: AgentType): boolean {
   return (NAMED_BUILTIN_AGENT_TYPES as readonly AgentType[]).includes(type);
 }
 
-/** Auto Run workers: implementer and reviewer */
-export const AUTO_RUN_WORKER_TYPES = ["implementer", "reviewer"] as const;
+/** Auto Run workers: address and review */
+export const AUTO_RUN_WORKER_TYPES = ["address", "review"] as const;
 
 export function isAutoRunWorkerType(type: AgentType): boolean {
   return (AUTO_RUN_WORKER_TYPES as readonly AgentType[]).includes(type);
 }
 
-/** Explore sessions are not restored from activity */
-export const NON_RESTORABLE_PERSISTED_AGENT_TYPES = ["Explore"] as const;
+/** explore sessions are not restored from activity */
+export const NON_RESTORABLE_PERSISTED_AGENT_TYPES = ["explore"] as const;
 
 export function isNonRestorablePersistedAgentType(type: AgentType): boolean {
   return (NON_RESTORABLE_PERSISTED_AGENT_TYPES as readonly AgentType[]).includes(type);
 }
 
 export function isAutomatedAgentType(type: AgentType): boolean {
-  return type === "Explore" || isAutoRunWorkerType(type);
+  return type === "explore" || isAutoRunWorkerType(type);
+}
+
+/**
+ * One-shot headless execution: a provider process with no terminal, no
+ * takeover, and no later resume. Manual delegations choose it explicitly with
+ * `auto`; inside Auto Run only exploration qualifies, because its report is
+ * read once and discarded. Auto Run workers stay in visible terminals even in
+ * AFK mode: the user takes them over, continues them, and accepts their work.
+ */
+export function isHeadlessExecution(type: AgentType, mode: ExecutionMode | undefined): boolean {
+  return mode === "auto" || (mode === "auto-run" && !isAutoRunWorkerType(type));
 }
 
 export type AgentId = string & { readonly __brand: "AgentId" };

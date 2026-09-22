@@ -104,7 +104,7 @@ def test_subagents_install_and_removal_cover_the_complete_workflow(tmp_path, mon
     assert target.destination_path("skills", "review-this/SKILL.md").exists()
     assert target.destination_path("hooks", "issue_readers_hook.py").exists()
     assert not target.destination_path("hooks", "delegation_hook.py").exists()
-    assert ".harness/runtime/" in target.gitignore_path.read_text(encoding="utf-8")
+    assert not target.gitignore_path.exists() or ".harness/runtime/" not in target.gitignore_path.read_text(encoding="utf-8")
 
     installer.reconcile(set())
     assert not target.destination_path("skills", "prototype-with-agent/SKILL.md").exists()

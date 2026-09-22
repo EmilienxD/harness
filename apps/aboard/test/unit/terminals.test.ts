@@ -9,7 +9,8 @@ import {
   type TerminalHost,
   type TerminalLifecycleEvent,
 } from "../../src/platform/terminals.js";
-import type { AgentId, SessionId, TerminalId } from "../../src/domain/contracts.js";
+import type { AgentId, AgentSession, IsoTimestamp, SessionId, TerminalId } from "../../src/domain/contracts.js";
+import { resumeInOpenTerminal, type DelegationBinding, type ManualDelegationLaunch } from "../../src/bridge/manual-delegation.js";
 import { createTerminalRoutes } from "../../src/bridge/terminal-routes.js";
 import type { AuthenticatedBridgeRequest } from "../../src/bridge/protocol.js";
 import { SessionStartCancelledError, SessionStartTimeoutError } from "../../src/bridge/session-lifecycle.js";
@@ -37,6 +38,10 @@ class FakeTerminal implements TerminalHandle {
 class FakeTerminalHost implements TerminalHost {
   public readonly created: Array<{ options: TerminalCreationOptions; terminal: FakeTerminal }> = [];
   #listener: ((terminal: TerminalHandle) => void) | undefined;
+
+  public createBackgroundProcess(options: TerminalCreationOptions): TerminalHandle {
+    return this.createTerminal(options);
+  }
 
   public createTerminal(options: TerminalCreationOptions): TerminalHandle {
     const terminal = new FakeTerminal();
@@ -75,12 +80,52 @@ function setup() {
   return { controller, host, events };
 }
 
+test("resuming in an open terminal pastes a multiline message and submits it once", async () => {
+  const { controller, host } = setup();
+  const created = controller.create({ agentId: agent("child"), sessionId: session("conversation"), agentType: "general", executionMode: "interactive" });
+  host.created[0]!.terminal.sent.length = 0;
+  await controller.sendResumeMessage(created.terminalId, "First line\nSecond line");
+  assert.deepEqual(host.created[0]!.terminal.sent, [
+    { text: "\u001b[200~First line\nSecond line\u001b[201~", addNewLine: false },
+    { text: "\r", addNewLine: false },
+  ]);
+  assert.equal(controller.list().length, 1);
+});
+
+test("interactive delegation resumes use the matching live terminal and preserve its session", async () => {
+  for (const provider of ["claude", "chatgpt"] as const) {
+    const { controller, host } = setup();
+    const opened = controller.create({ agentId: agent("child"), sessionId: session("conversation"), agentType: "general", executionMode: "interactive", provider });
+    const binding: DelegationBinding = { agentId: "child", sessionId: "conversation", terminalId: opened.terminalId, provider, type: "general", task: "general", executionMode: "interactive", cwd: opened.cwd, description: "Child", harnessSessionId: "stable" };
+    const request: ManualDelegationLaunch = { ...binding, requestId: "next", resumeAgentId: "child", resumeSessionId: "conversation", forkSessionId: "conversation", executionId: "execution", prompt: "Continue" };
+    const saved: AgentSession = { platform: provider, identity: { agentId: agent("child"), type: "general" }, sessionId: session("conversation"), sessionBinding: "bound", terminal: { terminalId: opened.terminalId, name: opened.name }, lifecycle: { status: "awaiting-user", startedAt: opened.createdAt as IsoTimestamp }, executionMode: "interactive", resultDelivery: { mode: "none" }, telemetry: { totalTokens: 0, totalDurationMs: 0, totalToolUseCount: 0, compactionCount: 0 } };
+    host.created[0]!.terminal.sent.length = 0;
+    const prepare = async () => { assert.equal(host.created[0]!.terminal.sent.length, 0); };
+    const resumed = await resumeInOpenTerminal(request, binding, saved, controller, prepare);
+    assert.deepEqual(resumed, { agentId: "child", sessionId: "conversation", terminalId: opened.terminalId });
+    assert.equal(host.created.length, 1);
+    assert.equal(host.created[0]!.terminal.sent.length, 2);
+
+    const sentBeforeFailure = host.created[0]!.terminal.sent.length;
+    await assert.rejects(resumeInOpenTerminal(request, binding, saved, controller, async () => { throw new Error("Ownership could not be bound"); }), /Ownership could not be bound/u);
+    await assert.rejects(resumeInOpenTerminal({ ...request, prompt: "Text\u001b[201~\rcommand" }, binding, saved, controller, prepare), /control characters/u);
+    assert.equal(host.created[0]!.terminal.sent.length, sentBeforeFailure);
+
+    for (const changed of [{ ...saved, platform: provider === "claude" ? "chatgpt" as const : "claude" as const }, { ...saved, sessionId: session("other") }, { ...saved, lifecycle: { status: "completed" as const, startedAt: opened.createdAt as IsoTimestamp, finishedAt: opened.createdAt as IsoTimestamp, exitCode: 0, lastAssistantMessage: null } }]) {
+      assert.equal(await resumeInOpenTerminal(request, binding, changed, controller, prepare), undefined);
+    }
+    assert.equal(await resumeInOpenTerminal({ ...request, executionMode: "auto" }, binding, saved, controller, prepare), undefined);
+    host.close(host.created[0]!.terminal, 0);
+    assert.equal(await resumeInOpenTerminal(request, binding, saved, controller, prepare), undefined);
+  }
+});
+
 test("creates one real-terminal record with the complete aboard environment", () => {
   const { controller, host, events } = setup();
   const created = controller.create({
     agentId: agent("agent-6"),
     sessionId: session("4db0ed4c-5d9e-4ab5-a493-2b8575ab19ee"),
-    agentType: "implementer",
+    agentType: "address",
     issueNumbers: [6],
     completionCommitStartingSha: "1234567890abcdef1234567890abcdef12345678",
     reviewRange: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa..bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
@@ -89,12 +134,14 @@ test("creates one real-terminal record with the complete aboard environment", ()
 
   assert.equal(created.terminalId, "terminal-1");
   // Exhaustive on purpose: terminals receive only the Aboard bridge/session environment.
-  assert.deepEqual(host.created[0]?.options.env, {
+  const { ABOARD_EXECUTION_ID, ...environment } = host.created[0]!.options.env;
+  assert.match(ABOARD_EXECUTION_ID!, /^[0-9a-f-]{36}$/u);
+  assert.deepEqual(environment, {
     ABOARD_BRIDGE_PORT: "4932",
     ABOARD_BRIDGE_TOKEN: "secret",
     ABOARD_AGENT_ID: "agent-6",
     ABOARD_SESSION_ID: "4db0ed4c-5d9e-4ab5-a493-2b8575ab19ee",
-    ABOARD_AGENT_TYPE: "implementer",
+    ABOARD_AGENT_TYPE: "address",
     ABOARD_WORKSPACE_ROOT: "C:\\work\\aboard",
     ABOARD_ISSUE_NUMBERS: "6",
     ABOARD_WORKER_START_SHA: "1234567890abcdef1234567890abcdef12345678",
@@ -112,7 +159,7 @@ test("creates one real-terminal record with the complete aboard environment", ()
   assert.throws(() => controller.create({
     agentId: agent("agent-6"),
     sessionId: session("af817a6c-cd41-41e2-a4db-44d3f43cd560"),
-    agentType: "reviewer",
+    agentType: "review",
   }), /already has a live aboard terminal/);
 });
 
@@ -121,7 +168,7 @@ test("a launch given its own directory starts there, cds there, and calls it the
   const created = controller.create({
     agentId: agent("agent-7"),
     sessionId: session("4db0ed4c-5d9e-4ab5-a493-2b8575ab19ee"),
-    agentType: "implementer",
+    agentType: "address",
     cwd: "C:\\sessions\\run_test\\aboard",
     initialCommand: "claude --add-dir .abd/runtime/agents/agent-7",
   });
@@ -184,21 +231,34 @@ test("releasing is idempotent and never resurrects a closed terminal", () => {
 
 test("several bound issues reach the session as one comma-separated variable, and none as no variable", () => {
   const { controller, host } = setup();
-  controller.create({ agentId: agent("agent-7"), sessionId: session("af817a6c-cd41-41e2-a4db-44d3f43cd560"), agentType: "Explore", issueNumbers: [6, 9] });
+  controller.create({ agentId: agent("agent-7"), sessionId: session("af817a6c-cd41-41e2-a4db-44d3f43cd560"), agentType: "explore", issueNumbers: [6, 9] });
   assert.equal(host.created[0]?.options.env?.ABOARD_ISSUE_NUMBERS, "6,9");
   // An empty list is no attribution, not an empty string a hook would have to
   // tell apart from a real value.
-  controller.create({ agentId: agent("agent-8"), sessionId: session("c15badb6-d6c8-45a6-a59f-e931cd364332"), agentType: "Explore", issueNumbers: [] });
+  controller.create({ agentId: agent("agent-8"), sessionId: session("c15badb6-d6c8-45a6-a59f-e931cd364332"), agentType: "explore", issueNumbers: [] });
   assert.equal("ABOARD_ISSUE_NUMBERS" in (host.created[1]?.options.env ?? {}), false);
 });
 
-test("the terminal leaves title policy to VS Code; the aboard label stays on the record", () => {
-  // A static role title outlives the session and then lies about it.
+test("the terminal uses its agent label as the VS Code terminal name", () => {
   const { controller, host } = setup();
-  const created = controller.create({ agentId: agent("agent-6"), sessionId: session("4db0ed4c-5d9e-4ab5-a493-2b8575ab19ee"), agentType: "implementer", issueNumbers: [6] });
-  assert.equal("name" in (host.created[0]?.options ?? {}), false);
+  const created = controller.create({ agentId: agent("agent-6"), sessionId: session("4db0ed4c-5d9e-4ab5-a493-2b8575ab19ee"), agentType: "address", issueNumbers: [6] });
+  assert.equal(host.created[0]?.options.name, "aboard-address-agent-6");
   assert.equal("titleTemplate" in (host.created[0]?.options ?? {}), false);
-  assert.equal(created.name, "aboard: implementer");
+  assert.equal(created.name, "aboard-address-agent-6");
+});
+
+test("a visible agent exposes its provider and agent label to the terminal host", () => {
+  const { controller, host } = setup();
+  controller.create({
+    agentId: agent("agent-codex"),
+    sessionId: session("4db0ed4c-5d9e-4ab5-a493-2b8575ab19ee"),
+    agentType: "interactive",
+    provider: "chatgpt",
+    executionMode: "interactive",
+  });
+
+  assert.equal(host.created[0]?.options.provider, "chatgpt");
+  assert.equal(host.created[0]?.options.name, "aboard-interactive-agent-codex");
 });
 
 test("a closed terminal frees the agent for relaunch but keeps session identity fixed", async () => {
@@ -228,7 +288,7 @@ test("attended sessions carry ABOARD_ATTENDED independently of reporting", () =>
   controller.create({
     agentId: agent("explore-auto"),
     sessionId: session("4db0ed4c-5d9e-4ab5-a493-2b8575ab19ee"),
-    agentType: "Explore",
+    agentType: "explore",
     initialCommand: "claude --agent Explore map the auth flow",
     attended: false,
   });
@@ -238,7 +298,7 @@ test("attended sessions carry ABOARD_ATTENDED independently of reporting", () =>
   controller.create({
     agentId: agent("explore-interactive"),
     sessionId: session("af817a6c-cd41-41e2-a4db-44d3f43cd560"),
-    agentType: "Explore",
+    agentType: "explore",
     attended: true,
   });
   assert.equal(host.created[1]!.options.env.ABOARD_ATTENDED, "1");
@@ -250,7 +310,7 @@ test("manual delegation mode is present before the child's first hook", () => {
   controller.create({
     agentId: agent("manual-auto"),
     sessionId: session("4db0ed4c-5d9e-4ab5-a493-2b8575ab19ee"),
-    agentType: "General",
+    agentType: "general",
     executionMode: "auto",
     harnessRequestId: "request-7",
   });
@@ -346,7 +406,7 @@ test("terminal routes validate creation and reserve send/keys for explicit user 
   const created = await handler(request("POST", "/terminals", {
     agentId: "worker",
     sessionId: "4db0ed4c-5d9e-4ab5-a493-2b8575ab19ee",
-    agentType: "implementer",
+    agentType: "address",
     issueNumbers: [6],
   }));
   assert.equal(created.status, 201);
@@ -370,7 +430,7 @@ test("terminal routes validate creation and reserve send/keys for explicit user 
   const duplicate = await handler(request("POST", "/terminals", {
     agentId: "worker",
     sessionId: session("af817a6c-cd41-41e2-a4db-44d3f43cd560"),
-    agentType: "reviewer",
+    agentType: "review",
   }));
   assert.equal(duplicate.status, 409);
 });
@@ -483,4 +543,32 @@ test("startup ownership is published after proof is armed and before the command
 
   assert.equal(published, true);
   assert.equal(host.created[0]?.terminal.sent.at(-1)?.text, "codex");
+});
+
+
+test("automatic executions use a process handle without creating or showing a terminal", () => {
+  const { controller, host } = setup();
+  const background = new FakeTerminal();
+  Object.assign(host, { createBackgroundProcess: () => background });
+  const created = controller.create({ agentId: agent("agent-auto"), sessionId: session("auto-session"), agentType: "general", executionMode: "auto", initialCommand: "provider task" });
+  assert.equal(host.created.length, 0);
+  assert.equal(created.backend, "process");
+  assert.deepEqual(background.shows, []);
+  assert.deepEqual(background.sent, [{ text: "provider task", addNewLine: true }]);
+});
+
+test("auto-run exploration is a background process while auto-run workers keep an unfocused terminal", () => {
+  const { controller, host } = setup();
+  const background = new FakeTerminal();
+  Object.assign(host, { createBackgroundProcess: () => background });
+
+  const explore = controller.create({ agentId: agent("agent-explore"), sessionId: session("explore-session"), agentType: "explore", executionMode: "auto-run", attended: false, initialCommand: "claude --agent Explore" });
+  assert.equal(explore.backend, "process");
+  assert.equal(host.created.length, 0);
+
+  const address = controller.create({ agentId: agent("agent-address"), sessionId: session("address-session"), agentType: "address", executionMode: "auto-run", attended: false, initialCommand: "claude \"/address-this\"" });
+  assert.equal(address.backend, "terminal");
+  const created = host.created.at(-1)?.terminal;
+  assert.deepEqual(created?.shows, []);
+  assert.deepEqual(created?.sent.map((entry) => entry.text), ["cd -LiteralPath 'C:\\work\\aboard'", "claude \"/address-this\""]);
 });

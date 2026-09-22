@@ -1,5 +1,5 @@
 name = "todo-hitl"
-version = "1.0.0"
+version = "1.0.1"
 description = "Mark deferred code work for human review and address it deliberately"
 docs = "https://github.com/EmilienxD/harness/blob/main/README.md#user-invoked-skills"
 

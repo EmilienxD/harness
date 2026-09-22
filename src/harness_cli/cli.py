@@ -212,10 +212,14 @@ def _adoption_lines(products: dict[str, set[str]]) -> list[str]:
     ]
 
 
-def catalogue_menu() -> int:
+def catalogue_menu(*, local: Path | None = None, root: Path | None = None) -> int:
     if not sys.stdin.isatty():
         raise InstallError("the catalogue is interactive; run `harness` in a terminal")
-    available = discover()
+    available = discover(local=local) if local is not None else discover()
+    if root is not None:
+        root = root.expanduser().resolve()
+        if not root.is_dir():
+            raise UsageError(f"project root is not an existing directory: {root}")
     tools = sorted(
         (tool for tool in available.values() if tool.selectable),
         key=lambda tool: (_category_rank(tool), tool.name),
@@ -248,7 +252,10 @@ def catalogue_menu() -> int:
             _cancel(ui)
             return 0
 
-        targets = _targets(scope, platforms)
+        targets = (
+            [Target.for_project(root, platform) for platform in platforms]
+            if scope == 0 and root is not None else _targets(scope, platforms)
+        )
         installed = _root_packages(targets, store)
         package_selection = ui.multiselect(
             "Select packages",
@@ -279,10 +286,66 @@ def catalogue_menu() -> int:
             _cancel(ui)
             return 0
 
-        changes_by_platform = {}
+        selected_updates: set[str] = set()
         for installer in installers:
-            _, changes = installer.plan(requests[installer.target.platform])
+            installer.update_packages = selected_updates
+        changes_by_platform = {}
+        resolved_by_platform = {}
+        update_versions: dict[str, list[str]] = {}
+        for installer in installers:
+            resolved, changes = installer.plan(requests[installer.target.platform])
             changes_by_platform[installer.target.platform] = changes
+            resolved_by_platform[installer.target.platform] = resolved
+            kept = {item.tool.name for item in resolved} | requests[installer.target.platform]
+            required = {change.package for change in changes if change.action == "upgrade"}
+            for name, receipt in installed_packages(installer.target, store).items():
+                if (
+                    name in kept
+                    and name not in required
+                    and name in available
+                    and receipt.get("version") is not None
+                    and receipt["version"] != available[name].version
+                ):
+                    update_versions.setdefault(name, []).append(
+                        f"{installer.target.adapter.product_name}: {receipt['version']} → {available[name].version}"
+                    )
+        if update_versions:
+            update_names = sorted(update_versions)
+            ui.note("Available updates", ["  Leave packages unselected to keep their installed versions."])
+            update_selection = ui.multiselect(
+                "Update existing packages (optional)",
+                [
+                    MenuOption(name, "; ".join(update_versions[name]), badge="optional update")
+                    for name in update_names
+                ],
+                selected=set(),
+                select_all=True,
+                required=False,
+            )
+            if update_selection is None:
+                _cancel(ui)
+                return 0
+            selected_updates.update(update_names[index] for index in update_selection)
+            for installer in installers:
+                resolved, changes = installer.plan(requests[installer.target.platform])
+                resolved_by_platform[installer.target.platform] = resolved
+                changes_by_platform[installer.target.platform] = changes
+        required_updates = []
+        for installer in installers:
+            resolved = resolved_by_platform[installer.target.platform]
+            changes = changes_by_platform[installer.target.platform]
+            for change in changes:
+                if change.action != "upgrade" or change.package in selected_updates:
+                    continue
+                parents = [
+                    item.tool.name for item in resolved
+                    if any(dependency.name == change.package and dependency.constraint for dependency in item.tool.dependencies)
+                ]
+                required_updates.append(
+                    f"  {installer.target.adapter.product_name}: {change.package} {change.reason} (required by {', '.join(parents)})"
+                )
+        if required_updates:
+            ui.note("Required dependency updates", required_updates)
         if not any(changes_by_platform.values()):
             ui.outro("Catalogue already matches that selection.")
             return 0
@@ -327,6 +390,8 @@ def catalogue_menu() -> int:
                     CatalogueInstaller(available, target, locked_store)
                     for target in targets
                 ]
+                for installer in locked_installers:
+                    installer.update_packages = selected_updates
                 locked_changes = {
                     installer.target.platform: installer.plan(
                         requests[installer.target.platform]
@@ -357,6 +422,8 @@ def build_parser() -> argparse.ArgumentParser:
         description="Install and reconcile the Harness catalogue.",
     )
     parser.add_argument("--version", action="version", version=f"harness {__version__}")
+    parser.add_argument("--local", type=Path, help="use a local Harness checkout and its Python runtimes")
+    parser.add_argument("--root", type=Path, help="project root (default: current directory)")
     commands = parser.add_subparsers(dest="command")
     install = commands.add_parser(
         "install",
@@ -373,7 +440,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--scope", choices=("project", "user"), default="project",
         help="installation scope (default: project)",
     )
-    install.add_argument("--root", type=Path, help="project root (default: current directory)")
+    install.add_argument("--root", type=Path, default=argparse.SUPPRESS, help="project root (default: current directory)")
     install.add_argument("--dry-run", action="store_true", help="print the plan without changing files")
     install.add_argument(
         "--overwrite", action="store_true",
@@ -399,7 +466,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--scope", choices=("project", "user"), default="project",
         help="installation scope (default: project)",
     )
-    uninstall.add_argument("--root", type=Path, help="project root (default: current directory)")
+    uninstall.add_argument("--root", type=Path, default=argparse.SUPPRESS, help="project root (default: current directory)")
     uninstall.add_argument("--dry-run", action="store_true", help="print the plan without changing files")
     uninstall.add_argument("--json", action="store_true", help="emit one machine-readable JSON object")
     uninstall.set_defaults(operation="uninstall")
@@ -415,7 +482,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--scope", choices=("project", "user"), default="project",
         help="installation scope (default: project)",
     )
-    upgrade.add_argument("--root", type=Path, help="project root (default: current directory)")
+    upgrade.add_argument("--root", type=Path, default=argparse.SUPPRESS, help="project root (default: current directory)")
     upgrade.add_argument("--dry-run", action="store_true", help="print the plan without changing files")
     upgrade.add_argument(
         "--overwrite", action="store_true",
@@ -437,7 +504,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--scope", choices=("project", "user"), default="project",
         help="installation scope (default: project)",
     )
-    list_parser.add_argument("--root", type=Path, help="project root (default: current directory)")
+    list_parser.add_argument("--root", type=Path, default=argparse.SUPPRESS, help="project root (default: current directory)")
     list_parser.add_argument("--json", action="store_true", help="emit one machine-readable JSON object")
     list_parser.set_defaults(operation="list")
     info = commands.add_parser("info", help="show package details")
@@ -457,6 +524,8 @@ def main(argv: list[str] | None = None) -> int:
         args = build_parser().parse_args(raw_args)
         if args.command is not None:
             return run_installer_command(args)
+        if args.local is not None or args.root is not None:
+            return catalogue_menu(local=args.local, root=args.root)
         return catalogue_menu()
     except UsageError as exc:
         if "--json" in raw_args:

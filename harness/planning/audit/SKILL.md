@@ -1,6 +1,10 @@
 ---
 name: audit
-description: Audit a codebase or a scoped part of it and report evidence-backed findings with severity, confidence, remediation difficulty, and recommendations. Use when the user wants a security, architecture, quality, performance, reliability, testing, dependency, privacy, or general codebase audit. Explicit invocation only.
+description: Audit a codebase or selected scope and report evidence-backed findings. Use when the user requests a security, architecture, quality, performance, or general code audit.
+argument-hint: "[scope] [type] [agents=N] [focus]"
+license: MIT
+metadata:
+  author: EMB
 disable-model-invocation: true
 ---
 
@@ -82,7 +86,7 @@ Only after every report has arrived:
 
 Do not claim exhaustive coverage, exploitability, measured performance impact, or absence of risk without evidence.
 
-## 5. Present the audit in chat
+## 5. Present the audit in the end-of-turn message
 
 Write the final audit directly in the conversation. Do not create an audit file unless the user asks for one.
 

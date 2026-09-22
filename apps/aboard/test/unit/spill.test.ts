@@ -6,8 +6,55 @@ import test from "node:test";
 
 import { FileSystemPromptSpillStore, PromptSpillPathError, createPromptSpillRoot } from "../../src/platform/spill.js";
 import { planLaunch } from "../../src/claude/launch.js";
+import { planChatGptLaunch } from "../../src/chatgpt/launch.js";
 import { promptSpillRoot, taskPromptPath } from "../../src/platform/launch.js";
 import type { AgentId, SessionId } from "../../src/domain/contracts.js";
+
+test("Codex's shared lifecycle script survives agent cleanup", async (t) => {
+  const root = await mkdtemp(join(tmpdir(), "aboard-shared-hooks-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const store = new FileSystemPromptSpillStore("C:/project", root, new Map([
+    ["chatgpt", { settings: "assets/runtime/abd-hooks.json", script: "assets/runtime/abd_hook.py" }],
+  ]));
+  const plan = planChatGptLaunch({
+    agentId: "10" as AgentId, sessionId: "29581ba3-a790-4a66-9b8d-dc4748eedcd9" as SessionId,
+    agentType: "interactive", shell: "powershell", configuration: { shape: "default" }, runtimeDirectory: root,
+  });
+  await store.prepare(plan);
+  const script = join(root, "scripts", "abd_hook.py");
+  assert.equal(await readFile(script, "utf8"), await readFile("assets/runtime/abd_hook.py", "utf8"));
+  await assert.rejects(readFile(join(plan.runtimeDirectory, "settings.json"), "utf8"), { code: "ENOENT" });
+  await store.remove(plan.agentId);
+  await store.prune(new Set());
+  assert.equal(await readFile(script, "utf8"), await readFile("assets/runtime/abd_hook.py", "utf8"));
+});
+
+test("a delegated Claude fork receives a lifecycle startup hook", async (t) => {
+  const runtimeRoot = await mkdtemp(join(tmpdir(), "aboard-fork-hooks-test-"));
+  t.after(() => rm(runtimeRoot, { recursive: true, force: true }));
+  const plan = {
+    ...planLaunch({
+      agentId: "10" as AgentId,
+      sessionId: "29581ba3-a790-4a66-9b8d-dc4748eedcd9" as SessionId,
+      forkSessionId: "d4919c37-76d4-46f5-8a99-0e3c0e0c8369" as SessionId,
+      agentType: "brainstorm",
+      shell: "powershell",
+      configuration: { shape: "default" },
+      executionMode: "interactive",
+      runtimeDirectory: runtimeRoot,
+    }),
+    platform: "claude" as const,
+  };
+  const store = new FileSystemPromptSpillStore("C:/project", runtimeRoot, new Map([
+    ["claude", { settings: "assets/runtime/abd-hooks.json", script: "assets/runtime/abd_hook.py" }],
+  ]));
+  await store.prepare(plan);
+  const settings = JSON.parse(await readFile(join(plan.runtimeDirectory, "settings.json"), "utf8")) as {
+    hooks: { SessionStart: { matcher?: string; hooks: { args: string[] }[] }[] };
+  };
+  const applicable = settings.hooks.SessionStart.filter((entry) => entry.matcher === undefined || new RegExp(entry.matcher).test("fork"));
+  assert.ok(applicable.some((entry) => entry.hooks.some((hook) => hook.args.at(-1) === "session-start")));
+});
 
 test("an activation owns a short isolated prompt root", async (t) => {
   const parent = await mkdtemp(join(tmpdir(), "aboard-prompt-root-test-"));
@@ -31,31 +78,6 @@ test("an activation owns a short isolated prompt root", async (t) => {
   );
 });
 
-test("short-root cleanup also removes the current workspace's legacy prompt files", async (t) => {
-  const parent = await mkdtemp(join(tmpdir(), "aboard-prompt-migration-test-"));
-  const runtimeRoot = join(parent, "runtime");
-  const promptRoot = await createPromptSpillRoot(parent);
-  const legacyRoot = promptSpillRoot(runtimeRoot);
-  t.after(async () => {
-    await rm(parent, { recursive: true, force: true });
-    await rm(legacyRoot, { recursive: true, force: true });
-  });
-
-  const agentId = "8" as AgentId;
-  const current = new FileSystemPromptSpillStore("C:/project", runtimeRoot, new Map(), { promptRoot });
-  const legacy = new FileSystemPromptSpillStore("C:/project", runtimeRoot, new Map());
-  const contents = "Review issue #8.\n";
-  const currentPath = join(promptRoot, agentId, "task.md");
-  const legacyPath = taskPromptPath(runtimeRoot, agentId);
-  await current.write({ agentId, relativePath: currentPath, contents });
-  await legacy.write({ agentId, relativePath: legacyPath, contents });
-
-  await current.remove(agentId);
-
-  await assert.rejects(readFile(currentPath), { code: "ENOENT" });
-  await assert.rejects(readFile(legacyPath), { code: "ENOENT" });
-});
-
 test("compaction restores an archived worker task into its activation root", async (t) => {
   const parent = await mkdtemp(join(tmpdir(), "aboard-task-reground-test-"));
   const runtimeRoot = join(parent, "runtime");
@@ -74,7 +96,7 @@ test("compaction restores an archived worker task into its activation root", asy
     ...planLaunch({
       agentId,
       sessionId: "6b1e3f7a-2c4d-4a8b-9f10-2c3d4e5f6071" as SessionId,
-      agentType: "implementer",
+      agentType: "address",
       shell: "powershell",
       configuration: { shape: "skill", skillName: "address-this" },
       prompt: "Address issue #9.",

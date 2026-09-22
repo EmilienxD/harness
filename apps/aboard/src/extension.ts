@@ -1,6 +1,8 @@
 import type { ExtensionContext } from "vscode";
 import { ProgressLocation, RelativePattern, ThemeIcon, TreeItem, TreeItemCollapsibleState, Uri, commands, env, window, workspace } from "vscode";
 import { randomUUID } from "node:crypto";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
 
 
 import {
@@ -10,7 +12,7 @@ import {
 } from "./bridge/server.js";
 import { createTerminalRoutes } from "./bridge/terminal-routes.js";
 import { CommandTerminalService, createCommandRoutes, type CommandTerminalId } from "./bridge/command-terminals.js";
-import { createDelegationRoutes } from "./bridge/manual-delegation.js";
+import { createDelegationRoutes, delegationParentSession, readDelegationBinding, resumeInOpenTerminal } from "./bridge/manual-delegation.js";
 import { FileCommandEndpointRegistry, commandEndpointDirectory } from "./bridge/command-endpoint.js";
 import { TerminalController } from "./platform/terminals.js";
 import type { TerminalId } from "./domain/contracts.js";
@@ -18,10 +20,11 @@ import { createVsCodeTerminalHost } from "./vscode/terminals.js";
 import { spawnCommandRunner } from "./platform/preflight.js";
 import { ClaudeAgentPlatform } from "./claude/platform.js";
 import { ChatGptAgentPlatform } from "./chatgpt/platform.js";
+import { ChatGptHookTrust } from "./chatgpt/hook-trust.js";
 import type { AgentPlatform, AgentPlatformId } from "./platform/agent-platform.js";
 import { GitHubBoundaryError, GitHubClient, ProcessGhExecutor } from "./github/client.js";
 import { readScaffoldState, scaffoldCatalogRevision, scaffoldProject } from "./scaffold/project.js";
-import { join } from "node:path";
+import { delimiter, join } from "node:path";
 import { FleetRegistry } from "./domain/fleet.js";
 import { WriteLease } from "./domain/lease.js";
 import { registerNativeFleetUi, type NativeFleetUiRegistration } from "./vscode/native-ui.js";
@@ -40,7 +43,7 @@ import {
 import { FileActivityStore, FileFleetStore, PersistOnChange } from "./runtime/persistence.js";
 import { ActivityRecorder } from "./runtime/activity-recorder.js";
 import { isInteractiveLaunch, shouldRecordEndedSession, type AgentOutcome } from "./domain/activity.js";
-import { completedCount, isUnsupportedRecord } from "./domain/run-plan.js";
+import { completedCount } from "./domain/run-plan.js";
 import { isLiveSession } from "./vscode/fleet.js";
 import { ReopenCoordinator, describeReopenOutcome } from "./platform/reopen.js";
 import { registerReopenCommand } from "./vscode/reopen.js";
@@ -58,7 +61,7 @@ import {
   SessionStartupProofs,
   type SessionEndReason,
 } from "./bridge/session-lifecycle.js";
-import { lockMarkerDirectory, lockMarkerPresent, sessionExitFailure, sessionLaunchFailure, sessionWrapperLayout, takeSessionExitRecord, watchLockMarkers, type SessionExitRecord } from "./runtime/lock-markers.js";
+import { lockMarkerDirectory, lockMarkerLive, sessionExitFailure, sessionLaunchFailure, sessionWrapperLayout, takeSessionExitRecord, watchLockMarkers, type SessionExitRecord } from "./runtime/lock-markers.js";
 import { WorkspaceAgentIdCounter } from "./runtime/agent-id-counter.js";
 import { PromptResolver } from "./platform/prompts.js";
 import { GitHubDelegationPromptResolver } from "./github/prompt-adapter.js";
@@ -66,7 +69,7 @@ import { FileSystemPromptSpillStore, createPromptSpillRoot } from "./platform/sp
 import { readFile, rm } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { homedir } from "node:os";
-import type { AgentId, AgentSession, AgentType, IsoTimestamp, SessionId, TerminalId as TerminalIdBrand } from "./domain/contracts.js";
+import { isHeadlessExecution, type AgentId, type AgentSession, type AgentType, type IsoTimestamp, type SessionId, type TerminalId as TerminalIdBrand } from "./domain/contracts.js";
 
 
 /** Generous worker proof-of-life window: cold starts include `uv` resolving the hook shim and the agent CLI boot. */
@@ -87,6 +90,8 @@ import { RuntimeLayout } from "./runtime/layout.js";
 import { requireHarnessWorkerSkills } from "./claude/skills.js";
 import { requireChatGptWorkerSkills } from "./chatgpt/skills.js";
 import { FileLaunchConfigurationSource } from "./platform/launch-configuration.js";
+import { createGrillCloudRelay, type GrillCloudRelay } from "./grill/cloud-relay.js";
+import { PromptSubmissions } from "./platform/prompt-submissions.js";
 
 let bridge: BridgeRuntime | undefined;
 let commandEndpointRegistry: FileCommandEndpointRegistry | undefined;
@@ -113,7 +118,7 @@ async function readProjectSettings(workspaceRoot: string): Promise<ProjectSettin
 
 function workerConfigurations(workspaceRoot: string, source: FileLaunchConfigurationSource): DelegationConfigurationSource {
   const requireSkills = async (configured: Awaited<ReturnType<FileLaunchConfigurationSource["get"]>>, type: AgentType) => {
-    if (type === "implementer" || type === "reviewer") {
+    if (type === "address" || type === "review") {
       if (configured.platform === "claude") await requireHarnessWorkerSkills(workspaceRoot);
       else await requireChatGptWorkerSkills(workspaceRoot);
     }
@@ -122,6 +127,7 @@ function workerConfigurations(workspaceRoot: string, source: FileLaunchConfigura
   return {
     get: async (type) => requireSkills(await source.get(type), type),
     getFor: async (platform, type) => requireSkills(await source.getFor(platform, type), type),
+    getDelegationFor: async (platform, task) => requireSkills(await source.getDelegationFor(platform, task), task === "explore" ? "explore" : "general"),
   };
 }
 
@@ -176,6 +182,8 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
         ...bridgeEnvironment,
         workspaceRoot,
         runtimeRoot: runtime.root,
+        ...(process.env.HARNESS_GRILL_URL === undefined ? {} : { HARNESS_GRILL_URL: process.env.HARNESS_GRILL_URL }),
+        ...(process.env.HARNESS_GRILL_CODE === undefined ? {} : { HARNESS_GRILL_CODE: process.env.HARNESS_GRILL_CODE }),
       };
     },
     terminalIdFactory: () => randomUUID() as TerminalId,
@@ -230,6 +238,61 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
   const fleetStore = new FileFleetStore(runtime.root, runtimeAdmission);
   const persistedFleet = await fleetStore.load();
   const fleet = persistedFleet === undefined ? new FleetRegistry() : FleetRegistry.restore(persistedFleet);
+  // Presence belongs to this project, so the relay lives exactly as long as the
+  // project is initialized: an uninitialized workspace neither reports nor polls.
+  let grillRelay: GrillCloudRelay | undefined;
+  // Tracked separately from the relay itself: an unconfigured host yields no
+  // relay, and retrying that on every `.abd/` write would repeat its diagnostic.
+  let grillRelayResolved = false;
+  const promptSubmissions = new PromptSubmissions();
+  const syncGrillRelay = (): void => {
+    if (initialized === grillRelayResolved) return;
+    grillRelayResolved = initialized;
+    if (!initialized) { grillRelay?.dispose(); grillRelay = undefined; return; }
+    grillRelay = createGrillCloudRelay({ fleet, terminals, workspaceRoot, prompts: promptSubmissions, log: (message) => output.appendLine(message) });
+    grillRelay?.start();
+    // A window reload reuses the existing host environment, so pointing at a
+    // reload here would send the user in a circle when the variables are new.
+    output.appendLine(grillRelay === undefined
+      ? "Grill relay is inactive: HARNESS_GRILL_URL and HARNESS_GRILL_CODE are not in this VS Code process's environment. Setting them for the agent alone (for example in .claude/settings.local.json) does not reach the extension host; set them for the user or shell that starts VS Code and restart VS Code entirely."
+      : `Grill relay started for this project as instance ${grillRelay.instanceId}.`);
+  };
+  context.subscriptions.push({ dispose: () => grillRelay?.dispose() });
+  const delegationStateDirectory = join(runtime.root, "delegations");
+  const parentTerminalUri = async (childSessionId: string): Promise<string | undefined> => {
+    try {
+      const target = Uri.from({
+        scheme: env.uriScheme,
+        authority: context.extension.id,
+        path: "/focus-parent",
+        query: new URLSearchParams({ childSessionId }).toString(),
+      });
+      return (await env.asExternalUri(target)).toString();
+    } catch (error) {
+      output.appendLine(`Could not create the parent-terminal link: ${error instanceof Error ? error.message : "unknown error"}`);
+      return undefined;
+    }
+  };
+  context.subscriptions.push(window.registerUriHandler({
+    handleUri: async (uri) => {
+      if (uri.path !== "/focus-parent") return;
+      const parameters = new URLSearchParams(uri.query);
+      const childSessionId = parameters.get("childSessionId");
+      // asExternalUri may append its own window-routing query parameters.
+      if (childSessionId === null || !childSessionId.trim()) {
+        void window.showWarningMessage("That Aboard terminal link is invalid.");
+        return;
+      }
+      const parentSessionId = await delegationParentSession(delegationStateDirectory, childSessionId).catch(() => undefined);
+      const parent = parentSessionId === undefined ? undefined : fleet.getBySession(parentSessionId as SessionId);
+      const terminalId = parent === undefined ? undefined : terminals.liveTerminalForAgent(parent.identity.agentId);
+      if (terminalId === undefined) {
+        void window.showInformationMessage("The parent agent terminal is no longer open.");
+        return;
+      }
+      terminals.show(terminalId);
+    },
+  }));
   const activityListeners = new Set<() => void>();
   const activity = new ActivityRecorder({
     store: new FileActivityStore(runtime.root, runtimeAdmission),
@@ -239,8 +302,8 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
     onDidChange: () => { for (const listener of activityListeners) listener(); },
   });
   const launchFile = new FileLaunchConfigurationSource({
-    project: join(workspaceRoot, ".harness", "launch.json"),
-    global: join(homedir(), ".harness", "launch.json"),
+    project: join(workspaceRoot, ".harness", "config.json"),
+    global: join(homedir(), ".harness", "config.json"),
   });
   const claudePlatform = new ClaudeAgentPlatform({
     commandRunner: spawnCommandRunner(workspaceRoot),
@@ -249,7 +312,18 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
       script: join(context.extensionPath, "assets", "runtime", "abd_hook.py"),
     },
   });
+  const hookTrustKey = `aboard.codexHooksAllowed:${workspaceRoot}`;
+  const chatGptHookTrust = new ChatGptHookTrust({
+    isAllowed: () => context.workspaceState.get<boolean>(hookTrustKey) === true,
+    remember: async () => { await context.workspaceState.update(hookTrustKey, true); },
+    ask: async () => await window.showWarningMessage(
+      "Allow configured Codex hooks for Aboard sessions in this workspace?",
+      { modal: true, detail: "Aboard needs lifecycle hooks to detect session startup, and guard hooks for Auto Run. This allows all enabled Codex hooks, including user and project hooks, without individual trust review during Aboard launches and resumes. Only allow this if you trust those hooks. Your choice is remembered for this workspace." },
+      "Allow Hooks",
+    ) === "Allow Hooks",
+  });
   const chatGptPlatform = new ChatGptAgentPlatform({
+    approveHooks: () => chatGptHookTrust.approve(),
     commandRunner: spawnCommandRunner(workspaceRoot),
     lifecycleAssets: {
       settings: join(context.extensionPath, "assets", "runtime", "abd-hooks.json"),
@@ -311,7 +385,7 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
       if (launchFileNotice !== undefined && notice.length === 0) void window.showInformationMessage("Launch configuration is valid. New and reopened sessions use it.");
       launchFileNotice = notice.length === 0 ? undefined : notice;
     } catch (error) {
-      const notice = error instanceof Error ? error.message : "Invalid .harness/launch.json";
+      const notice = error instanceof Error ? error.message : "Invalid .harness/config.json";
       output.appendLine(`Launch configuration: ${notice}`);
       if (notice !== launchFileNotice) void window.showErrorMessage(`${notice}. New and reopened sessions are blocked until it is fixed.`);
       launchFileNotice = notice;
@@ -334,7 +408,7 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
   const wrapperLayout = sessionWrapperLayout(runtime.root, join(context.extensionPath, "assets", "runtime", "abd_wrapper.py"));
   // `sessionMonitor` is constructed below, after the settlement callbacks it
   // needs; the observer is only ever called from a launch, long after that.
-  const coordinator = new DelegationCoordinator({ admission: () => initialized, workspaceRoot, promptRoot, fleet, lease, terminals, sessions: { observe: (agentId) => sessionMonitor.observe(agentId) }, onStaleLeaseRecovered: (holder, observation) => { output.appendLine(`Reclaimed the write lease from ${holder.agentId} (held since ${holder.acquiredAt}): terminal ${observation.terminal}, session ${observation.session}.`); void window.showWarningMessage(`aboard reclaimed the write lease from ${holder.agentId}: its terminal and session are both gone.`); }, configurations: launchConfigurations, platforms, prompts: new GitHubDelegationPromptResolver(new PromptResolver({ github })), spills: runtimeFiles, shell: process.platform === "win32" ? "powershell" : "git-bash", maxInlinePromptChars: currentConfiguration.maxInlinePromptChars, agentIdFactory: () => agentIdCounter.next(), startupTimeoutMs: STARTUP_PROOF_TIMEOUT_MS, wrapper: wrapperLayout });
+  const coordinator = new DelegationCoordinator({ admission: () => initialized, workspaceRoot, promptRoot, fleet, lease, terminals, sessions: { observe: (agentId) => sessionMonitor.observe(agentId) }, onStaleLeaseRecovered: (holder, observation) => { output.appendLine(`Reclaimed the write lease from ${holder.agentId} (held since ${holder.acquiredAt}): terminal ${observation.terminal}, session ${observation.session}.`); void window.showWarningMessage(`aboard reclaimed the write lease from ${holder.agentId}: its terminal and session are both gone.`); }, configurations: launchConfigurations, platforms, prompts: new GitHubDelegationPromptResolver(new PromptResolver({ github })), spills: runtimeFiles, shell: process.platform === "win32" ? "powershell" : "git-bash", maxInlinePromptChars: currentConfiguration.maxInlinePromptChars, agentIdFactory: () => agentIdCounter.next(), startupTimeoutMs: STARTUP_PROOF_TIMEOUT_MS, wrapper: wrapperLayout, lockProbe: lockMarkerLive });
   lifecycle = new WorkerLifecycleReconciler({
     fleet,
     lease,
@@ -395,7 +469,7 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
     void window.showWarningMessage(`aboard could not start the configured agent: it ${cause}. Check the terminal for the error.`);
   };
   const sessionMonitor = new SessionProcessMonitor({
-    probe: lockMarkerPresent,
+    probe: lockMarkerLive,
     debug: (message) => output.appendLine(`[liveness] ${message}`),
     onProcessEnded: (observation) => {
       // The exit record is consumed either way, so a spent one can never be
@@ -507,9 +581,9 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
       }),
       runDiscarded: (record) => activity.recordRun({
         runId: record.runId,
-        attempt: record.version === 4 ? record.attempt : 1,
+        attempt: record.attempt,
         outcome: "discarded",
-        ...(record.version === 4 ? { issueNumbers: record.plan.map((issue) => issue.number) } : {}),
+        issueNumbers: record.plan.map((issue) => issue.number),
       }),
     },
     settings: () => currentConfiguration.autoRun,
@@ -527,7 +601,7 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
       liveTerminalFor: (agentId) => terminals.liveTerminalForAgent(agentId),
       show: (terminalId) => terminals.show(terminalId),
     },
-    launcher: coordinator,
+    launcher: { reopen: (target) => coordinator.reopen(target) },
     isResumable: (platform, sessionId, cwd, type) => sessionIsResumable(platform, sessionId, cwd ?? workspaceRoot, type),
   });
   const commandEndpoint = new FileCommandEndpointRegistry({ directory: commandEndpointDirectory(process.platform, process.env, homedir()) });
@@ -543,15 +617,31 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
     bridge = await startBridge({
     preferredPort: currentConfiguration.bridgePort,
     handler: combineHandlers(
-      createAutoRoutes(autoRun),
-      createPlatformLifecycleRoutes({ fleet, platforms, sessions: sessionLifecycle, workers: lifecycle, compactions: workerHooks, sessionBindings: [lease, terminals], proofs: sessionProofs }),
+      createAutoRoutes({
+        dryRun: (options) => autoRun.dryRun(options),
+        start: async (options) => {
+          if ((await launchFile.load()).value.autoRunProvider === "chatgpt" && !await chatGptHookTrust.approve()) {
+            return { started: false as const, reason: "Codex Auto Run requires workspace hook consent" };
+          }
+          return autoRun.start(options);
+        },
+      }),
+      createPlatformLifecycleRoutes({ fleet, platforms, sessions: sessionLifecycle, workers: lifecycle, compactions: workerHooks, sessionBindings: [lease, terminals], proofs: sessionProofs, prompts: promptSubmissions }),
       createWorkerHookRoutes(workerHooks),
       createTerminalRoutes(terminals),
       createCommandRoutes(commandTerminals),
       createDelegationRoutes({ launch: async (request) => {
-        const configured = await launchFile.getFor(request.provider, request.type);
+        const configured = await launchFile.getDelegationFor(request.provider, request.task);
+        const returnUri = request.executionMode === "interactive" && request.harnessSessionId !== undefined
+          ? await parentTerminalUri(request.harnessSessionId)
+          : undefined;
         return coordinator.launchManual({
           requestId: request.requestId,
+          ...(request.harnessStateDirectory === undefined ? {} : { harnessStateDirectory: request.harnessStateDirectory }),
+          ...(request.harnessRuntimePath === undefined ? {} : { harnessRuntimePath: request.harnessRuntimePath }),
+          ...(request.harnessSessionId === undefined ? {} : { harnessSessionId: request.harnessSessionId }),
+          ...(request.executionId === undefined ? {} : { executionId: request.executionId }),
+          ...(returnUri === undefined ? {} : { parentTerminalUri: returnUri }),
           type: request.type,
           prompt: request.prompt,
           ...(request.skill === undefined ? {} : { skill: request.skill }),
@@ -560,7 +650,49 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
           executionMode: request.executionMode,
           configuration: configured,
         }, request.executionMode);
-      } }, { workspaceRoot }),
+      }, resume: async (request) => {
+        if (!request.harnessSessionId) throw new Error("Delegated resume requires its stable Harness identity");
+        const binding = await readDelegationBinding(join(runtime.root,"delegations"),request.harnessSessionId);
+        if (!binding || binding.agentId !== request.resumeAgentId || binding.sessionId !== request.resumeSessionId || binding.provider !== request.provider || binding.executionMode !== request.executionMode || binding.cwd !== request.cwd || binding.parentSessionId !== request.parentSessionId) throw new Error("Delegated session ownership or execution mode does not match");
+        const saved = fleet.get(binding.agentId as AgentId);
+        const returnUri = binding.executionMode === "interactive"
+          ? await parentTerminalUri(request.harnessSessionId)
+          : undefined;
+        const lockPath = wrapperLayout.lockPathFor(binding.agentId as AgentId);
+        if (currentConfiguration.interactiveResumeMode === "reuse-terminal" && lockMarkerLive(lockPath)) {
+          const reused = await resumeInOpenTerminal(request, binding, saved, terminals, async (terminalId) => {
+            if (!request.executionId || !binding.harnessPython || !binding.harnessRuntimePath || !binding.harnessStateDirectory) throw new Error("Existing terminal's Harness runtime identity is unavailable; resume refused");
+            await promisify(execFile)(binding.harnessPython, ["-m", "subagents_runtime.terminal_resume", request.harnessSessionId as string, request.executionId, binding.agentId, terminalId, binding.sessionId], {
+              cwd: binding.cwd,
+              env: { ...process.env, HARNESS_STATE_DIR: binding.harnessStateDirectory, PYTHONPATH: [binding.harnessRuntimePath, process.env.PYTHONPATH].filter(Boolean).join(delimiter) },
+              windowsHide: true,
+              timeout: 15_000,
+            });
+            if (!lockMarkerLive(lockPath)) throw new Error("Delegated session ended before the resume message could be submitted");
+          });
+          if (reused !== undefined) return reused;
+        }
+        if (request.forkSessionId !== undefined) {
+          const configured = await launchFile.getDelegationFor(binding.provider, binding.task);
+          return coordinator.launchManual({
+            forkSessionId: request.forkSessionId as SessionId,
+            requestId: request.requestId,
+            harnessSessionId: request.harnessSessionId,
+            ...(request.executionId === undefined ? {} : { executionId: request.executionId }),
+            ...(returnUri === undefined ? {} : { parentTerminalUri: returnUri }),
+            ...(request.harnessStateDirectory === undefined ? {} : { harnessStateDirectory: request.harnessStateDirectory }),
+            ...(request.harnessRuntimePath === undefined ? {} : { harnessRuntimePath: request.harnessRuntimePath }),
+            type: binding.type, prompt: request.prompt, description: binding.description,
+            isolation: { cwd: binding.cwd, protectedPaths: [], writableRoots: [] },
+            executionMode: binding.executionMode, configuration: configured,
+          }, binding.executionMode);
+        }
+        if (lockMarkerLive(lockPath)) throw new Error("Delegated execution is running or uncertain; resume refused");
+        return coordinator.reopen({ platform: binding.provider, agentId: binding.agentId as AgentId, type: binding.type, delegationTask: binding.task, sessionId: binding.sessionId as SessionId, executionMode: binding.executionMode, cwd: binding.cwd, prompt: request.prompt, resultDelivery: saved?.resultDelivery ?? { mode:"none" }, harnessSessionId: request.harnessSessionId, ...(request.executionId === undefined ? {} : { executionId: request.executionId }), ...(returnUri === undefined ? {} : { parentTerminalUri: returnUri }), ...(request.harnessStateDirectory === undefined ? {} : { harnessStateDirectory: request.harnessStateDirectory }), ...(request.harnessRuntimePath === undefined ? {} : { harnessRuntimePath: request.harnessRuntimePath }), requestId: request.requestId });
+      } }, {
+        workspaceRoot,
+        stateDirectory: delegationStateDirectory,
+      }),
     ),
     logger: { info: (message) => output.appendLine(message), error: (message) => output.appendLine(`Error: ${message}`) },
     });
@@ -587,6 +719,9 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
   await startRuntimeBridge();
   const startAutoRun = async (preview: AutoRunPreview) => {
     if (!requireInitialized()) return { started: false as const, reason: "the project is not initialized" };
+    if ((await launchFile.load()).value.autoRunProvider === "chatgpt" && !await chatGptHookTrust.approve()) {
+      return { started: false as const, reason: "Codex Auto Run requires workspace hook consent" };
+    }
     return autoRun.startPreviewed(preview);
   };
   fleetUi = registerNativeFleetUi(context, {
@@ -668,6 +803,12 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
     const openTerminalIds = new Set(terminals.list().filter((terminal) => terminal.status === "open").map((terminal) => terminal.terminalId));
     const stale = fleet.list().filter((session) => isLiveSession(session) && !openTerminalIds.has(session.terminal.terminalId));
     for (const session of stale) {
+      if (isHeadlessExecution(session.identity.type, session.executionMode)) {
+        // Detached wrappers outlive the extension. Restore observation without spawning.
+        const lockFile = wrapperLayout.lockPathFor(session.identity.agentId);
+        sessionMonitor.track({ agentId: session.identity.agentId, sessionId: session.sessionId, lockFile });
+        continue;
+      }
       const at = new Date().toISOString() as IsoTimestamp;
       if (initialized) void rememberEndedSession(session, at, "interrupted", "the extension host restarted under it");
       // A lease held by an agent whose terminal is gone would block every later
@@ -719,6 +860,7 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
 
     }
     if (initialized) await startRuntimeBridge();
+    syncGrillRelay();
     await commands.executeCommand("setContext", "aboard.initialized", next);
     await commands.executeCommand("setContext", "aboard.scaffoldUpdateRequired", scaffoldState === "update-required");
     if (scaffoldState !== "update-required") scaffoldUpdateWarningShown = false;

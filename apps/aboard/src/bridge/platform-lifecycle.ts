@@ -2,6 +2,7 @@ import type { AgentId, AgentPlatformId, IsoTimestamp, SessionId } from "../domai
 import type { FleetRegistry } from "../domain/fleet.js";
 import type { AgentPlatform } from "../platform/agent-platform.js";
 import type { LifecycleObservation, PlatformLifecycleKind } from "../platform/lifecycle.js";
+import type { PromptSubmissions } from "../platform/prompt-submissions.js";
 import type { WorkerLifecycleReconciler } from "./lifecycle.js";
 import type { BridgeRequestHandler } from "./protocol.js";
 import { protocolError } from "./protocol.js";
@@ -10,6 +11,7 @@ import type { WorkerHookService } from "./worker-hooks.js";
 
 const ROUTES: Readonly<Record<string, PlatformLifecycleKind>> = {
   "/hooks/session-start": "start",
+  "/hooks/prompt-submit": "prompt",
   "/hooks/session-end": "end",
   "/hooks/stop": "stop",
   "/hooks/stop-failure": "failure",
@@ -24,6 +26,7 @@ export interface PlatformLifecycleRoutesOptions {
   readonly compactions: Pick<WorkerHookService, "compact">;
   readonly sessionBindings?: readonly SessionBindingTarget[];
   readonly proofs?: SessionStartupProof;
+  readonly prompts?: Pick<PromptSubmissions, "submitted">;
   readonly now?: () => Date;
 }
 
@@ -78,6 +81,10 @@ async function dispatch(options: PlatformLifecycleRoutesOptions, platform: Agent
       if (acceptedStart) options.proofs?.discharge(normalized, current.sessionId);
       return acceptedStart;
     }
+    case "prompt":
+      // Only a delivery waiting on this exact session cares that a prompt landed.
+      if (options.fleet.get(observation.agentId)?.sessionId !== observation.sessionId) return false;
+      return options.prompts?.submitted(observation.sessionId) ?? false;
     case "end": return options.sessions.sessionEnded(observation);
     case "stop": {
       const session = options.fleet.get(observation.agentId);

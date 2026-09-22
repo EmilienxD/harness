@@ -1,6 +1,6 @@
 {
   "hooks": {
-    "SessionStart": [{"hooks": [{"type": "command", "command": "harness-subagents-hook", "args": ["--claude"]}]}],
+    "SessionStart": [{"matcher": "startup|resume|compact|clear|fork", "hooks": [{"type": "command", "command": "harness-subagents-hook", "args": ["--claude"]}]}],
     "UserPromptSubmit": [{"hooks": [{"type": "command", "command": "harness-subagents-hook", "args": ["--claude"]}]}],
     "PreToolUse": [{"hooks": [{"type": "command", "command": "harness-subagents-hook", "args": ["--claude"]}]}],
     "PostToolUse": [{"hooks": [{"type": "command", "command": "harness-subagents-hook", "args": ["--claude"]}]}],

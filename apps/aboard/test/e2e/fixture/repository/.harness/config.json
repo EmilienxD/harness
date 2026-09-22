@@ -1,0 +1,32 @@
+{
+  "version": 1,
+  "autoRun": {
+    "provider": "claude"
+  },
+  "providers": {
+    "claude": {
+      "command": ["claude"],
+      "interactive": {
+        "model": "inherit",
+        "effort": "inherit",
+        "deniedTools": ["Agent", "WebSearch", "WebFetch"]
+      },
+      "autoRun": {
+        "address": {
+          "deniedTools": ["Agent", "WebSearch", "WebFetch"]
+        },
+        "review": {
+          "deniedTools": ["Agent", "WebSearch", "WebFetch"]
+        }
+      }
+    },
+    "chatgpt": {
+      "command": ["codex"],
+      "interactive": {
+        "model": "inherit",
+        "effort": "inherit"
+      },
+      "delegations": {}
+    }
+  }
+}

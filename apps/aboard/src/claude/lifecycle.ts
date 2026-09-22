@@ -9,6 +9,8 @@ export function normalizeClaudeLifecycle(kind: PlatformLifecycleKind, input: unk
       const source = optionalString(value.source);
       return { type: "start", agentId, sessionId: sessionId(value.sessionId ?? value.session_id), ...(source === undefined ? {} : { source }) };
     }
+    case "prompt":
+      return { type: "prompt", agentId, sessionId: sessionId(value.sessionId ?? value.session_id) };
     case "end": {
       const reason = requiredString(value.reason, "reason");
       if (!(SESSION_END_REASONS as readonly string[]).includes(reason)) throw new Error(`reason must be one of ${SESSION_END_REASONS.join(", ")}`);

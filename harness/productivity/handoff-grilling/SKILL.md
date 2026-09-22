@@ -1,6 +1,10 @@
 ---
 name: handoff-grilling
-description: Create a detailed handoff of a grill-me conversation that preserves the user's initial request verbatim, every decision and its rationale, and the explored codebase evidence. Explicit invocation only.
+description: Create a detailed handoff preserving the decisions, rationale, and evidence from a grill-me session. Use when that design discussion must continue in another session.
+argument-hint: "[next-session focus]"
+license: MIT
+metadata:
+  author: EMB
 disable-model-invocation: true
 ---
 

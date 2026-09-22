@@ -1,0 +1,6 @@
+{
+  "hooks": {
+    "UserPromptSubmit": [{"hooks": [{"type": "command", "command": "${PYTHON}", "args": ["${CLAUDE_DIR}/hooks/grill-lavish/grill_me_in_lavish_hook.py", "--claude"]}]}],
+    "PostToolUse": [{"hooks": [{"type": "command", "command": "${PYTHON}", "args": ["${CLAUDE_DIR}/hooks/grill-lavish/grill_me_in_lavish_hook.py", "--claude"], "timeout": 86400}]}]
+  }
+}

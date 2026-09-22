@@ -10,10 +10,15 @@ for (const platform of ["claude", "chatgpt"] as const) {
     assert.deepEqual(result.checkpoints, ["draft-write", "draft-complete"]);
     assert.equal(result.inferenceRequestsBeforePublish, result.inferenceRequestsAfterPublish);
     assert.equal(result.draftExistsAfterPublish, false);
+    // Publishing leaves nothing behind in the working tree but the drafts
+    // directory's own .gitignore: no state, lock, bookkeeping file, and no
+    // per-session subfolder.
+    assert.deepEqual(result.draftDirEntriesAfterPublish, [".gitignore"]);
     assert.equal(result.published.title, "Document deterministic issue journeys");
     assert.deepEqual(result.published.labels, ["[AI]-routine-difficulty", "[AI]-afk"]);
     assert.match(result.published.body, /real CLI and fake endpoint/iu);
-    assert.equal(result.published.body.includes("issues-gateway:"), false);
+    // Nothing hidden is injected into a body a human will read.
+    assert.equal(result.published.body.includes("<!--"), false);
     assert.equal(result.unexpectedRequests, 0);
   });
 }

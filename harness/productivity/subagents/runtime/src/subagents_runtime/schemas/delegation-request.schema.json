@@ -5,13 +5,89 @@
   "description": "The YAML frontmatter of a request file. The prompt is the nonempty Markdown body that follows the frontmatter, not a frontmatter key.",
   "type": "object",
   "additionalProperties": false,
-  "required": ["task", "mode"],
   "properties": {
-    "task": {"enum": ["explore", "prototype", "websearch", "brainstorm", "implement", "review", "general"]},
-    "provider": {
-      "description": "Defaults to the parent session's provider when omitted.",
-      "enum": ["claude", "chatgpt"]
+    "task": {
+      "enum": [
+        "explore",
+        "prototype",
+        "websearch",
+        "brainstorm",
+        "address",
+        "review",
+        "general"
+      ]
     },
-    "mode": {"enum": ["interactive", "auto"]}
+    "provider": {
+      "description": "Defaults to the parent session's provider when omitted. 'codex' is an alias of 'chatgpt' and is normalized to it.",
+      "enum": [
+        "claude",
+        "chatgpt",
+        "codex"
+      ]
+    },
+    "mode": {
+      "enum": [
+        "interactive",
+        "auto"
+      ]
+    },
+    "resume": {
+      "type": "string",
+      "pattern": "^agent-[1-9][0-9]*$"
+    }
+  },
+  "oneOf": [
+    {
+      "required": [
+        "task",
+        "mode"
+      ],
+      "not": {
+        "required": [
+          "resume"
+        ]
+      }
+    },
+    {
+      "required": [
+        "resume"
+      ],
+      "not": {
+        "anyOf": [
+          {
+            "required": [
+              "task"
+            ]
+          },
+          {
+            "required": [
+              "mode"
+            ]
+          },
+          {
+            "required": [
+              "provider"
+            ]
+          }
+        ]
+      }
+    }
+  ],
+  "if": {
+    "properties": {
+      "task": {
+        "const": "prototype"
+      }
+    },
+    "required": [
+      "task"
+    ]
+  },
+  "then": {
+    "properties": {
+      "mode": {
+        "const": "interactive"
+      }
+    }
   }
 }

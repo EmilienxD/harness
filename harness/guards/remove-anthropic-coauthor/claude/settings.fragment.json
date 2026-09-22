@@ -1,0 +1,17 @@
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Bash|PowerShell",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${PYTHON}",
+            "args": ["${CLAUDE_DIR}/hooks/remove_anthropic_coauthor_hook.py", "--claude"],
+            "timeout": 120
+          }
+        ]
+      }
+    ]
+  }
+}

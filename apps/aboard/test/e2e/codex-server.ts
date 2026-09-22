@@ -4,11 +4,11 @@ import { createServer, type IncomingMessage, type ServerResponse } from "node:ht
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { dirname, isAbsolute, relative, resolve } from "node:path";
-import { AFTER_CONTENT, AUTO_RUN_AFK_MARKER, AUTO_RUN_EXPLORE_REPORT, AUTO_RUN_FOLLOWUP_MARKER, AUTO_RUN_HITL_MARKER, AUTO_RUN_HITL_REVIEW_MARKER, AUTO_RUN_NESTED_CONTEXT, AUTO_RUN_PERMANENT_NOTE, BEFORE_CONTENT, FINAL_RESPONSE, HITL_ACCEPT_PROMPT, REVIEWER_APPROVAL_COMMIT_COMMAND, WORKER_COMMIT_COMMAND } from "./scenario.js";
+import { AFTER_CONTENT, AUTO_RUN_AFK_MARKER, AUTO_RUN_EXPLORE_REPORT, AUTO_RUN_FOLLOWUP_MARKER, AUTO_RUN_HITL_MARKER, AUTO_RUN_HITL_REVIEW_MARKER, AUTO_RUN_NESTED_CONTEXT, AUTO_RUN_PERMANENT_NOTE, BEFORE_CONTENT, FINAL_RESPONSE, HITL_ACCEPT_PROMPT, REVIEW_APPROVAL_COMMIT_COMMAND, WORKER_COMMIT_COMMAND } from "./scenario.js";
 
 const MAX_BODY_BYTES = 32 * 1024 * 1024;
 
-type CodexScenario = "attended" | "explore" | "implement" | "review-approve" | "review-changes" | "process-failure" | "auto-run-afk" | "auto-run-hitl" | "auto-run-hitl-review" | "auto-run-followup";
+type CodexScenario = "attended" | "explore" | "address" | "review-approve" | "review-changes" | "process-failure" | "auto-run-afk" | "auto-run-hitl" | "auto-run-hitl-review" | "auto-run-followup";
 
 interface ResponsesRequest {
   readonly model: string;
@@ -140,7 +140,6 @@ function parseRequest(value: unknown): ResponsesRequest {
   if (!Array.isArray(body.input)) throw new ProtocolMismatch("$.input", "must be an array");
   if (body.tools !== undefined && !Array.isArray(body.tools)) throw new ProtocolMismatch("$.tools", "must be an array when present");
   const input = body.input.map((item, index) => record(item, `$.input[${index}]`));
-  const codeMode = input.some((item) => item.type === "additional_tools");
   const topLevelTools = (body.tools ?? []).map((tool, index) => record(tool, `$.tools[${index}]`));
   const additionalTools = input.flatMap((item, inputIndex) => {
     if (item.type !== "additional_tools") return [];
@@ -148,6 +147,7 @@ function parseRequest(value: unknown): ResponsesRequest {
     return item.tools.map((tool, toolIndex) => record(tool, `$.input[${inputIndex}].tools[${toolIndex}]`));
   });
   const tools = [...topLevelTools, ...additionalTools];
+  const codeMode = tools.some((tool) => toolNames(tool).includes("exec")) && !topLevelTools.some((tool) => toolNames(tool).includes("exec_command"));
   const metadata = typeof body.client_metadata === "object" && body.client_metadata !== null && !Array.isArray(body.client_metadata) ? body.client_metadata as Record<string, unknown> : {};
   let sandboxMode: string | null = null;
   let sessionId: string | null = null;
@@ -198,7 +198,8 @@ function schemaFixture(schema: Record<string, unknown>): unknown {
 function toolNames(tool: Record<string, unknown>): string[] {
   const names: string[] = [];
   const visit = (value: unknown): void => {
-    if (typeof value !== "object" || value === null || Array.isArray(value)) return;
+    if (Array.isArray(value)) { value.forEach(visit); return; }
+    if (typeof value !== "object" || value === null) return;
     for (const [key, nested] of Object.entries(value)) {
       if (key === "name" && typeof nested === "string") names.push(nested);
       else visit(nested);
@@ -224,13 +225,14 @@ async function selectScenario(body: ResponsesRequest): Promise<{ readonly scenar
 }
 
 function scenarioFromText(text: string): CodexScenario | undefined {
+  if (/Review issue #\d+; Accept deterministic (?:per-issue|single-branch) change after review in the exact range/u.test(text)) return "auto-run-hitl-review";
   if (text.includes(AUTO_RUN_FOLLOWUP_MARKER)) return "auto-run-followup";
   if (text.includes(AUTO_RUN_HITL_REVIEW_MARKER)) return "auto-run-hitl-review";
   if (text.includes(AUTO_RUN_HITL_MARKER)) return "auto-run-hitl";
   if (text.includes(AUTO_RUN_AFK_MARKER) || text.includes("Review pull request") && text.includes(AUTO_RUN_PERMANENT_NOTE)) return "auto-run-afk";
   if (text.includes("[E2E:chatgpt-process-failure]")) return "process-failure";
   if (text.includes("[E2E:chatgpt-explore]")) return "explore";
-  if (text.includes("[E2E:chatgpt-implement]")) return "implement";
+  if (text.includes("[E2E:chatgpt-address]")) return "address";
   if (text.includes("[E2E:chatgpt-review-changes]")) return "review-changes";
   if (text.includes("[E2E:chatgpt-review-approve]")) return "review-approve";
   if (text.includes("[E2E:chatgpt-success]")) return "attended";
@@ -241,7 +243,7 @@ function scenarioFromToolHistory(body: ResponsesRequest): CodexScenario | undefi
   const scenarios = new Set<CodexScenario>();
   for (const call of toolCalls(body)) {
     if (typeof call.call_id !== "string") continue;
-    const match = /^call_e2e_(attended|explore|implement|review-approve|review-changes|process-failure|auto-run-afk|auto-run-hitl|auto-run-hitl-review|auto-run-followup)_/u.exec(call.call_id);
+    const match = /^call_e2e_(attended|explore|address|review-approve|review-changes|process-failure|auto-run-afk|auto-run-hitl|auto-run-hitl-review|auto-run-followup)_/u.exec(call.call_id);
     if (match !== null) scenarios.add(match[1] as CodexScenario);
   }
   if (scenarios.size > 1) throw new ProtocolMismatch("$.input", "mixes deterministic scenario tool calls");
@@ -250,7 +252,7 @@ function scenarioFromToolHistory(body: ResponsesRequest): CodexScenario | undefi
 
 function transition(body: ResponsesRequest, scenario: CodexScenario, text: string, repoRoot?: string): { readonly checkpoint: string; readonly output: ResponseOutput } {
   if (scenario === "auto-run-afk") return autoRunAfkTransition(body, text, requireRepoRoot(repoRoot));
-  if (scenario === "auto-run-hitl-review" && (text.includes("Aboard pinned ") || hitlRouteFromToolHistory(body) === "reviewer")) {
+  if (scenario === "auto-run-hitl-review" && (text.includes("in the exact range") || text.includes("Aboard pinned ") || hitlRouteFromToolHistory(body) === "review")) {
     return autoRunHitlReviewTransition(body, requireRepoRoot(repoRoot));
   }
   if (scenario === "auto-run-hitl" || scenario === "auto-run-hitl-review") return autoRunSequentialTransition(body, text, requireRepoRoot(repoRoot), "auto-hitl", BEFORE_CONTENT, AFTER_CONTENT, scenario);
@@ -260,8 +262,8 @@ function transition(body: ResponsesRequest, scenario: CodexScenario, text: strin
   const calls = toolCalls(body);
   if (outputs.length === 0) {
     if (calls.length > 0) throw new ProtocolMismatch("$.input", "contains a tool call without its output");
-    if (scenario === "implement") return { checkpoint: "guard", output: functionOutput("git push origin main", body, scenario) };
-    if (scenario === "explore" && body.sandboxMode !== "read-only") throw new ProtocolMismatch("$.client_metadata", "Explore did not activate the read-only sandbox");
+    if (scenario === "address") return { checkpoint: "guard", output: functionOutput("git push origin main", body, scenario) };
+    if (scenario === "explore" && body.sandboxMode !== "read-only") throw new ProtocolMismatch("$.client_metadata", "explore did not activate the read-only sandbox");
     const command = scenario === "explore"
       ? "Set-Content -LiteralPath 'sandbox-target.txt' -Value 'sandbox escape'"
       : `Set-Content -LiteralPath 'write-attempt-${scenario}.txt' -Value 'real Codex tool execution'`;
@@ -273,9 +275,9 @@ function transition(body: ResponsesRequest, scenario: CodexScenario, text: strin
     throw new ProtocolMismatch("$.input", "contains an unknown shell call output");
   }
   const output = toolOutputText(lastOutput);
-  if (scenario === "implement" && outputs.length === 1) {
+  if (scenario === "address" && outputs.length === 1) {
     if (!/denied|reject|blocked|not allowed/iu.test(output)) throw new ProtocolMismatch("$.input", "worker guard allowed a forbidden git push");
-    return { checkpoint: "tool", output: functionOutput("Set-Content -LiteralPath 'write-attempt-implement.txt' -Value 'real Codex tool execution'", body, scenario) };
+    return { checkpoint: "tool", output: functionOutput("Set-Content -LiteralPath 'write-attempt-address.txt' -Value 'real Codex tool execution'", body, scenario) };
   }
   if (scenario === "explore" && !/failed|denied|reject|blocked|sandbox|exited with (?:code|status) [1-9]|exit_code["']?\s*[:=]\s*[1-9]/iu.test(output)) {
     throw new ProtocolMismatch("$.input", "read-only sandbox allowed the write attempt");
@@ -289,11 +291,11 @@ function transition(body: ResponsesRequest, scenario: CodexScenario, text: strin
 function autoRunAfkTransition(body: ResponsesRequest, text: string, repoRoot: string): { readonly checkpoint: string; readonly output: ResponseOutput } {
   const historyRoute = autoRunAfkRouteFromToolHistory(body);
   const route = text.includes("Review pull request") ? "review"
-    : text.includes("Explore implementation context") ? "explore"
-      : historyRoute ?? "implementer";
+    : text.includes("<work-to-explore>") ? "explore"
+      : historyRoute ?? "address";
   if (route === "review") {
     return commandSequence(body, [
-      { checkpoint: "auto-review-commit", command: REVIEWER_APPROVAL_COMMIT_COMMAND },
+      { checkpoint: "auto-review-commit", command: REVIEW_APPROVAL_COMMIT_COMMAND },
     ], "auto-review-complete", "Review complete; no fixes required.", "auto-run-afk", "review");
   }
   if (route === "explore") {
@@ -305,23 +307,23 @@ function autoRunAfkTransition(body: ResponsesRequest, text: string, repoRoot: st
     { checkpoint: "auto-afk-read", command: readCommand(repoRoot), requireOutput: BEFORE_CONTENT.trimEnd() },
     { checkpoint: "auto-afk-edit", command: writeCommand(repoRoot, AFTER_CONTENT) },
     { checkpoint: "auto-afk-commit", command: WORKER_COMMIT_COMMAND },
-  ], "auto-afk-complete", FINAL_RESPONSE, "auto-run-afk", "implementer");
+  ], "auto-afk-complete", FINAL_RESPONSE, "auto-run-afk", "address");
 }
 
-function autoRunAfkRouteFromToolHistory(body: ResponsesRequest): "explore" | "review" | "implementer" | undefined {
-  const routes = new Set<"explore" | "review" | "implementer">();
+function autoRunAfkRouteFromToolHistory(body: ResponsesRequest): "explore" | "review" | "address" | undefined {
+  const routes = new Set<"explore" | "review" | "address">();
   for (const call of toolCalls(body)) {
     if (typeof call.call_id !== "string") continue;
-    const match = /^call_e2e_auto-run-afk__(explore|review|implementer)_/u.exec(call.call_id);
-    if (match !== null) routes.add(match[1] as "explore" | "review" | "implementer");
+    const match = /^call_e2e_auto-run-afk__(explore|review|address)_/u.exec(call.call_id);
+    if (match !== null) routes.add(match[1] as "explore" | "review" | "address");
   }
   if (routes.size > 1) throw new ProtocolMismatch("$.input", "mixes auto-run AFK worker histories");
   return [...routes][0];
 }
 
-function hitlRouteFromToolHistory(body: ResponsesRequest): "reviewer" | undefined {
-  return toolCalls(body).some((call) => typeof call.call_id === "string" && /^call_e2e_auto-run-hitl-review__reviewer_/u.test(call.call_id))
-    ? "reviewer"
+function hitlRouteFromToolHistory(body: ResponsesRequest): "review" | undefined {
+  return toolCalls(body).some((call) => typeof call.call_id === "string" && /^call_e2e_auto-run-hitl-review__review_/u.test(call.call_id))
+    ? "review"
     : undefined;
 }
 
@@ -339,7 +341,7 @@ function autoRunHitlReviewTransition(body: ResponsesRequest, repoRoot: string): 
     acceptanceRequested ? "auto-hitl-accept-complete" : "auto-hitl-review-complete",
     acceptanceRequested ? FINAL_RESPONSE : "Review complete; no fixes required.",
     "auto-run-hitl-review",
-    "reviewer",
+    "review",
   );
 }
 
@@ -452,8 +454,8 @@ function finalOutput(text: string): ResponseOutput {
 }
 
 function finalMessage(scenario: Exclude<CodexScenario, "process-failure">): string {
-  if (scenario === "explore") return "Explore report: the deterministic checkout keeps its launch plan in src/chatgpt/launch.ts.";
-  if (scenario === "implement") return "Implemented the deterministic issue; the work is uncommitted.";
+  if (scenario === "explore") return "explore report: the deterministic checkout keeps its launch plan in src/chatgpt/launch.ts.";
+  if (scenario === "address") return "Implemented the deterministic issue; the work is uncommitted.";
   if (scenario === "review-changes") return "Review complete: requested changes before this can merge.";
   if (scenario === "review-approve") return "Review complete: the implementation matches the frozen issue contract.";
   return "Deterministic ChatGPT session completed.";
@@ -481,8 +483,7 @@ async function readSpill(candidate: string): Promise<string> {
   const offset = relative(temporaryRoot, path);
   const parts = offset.split(/[\\/]/u);
   const activationRoot = parts[0] !== undefined && /^abd-[A-Za-z0-9]+$/u.test(parts[0]) && parts.length >= 3;
-  const legacyRoot = parts[0] === "abd-prompts" && parts.length >= 4;
-  if (offset === "" || offset === ".." || offset.startsWith(`..${process.platform === "win32" ? "\\" : "/"}`) || isAbsolute(offset) || !activationRoot && !legacyRoot) {
+  if (offset === "" || offset === ".." || offset.startsWith(`..${process.platform === "win32" ? "\\" : "/"}`) || isAbsolute(offset) || !activationRoot) {
     throw new ProtocolMismatch("$.input", "spilled prompt path escaped its dedicated root");
   }
   try { return await readFile(path, "utf8"); }

@@ -7,8 +7,10 @@ async function main(): Promise<void> {
   }
   const platforms = selected === undefined ? ["claude", "chatgpt"] as const : [selected] as const;
   for (const platform of platforms) {
-    const result = await runSubagentsJourney(platform);
-    process.stdout.write(`subagents ${platform} E2E passed (${result.checkpoints.join(" -> ")})\n`);
+    for (const mode of ["interactive","auto"] as const) {
+      const result = await runSubagentsJourney(platform,mode);
+      process.stdout.write(`subagents ${platform} ${mode} E2E passed (${result.checkpoints.join(" -> ")})\n`);
+    }
   }
 }
 

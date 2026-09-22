@@ -1,12 +1,14 @@
 ---
 name: draft-issue
-description: Turn a request, a plan, or the current conversation into one tracer-bullet ticket declaring its blocking edges, written to a markdown file for the user to review and edit before publishing. Use when a single issue is wanted, with no multi-issue breakdown.
+description: Turn a request or plan into one tracer-bullet issue draft. Use when the work belongs in a single reviewable ticket.
+argument-hint: "[request, plan, spec, or reference]"
+license: MIT
+metadata:
+  author: EMB
 disable-model-invocation: true
 ---
 
-Use what the user provided alongside the invocation as this skill's input. A provider-specific hook has already supplied an **issues session id**, **draft directory**, and **next free issue index** as context. Use those exact values for `<issues-session-id>` and `<next-free-issue-index>` below. Do not recompute them.
-
-Turn a plan, spec or conversation into a single GitHub **issue**.
+Turn a plan, spec or conversation into a single GitHub issue.
 
 This skill is part of an issue publishing system that uses a gateway for publishing issues. Your job stops at issue drafting, as a markdown file. The gateway handles publishing automatically — you are not allowed to call `gh issue create`.
 
@@ -14,12 +16,10 @@ This skill is part of an issue publishing system that uses a gateway for publish
 
 ### 1. Gather context
 
-Work from whatever is already in the conversation context. If the user passes a description as an argument, use it. If the user passes a reference (a spec path, an issue number or URL) as an argument, fetch it and read its full body and comments, plus any relevant reference in that body.
+Work from whatever is already in the conversation context. If the user passes a description as an argument, use it. If the user passes a reference (a spec path, an issue number or URL) as an argument, fetch it and read its full body, plus any relevant reference in that body.
 
-### 2. Explore the codebase (optional)
-
-If you haven't already explored the codebase or read the related contract documents, do so to understand the current state of the code.
-Look for prefactoring opportunities that make the implementation easier. "Make the change easy, then make the easy change."
+(optional) If you haven't already explored the codebase or read the related contract documents, do so to understand the current state of the code.
+Look for refactoring opportunities that make the implementation easier. "Make the change easy, then make the easy change."
 
 ### 3. Pin down the issue
 
@@ -42,13 +42,11 @@ If the user asks for extra labels, verify them before writing the file: run `gh 
 
 ### 2. Write one file
 
-Create `.issues-gateway/<issues-session-id>/issue-{i}.md` where {i} is:
-<next-free-issue-index>
+Write the draft file at the file path instructed by the hook. If no hook gave you that info, stop immediately and alert the user about the bug instead of finding a workaround.
 
-Do not spend time checking whether the folder exists or what it already contains — just write the file.
+Do not spend time checking whether the folder exists or what it already contains — just trust the hook and write the file.
 
-Use this template. The title is the first `# ` header. The line directly below it — the first non-empty line after the title — declares this issue's labels and must contain nothing else:
-
+Use the template below:
 <issue-template>
 # {Issue title}
 

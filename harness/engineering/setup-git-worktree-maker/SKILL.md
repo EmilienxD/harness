@@ -1,53 +1,54 @@
 ---
 name: setup-git-worktree-maker
-description: Create or update a repository-specific, agent-free command that creates and fully initializes Git worktrees. Use when setting up reusable worktree automation for a project; optional arguments describe copied files, setup commands, or script preferences, not a branch to create now.
+description: Create or update a repository-specific command for fully initialized Git worktrees.
+argument-hint: "[copy or setup requirements]"
+license: MIT
+metadata:
+  author: EMB
 disable-model-invocation: true
 ---
 
-# Set Up a Git Worktree Maker
+Create a reusable worktree setup command in two phases: explore and obtain approval, then implement. This skill generates the command; it does not create a worktree.
 
-Build the repository a reusable command for creating initialized worktrees. Do not create a worktree while performing this setup.
+## 1. Explore
 
-## Inspect
+Verify that the current directory is inside a Git working tree. Treat invocation arguments as setup requirements, not a branch to create.
 
-First verify that the current directory is inside a Git working tree. If it is not, stop with a clear explanation.
+Explore the entire repository, including nested applications, packages, and workspaces:
 
-Inspect only enough of the repository to identify:
+- Find manifests, lockfiles, workspace configuration, setup documentation, existing bootstrap commands, script conventions, and worktree helpers.
+- Recursively inventory **all `.env` and `.env.*` paths**, including hidden and ignored files in subdirectories. Use filename-only discovery with exclusions for dependency, build, cache, and virtual-environment directories. Cover every source package, including ignored source directories.
+- Inspect ignore rules and list ignored paths (e.g., `git ls-files --others --ignored -exclude-standard`). Look for other checkout-local configuration commonly needed for setup: `.npmrc`, `.pypirc`, `.netrc`, local settings files, development certificates, and configuration paths named in setup documentation. These are copy candidates, not automatic inclusions. Exclude dependency directories, caches, and build outputs.
+- Discover secret-bearing files by **path only**. Do not read, print, or source `.env` files or other credential-bearing configuration.
+- Determine dependency and initialization commands for every component, with its working directory and required order. Examples: Python `uv sync`; JavaScript or TypeScript `npm ci` with a suitable lockfile or `npm install` where appropriate; Rust `cargo fetch` or a documented `cargo build`. These are examples, not defaults: follow the repository's actual tooling and setup instructions. Account for workspace-wide commands so packages are neither missed nor initialized twice.
 
-- script directories, filenames, command aliases, and languages already used;
-- manifests, lockfiles, package managers, workspace or monorepo configuration;
-- setup documentation and existing bootstrap commands;
-- environment examples, ignored project-local configuration, and files the user explicitly requested to copy;
-- existing worktree helpers; and
-- `.vscode/tasks.json` and nearby VS Code conventions.
+## 2. Propose the plan
 
-Treat invocation arguments as setup requirements and preferences. They never name the first worktree branch. Combine them with repository evidence to choose the script language, path, filename, native runner or command alias, and a deterministic setup sequence. Do not add a new runtime or dependency merely to implement the command.
+Present a concrete plan, without generated code, containing:
 
-Ask only about a material choice that evidence and arguments do not settle. If the script location is still uncertain, ask where to write it. Do not invent a dependency command from a manifest alone when multiple lockfiles, workspace roots, or documented setup paths make the correct command ambiguous.
+- Script location, language (default to Bash), command alias, and any existing content to replace.
+- Exact source-relative paths to copy, preserving their layout, and unresolved copy candidates requiring a decision.
+- Dependency and initialization commands in execution order, each with its working directory, covering all components or explaining why a component needs no setup.
+- Worktree behavior: the future command accepts or prompts for a branch, reuses an unattached local branch or creates one from the invoking checkout's HEAD, and creates a numbered sibling of the primary checkout. Give a naming example; no worktree is created during this skill.
+- Proposed VS Code integration, including whether it requires creating `.vscode/`.
 
-Before generating code, read [references/generated-command-contract.md](references/generated-command-contract.md) and implement every applicable requirement.
+Ask the user to approve or suggest modifications, then **stop before writing the script or changing integration files**. Resolve uncertainty in the plan rather than silently inventing commands or selecting sensitive files. After modifications, obtain approval of the revised plan.
 
-## Generate
+## 3. Implement the approved plan
 
-Create one self-contained project-native script and, when the repository has an established command runner, expose it through that runner. The runtime command must not require an agent. Keep its configuration fixed in the generated files; its only interactive question is the branch prompt when the branch argument is absent.
+Create one self-contained project-native script and expose it through the approved command runner.
 
-Order setup steps according to their dependencies. Copy only files explicitly requested or confidently identified as ignored, project-local configuration for this checkout. Preserve paths relative to the invoking checkout. Never copy arbitrary external secrets or infer unsupported initialization commands.
+Implement these runtime behaviors:
+- Accept zero or one branch argument. Prompt when omitted; reject empty, invalid, or additional arguments. Validate with Git and pass values safely as command arguments.
+- Work from any directory inside a checkout or linked worktree. Capture the invoking checkout's root and HEAD before changing directories. Resolve the primary checkout or a stable repository anchor from Git metadata; fail before mutation if a safe sibling location cannot be resolved.
+- Choose an absolute sibling path `<repository>-N`, where N is one greater than the highest existing nonnegative numeric suffix, starting at 0. For example, `project`, `project-0`, and `project-2` yield `project-3`. Refuse an occupied destination.
+- Inspect registered worktrees and local branches before mutation. Reject a branch already checked out elsewhere, identifying its path. Use an existing unattached local branch; otherwise create it from the captured HEAD, without remote-branch guessing.
+- Copy approved files from the invoking checkout, preserving relative paths, then run the approved setup commands in dependency order inside the new worktree or specified workspace directories. Show progress, preserve useful command output, and stop on the first failure.
+- Install failure handling before mutation. On failure, clean up worktree state created by this run, including partial creation. Restrict filesystem removal to the verified destination; prune stale registration when needed. Delete a branch only if this run created it and its worktree has been detached or removed. Report cleanup failures and remaining artifacts; exit nonzero.
+- On success, print the new worktree's absolute path.
 
-Add a short, language-appropriate marker identifying files or blocks managed by `setup-git-worktree-maker`. Inspect every existing target before editing it:
+Mark managed scripts and integration entries with `setup-git-worktree-maker`. Update them on reruns, preserving unrelated content and avoiding duplicate aliases or tasks. Stay within the approved plan; seek revised approval for material changes or newly discovered user-owned content that would need replacement.
 
-- Update a recognizable managed script, alias, or task in place.
-- Preserve unrelated scripts, command definitions, tasks, settings, formatting, and JSONC comments where practical.
-- If the chosen name or location contains user-owned content, ask before replacing or materially rewriting it.
-- Do not create duplicate command aliases or VS Code tasks on reruns.
+If approved, add or update a `Create Git Worktree` VS Code task that invokes the same command in an integrated terminal without a branch argument, allowing its prompt.
 
-Validate the generated script with the strongest safe check that does not create a worktree, such as parsing, linting, compilation, or its non-mutating help path. Also inspect the final diffs for accidental unrelated changes. Do not commit the files.
-
-## VS Code
-
-If `.vscode/` already exists, add or update one task labeled `Create Git Worktree` that invokes the project-native command in an integrated terminal and allows its interactive branch prompt. If `.vscode/` does not exist, ask before creating it; declining affects only the task, not script generation.
-
-Identify the managed task with a stable marker field when the task schema permits it. Preserve every unrelated task and setting, and reuse the existing task on reruns.
-
-## Report
-
-Explain the files and command alias created or updated, the fixed copy/install/initialization sequence, and both invocation forms: with a branch argument and with interactive prompting. State whether VS Code integration was added. Explicitly confirm that setup did not create a worktree.
+Concisely tell the user what you created and how to use it.

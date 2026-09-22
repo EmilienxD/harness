@@ -129,11 +129,11 @@ function validateBranches(record: AutoRunRecord, observations: RunObservations):
     const range = observations.issueRange;
     const waiting = progress?.state === "current" && progress.phase === "await-commit" && progress.expectedBranch === name;
     const recordedLocal = progress?.state === "current" && progress.expectedBranch === name
-      ? progress.reviewedSha ?? progress.implementationSha ?? progress.implementerCommitSha
+      ? progress.reviewedSha ?? progress.implementationSha ?? progress.addressCommitSha
       : undefined;
     if ((waiting || workerRunning) && range !== undefined && !range.descendsFromStart) return broken(`${name} no longer descends from the recorded starting commit`);
     if (expected === undefined) continue;
-    if (observed.localSha !== undefined && observed.localSha !== expected && observed.localSha !== recordedLocal && !workerRunning && !(resetRunning && (observed.localSha === record.pendingAction?.implementerCommitSha || observed.localSha === record.pendingAction?.beforeSha)) && !(waiting && range?.descendsFromStart === true && range.headSha === observed.localSha) && merge?.mergeCommitSha !== observed.localSha) {
+    if (observed.localSha !== undefined && observed.localSha !== expected && observed.localSha !== recordedLocal && !workerRunning && !(resetRunning && (observed.localSha === record.pendingAction?.addressCommitSha || observed.localSha === record.pendingAction?.beforeSha)) && !(waiting && range?.descendsFromStart === true && range.headSha === observed.localSha) && merge?.mergeCommitSha !== observed.localSha) {
       return broken(`${name} has moved since the run last pushed it`);
     }
     if (observed.remoteSha !== undefined && observed.remoteSha !== expected && !(record.pendingAction?.kind === "push" && record.pendingAction.branch === name && record.pendingAction.sha === observed.remoteSha) && merge?.mergeCommitSha !== observed.remoteSha) {

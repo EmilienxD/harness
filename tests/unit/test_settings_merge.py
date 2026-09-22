@@ -130,28 +130,6 @@ def test_unmerge_finds_own_hook_in_user_group():
     assert unmerge(merge(base, COMMIT), COMMIT) == base
 
 
-def test_same_hook_in_two_groups_is_deduped_on_reinstall():
-    # The failure this whole change exists for: a file where the same hook
-    # landed in two matcher-less groups (e.g. one written with an explicit
-    # "" matcher that identity-keyed merging could not match). Reinstalling
-    # removes the fragment's own copy from the twin group — Claude Code then
-    # fires it exactly once — without collapsing the user's separate groups
-    # or dropping their hooks.
-    wedged = {
-        "hooks": {
-            "UserPromptSubmit": [
-                group(hook("python", "/x/commit.py")),
-                group(hook("python", "/other.py"), hook("python", "/x/commit.py")),
-            ]
-        }
-    }
-    fixed = merge(wedged, COMMIT)
-    entries = fixed["hooks"]["UserPromptSubmit"]
-    # One group, both hooks, no duplicate: the event fires each once.
-    assert entries == [group(hook("python", "/x/commit.py"), hook("python", "/other.py"))]
-    assert merge(fixed, COMMIT) == fixed  # fixed point
-
-
 def test_catchall_matchers_normalize_into_matcherless_group():
     a = {"hooks": {"PreToolUse": [group(hook("x"), matcher=".*")]}}
     b = {"hooks": {"PreToolUse": [group(hook("y"), matcher="")]}}
@@ -192,39 +170,6 @@ def test_same_script_with_different_launcher_flags_is_one_hook():
     # already-installed argv. Re-resolution refreshes it on uninstall and
     # on any merge where the fragment is the existing entry instead.
     assert ".py" in entries[0]["hooks"][0]["args"][-1]
-
-
-def test_shell_form_hook_dedupes_launcher_flags_quotes_and_install_path():
-    old = {
-        "hooks": {"UserPromptSubmit": [group(
-            {
-                "type": "command",
-                "command": "uv run --no-project .codex/hooks/issue_writers_hook.py",
-                "timeout": 300,
-            },
-            {
-                "type": "command",
-                "command": (
-                    'uv run --no-project --no-managed-python '
-                    '"C:/old/project/.codex/hooks/issue_writers_hook.py"'
-                ),
-                "timeout": 300,
-            },
-        )]}
-    }
-    fragment = {
-        "hooks": {"UserPromptSubmit": [group({
-            "type": "command",
-            "command": (
-                'uv run --no-project --no-managed-python '
-                '"C:/work/project/.codex/hooks/issue_writers_hook.py"'
-            ),
-            "timeout": 300,
-        })]}
-    }
-    merged = merge(old, fragment)
-    hooks = merged["hooks"]["UserPromptSubmit"][0]["hooks"]
-    assert hooks == fragment["hooks"]["UserPromptSubmit"][0]["hooks"]
 
 
 def test_shell_form_hooks_for_different_scripts_still_stack():

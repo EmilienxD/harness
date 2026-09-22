@@ -1,6 +1,6 @@
 
 import type { InteractiveLaunchHandles, ReopenTarget } from "../bridge/delegation.js";
-import type { AgentId, AgentPlatformId, AgentType, SessionId, TerminalId } from "../domain/contracts.js";
+import { type AgentId, type AgentPlatformId, type AgentType, type SessionId, type TerminalId } from "../domain/contracts.js";
 import type { FleetRegistry } from "../domain/fleet.js";
 import {
   reopenCandidates,
@@ -10,7 +10,7 @@ import {
 
 /** Why a recorded session cannot be reopened, as the user is told it. */
 export type UnresumableReason =
-  "no-transcript" | "inspection-failed";
+  "no-transcript" | "inspection-failed" | "execution-active";
 
 /** A candidate plus the answer to "would `--resume` actually find it?". */
 export interface ReopenOption {
@@ -52,9 +52,13 @@ export interface ReopenCoordinatorOptions {
 
 const TYPE_SELECTORS: Readonly<Record<string, AgentType>> = {
   interactive: "interactive",
-  explore: "Explore",
-  implementer: "implementer",
-  reviewer: "reviewer",
+  explore: "explore",
+  prototype: "prototype",
+  brainstorm: "brainstorm",
+  websearch: "websearch",
+  general: "general",
+  address: "address",
+  review: "review",
 };
 
 export class ReopenCoordinator {
@@ -107,11 +111,11 @@ export class ReopenCoordinator {
     }
     if (!resumable) return { action: "unresumable", candidate, reason: "no-transcript" };
     const handles = await this.options.launcher.reopen({
+      executionMode: "interactive",
       platform: candidate.platform,
       agentId: candidate.agentId,
       type: candidate.type,
       sessionId: candidate.sessionId,
-      terminalName: `aboard: ${candidate.description}`,
       ...(candidate.issueNumbers === undefined ? {} : { issueNumbers: candidate.issueNumbers }),
       ...(candidate.chromeEnabled === true ? { chromeEnabled: true as const } : {}),
       ...(candidate.cwd === undefined ? {} : { cwd: candidate.cwd }),
@@ -162,6 +166,7 @@ export function describeReopenOutcome(outcome: ReopenOutcome): string {
     case "reopened":
       return `Reopened the ${outcome.candidate.type} session (agent ${outcome.candidate.agentId}) and handed it back to you.`;
     case "unresumable":
+      if (outcome.reason === "execution-active") return `Agent ${outcome.candidate.agentId} has a running or uncertain execution; resume refused.`;
       return outcome.reason === "inspection-failed"
         ? `The conversation for agent ${outcome.candidate.agentId} could not be inspected: ${outcome.diagnostic ?? "unknown platform error"}`
         : `The selected agent platform no longer has the conversation for agent ${outcome.candidate.agentId}, so it cannot be reopened.`;

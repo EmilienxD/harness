@@ -8,7 +8,7 @@ import { OpenAiProtocolError, type OpenAiResponseOutput, type OpenAiResponsesReq
 export const DRAFT_MARKER = "[E2E:issue-writers:draft]";
 export const DRAFT_NAME = "issue-0.md";
 export const DRAFT_CONTENT = "# Document deterministic issue journeys\n\n> difficulty:routine, mode:afk\n\n## What to build\n\nExercise the real CLI and fake endpoint through a resumable session.\n\n## Acceptance criteria\n\n- Draft publishing is hook-only.\n";
-export const scenarioCatalogHash = createHash("sha256").update("issue-writers:v1").digest("hex");
+export const scenarioCatalogHash = createHash("sha256").update("issue-writers:v2").digest("hex");
 
 const CLAUDE_WRITE = "toolu_e2e_issue_writer_write";
 const CODEX_WRITE = "call_e2e_issue_writer_write";
@@ -50,7 +50,9 @@ export function codexTransition(request: OpenAiResponsesRequest, repoRoot: strin
 }
 
 function writeFileCommand(path: string, content: string): string {
-  const script = "require('node:fs').writeFileSync(Buffer.from(process.argv[1],'base64').toString(),Buffer.from(process.argv[2],'base64'))";
+  // mkdir -p first, exactly as a real agent's write tool would, so the draft
+  // lands whether or not the hook already created the directory.
+  const script = "const fs=require('node:fs'),p=Buffer.from(process.argv[1],'base64').toString();fs.mkdirSync(require('node:path').dirname(p),{recursive:true});fs.writeFileSync(p,Buffer.from(process.argv[2],'base64'))";
   return `node -e \"${script}\" ${Buffer.from(path).toString("base64")} ${Buffer.from(content).toString("base64")}`;
 }
 
@@ -59,10 +61,11 @@ export function findDraftPath(text: string, repoRoot: string): string {
 }
 
 function draftPath(text: string, repoRoot: string, field: string, platform: "claude" | "codex"): string {
-  const match = /draft directory:\s+([^\s]+)/u.exec(text);
-  const relativePath = match?.[1];
-  if (relativePath && /^\.issues-gateway\/[0-9a-f-]{36}$/iu.test(relativePath)) {
-    const candidate = normalize(join(repoRoot, relativePath, DRAFT_NAME));
+  // The hook allocates the concrete next path for this saved conversation.
+  const match = /draft file path:\s+([^\s]+)/iu.exec(text);
+  const allocated = match?.[1];
+  if (allocated && /^\.harness\/issue-drafts\/[0-9a-f-]{36}\.issue-\d+\.md$/iu.test(allocated)) {
+    const candidate = normalize(join(repoRoot, allocated));
     const outside = relative(repoRoot, candidate);
     if (!outside.startsWith("..") && !isAbsolute(outside)) return candidate;
   }

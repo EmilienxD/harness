@@ -1,4 +1,4 @@
-"""Commit metadata injection and worktree blocking for review."""
+"""Commit metadata, issue preloading, and worktree blocking for review."""
 
 import importlib.util
 import io
@@ -23,11 +23,50 @@ hook = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(hook)
 
 
+REPOSITORY = "example/project"
+
+
 def git(root, *arguments):
     return subprocess.run(
         ["git", *arguments], cwd=root, check=True, capture_output=True,
         text=True, encoding="utf-8",
     ).stdout
+
+
+def issue(number, *, body="", state="OPEN", sub_issues=()):
+    return {
+        "number": number,
+        "title": f"Issue {number}",
+        "body": body,
+        "state": state,
+        "author": {"login": "author"},
+        "labels": {"nodes": []},
+        "parent": None,
+        "subIssues": {"nodes": [{"number": value} for value in sub_issues]},
+        "comments": {"totalCount": 0, "nodes": []},
+    }
+
+
+def fake_github(monkeypatch, issues):
+    """Answer gh calls from a fixed issue table; run git for real."""
+    real = subprocess.run
+    requested = []
+
+    def run(arguments, **kwargs):
+        if arguments[0] != "gh":
+            return real(arguments, **kwargs)
+        if arguments[1] == "repo":
+            return subprocess.CompletedProcess(arguments, 0, f"{REPOSITORY}\n", "")
+        fields = dict(
+            argument.split("=", 1) for argument in arguments if argument.count("=") == 1
+        )
+        key = (f"{fields['owner']}/{fields['repo']}", int(fields["number"]))
+        requested.append(key)
+        payload = {"data": {"repository": {"issue": issues.get(key)}}}
+        return subprocess.CompletedProcess(arguments, 0, json.dumps(payload), "")
+
+    monkeypatch.setattr(hook.subprocess, "run", run)
+    return requested
 
 
 def repository(tmp_path, commits=2):
@@ -45,7 +84,7 @@ def repository(tmp_path, commits=2):
         (root / "new.py").write_text("new\n", encoding="utf-8")
         (root / "old.py").unlink()
         git(root, "add", "-A")
-        git(root, "commit", "-m", "implement the feature")
+        git(root, "commit", "-m", "address the feature")
     return root
 
 
@@ -73,7 +112,7 @@ def blocked(prompt, cwd, monkeypatch, capsys):
 
 @pytest.mark.parametrize("prompt", [
     "Review the last commit",
-    "/reviewer",
+    "/review",
     "Explain what `/review-this` does",
 ])
 def test_unrelated_prompts_are_ignored(prompt, tmp_path, monkeypatch, capsys):
@@ -114,7 +153,7 @@ def test_root_commit_reports_no_parent(tmp_path, monkeypatch, capsys):
 
 
 @pytest.mark.parametrize("dirty", ["staged", "unstaged", "untracked"])
-def test_any_pre_existing_change_blocks_before_model_invocation(
+def test_pre_existing_changes_become_the_manual_review_target(
     dirty, tmp_path, monkeypatch, capsys,
 ):
     root = repository(tmp_path)
@@ -124,8 +163,10 @@ def test_any_pre_existing_change_blocks_before_model_invocation(
         (root / "README.md").write_text("changed again\n", encoding="utf-8")
         if dirty == "staged":
             git(root, "add", "-A")
-    error = blocked("/review-this", root, monkeypatch, capsys)
-    assert "completely clean Git worktree" in error
+    context = run_hook("/review-this", root, monkeypatch, capsys)
+    assert "pre-existing working-tree changes" in context
+    assert "working-tree review target" in context
+    assert ("scratch.txt" if dirty == "untracked" else "README.md") in context
 
 
 def test_aboard_pinned_range_allows_the_uncommitted_hitl_handoff(
@@ -142,7 +183,7 @@ def test_aboard_pinned_range_allows_the_uncommitted_hitl_handoff(
     assert context
 
 
-def test_aboard_continuation_keeps_the_exact_dirty_reviewer_handoff(
+def test_aboard_continuation_keeps_the_exact_dirty_review_handoff(
     tmp_path, monkeypatch, capsys,
 ):
     root = repository(tmp_path)
@@ -171,6 +212,88 @@ def test_missing_repository_blocks(tmp_path, monkeypatch, capsys):
     (plain / ".git").write_text("not a gitdir", encoding="utf-8")
     error = blocked("/review-this", plain, monkeypatch, capsys)
     assert "requires a Git repository" in error
+
+
+@pytest.mark.parametrize("argument, expected", [
+    ("42", [42]),
+    ("42, 51", [42, 51]),
+    (" 42 ,51 ", [42, 51]),
+])
+def test_whole_number_arguments_become_issue_references(argument, expected):
+    assert hook.issue_numbers(argument) == expected
+
+
+@pytest.mark.parametrize("argument", [
+    "",
+    "focus on error paths",
+    "#42",
+    "42 and 51",
+    "42, please",
+    "0",
+    "-1",
+    "https://github.com/other/repo/issues/7",
+])
+def test_anything_but_bare_numbers_stays_out_of_reference_mode(argument):
+    assert hook.issue_numbers(argument) is None
+
+
+def test_issue_numbers_preload_the_requirements_behind_the_review(
+    tmp_path, monkeypatch, capsys,
+):
+    root = repository(tmp_path)
+    issues = {
+        (REPOSITORY, 408): issue(408, body="Add filtering.", sub_issues=[409]),
+        (REPOSITORY, 409): issue(409, body="Sub body."),
+        (REPOSITORY, 51): issue(51, body="Body of 51."),
+    }
+    requested = fake_github(monkeypatch, issues)
+
+    context = run_hook("/review-this 408, 51", root, monkeypatch, capsys)
+
+    assert requested == [(REPOSITORY, 408), (REPOSITORY, 51), (REPOSITORY, 409)]
+    assert "Add filtering." in context
+    assert "Body of 51." in context
+    assert "Sub body." in context
+
+
+def test_free_text_argument_triggers_no_lookup(tmp_path, monkeypatch, capsys):
+    root = repository(tmp_path)
+    requested = fake_github(monkeypatch, {(REPOSITORY, 408): issue(408)})
+
+    context = run_hook("/review-this focus on error paths", root, monkeypatch, capsys)
+
+    assert requested == []
+    assert context
+
+
+def test_closed_issues_are_reviewable(tmp_path, monkeypatch, capsys):
+    root = repository(tmp_path)
+    issues = {(REPOSITORY, 407): issue(407, body="Shipped work.", state="CLOSED")}
+    fake_github(monkeypatch, issues)
+
+    context = run_hook("/review-this 407", root, monkeypatch, capsys)
+
+    assert "Shipped work." in context
+
+
+def test_missing_issue_blocks(tmp_path, monkeypatch, capsys):
+    root = repository(tmp_path)
+    fake_github(monkeypatch, {})
+
+    error = blocked("/review-this 408", root, monkeypatch, capsys)
+
+    assert "review-this could not find issue example/project#408" in error
+
+
+def test_the_last_commit_subject_is_not_presented_as_the_review_target(
+    tmp_path, monkeypatch, capsys,
+):
+    root = repository(tmp_path)
+    (root / "README.md").write_text("uncommitted\n", encoding="utf-8")
+
+    context = run_hook("/review-this", root, monkeypatch, capsys)
+
+    assert "address the feature" not in context
 
 
 @pytest.mark.parametrize("platform", ["claude", "chatgpt"])

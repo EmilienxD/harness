@@ -3,6 +3,7 @@ from __future__ import annotations
 import io
 import re
 import subprocess
+import os
 from datetime import datetime
 
 import pytest
@@ -10,9 +11,60 @@ import pytest
 from harness_cli.manifest import SupportStatus, discover
 from report_gotchas.cli import main
 from report_gotchas.config import webhook_url
-from report_gotchas.discord import deliver
+from report_gotchas.discord import deliver, messages
 from report_gotchas.hooks import handle, provider_from_argv
-from report_gotchas.reports import load_draft, load_queued
+from report_gotchas.reports import GitState, QueuedReport, load_draft, load_queued
+
+
+@pytest.mark.parametrize("count", [0, 1, 10, 11, 80])
+def test_discord_git_summary_counts_changes_and_shows_at_most_ten_files(count) -> None:
+    status = "## main...origin/main\n" + "\n".join(
+        f" M file-{index:02}.txt" for index in range(count)
+    )
+    report = QueuedReport(
+        receipt="a" * 32, message="A caveat.", session_id="test-session",
+        provider="claude", cwd="/project", reported_at="2026-09-16T12:00:00+00:00",
+        git=GitState("/project", "main", "abcdef123456", status, ""),
+    )
+    content = "\n".join(messages(report))
+    assert f"**Changed files:** {count}" in content
+    assert "## main" not in content
+    for index in range(min(count, 10)):
+        assert f" M file-{index:02}.txt" in content
+    if count > 10:
+        assert "file-10.txt" not in content
+        assert f"… truncated: {count - 10} more files" in content
+    else:
+        assert "truncated" not in content
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows console creation flags")
+def test_post_tool_hook_runs_git_and_delivery_without_console_windows(
+    tmp_path, monkeypatch, capsys
+) -> None:
+    monkeypatch.setenv("HARNESS_REPORT_GOTCHAS_STATE_DIR", str(tmp_path / "state"))
+    monkeypatch.setattr("sys.stdin", io.StringIO("A caveat."))
+    assert main(["submit"]) == 0
+    receipt = capsys.readouterr().out.strip().rsplit(":", 1)[1]
+    monkeypatch.setenv("HARNESS_REPORT_GOTCHAS_WEBHOOK_URL", "https://discord.com/api/webhooks/123/test")
+    launches = []
+
+    def run(command, **kwargs):
+        launches.append((command, kwargs))
+        return subprocess.CompletedProcess(command, 0, stdout="main\n", stderr="")
+
+    monkeypatch.setattr(subprocess, "run", run)
+    monkeypatch.setattr(subprocess, "Popen", lambda command, **kwargs: launches.append((command, kwargs)))
+    handle({
+        "hook_event_name": "PostToolUse", "session_id": "test-session",
+        "cwd": str(tmp_path), "tool_name": "Bash",
+        "tool_input": {"command": "harness-report-gotchas submit"},
+        "tool_response": f"HARNESS_REPORT_GOTCHAS_RECEIPT:{receipt}",
+    })
+    assert any("deliver" in command for command, _ in launches)
+    for _, options in launches:
+        assert options.get("creationflags", 0) & subprocess.CREATE_NO_WINDOW
+        assert not options.get("creationflags", 0) & subprocess.DETACHED_PROCESS
 
 
 @pytest.mark.parametrize(
@@ -217,7 +269,7 @@ def test_configure_reads_the_webhook_secret_without_echoing_it(
 
 def test_catalogue_exposes_model_invokable_dual_platform_skill_and_runtime() -> None:
     tool = discover()["report-gotchas"]
-    assert tool.version == "1.1.2"
+    assert tool.version == "1.1.4"
     assert tool.support_for("claude").status is SupportStatus.SUPPORTED
     assert tool.support_for("chatgpt").status is SupportStatus.SUPPORTED
     assert tool.requires == ("git",)

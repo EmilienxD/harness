@@ -12,11 +12,15 @@ import { startFakeOpenAiServer } from "../../core/openai-server.js";
 import { DRAFT_MARKER, DRAFT_NAME, claudeTransition, codexTransition, scenarioCatalogHash } from "./scenario.js";
 import { copyTree, createFakeGh, findHarnessRoot, initializeRepository, isolatedCodexEnvironment, parseCodexThreadId, pythonCommand, readPublishedIssue, successfulOpenAiRequests, type FakeIssue, type IssuePlatform } from "../issues/support.js";
 
+/** Where drafts live, relative to the project root. */
+const DRAFTS_DIR = join(".harness", "issue-drafts");
+
 export interface IssueWritersJourneyResult {
   readonly checkpoints: readonly string[];
   readonly inferenceRequestsBeforePublish: number;
   readonly inferenceRequestsAfterPublish: number;
   readonly draftExistsAfterPublish: boolean;
+  readonly draftDirEntriesAfterPublish: readonly string[];
   readonly published: FakeIssue;
   readonly unexpectedRequests: number;
 }
@@ -61,7 +65,7 @@ export async function runIssueWritersJourney(platform: IssuePlatform): Promise<I
         CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION: "false", CLAUDE_CODE_MAX_RETRIES: "0", DISABLE_UPDATES: "1", DISABLE_AUTOUPDATER: "1",
       });
       const sessionId = randomUUID();
-      draftPath = join(projectRoot, ".issues-gateway", sessionId, DRAFT_NAME);
+      draftPath = join(projectRoot, DRAFTS_DIR, `${sessionId}.${DRAFT_NAME}`);
       const first = await runClaude(claudeArgs(`/draft-issue ${DRAFT_MARKER}`, ["--session-id", sessionId], "Write"), projectRoot, env);
       requireClaudeDraftSuccess(first);
       inferenceRequestsBeforePublish = claudeServer.assertions().inferenceRequests;
@@ -95,6 +99,7 @@ export async function runIssueWritersJourney(platform: IssuePlatform): Promise<I
       inferenceRequestsBeforePublish,
       inferenceRequestsAfterPublish,
       draftExistsAfterPublish: await exists(draftPath),
+      draftDirEntriesAfterPublish: await draftDirectoryEntries(projectRoot),
       published: await readPublishedIssue(fakeGh.statePath),
       unexpectedRequests: assertions.unexpectedRequests,
     };
@@ -107,7 +112,7 @@ export async function runIssueWritersJourney(platform: IssuePlatform): Promise<I
 async function stageIssueWriters(platform: IssuePlatform, harnessRoot: string, projectRoot: string, python: string): Promise<void> {
   const source = join(harnessRoot, "harness", "building", "issue-writers");
   const HOOK = "issue_writers_hook.py";
-  const skills = ["draft-issue", "draft-issues", "draft-audit-issues", "publish-issues", "to-spec", "to-spec-draft-issue"];
+  const skills = ["draft-issue", "draft-issues", "publish-issues", "to-spec", "to-spec-draft-issue"];
   if (platform === "claude") {
     const claudeRoot = join(projectRoot, ".claude");
     const hookRoot = join(claudeRoot, "hooks");
@@ -176,10 +181,21 @@ function requireSilentHookCompletion(code: number | null, timedOut: boolean, cli
 }
 
 async function onlyDraftPath(projectRoot: string): Promise<string> {
-  const gateway = join(projectRoot, ".issues-gateway");
-  const batches = (await readdir(gateway, { withFileTypes: true })).filter((entry) => entry.isDirectory() && /^[0-9a-f-]{36}$/iu.test(entry.name));
-  if (batches.length !== 1) throw new Error("ChatGPT drafting did not create exactly one session batch");
-  return join(gateway, batches[0]!.name, DRAFT_NAME);
+  const drafts = join(projectRoot, DRAFTS_DIR);
+  const written = (await readdir(drafts)).filter((name) => name.endsWith(DRAFT_NAME));
+  if (written.length !== 1) throw new Error("ChatGPT drafting did not write exactly one draft");
+  return join(drafts, written[0]!);
+}
+
+/** Everything the tool leaves in the working tree, drafts directory included. */
+async function draftDirectoryEntries(projectRoot: string): Promise<readonly string[]> {
+  const drafts = join(projectRoot, DRAFTS_DIR);
+  const found: string[] = [];
+  for (const entry of await readdir(drafts, { withFileTypes: true })) {
+    // A subdirectory would mean the flat-file layout regressed.
+    found.push(entry.isDirectory() ? `${entry.name}/` : entry.name);
+  }
+  return found.sort();
 }
 
 async function exists(path: string): Promise<boolean> {

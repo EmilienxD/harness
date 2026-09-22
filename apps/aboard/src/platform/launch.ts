@@ -75,10 +75,12 @@ export interface SessionWrapperLayout {
 }
 
 export interface PlatformLaunchRequest {
+  readonly forkSessionId?: SessionId;
   readonly agentId: AgentId;
   readonly sessionId: SessionId;
   readonly agentType: AgentType;
   readonly shell: ShellKind;
+  readonly executionMode?: import("../domain/contracts.js").ExecutionMode | undefined;
   readonly attended?: boolean | undefined;
   readonly skill?: string | undefined;
   readonly autoRunRestricted?: true | undefined;

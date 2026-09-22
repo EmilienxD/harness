@@ -11,32 +11,37 @@ import {
   parseLaunchFile,
 } from "../../src/platform/launch-configuration.js";
 
-const defaults = `{
-  "version": 3,
-  "autoRun": { "provider": "claude" },
-  "providers": {
-    "claude": {
-      "command": ["claude"],
-      "interactive": { "model": "inherit", "effort": "inherit" },
-      "explore": { "model": "haiku", "effort": "low" },
-      "implementer": { "model": "by-difficulty", "effort": "by-difficulty" },
-      "reviewer": { "model": "by-difficulty", "effort": "by-difficulty" }
-    },
-    "chatgpt": {}
-  }
-}`;
+const defaults = '{"version":1}';
 
 function settings(value: { readonly settings: unknown }): LaunchConfiguration {
   return value.settings as LaunchConfiguration;
 }
 
 function providerFile(provider: "claude" | "chatgpt", value: Record<string, unknown> = {}): string {
-  return JSON.stringify({ version: 3, autoRun: { provider }, providers: { claude: {}, chatgpt: {}, [provider]: value } });
+  return JSON.stringify({ version: 1, autoRun: { provider }, providers: { [provider]: value } });
 }
 
-test("launch.json configures Claude and ChatGPT together while Claude defaults only Auto Run", () => {
+test("a sparse config.json uses product-owned defaults", () => {
+  const parsed = parseLaunchFile(defaults);
+
+  assert.equal(parsed.value.autoRunProvider, "claude");
+  assert.deepEqual(settings(parsed.value.configurationFor("claude", "interactive")), {
+    shape: "default", declaredCommand: ["claude"], deniedTools: [],
+  });
+  assert.deepEqual(settings(parsed.value.configurationFor("claude", "explore")), {
+    shape: "builtin", agentName: "Explore", declaredCommand: ["claude"], declaredModel: "haiku", declaredEffort: "low", deniedTools: [],
+  });
+  assert.deepEqual(settings(parsed.value.configurationFor("chatgpt", "explore")), {
+    shape: "explore", declaredCommand: ["codex"], declaredModel: "gpt-5.6-luna", declaredEffort: "low",
+  });
+  assert.deepEqual(settings(parsed.value.configurationFor("chatgpt", "address")), {
+    shape: "skill", skillName: "address-this", declaredCommand: ["codex"], declaredModel: "by-difficulty", declaredEffort: "by-difficulty",
+  });
+});
+
+test("config.json configures providers independently while Claude remains the Auto Run default", () => {
   const parsed = parseLaunchFile(`{
-    "version": 3,
+    "version": 1,
     "autoRun": { "provider": "claude" },
     "providers": {
       "claude": { "command": ["wrapper", "claude"] },
@@ -49,7 +54,37 @@ test("launch.json configures Claude and ChatGPT together while Claude defaults o
   assert.deepEqual(settings(parsed.value.configurationFor("chatgpt", "interactive")).declaredCommand, ["wrapper", "codex"]);
 });
 
-test("launch.json resolves the four launch profiles", () => {
+test("task commands override their provider command independently", () => {
+  const parsed = parseLaunchFile(JSON.stringify({
+    version: 1,
+    providers: {
+      claude: {
+        command: ["claude"],
+        delegations: { explore: { command: ["clauder", "run", "kiro"] } },
+        autoRun: {
+          explore: { command: ["clauder", "run", "kiro"] },
+          address: { command: ["claude", "--address-profile"] },
+        },
+      },
+      chatgpt: {
+        command: ["codex"],
+        delegations: { websearch: { command: ["codex-wrapper", "search"] } },
+        autoRun: { review: { command: ["codex-wrapper", "review"] } },
+      },
+    },
+  }));
+
+  assert.deepEqual(settings(parsed.value.delegationConfigurationFor("claude", "explore")).declaredCommand, ["clauder", "run", "kiro"]);
+  assert.deepEqual(settings(parsed.value.configurationFor("claude", "explore")).declaredCommand, ["clauder", "run", "kiro"]);
+  assert.deepEqual(settings(parsed.value.configurationFor("claude", "address")).declaredCommand, ["claude", "--address-profile"]);
+  assert.deepEqual(settings(parsed.value.configurationFor("claude", "review")).declaredCommand, ["claude"]);
+  assert.deepEqual(settings(parsed.value.delegationConfigurationFor("chatgpt", "websearch")).declaredCommand, ["codex-wrapper", "search"]);
+  assert.deepEqual(settings(parsed.value.configurationFor("chatgpt", "review")).declaredCommand, ["codex-wrapper", "review"]);
+  assert.deepEqual(settings(parsed.value.configurationFor("chatgpt", "address")).declaredCommand, ["codex"]);
+  assert.deepEqual(parsed.diagnostics, []);
+});
+
+test("config.json resolves interactive and Auto Run profiles", () => {
   const parsed = parseLaunchFile(defaults);
 
   assert.deepEqual(parsed.diagnostics, []);
@@ -61,7 +96,7 @@ test("launch.json resolves the four launch profiles", () => {
       deniedTools: [],
     },
   });
-  assert.deepEqual(parsed.value.configurationFor("claude", "Explore"), {
+  assert.deepEqual(parsed.value.configurationFor("claude", "explore"), {
     platform: "claude",
     settings: {
       shape: "builtin",
@@ -72,7 +107,7 @@ test("launch.json resolves the four launch profiles", () => {
       deniedTools: [],
     },
   });
-  assert.deepEqual(parsed.value.configurationFor("claude", "implementer"), {
+  assert.deepEqual(parsed.value.configurationFor("claude", "address"), {
     platform: "claude",
     settings: {
       shape: "skill",
@@ -83,45 +118,48 @@ test("launch.json resolves the four launch profiles", () => {
       deniedTools: [],
     },
   });
-  const reviewer = parsed.value.configurationFor("claude", "reviewer");
-  const reviewerSettings = settings(reviewer);
-  assert.equal(reviewerSettings.shape, "skill");
-  if (reviewerSettings.shape !== "skill") assert.fail("reviewer must resolve to a skill launch");
-  assert.equal(reviewerSettings.skillName, "review-this");
+  const review = parsed.value.configurationFor("claude", "review");
+  const reviewSettings = settings(review);
+  assert.equal(reviewSettings.shape, "skill");
+  if (reviewSettings.shape !== "skill") assert.fail("review must resolve to a skill launch");
+  assert.equal(reviewSettings.skillName, "review-this");
 });
 
-test("manual delegation identities reuse the unrestricted interactive profile", () => {
-  const parsed = parseLaunchFile(defaults);
-
-  for (const type of ["Prototype", "Brainstorm", "General"] as const) {
-    assert.deepEqual(parsed.value.configurationFor("claude", type), {
-      platform: "claude",
-      settings: {
-        shape: "default",
-        declaredCommand: ["claude"],
-        deniedTools: [],
-      },
-    });
-  }
-  assert.deepEqual(parsed.value.configurationFor("claude", "Web Search"), {
-    platform: "claude",
-    settings: {
-      shape: "default",
-      declaredCommand: ["claude"],
-      deniedTools: [],
+test("manual delegation tasks have independently configurable profiles", () => {
+  const parsed = parseLaunchFile(JSON.stringify({
+    version: 1,
+    providers: {
+      claude: { delegations: { prototype: { model: "sonnet", effort: "high" }, review: { model: "opus", effort: "max" } } },
+      chatgpt: { delegations: { websearch: { model: "gpt-5.6-sol", effort: "xhigh" } } },
     },
+  }));
+
+  assert.deepEqual(settings(parsed.value.delegationConfigurationFor("claude", "prototype")), {
+    shape: "default", declaredCommand: ["claude"], declaredModel: "sonnet", declaredEffort: "high", deniedTools: [],
+  });
+  assert.deepEqual(settings(parsed.value.delegationConfigurationFor("claude", "review")), {
+    shape: "default", declaredCommand: ["claude"], declaredModel: "opus", declaredEffort: "max", deniedTools: [],
+  });
+  assert.deepEqual(settings(parsed.value.delegationConfigurationFor("chatgpt", "websearch")), {
+    shape: "default", declaredCommand: ["codex"], declaredModel: "gpt-5.6-sol", declaredEffort: "xhigh",
+  });
+  assert.deepEqual(settings(parsed.value.delegationConfigurationFor("chatgpt", "brainstorm")), {
+    shape: "default", declaredCommand: ["codex"],
   });
 });
 
-test("Claude preserves user-configured tool denials for every manual identity", () => {
-  const parsed = parseLaunchFile(providerFile("claude", { interactive: { deniedTools: ["Agent", "WebSearch", "WebFetch"] } }));
+test("Claude keeps tool denials local to the profile that declares them", () => {
+  const parsed = parseLaunchFile(providerFile("claude", {
+    interactive: { deniedTools: ["Agent"] },
+    delegations: { prototype: { deniedTools: ["WebSearch", "WebFetch"] } },
+  }));
 
-  for (const type of ["interactive", "Prototype", "Web Search", "Brainstorm", "General"] as const) {
-    assert.deepEqual(settings(parsed.value.configurationFor("claude", type)).deniedTools, ["Agent", "WebSearch", "WebFetch"]);
-  }
+  assert.deepEqual(settings(parsed.value.configurationFor("claude", "interactive")).deniedTools, ["Agent"]);
+  assert.deepEqual(settings(parsed.value.delegationConfigurationFor("claude", "prototype")).deniedTools, ["WebSearch", "WebFetch"]);
+  assert.deepEqual(settings(parsed.value.delegationConfigurationFor("claude", "brainstorm")).deniedTools, []);
 });
 
-test("launch.json selects an attended ChatGPT session with its Codex command", () => {
+test("config.json selects an attended ChatGPT session with its Codex command", () => {
   const parsed = parseLaunchFile(providerFile("chatgpt", { command: ["wrapper", "codex"], interactive: { model: "inherit", effort: "inherit" } }));
 
   assert.deepEqual(parsed.diagnostics, []);
@@ -134,11 +172,11 @@ test("launch.json selects an attended ChatGPT session with its Codex command", (
   });
 });
 
-test("launch.json selects a read-only ChatGPT Explore session and still refuses unsupported kinds", () => {
-  const parsed = parseLaunchFile(providerFile("chatgpt", { command: ["codex"], explore: { model: "gpt-test", effort: "low" } }));
+test("config.json selects a read-only ChatGPT explore session and still refuses unsupported kinds", () => {
+  const parsed = parseLaunchFile(providerFile("chatgpt", { command: ["codex"], autoRun: { explore: { model: "gpt-test", effort: "low" } } }));
 
   assert.deepEqual(parsed.diagnostics, []);
-  assert.deepEqual(parsed.value.configurationFor("chatgpt", "Explore"), {
+  assert.deepEqual(parsed.value.configurationFor("chatgpt", "explore"), {
     platform: "chatgpt",
     settings: {
       shape: "explore",
@@ -148,20 +186,20 @@ test("launch.json selects a read-only ChatGPT Explore session and still refuses 
     },
   });
   assert.throws(
-    () => parseLaunchFile(providerFile("chatgpt", { explore: { model: "opus" } })),
-    /explore\.model is not valid for platform chatgpt.*Claude model/u,
+    () => parseLaunchFile(providerFile("chatgpt", { autoRun: { explore: { model: "opus" } } })),
+    /autoRun\.explore\.model is not valid for platform chatgpt/u,
   );
   assert.throws(
-    () => parseLaunchFile(providerFile("chatgpt", { explore: { effort: "max" } })),
-    /explore\.effort is not valid for platform chatgpt/u,
+    () => parseLaunchFile(providerFile("chatgpt", { autoRun: { explore: { effort: "max" } } })),
+    /autoRun\.explore\.effort is not valid for platform chatgpt/u,
   );
 });
 
-test("launch.json routes a ChatGPT implementer without overriding native tool settings", () => {
+test("config.json routes a ChatGPT address without overriding native tool settings", () => {
   const parsed = parseLaunchFile(providerFile("chatgpt", { command: ["codex"] }));
 
   assert.deepEqual(parsed.diagnostics, []);
-  assert.deepEqual(parsed.value.configurationFor("chatgpt", "implementer"), {
+  assert.deepEqual(parsed.value.configurationFor("chatgpt", "address"), {
     platform: "chatgpt",
     settings: {
       shape: "skill",
@@ -173,11 +211,11 @@ test("launch.json routes a ChatGPT implementer without overriding native tool se
   });
 });
 
-test("launch.json routes ChatGPT reviewers through the review skill their disposition selects", () => {
-  const parsed = parseLaunchFile(providerFile("chatgpt", { command: ["codex"], reviewer: { effort: "high" } }));
+test("config.json routes ChatGPT review workers through the review skill their disposition selects", () => {
+  const parsed = parseLaunchFile(providerFile("chatgpt", { command: ["codex"], autoRun: { review: { effort: "high" } } }));
 
   assert.deepEqual(parsed.diagnostics, []);
-  assert.deepEqual(settings(parsed.value.configurationFor("chatgpt", "reviewer")), {
+  assert.deepEqual(settings(parsed.value.configurationFor("chatgpt", "review")), {
     shape: "skill",
     skillName: "review-this",
     declaredCommand: ["codex"],
@@ -185,14 +223,14 @@ test("launch.json routes ChatGPT reviewers through the review skill their dispos
     declaredEffort: "high",
   });
   // AFK and HITL are orchestration modes, so both resolve to the one skill.
-  const implementer = settings(parsed.value.configurationFor("chatgpt", "implementer"));
-  assert.equal(implementer.shape === "skill" ? implementer.skillName : undefined, "address-this");
+  const address = settings(parsed.value.configurationFor("chatgpt", "address"));
+  assert.equal(address.shape === "skill" ? address.skillName : undefined, "address-this");
 });
 
-test("a ChatGPT implementer profile is configurable independently of Claude routing", () => {
-  const parsed = parseLaunchFile(providerFile("chatgpt", { implementer: { model: "gpt-5.6-sol", effort: "xhigh", webSearch: "live", subagents: "allowed" } }));
+test("a ChatGPT address profile is configurable independently of Claude routing", () => {
+  const parsed = parseLaunchFile(providerFile("chatgpt", { autoRun: { address: { model: "gpt-5.6-sol", effort: "xhigh", webSearch: "live", subagents: "allowed" } } }));
 
-  assert.deepEqual(settings(parsed.value.configurationFor("chatgpt", "implementer")), {
+  assert.deepEqual(settings(parsed.value.configurationFor("chatgpt", "address")), {
     shape: "skill",
     skillName: "address-this",
     declaredCommand: ["codex"],
@@ -202,30 +240,30 @@ test("a ChatGPT implementer profile is configurable independently of Claude rout
     subagents: "allowed",
   });
   assert.throws(
-    () => parseLaunchFile(providerFile("chatgpt", { implementer: { model: "opus" } })),
-    /implementer\.model is not valid for platform chatgpt.*Claude model/u,
+    () => parseLaunchFile(providerFile("chatgpt", { autoRun: { address: { model: "opus" } } })),
+    /autoRun\.address\.model is not valid for platform chatgpt/u,
   );
   assert.throws(
-    () => parseLaunchFile(providerFile("chatgpt", { implementer: { effort: "max" } })),
-    /implementer\.effort is not valid for platform chatgpt/u,
+    () => parseLaunchFile(providerFile("chatgpt", { autoRun: { address: { effort: "max" } } })),
+    /autoRun\.address\.effort is not valid for platform chatgpt/u,
   );
   assert.throws(
-    () => parseLaunchFile(providerFile("chatgpt", { implementer: { webSearch: "everything" } })),
-    /implementer\.webSearch is not valid for platform chatgpt/u,
+    () => parseLaunchFile(providerFile("chatgpt", { autoRun: { address: { webSearch: "everything" } } })),
+    /autoRun\.address\.webSearch is not valid for platform chatgpt/u,
   );
   assert.throws(
     () => parseLaunchFile(providerFile("chatgpt", { interactive: { webSearch: "live" } })),
-    /interactive\.webSearch is only supported for the implementer and reviewer profiles/u,
+    /interactive\.webSearch is only supported for Auto Run address and review profiles/u,
   );
   assert.throws(
     () => parseLaunchFile(providerFile("chatgpt", { interactive: { model: "by-difficulty" } })),
-    /interactive\.model must be inherit or a Codex model slug/u,
+    /interactive\.model is not valid for platform chatgpt/u,
   );
 });
 
 test("missing profile fields use defaults and unsupported fields produce one warning", () => {
   const parsed = parseLaunchFile(JSON.stringify({
-    version: 3,
+    version: 1,
     autoRun: { provider: "claude" },
     providers: { claude: { command: ["wrapper", "claude"], interactive: { deniedTools: [], future: true } }, chatgpt: {} },
     futureRoot: true,
@@ -249,36 +287,29 @@ test("invalid known launch fields block configuration", () => {
     "not json",
     "[]",
     '{"version":2,"platform":"claude"}',
-    '{"version":3,"autoRun":{"provider":"codex"}}',
+    '{"version":1,"autoRun":{"provider":"codex"}}',
     providerFile("claude", { command: "claude" }),
     providerFile("claude", { command: [] }),
+    providerFile("claude", { delegations: { explore: { command: [] } } }),
+    providerFile("chatgpt", { autoRun: { address: { command: "codex" } } }),
     providerFile("claude", { interactive: { model: "by-difficulty" } }),
-    providerFile("claude", { explore: { deniedTools: ["Agent"] } }),
-    providerFile("claude", { implementer: { effort: "inherit" } }),
-    providerFile("claude", { reviewer: { deniedTools: "Agent" } }),
-    providerFile("claude", { implementer: { model: "gpt-5.6-sol" } }),
+    providerFile("claude", { autoRun: { explore: { deniedTools: ["Agent"] } } }),
+    providerFile("claude", { autoRun: { address: { effort: "inherit" } } }),
+    providerFile("claude", { autoRun: { review: { deniedTools: "Agent" } } }),
+    providerFile("claude", { autoRun: { address: { model: "gpt-5.6-sol" } } }),
     providerFile("chatgpt", { interactive: { model: "sonnet" } }),
   ]) {
     assert.throws(() => parseLaunchFile(text), LaunchFileError, text);
   }
 });
 
-test("version 3 requires both provider blocks and rejects version 2 with the shape that replaces it", () => {
-  // Version 2 selected one global platform; there is no compatibility layer, so
-  // the rejection has to show the replacement rather than only the number.
+test("config.json requires only its format marker", () => {
   assert.throws(
     () => parseLaunchFile('{"version":2,"platform":"claude","command":["claude"]}'),
-    (error: LaunchFileError) => /version must be 3/u.test(error.message)
-      && /"autoRun"/u.test(error.message)
-      && /"providers"/u.test(error.message),
+    (error: LaunchFileError) => /version must be 1/u.test(error.message)
+      && /\{"version": 1\}/u.test(error.message),
   );
-  for (const missing of ["claude", "chatgpt"] as const) {
-    const providers = missing === "claude" ? { chatgpt: {} } : { claude: {} };
-    assert.throws(
-      () => parseLaunchFile(JSON.stringify({ version: 3, autoRun: { provider: "claude" }, providers })),
-      new RegExp(`providers\\.${missing} is required`, "u"),
-    );
-  }
+  assert.doesNotThrow(() => parseLaunchFile('{"version":1}'));
 });
 
 test("a provider's own parse failures name the provider that owns them", () => {
@@ -291,32 +322,32 @@ test("a provider's own parse failures name the provider that owns them", () => {
 });
 
 test("shared session settings are validated without becoming provider configuration", () => {
-  const text = JSON.stringify({ version: 3, autoRun: { provider: "claude" }, providers: { claude: {}, chatgpt: {} }, session: { stopWaitHours: 1.5 } });
+  const text = JSON.stringify({ version: 1, autoRun: { provider: "claude" }, providers: { claude: {}, chatgpt: {} }, session: { stopWaitHours: 1.5 } });
   assert.equal(parseLaunchFile(text).diagnostics.length, 0);
-  assert.throws(() => parseLaunchFile(JSON.stringify({ version: 3, autoRun: { provider: "claude" }, providers: { claude: {}, chatgpt: {} }, session: { stopWaitHours: -1 } })), /stopWaitHours/u);
-  assert.match(parseLaunchFile(JSON.stringify({ version: 3, autoRun: { provider: "claude" }, providers: { claude: {}, chatgpt: {} }, stopWaitHours: 1.5 })).diagnostics[0]!.message, /stopWaitHours/u);
+  assert.throws(() => parseLaunchFile(JSON.stringify({ version: 1, autoRun: { provider: "claude" }, providers: { claude: {}, chatgpt: {} }, session: { stopWaitHours: -1 } })), /stopWaitHours/u);
+  assert.match(parseLaunchFile(JSON.stringify({ version: 1, autoRun: { provider: "claude" }, providers: { claude: {}, chatgpt: {} }, stopWaitHours: 1.5 })).diagnostics[0]!.message, /stopWaitHours/u);
 });
 
 test("provider diagnostics identify unknown and cross-platform settings", () => {
-  assert.throws(() => parseLaunchFile('{"version":3,"autoRun":{"provider":"codex"}}'), /autoRun\.provider must be.*claude.*chatgpt.*codex/u);
+  assert.throws(() => parseLaunchFile('{"version":1,"autoRun":{"provider":"codex"}}'), /autoRun\.provider must be.*claude.*chatgpt.*codex/u);
   assert.throws(
-    () => parseLaunchFile(providerFile("claude", { implementer: { model: "gpt-5.6-sol" } })),
-    /implementer\.model is not valid for platform claude/u,
+    () => parseLaunchFile(providerFile("claude", { autoRun: { address: { model: "gpt-5.6-sol" } } })),
+    /autoRun\.address\.model is not valid for platform claude/u,
   );
   assert.throws(
     () => parseLaunchFile(providerFile("chatgpt", { interactive: { model: "sonnet" } })),
-    /interactive\.model is not valid for platform chatgpt.*Claude model/u,
+    /interactive\.model is not valid for platform chatgpt/u,
   );
 });
 
-test("the file source reads the latest valid launch.json on every launch", async () => {
+test("the file source reads the latest valid config.json on every launch", async () => {
   const root = await mkdtemp(join(tmpdir(), "aboard-launch-file-"));
-  const path = join(root, "launch.json");
+  const path = join(root, "config.json");
   const source = new FileLaunchConfigurationSource(path);
   await writeFile(path, defaults, "utf8");
   assert.deepEqual(settings(await source.get("interactive")).declaredCommand, ["claude"]);
 
-  await writeFile(path, defaults.replace('["claude"]', '["wrapper", "claude"]'), "utf8");
+  await writeFile(path, providerFile("claude", { command: ["wrapper", "claude"] }), "utf8");
   assert.deepEqual(settings(await source.get("interactive")).declaredCommand, ["wrapper", "claude"]);
 
   await writeFile(path, providerFile("claude", { command: [] }), "utf8");
@@ -325,8 +356,8 @@ test("the file source reads the latest valid launch.json on every launch", async
 
 test("launch configuration resolves project, then global, then built-in defaults", async () => {
   const root = await mkdtemp(join(tmpdir(), "aboard-launch-resolution-"));
-  const project = join(root, "project", ".harness", "launch.json");
-  const global = join(root, "home", ".harness", "launch.json");
+  const project = join(root, "project", ".harness", "config.json");
+  const global = join(root, "home", ".harness", "config.json");
   await mkdir(join(root, "home", ".harness"), { recursive: true });
   const source = new FileLaunchConfigurationSource({ project, global });
 
@@ -335,7 +366,7 @@ test("launch configuration resolves project, then global, then built-in defaults
   assert.deepEqual(settings(await source.get("interactive")).declaredCommand, ["global-codex"]);
 
   await mkdir(join(root, "project", ".harness"), { recursive: true });
-  await writeFile(project, JSON.stringify({ version: 3, autoRun: { provider: "claude" }, providers: { claude: { command: ["project-claude"] }, chatgpt: { command: ["project-codex"] } } }), "utf8");
+  await writeFile(project, JSON.stringify({ version: 1, autoRun: { provider: "claude" }, providers: { claude: { command: ["project-claude"] }, chatgpt: { command: ["project-codex"] } } }), "utf8");
   assert.deepEqual(settings(await source.get("interactive")).declaredCommand, ["project-claude"]);
-  assert.deepEqual(settings(await source.getFor("chatgpt", "General")).declaredCommand, ["project-codex"]);
+  assert.deepEqual(settings(await source.getFor("chatgpt", "general")).declaredCommand, ["project-codex"]);
 });

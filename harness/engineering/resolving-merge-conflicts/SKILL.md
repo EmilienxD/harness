@@ -1,6 +1,10 @@
 ---
 name: resolving-merge-conflicts
-description: "Use when you need to resolve an in-progress git merge/rebase conflict."
+description: Resolve and finish an in-progress Git merge or rebase. Use when the repository contains unresolved conflicts.
+argument-hint: "[merge or rebase context]"
+license: MIT
+metadata:
+  author: EMB
 ---
 
 1. **See the current state** of the merge/rebase. Check git history, and the conflicting files.

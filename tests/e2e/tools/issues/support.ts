@@ -121,7 +121,7 @@ const option = (name) => { const index = args.indexOf(name); return index >= 0 ?
 const finish = (text = "") => { save(); if (text) process.stdout.write(text.endsWith("\\n") ? text : text + "\\n"); };
 if (args[0] === "repo" && args[1] === "view") finish("fixture/issues");
 else if (args[0] === "api" && args[1] === "graphql") finish(JSON.stringify({ data: { repository: { issue: {
-  number: 42, title: "Address the deterministic fixture", body: "Replace the fixture implementation with addressed issue 42.\\n\\n<!-- issues-gateway:legacy:sha256:" + "a".repeat(64) + ":part:1/1 -->",
+  number: 42, title: "Address the deterministic fixture", body: "Replace the fixture implementation with addressed issue 42.",
   state: "OPEN", author: { login: "fixture-author" }, labels: { nodes: [{ name: "[AI]-routine-difficulty" }] }, parent: null, subIssues: { nodes: [] }, comments: { totalCount: 1, nodes: [{ author: { login: "maintainer" }, body: "Keep the final file to one line." }] }
 } } } }));
 else if (args[0] === "label" && args[1] === "create") finish();

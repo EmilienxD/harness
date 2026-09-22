@@ -3,9 +3,8 @@ import { execFile } from "node:child_process";
 import { access, readFile, readdir } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { promisify } from "node:util";
-import { commands, extensions, window, workspace, type Terminal } from "vscode";
+import { commands, extensions, window, workspace } from "vscode";
 
-import { HITL_ACCEPT_PROMPT } from "../scenario.js";
 import { removeDirectoryWithRetries } from "./support.js";
 
 const execFileAsync = promisify(execFile);
@@ -31,16 +30,10 @@ async function diagnostics(): Promise<Diagnostics | undefined> {
   catch { return undefined; }
 }
 
-async function submitHitlAcceptance(terminal: Terminal, checkpoint: string): Promise<void> {
-  terminal.show();
-  terminal.sendText(HITL_ACCEPT_PROMPT, false);
-  for (let attempt = 0; attempt < 10; attempt += 1) {
-    terminal.sendText("\r", false);
-    await new Promise((resolve) => setTimeout(resolve, 3000));
-    const value = await diagnostics();
-    if (value?.observations.some((item) => item.checkpoint === checkpoint)) return;
-  }
-  throw new Error("HITL terminal did not submit the acceptance instruction");
+async function submitHitlAcceptance(cwd: string): Promise<void> {
+  // The fixture acts as the user accepting the handed-off worker's unstaged edits.
+  await execFileAsync("git", ["add", "--", "deterministic.txt"], { cwd, windowsHide: true });
+  await execFileAsync("git", ["-c", "commit.gpgSign=false", "commit", "-m", "Accept deterministic worker change"], { cwd, windowsHide: true });
 }
 
 async function endpoint(directory: string, root: string): Promise<CommandEndpoint | undefined> {
@@ -82,22 +75,24 @@ export async function run(): Promise<void> {
     assert.ok(Number.isInteger(issueNumber) && issueNumber > 0, "auto-run issue number is configured");
     assert.equal(contextIssues.length, 2);
     assert.ok(contextIssues.every((number) => Number.isInteger(number) && number > 0));
-    const existingTerminals = new Set(window.terminals);
     const opened: typeof window.terminals[number][] = [];
     const terminalListener = window.onDidOpenTerminal((terminal) => opened.push(terminal));
     await commands.executeCommand("aboard.autoRun.refresh");
     await commands.executeCommand("aboard.startAutoRun");
     const implementer = await eventually(
-      () => opened.find((candidate) => !existingTerminals.has(candidate)),
+      () => opened.find((terminal) => terminal.name.startsWith("aboard:")),
       "auto-run did not launch a visible implementer terminal",
     );
-    terminalListener.dispose();
     assert.ok(await implementer.processId);
 
     const completed = await eventually(async () => {
       const value = await diagnostics();
       return value?.observations.some((item) => item.checkpoint === "auto-review-complete") ? value : undefined;
     }, "auto-run workers did not complete", 480);
+    terminalListener.dispose();
+    const workerTerminals = opened.filter((terminal) => terminal.name.startsWith("aboard:"));
+    assert.equal(workerTerminals.length, 2, "the implementer and the reviewer each ran in a visible terminal");
+    assert.equal(workerTerminals.some((terminal) => /explore/iu.test(terminal.name)), false, "exploration runs headless without a terminal");
     assert.equal(completed.upstreamMode, "forbidden");
     const rows = completed.observations.filter((item) => item.scenario === "auto-run-afk" && item.result === "success");
     assert.deepEqual(rows.map((item) => item.checkpoint), [
@@ -158,7 +153,7 @@ export async function run(): Promise<void> {
     await eventually(async () => {
       const value = await diagnostics();
       return value?.observations.some((item) => item.checkpoint === handoffCheckpoint) ? value : undefined;
-    }, review ? "HITL reviewer did not complete" : "HITL implementer did not complete", 480);
+    }, review ? "HITL review did not complete" : "HITL address did not complete", 480);
     const worktree = await eventually(async () => {
       const output = (await execFileAsync("git", ["worktree", "list", "--porcelain"], { cwd: root, encoding: "utf8" })).stdout;
       return worktreeRoots(output).find((path) => path.toLowerCase() !== resolve(root).toLowerCase());
@@ -166,20 +161,21 @@ export async function run(): Promise<void> {
     assert.notEqual(worktree.toLowerCase(), root.toLowerCase());
     assert.equal(await readFile(join(root, "deterministic.txt"), "utf8"), "harness e2e fixture: before\n");
 
+    // The user is expected to be able to talk to the worker they must accept,
+    // and closing that terminal before acceptance stops the run instead.
     const handoffTerminal = review ? opened[1] : opened[0];
     assert.ok(handoffTerminal && window.terminals.includes(handoffTerminal), "HITL keeps its handoff terminal visible");
     const dirty = (await execFileAsync("git", ["status", "--porcelain=v1"], { cwd: worktree, encoding: "utf8" })).stdout;
     assert.match(dirty, /^ M deterministic\.txt\s*$/u, "the acceptance handoff is wholly unstaged");
     const rootHead = (await execFileAsync("git", ["rev-parse", "HEAD"], { cwd: root, encoding: "utf8" })).stdout.trim();
     const handoffHead = (await execFileAsync("git", ["rev-parse", "HEAD"], { cwd: worktree, encoding: "utf8" })).stdout.trim();
-    assert.equal(handoffHead, rootHead, "the temporary implementer checkpoint is reset before acceptance");
+    assert.equal(handoffHead, rootHead, "the temporary address checkpoint is reset before acceptance");
     const beforeAcceptance = (await execFileAsync("gh", ["pr", "list", "--repo", repository, "--state", "open", "--json", "number"], { encoding: "utf8" })).stdout;
     assert.deepEqual(JSON.parse(beforeAcceptance), [], "no PR exists before acceptance");
-    // The response server persists the handoff just before Codex redraws its
-    // interactive prompt. Give the TUI time to become input-ready so this
-    // models a deliberate user follow-up instead of racing task settlement.
+    // Let the handoff settle so acceptance models a deliberate user follow-up
+    // instead of racing the worker's own task settlement.
     await new Promise((resolve) => setTimeout(resolve, 1500));
-    await submitHitlAcceptance(handoffTerminal, review ? "auto-hitl-accept-commit" : "auto-hitl-commit");
+    await submitHitlAcceptance(worktree);
 
     await eventually(async () => {
       const issue = JSON.parse((await execFileAsync("gh", ["issue", "view", String(hitl), "--repo", repository, "--json", "state"], { encoding: "utf8" })).stdout) as { state?: string };
@@ -193,17 +189,17 @@ export async function run(): Promise<void> {
       const value = await diagnostics();
       return value?.observations.some((item) => item.checkpoint === "auto-followup-read") ? value : undefined;
     }, "HITL run did not start its follow-up automatically", 480);
-    const finalCheckpoint = review ? "auto-hitl-accept-complete" : "auto-followup-complete";
+    const finalCheckpoint = review ? "auto-hitl-review-complete" : "auto-followup-complete";
     const completed = await eventually(async () => {
       const value = await diagnostics();
       return value?.observations.some((item) => item.checkpoint === finalCheckpoint) ? value : undefined;
-    }, review ? "HITL acceptance conversation did not complete" : "HITL follow-up implementer did not complete", 480);
+    }, review ? "HITL acceptance conversation did not complete" : "HITL follow-up address did not complete", 480);
     const successes = completed.observations.filter((item) => item.scenario !== null && item.result === "success");
     assert.deepEqual(successes.map((item) => item.checkpoint), review ? [
       "auto-hitl-read", "auto-hitl-edit", "auto-hitl-commit", "auto-hitl-complete",
-      "auto-hitl-review-read", "auto-hitl-review-complete", "auto-hitl-accept-commit", "auto-hitl-accept-complete",
+      "auto-hitl-review-read", "auto-hitl-review-complete",
     ] : [
-      "auto-hitl-read", "auto-hitl-edit", "auto-hitl-handoff", "auto-hitl-commit", "auto-hitl-complete",
+      "auto-hitl-read", "auto-hitl-edit", "auto-hitl-handoff",
       "auto-followup-read", "auto-followup-edit", "auto-followup-commit", "auto-followup-complete",
     ]);
     assert.equal(new Set(successes.map((item) => item.sessionHash).filter(Boolean)).size, 2);

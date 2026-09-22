@@ -3,6 +3,8 @@ import type { LaunchRestrictions, WriteCapability } from "../domain/capability.j
 import {
   agentLabel,
   isAutomatedAgentType,
+  isAutoRunWorkerType,
+  isHeadlessExecution,
   isNamedBuiltinAgentType,
   type AgentId,
   type AgentType,
@@ -43,6 +45,8 @@ import {
 
 export const DEFAULT_CLAUDE_COMMAND = ["claude"] as const;
 const CLAUDE_ENVIRONMENT = { CLAUDE_CODE_STOP_HOOK_BLOCK_CAP: "1000000" } as const;
+/** Print mode: one headless turn, streamed for a machine reader instead of a TUI. */
+const PRINT_MODE_ARGUMENTS = ["-p", "--output-format", "stream-json", "--verbose"] as const;
 
 export interface DifficultyLaunchPolicy {
   readonly model: string;
@@ -111,7 +115,7 @@ export function launchWriteCapability(
   agentType: AgentType,
   configuration: LaunchConfiguration,
 ): WriteCapability {
-  if (agentType === "Explore") return "read-only";
+  if (agentType === "explore") return "read-only";
   if (configuration.shape === "skill") return "write-capable";
   return configuration.shape === "default" ? "write-capable" : "read-only";
 }
@@ -178,10 +182,10 @@ function effortArguments(effort: EffortLevel | undefined): readonly string[] {
 
 function chromeArguments(agentType: AgentType, enabled: true | undefined): readonly string[] {
   if (enabled !== true) return [];
-  if (agentType !== "implementer") {
+  if (!isAutoRunWorkerType(agentType)) {
     throw new LaunchPlanError(
       "shape-not-allowed",
-      `Claude in Chrome is available only to [AI]-chrome auto-run implementers: ${agentType}`,
+      `Claude in Chrome is available only to [AI]-chrome auto-run workers: ${agentType}`,
     );
   }
   return ["--chrome"];
@@ -374,26 +378,26 @@ function wrapCommand(
 }
 
 function assertLaunchShape(agentType: AgentType, configuration: LaunchConfiguration): void {
-  if (["interactive", "Prototype", "Web Search", "Brainstorm", "General"].includes(agentType)) {
+  if (["interactive", "prototype", "websearch", "brainstorm", "general"].includes(agentType)) {
     if (configuration.shape !== "default") {
       throw new LaunchPlanError("shape-not-allowed", "interactive launches as Claude Code's default session");
     }
     return;
   }
-  if (agentType === "implementer") {
+  if (agentType === "address") {
     if (configuration.shape !== "skill" || configuration.skillName !== "address-this") {
-      throw new LaunchPlanError("shape-not-allowed", "implementer must launch through /address-this");
+      throw new LaunchPlanError("shape-not-allowed", "address must launch through /address-this");
     }
     return;
   }
-  if (agentType === "reviewer") {
+  if (agentType === "review") {
     // One skill for both dispositions: AFK and HITL differ in orchestration.
     if (configuration.shape !== "skill" || configuration.skillName !== "review-this") {
-      throw new LaunchPlanError("shape-not-allowed", "reviewer must launch through /review-this");
+      throw new LaunchPlanError("shape-not-allowed", "review must launch through /review-this");
     }
     return;
   }
-  if (isNamedBuiltinAgentType(agentType) && configuration.shape === "builtin" && configuration.agentName === agentType) return;
+  if (isNamedBuiltinAgentType(agentType) && configuration.shape === "builtin" && configuration.agentName === "Explore") return;
   throw new LaunchPlanError("shape-not-allowed", `${agentType} has no supported launch configuration`);
 }
 
@@ -415,7 +419,7 @@ export function planLaunch(request: LaunchPlanRequest): LaunchPlan {
   }
 
   const launchRuntimeDirectory = agentRuntimeDirectory(runtimeDirectory, request.agentId);
-  const task = prompt !== undefined && (agentType === "implementer" || agentType === "reviewer")
+  const task = prompt !== undefined && (agentType === "address" || agentType === "review")
     ? { agentId: request.agentId, relativePath: taskPromptPath(runtimeDirectory, request.agentId, request.promptRoot), contents: typeof prompt === "string" ? prompt : prompt.text }
     : undefined;
   const shapeArguments: string[] = [
@@ -437,6 +441,7 @@ export function planLaunch(request: LaunchPlanRequest): LaunchPlan {
   const fixedArguments = [
     "--session-id",
     request.sessionId,
+    ...(request.forkSessionId === undefined ? [] : ["--resume", request.forkSessionId, "--fork-session"]),
     "--name",
     agentLabel({ agentId: request.agentId, type: agentType }),
     ...shapeArguments,
@@ -463,7 +468,7 @@ export function planLaunch(request: LaunchPlanRequest): LaunchPlan {
         ? { invocation: skillInvocation("/", configuration.skillName) }
         : request.skill === undefined ? {} : { invocation: skillInvocation("/", request.skill) }),
     });
-    const args = [...fixedArguments, ...plan.args];
+    const args = [...(isHeadlessExecution(agentType, request.executionMode) ? PRINT_MODE_ARGUMENTS : []), ...fixedArguments, ...plan.args];
     const wrapped = wrapCommand(command, args, wrapper, request.agentId, runtimeDirectory, launchCode);
     return {
       plan,
@@ -542,7 +547,7 @@ export function planSessionResume(request: SessionResumePlanRequest): LaunchPlan
       stem: "continue",
       ...(request.promptRoot === undefined ? {} : { promptRoot: request.promptRoot }),
     });
-    const args = [...fixedArguments, ...promptPlan.args];
+    const args = [...(isHeadlessExecution(request.agentType, request.executionMode) ? PRINT_MODE_ARGUMENTS : []), ...fixedArguments, ...promptPlan.args];
     const wrapped = wrapCommand(command, args, wrapper, request.agentId, runtimeDirectory, launchCode);
     return {
       promptPlan,

@@ -5,6 +5,17 @@ import { join } from "node:path";
 
 import { ABOARD_SETTINGS, createLayeredReader, parseProjectSettings, readAboardConfiguration } from "../../src/configuration.js";
 
+test("interactive resumes keep fork as default and accept the terminal reuse setting", () => {
+  assert.equal(readAboardConfiguration({ get: () => undefined }).value.interactiveResumeMode, "fork");
+  const project = parseProjectSettings('{"sessions":{"interactiveResumeMode":"reuse-terminal"}}');
+  const result = readAboardConfiguration(createLayeredReader({ user: { get: () => undefined }, project: project.values }));
+  assert.equal(result.value.interactiveResumeMode, "reuse-terminal");
+  assert.equal(result.diagnostics.length + project.diagnostics.length, 0);
+  const invalid = readAboardConfiguration({ get: (key) => key === "aboard.sessions.interactiveResumeMode" ? "invalid" : undefined });
+  assert.equal(invalid.value.interactiveResumeMode, "fork");
+  assert.equal(invalid.diagnostics.length, 1);
+});
+
 test("configuration validates retained settings and uses conservative fallbacks", () => {
   const values = new Map<string, unknown>([
     ["aboard.bridge.port", 70_000],

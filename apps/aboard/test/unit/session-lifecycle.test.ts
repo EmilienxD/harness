@@ -21,7 +21,7 @@ const startedAt = at("2026-08-01T09:00:00.000Z");
 
 const LOCK = "C:\\repo\\.abd\\runtime\\locks\\a1.lock";
 
-function registerAgent(fleet: FleetRegistry, agentId: AgentId, sessionId: SessionId, type: AgentSession["identity"]["type"] = "implementer"): void {
+function registerAgent(fleet: FleetRegistry, agentId: AgentId, sessionId: SessionId, type: AgentSession["identity"]["type"] = "address"): void {
   fleet.register({
     platform: "claude",
     identity: { agentId, type },

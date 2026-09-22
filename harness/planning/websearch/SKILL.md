@@ -1,26 +1,27 @@
 ---
 name: websearch
-description: Research a question on the web and return a concise, complete, source-backed answer. Explicit invocation only.
+description: Research a question and return a concise, source-backed answer. Use when the user explicitly requests web research.
+argument-hint: "[research question]"
+license: MIT
+metadata:
+  author: EMB
 disable-model-invocation: true
 ---
 
-Research the user's query and answer it directly in chat. Except for the source index described below, this is a strictly read-only workflow: do not create, edit, or write files anywhere.
+Research the user's query and answer it directly in the end turn message. This is a read-only workflow: do not create or edit source code.
 
-Use any resources available for web research, including built-in web tools, the Context7 documentation library through `npx ctx7@latest`, or other available tools such as MCP servers or CLIs. Prefer any tools the user requests. You may quickly search the codebase when its dependencies, versions, terminology, or implementation details would make the research more accurate.
+You may quickly search the codebase when its dependencies, versions, terminology, or implementation details would make the research more accurate.
 
-For current library documentation, resolve the library first, then query its documentation:
+Before doing any search, read `.harness/websearch/INDEX.md` to get a list of common, known, and validated sources for the project. Use any source that is relevant to the task and fetch it.
 
-```bash
-npx ctx7@latest library <name> "<specific topic>"    # Skip when the library id is already known
-npx ctx7@latest docs <library-id> "<specific topic>"
-```
+If the user requests you to use specific search tools, use them. Otherwise, default to the Context7 npx CLI and complete the search with basic websearch if needed.
 
-Before doing any search, read INDEX.md to get a list of common, known, and validated sources. Use any source that is relevant to the task and fetch it. After every web search, add ONLY the relevant and trusted sources found during the search to the index. Use this format:
+How to use the Context7 CLI:
+- Resolve a library name to a Context7 library ID: `npx ctx7@latest library <name> [topic]` where `name` is the library name to search for and `topic` is what to look up in the library's documentation.
+- Query documentation for a library: `npx ctx7@latest docs <library-id> <query>` where library-id is the Context7 library ID (e.g., /facebook/react) and `query` is a single-topic question to get docs for (run a separate query per distinct concept, unless asking how they interact)
 
-```markdown
-- Concise title: Source (e.g. URL, Context7 library id).
-```
+Trace your sources in INDEX.md for the next sessions to pick up. ONLY save the relevant and trusted sources found during the search. Use 1 concise bullet point per source with the format `- title: source` where title is a title you define and source is the info needed to fetch (e.g. a Context7 id, or url)
 
-Avoid incidental findings, duplicates, and low-quality sources. Maintain the index in its correct format.
+Avoid incidental findings, duplicates, and low-quality sources.
 
 Return a complete synthesis that answers the request, cites the supporting sources, distinguishes uncertainty when necessary, and filters out non-essential research findings rather than recounting the search process.

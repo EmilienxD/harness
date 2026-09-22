@@ -1,9 +1,8 @@
 name = "subagents"
-version = "1.2.5"
-description = "Visible subagent delegation with task-specific workflows"
+version = "2.2.12"
+description = "Persistent conversation delegation with mode-preserving resume"
 docs = "https://github.com/EmilienxD/harness/blob/main/README.md#user-invoked-skills"
 dependencies = ["prototype>=1.1.0,<2.0.0", "websearch>=1.1.0,<2.0.0", "grill-me>=1.0.3,<2.0.0", "issue-readers>=1.0.0,<2.0.0"]
-workspace_gitignore = [".harness/runtime/"]
 
 [platforms.claude]
 status = "supported"
@@ -101,7 +100,18 @@ dest = "reply-to-agent/agents/openai.yaml"
 root = "skills"
 platforms = ["chatgpt"]
 
+[[files]]
+src = "resume-agent"
+dest = "resume-agent"
+root = "skills"
+
+[[files]]
+src = "chatgpt/agents/resume-agent.yaml"
+dest = "resume-agent/agents/openai.yaml"
+root = "skills"
+platforms = ["chatgpt"]
+
 [[actions]]
 type = "uv-tool"
 package = "harness-subagents-runtime"
-source = "git+https://github.com/EmilienxD/harness@9aa34905e94fac52bf7ee800dff020e8025bc289#subdirectory=harness/productivity/subagents/runtime"
+source = "git+https://github.com/EmilienxD/harness@cd51f62208e689ff04a841f6d717eabbab448279#subdirectory=harness/productivity/subagents/runtime"

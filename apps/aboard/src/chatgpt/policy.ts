@@ -60,7 +60,7 @@ export class ChatGptPolicyProbe {
       if (policy.allowManagedHooksOnly === true) {
         throw new ChatGptPolicyError(
           "lifecycle-hooks",
-          `Managed Codex policy in ${policy.source} sets allow_managed_hooks_only = true, so Codex skips the hooks Aboard generates for a ${agentType} session and its result would never arrive. Ask your administrator to allow session hooks.`,
+          `Managed Codex policy in ${policy.source} sets allow_managed_hooks_only = true, so Codex skips Aboard's launch-scoped hooks for a ${agentType} session and its result would never arrive. Ask your administrator to allow launch-scoped hooks.`,
         );
       }
       if (permissionProfile !== undefined) {
@@ -78,16 +78,16 @@ export class ChatGptPolicyProbe {
         }
       }
       const modes = policy.allowedSandboxModes;
-      if (agentType === "Explore" && permissionProfile === undefined && modes !== undefined && !modes.includes("read-only")) {
+      if (agentType === "explore" && permissionProfile === undefined && modes !== undefined && !modes.includes("read-only")) {
         throw new ChatGptPolicyError(
           "read-only-sandbox",
-          `Managed Codex policy in ${policy.source} limits allowed_sandbox_modes to ${modes.join(", ")}, which excludes read-only. A ChatGPT Explore session must run read-only. Ask your administrator to allow the read-only sandbox mode.`,
+          `Managed Codex policy in ${policy.source} limits allowed_sandbox_modes to ${modes.join(", ")}, which excludes read-only. A ChatGPT explore session must run read-only. Ask your administrator to allow the read-only sandbox mode.`,
         );
       }
       const approvals = policy.allowedApprovalPolicies;
-      if ((agentType === "Explore" || permissionProfile !== undefined) && approvals !== undefined && !approvals.includes("never")) {
+      if ((agentType === "explore" || permissionProfile !== undefined) && approvals !== undefined && !approvals.includes("never")) {
         const subject = permissionProfile === undefined
-          ? "A ChatGPT Explore session"
+          ? "A ChatGPT explore session"
           : `The ${permissionProfile} permission profile`;
         throw new ChatGptPolicyError(
           "never-approval",
