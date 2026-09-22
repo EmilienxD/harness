@@ -4,6 +4,7 @@ import { Check, ChevronLeft, CircleHelp, Folder, LoaderCircle, Lock, PanelLeft, 
 import type { AnswerDraft, GrillQuestion } from "@/lib/grill-contract";
 import {
   ignoresShortcuts,
+  leaveTextEntry,
   shortcutLetter,
   matchesShortcut,
   shortcutAria,
@@ -313,6 +314,11 @@ function GrillBoard() {
   );
 
   useEffect(() => {
+    window.addEventListener("keydown", leaveTextEntry, true);
+    return () => window.removeEventListener("keydown", leaveTextEntry, true);
+  }, []);
+
+  useEffect(() => {
     const handleShortcut = (event: KeyboardEvent) => {
       if (ignoresShortcuts(event) || deleteTarget || review || shortcutsOpen) return;
       if (matchesShortcut(event, "help")) {
@@ -323,6 +329,14 @@ function GrillBoard() {
       if (matchesShortcut(event, "toggleSessions")) {
         event.preventDefault();
         setRailOpen((current) => !current);
+        return;
+      }
+      const scroll = matchesShortcut(event, "scrollUp") ? -1 : matchesShortcut(event, "scrollDown") ? 1 : 0;
+      if (scroll) {
+        // The board scrolls inside the page element, so native arrow keys either miss it or
+        // move a focused radio group; the page scrolls whatever holds focus instead.
+        event.preventDefault();
+        page.current?.scrollBy({ top: scroll * ARROW_SCROLL_STEP, behavior: "instant" });
         return;
       }
       if (matchesShortcut(event, "closeOverlay") && railOpen && !window.matchMedia("(min-width: 901px)").matches) {
@@ -559,6 +573,7 @@ function GrillBoard() {
                               item.id === displayedRoundId && !reviewed && !shortcutsOpen && !deleteTarget
                             }
                             onSave={saveAnswer}
+                            onRevealRound={() => scrollToRound(item.id)}
                             onReview={async () => {
                               const result = await api<{ prompt: string }>(`rounds/${item.id}/prompt-preview`, {
                                 method: "POST",
@@ -863,6 +878,8 @@ function CodeGate({ onSuccess }: { onSuccess: () => void }) {
 
 /** Idle time after the last keystroke before a note saves, and how long continuous typing may defer it. */
 const NOTE_SAVE_DELAY = 800;
+// Matches the browser's own arrow-key scroll distance.
+const ARROW_SCROLL_STEP = 40;
 const NOTE_SAVE_MAX_WAIT = 4_000;
 
 type Draft = { selection: string; note: string };
@@ -882,15 +899,18 @@ function Questionnaire({
   round,
   shortcutActive,
   onSave,
+  onRevealRound,
   onReview,
 }: {
   round: Round;
   shortcutActive: boolean;
   onSave: SaveAnswer;
+  onRevealRound: () => void;
   onReview: () => Promise<void>;
 }) {
   const readOnly = round.status !== "active";
   const [active, setActive] = useState(0);
+  const deck = useRef<HTMLDivElement>(null);
   const [reviewing, setReviewing] = useState(false);
   const flushers = useRef(new Map<string, () => Promise<boolean>>());
   const questions = round.payload.questions;
@@ -927,28 +947,38 @@ function Questionnaire({
     }
   }, [onReview, questions]);
 
+  // A new question starts reading from the top of the round, as on page load.
+  const showQuestion = useCallback(
+    (index: number) => {
+      setActive(index);
+      onRevealRound();
+    },
+    [onRevealRound],
+  );
+
   useEffect(() => {
     if (!shortcutActive) return;
     const handleShortcut = (event: KeyboardEvent) => {
       if (ignoresShortcuts(event)) return;
       if (matchesShortcut(event, "previousQuestion")) {
         event.preventDefault();
-        setActive((current) => Math.max(0, current - 1));
+        showQuestion(Math.max(0, active - 1));
         return;
       }
       if (matchesShortcut(event, "nextQuestion")) {
         event.preventDefault();
-        setActive((current) => Math.min(questions.length - 1, current + 1));
+        showQuestion(Math.min(questions.length - 1, active + 1));
         return;
       }
       if (matchesShortcut(event, "reviewPrompt") && canReview && !reviewing) {
         event.preventDefault();
+        deck.current?.querySelector(".question:not([hidden]) .round-submit")?.scrollIntoView({ block: "nearest" });
         void reviewPrompt();
       }
     };
     window.addEventListener("keydown", handleShortcut, true);
     return () => window.removeEventListener("keydown", handleShortcut, true);
-  }, [canReview, questions.length, reviewPrompt, reviewing, shortcutActive]);
+  }, [active, canReview, questions.length, reviewPrompt, reviewing, shortcutActive, showQuestion]);
 
   const map = useMemo(() => {
     const size = Math.min(7, questions.length);
@@ -959,6 +989,7 @@ function Questionnaire({
   return (
     <div className="deck-wrap">
       <div
+        ref={deck}
         className={`deck ${active === questions.length - 2 ? "is-penult" : ""} ${active === questions.length - 1 ? "is-last" : ""}`}
       >
         {questions.map((question, index) => (
@@ -979,7 +1010,7 @@ function Questionnaire({
                     key={entry.question.id}
                     className={`map-btn ${entry.index === active ? "is-active" : ""} ${answerFor(entry.question.id)?.state === "queued" ? "is-queued" : ""}`}
                     aria-current={entry.index === active}
-                    onClick={() => setActive(entry.index)}
+                    onClick={() => showQuestion(entry.index)}
                   >
                     {entry.question.id}
                   </button>
@@ -1038,6 +1069,7 @@ function QuestionCard({
   const [failure, setFailure] = useState("");
   const [saved, confirmSaved] = useConfirmation();
   const noteField = useRef<HTMLTextAreaElement>(null);
+  const options = useRef<HTMLDivElement>(null);
   // Timers, page-hide listeners, and unmounting read these refs so they always save the newest edit.
   const latest = useRef<Draft>({ selection: serverSelection, note: serverNote });
   const synced = useRef(syncedKey);
@@ -1161,11 +1193,6 @@ function QuestionCard({
     if (!shortcutsEnabled || readOnly) return;
     const handleShortcut = (event: KeyboardEvent) => {
       if (ignoresShortcuts(event)) return;
-      if (matchesShortcut(event, "saveAnswer")) {
-        event.preventDefault();
-        void flush();
-        return;
-      }
       if (matchesShortcut(event, "focusNote")) {
         event.preventDefault();
         noteField.current?.focus();
@@ -1173,19 +1200,23 @@ function QuestionCard({
       }
       if (!matchesShortcut(event, "selectOption")) return;
       const letter = shortcutLetter(event);
+      const reveal = (target: string) =>
+        options.current?.querySelector(`[data-option="${target}"]`)?.scrollIntoView({ block: "nearest" });
       if (letter === noneLetter.toLocaleLowerCase()) {
         event.preventDefault();
         chooseNone();
+        reveal(noneLetter);
         return;
       }
       const option = question.options.find((item) => item.letter.toLocaleLowerCase() === letter);
       if (!option) return;
       event.preventDefault();
       edit({ selection: option.letter, note }, 0);
+      reveal(option.letter);
     };
     window.addEventListener("keydown", handleShortcut, true);
     return () => window.removeEventListener("keydown", handleShortcut, true);
-  }, [chooseNone, edit, flush, noneLetter, note, question.options, readOnly, shortcutsEnabled]);
+  }, [chooseNone, edit, noneLetter, note, question.options, readOnly, shortcutsEnabled]);
 
   return (
     <article className="question" hidden={hidden} inert={hidden}>
@@ -1197,9 +1228,9 @@ function QuestionCard({
         <h2>{question.question}</h2>
         <Explanation question={question} />
         <div className="answer-form">
-          <div className="options">
+          <div ref={options} className="options">
             {question.options.map((option) => (
-              <label key={option.letter} className="option">
+              <label key={option.letter} className="option" data-option={option.letter}>
                 <input
                   type="radio"
                   name={`${round.id}-${question.id}`}
@@ -1219,7 +1250,7 @@ function QuestionCard({
                 </span>
               </label>
             ))}
-            <label className="option">
+            <label className="option" data-option={noneLetter}>
               <input
                 type="radio"
                 name={`${round.id}-${question.id}`}
