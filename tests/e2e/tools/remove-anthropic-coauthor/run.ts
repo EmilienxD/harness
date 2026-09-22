@@ -1,13 +1,12 @@
 import { execFile } from "node:child_process";
 import { copyFile, mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
-import { homedir, tmpdir } from "node:os";
+import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { promisify } from "node:util";
 
 import { parseAnthropicMessagesRequest } from "../../core/anthropic-protocol.js";
 import { startFakeAnthropicServer } from "../../core/anthropic-server.js";
 import { isolatedClaudeEnvironment, runClaude, validateClaudeCli } from "../../core/claude.js";
-import { containsPath } from "../../core/path.js";
 import { MARKER, scenarioCatalogHash, transition } from "./scenario.js";
 
 const exec = promisify(execFile);
@@ -26,24 +25,13 @@ export interface RemoveAnthropicCoauthorJourneyResult {
 export async function runRemoveAnthropicCoauthorJourney(): Promise<RemoveAnthropicCoauthorJourneyResult> {
   await validateClaudeCli();
   const harness = await findHarnessRoot();
-  const fixtureRoot = resolve(process.env.HARNESS_E2E_FIXTURE_ROOT ?? process.env.ABOARD_E2E_ROOT ?? join(homedir(), "dev", "harness-e2e-runtime"));
-  const source = join(fixtureRoot, "repository");
-  const ownership = JSON.parse(await readFile(join(fixtureRoot, "harness-ownership.json"), "utf8")) as Record<string, unknown>;
-  if (ownership.schemaVersion !== 1 || ownership.repository !== "EmilienxD/harness-e2e" || ownership.cloneRoot !== source) {
-    throw new Error("harness-e2e ownership does not match the fixture checkout");
-  }
-  if (containsPath(harness, await realpath(source))) throw new Error("fixture must be outside the Harness checkout");
-  const origin = await git(source, "remote", "get-url", "origin");
-  if (!["https://github.com/EmilienxD/harness-e2e.git", "git@github.com:EmilienxD/harness-e2e.git"].includes(origin.trim())) {
-    throw new Error("fixture origin is not EmilienxD/harness-e2e");
-  }
   const root = await realpath(await mkdtemp(join(tmpdir(), "harness-remove-coauthor-e2e-")));
   const project = join(root, "repository");
   const config = join(root, "claude-config");
   let server: Awaited<ReturnType<typeof startFakeAnthropicServer>> | undefined;
   try {
-    await exec("git", ["clone", "--no-hardlinks", "--", source, project], { windowsHide: true, timeout: 30_000 });
-    await git(project, "remote", "set-url", "origin", origin.trim());
+    await mkdir(project);
+    await git(project, "init", "-b", "main");
     await git(project, "config", "user.name", "Harness E2E");
     await git(project, "config", "user.email", "harness-e2e@example.invalid");
     await git(project, "config", "commit.gpgSign", "false");
