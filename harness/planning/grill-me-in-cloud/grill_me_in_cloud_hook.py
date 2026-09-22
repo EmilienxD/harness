@@ -11,6 +11,9 @@ from pathlib import Path
 from grill_cloud_core import HostedError, Interview, InterviewRuntime, RoundError
 
 
+STOP = "Tell the user in one line and stop."
+
+
 def context(event: str, text: str) -> dict:
     return {"hookSpecificOutput": {"hookEventName": event, "additionalContext": text}}
 
@@ -19,9 +22,12 @@ def instructions(interview: Interview) -> str:
     return (
         "Publish the next grill round by writing its complete JSON directly to this reserved path:\n"
         f"{interview.source}\n"
-        "The directory is outside the project. Do not inspect it or create another filename. "
         f"Write supporting images first under {interview.assets} and reference them with the URL prefix "
-        f"{interview.assets_url}. Write the JSON last; that write triggers hosted publication."
+        f"{interview.assets_url}.\n"
+        "The system owns and creates both directories and their parents outside the project. They are reserved "
+        "to your session and you are their sole writer; create the files directly at these exact paths without "
+        "listing the directories or reading a template. Write the round file last: a successful write publishes "
+        "it automatically."
     )
 
 
@@ -85,43 +91,68 @@ def _handle(payload: dict, provider: str, runtime: InterviewRuntime) -> dict | N
         return None
     grilling = invocation or skill_loaded or runtime.current(provider, session) is not None
     if runtime.configuration_error is not None:
-        return context(event, f"Hosted grill is not configured: {runtime.configuration_error}") if grilling else None
+        return context(event, f"Hosted grill is not configured: {runtime.configuration_error}. {STOP}") if grilling else None
+    project = Path(payload.get("cwd") or Path.cwd())
+    if event == "UserPromptSubmit" or skill_loaded:
+        return _prepare(event, provider, session, project, runtime, invocation or skill_loaded, grilling)
+    return _publish(payload, provider, session, project, runtime)
+
+
+def _retry_queued(runtime: InterviewRuntime, provider: str, session: str) -> tuple[str, bool]:
+    """Report a round an outage left queued; the flag is set when the interview cannot continue."""
     try:
-        recovered = ""
-        try:
-            retried = runtime.retry_pending(provider, session)
-            if retried:
-                latest = retried[-1]
-                recovered = f"Recovered publication completed: round {latest['round_number']} — {latest['url']}\n\n"
-        except (HostedError, OSError, ValueError) as error:
-            # A stalled outbox must not block this session's fresh inbox or a new publication.
-            recovered = f"A staged round is still waiting in the Harness outbox ({error}); it retries on a later grill hook event.\n\n"
-        project = Path(payload.get("cwd") or Path.cwd())
-        if (event == "UserPromptSubmit" and invocation) or skill_loaded:
-            return context(event, recovered + instructions(runtime.start(provider, session, project)))
-        if event == "UserPromptSubmit":
-            interview = runtime.recover(provider, session, project)
-            return context(event, recovered + instructions(interview)) if interview else (context(event, recovered.rstrip()) if recovered else None)
-        published = runtime.publish(
-            provider,
-            session,
-            session_title(payload, provider) or session,
-            project=project,
-        )
-        if published is None:
-            return None
-        interview = runtime.current(provider, session)
+        published = runtime.retry_pending(provider, session)
+    except HostedError as error:
+        if not error.retryable:
+            return f"The queued round cannot be published: {error}. {STOP}", True
+        return f"The queued round is still unpublished ({error}); it retries on the next user message.\n\n", False
+    if not published:
+        return "", False
+    latest = published[-1]
+    return f"Queued round {latest['round_number']} is now published: {latest['url']}\n\n", False
+
+
+def _prepare(
+    event: str, provider: str, session: str, project: Path, runtime: InterviewRuntime, starting: bool, grilling: bool,
+) -> dict | None:
+    """Queued rounds retry only here, so ordinary tool calls never wait on the board."""
+    try:
+        queued, stopped = _retry_queued(runtime, provider, session)
+        if stopped:
+            return context(event, queued)
+        interview = runtime.start(provider, session, project) if starting else runtime.recover(provider, session, project)
+    except (HostedError, OSError, ValueError) as error:
+        # Every prompt looks up a hosted session, so an outage stays silent outside grill sessions.
+        return context(event, f"Grill setup failed: {error}. {STOP}") if grilling else None
+    if interview is None:
+        return context(event, queued.rstrip()) if queued else None
+    return context(event, queued + instructions(interview))
+
+
+def _publish(payload: dict, provider: str, session: str, project: Path, runtime: InterviewRuntime) -> dict | None:
+    event = payload["hook_event_name"]
+    try:
+        published = runtime.publish(provider, session, session_title(payload, provider) or session, project=project)
+    except RoundError as error:
         return context(
             event,
-            f"Round {published['round_number']} was published: {published['url']}\n"
-            "Publication is complete and does not wait for answers. End this turn normally; the next user message may contain the reviewed prompt.\n\n"
-            f"A fresh path is reserved for a later round.\n{instructions(interview)}",
+            f"Round rejected: {error}\nFix it and write the complete round, images included, to the new paths below.\n\n"
+            f"{instructions(runtime.current(provider, session))}",
         )
-    except RoundError as error:
-        interview = runtime.current(provider, session)
-        return context(event, f"Round validation failed: {error}\nWrite a complete corrected payload at the fresh path.\n\n{instructions(interview)}")
-    except (HostedError, OSError, ValueError) as error:
-        return context(event, f"Round publication failed: {error}. The material is retained in the durable Harness outbox and will retry on a later grill hook event. Do not claim that the round is available.")
+    except HostedError as error:
+        if error.retryable:
+            return context(event, f"Round not published yet: {error}. It is queued and retries on the user's next message. {STOP}")
+        return context(event, f"Round cannot be published: {error}. {STOP}")
+    except (OSError, ValueError) as error:
+        return context(event, f"Round cannot be published: {error}. {STOP}")
+    if published is None:
+        return None
+    return context(
+        event,
+        f"Round {published['round_number']} was published: {published['url']}\n"
+        "Only reply \"Done. Round available at: <URL>\", replacing `<URL>` with the round's URL, then end your turn; the user's answer will be automatically routed to you as the next user message.\n\n"
+        f"A fresh path is reserved for a later round.\n{instructions(runtime.current(provider, session))}",
+    )
 
 
 def main() -> int:

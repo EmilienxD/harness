@@ -39,6 +39,15 @@ class HostedError(RuntimeError):
         self.code = code
         self.status = status
 
+    @property
+    def retryable(self) -> bool:
+        """Outages and uploads can heal on retry, since a retry re-signs upload targets; other rejections cannot."""
+        if self.code == "missing_configuration":
+            return False
+        if self.status is None or self.code == "upload_failed":
+            return True
+        return self.status >= 500 or self.status in {408, 429}
+
 
 def atomic_write(path: Path, content: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -427,6 +436,15 @@ class InterviewRuntime:
         return publication
 
     def _publish_staged(self, publication_path: Path) -> dict:
+        try:
+            return self._send_staged(publication_path)
+        except HostedError as error:
+            # A rejection the board will repeat would otherwise retry on every later event.
+            if not error.retryable:
+                shutil.rmtree(publication_path.parent, ignore_errors=True)
+            raise
+
+    def _send_staged(self, publication_path: Path) -> dict:
         if self.client is None:
             raise HostedError("Hosted board configuration is unavailable", "missing_configuration")
         staged = json.loads(publication_path.read_text(encoding="utf-8"))
@@ -472,4 +490,7 @@ class InterviewRuntime:
         assets = interview.directory / "assets" / f"round-{old_sequence:03d}"
         manifest = validate_assets(payload, assets, f"assets/round-{old_sequence:03d}/")
         identity = project_identity(project, home) if project is not None else None
+        # The board makes its newest commit the active round, so a queued older round must never follow this one.
+        for queued in self._outboxes(provider, session):
+            shutil.rmtree(queued.parent)
         return self._publish_staged(self._stage(provider, session, payload, manifest, title, identity))

@@ -35,6 +35,8 @@ class HostedBoard:
     def request(self, method, path, body=None, idempotency_key=None):
         self.keys.append(idempotency_key)
         self.requests.append((method, path, body))
+        if isinstance(self.fail, HostedError):
+            raise self.fail
         if self.fail:
             raise HostedError("offline", "network_error")
         if path.endswith("/prepare"):
@@ -172,3 +174,103 @@ def test_failed_publication_keeps_one_idempotent_outbox_for_retry(tmp_path):
     client.fail = False
     assert runtime.retry_pending("chatgpt", "session")[0]["round_number"] == 1
     assert all(candidate == key for candidate in client.keys if candidate is not None)
+
+
+def queued_publications(tmp_path):
+    return list((tmp_path / "runtime" / "outbox").rglob("publication.json"))
+
+
+def write_round(runtime, session, project, question="Where should this run?"):
+    interview = runtime.start("claude", session, project)
+    payload = round_data()
+    payload["questions"][0]["question"] = question
+    interview.source.write_text(json.dumps(payload), encoding="utf-8")
+
+
+@pytest.mark.parametrize(("failure", "queued"), [
+    (HostedError("offline", "network_error"), True),
+    (HostedError("Server error", "commit_failed", 500), True),
+    (HostedError("Too many attempts", "too_many_attempts", 429), True),
+    (HostedError("Access is required.", "unauthorized", 401), False),
+    (HostedError("The publication payload is invalid.", "invalid_payload", 422), False),
+])
+def test_only_transient_publication_failures_stay_queued(tmp_path, failure, queued):
+    project = tmp_path / "project"
+    project.mkdir()
+    runtime = InterviewRuntime(tmp_path / "runtime", HostedBoard(fail=failure))
+    write_round(runtime, "session", project)
+    with pytest.raises(HostedError) as raised:
+        runtime.publish("claude", "session")
+    assert raised.value.retryable is queued
+    assert bool(queued_publications(tmp_path)) is queued
+
+
+def test_a_newer_round_replaces_a_queued_one_so_it_never_supersedes_it(tmp_path):
+    project = tmp_path / "project"
+    project.mkdir()
+    client = HostedBoard(fail=True)
+    runtime = InterviewRuntime(tmp_path / "runtime", client)
+    write_round(runtime, "session", project, "Stale question?")
+    with pytest.raises(HostedError):
+        runtime.publish("claude", "session")
+    client.fail = False
+    client.requests.clear()
+    write_round(runtime, "session", project, "Current question?")
+    runtime.publish("claude", "session")
+    assert runtime.retry_pending("claude", "session") == []
+    prepared = [body["payload"]["questions"][0]["question"] for _, path, body in client.requests if path.endswith("/prepare")]
+    assert prepared == ["Current question?"]
+
+
+def hook_event(project, event, **fields):
+    return {"session_id": "session", "hook_event_name": event, "cwd": str(project)} | fields
+
+
+def hook_context(result):
+    return result["hookSpecificOutput"]["additionalContext"]
+
+
+def test_queued_rounds_retry_on_the_next_user_message_not_on_every_tool_call(tmp_path):
+    project = tmp_path / "project"
+    project.mkdir()
+    client = HostedBoard(fail=True)
+    runtime = InterviewRuntime(tmp_path / "runtime", client)
+    write_round(runtime, "session", project)
+    grill_me_in_cloud_hook.handle(hook_event(project, "PostToolUse", tool_name="Write", tool_input={}), "claude", runtime)
+    assert queued_publications(tmp_path)
+    client.fail = False
+    client.requests.clear()
+
+    tool_call = hook_event(project, "PostToolUse", tool_name="Read", tool_input={})
+    assert grill_me_in_cloud_hook.handle(tool_call, "claude", runtime) is None
+    assert client.requests == []
+
+    reply = hook_context(grill_me_in_cloud_hook.handle(hook_event(project, "UserPromptSubmit", prompt="retry"), "claude", runtime))
+    assert not queued_publications(tmp_path)
+    assert "https://grill.test/?session=claude%3Asession" in reply
+    assert str(runtime.current("claude", "session").source) in reply
+
+
+def test_a_board_outage_stays_silent_in_sessions_that_are_not_grilling(tmp_path):
+    class OfflineBoard(HostedBoard):
+        def session(self, provider, session_id):
+            raise HostedError("offline", "network_error")
+
+    project = tmp_path / "project"
+    project.mkdir()
+    runtime = InterviewRuntime(tmp_path / "runtime", OfflineBoard())
+    assert grill_me_in_cloud_hook.handle(hook_event(project, "UserPromptSubmit", prompt="hello"), "claude", runtime) is None
+
+
+def test_a_permanently_rejected_queued_round_ends_the_interview_without_a_new_path(tmp_path):
+    project = tmp_path / "project"
+    project.mkdir()
+    client = HostedBoard(fail=True)
+    runtime = InterviewRuntime(tmp_path / "runtime", client)
+    write_round(runtime, "session", project)
+    grill_me_in_cloud_hook.handle(hook_event(project, "PostToolUse", tool_name="Write", tool_input={}), "claude", runtime)
+    client.fail = HostedError("Access is required.", "unauthorized", 401)
+
+    reply = hook_context(grill_me_in_cloud_hook.handle(hook_event(project, "UserPromptSubmit", prompt="retry"), "claude", runtime))
+    assert not queued_publications(tmp_path)
+    assert str(runtime.current("claude", "session").directory) not in reply

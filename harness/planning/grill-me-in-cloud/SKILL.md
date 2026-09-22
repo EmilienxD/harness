@@ -8,72 +8,61 @@ metadata:
 disable-model-invocation: true
 ---
 
-Interview the user relentlessly until you reach a shared understanding. Map the plan as a **design tree**: each decision branches into the decisions that depend on it.
+Interview the user relentlessly until you reach a shared understanding. Map this as a **design tree**: every decision branches into the decisions that hang off it.
 
-## Interview workflow
+Work the tree in **rounds**. The **frontier** is every decision whose prerequisites are already settled: the questions you can ask _now_ without guessing at answers you haven't heard yet. Ask the whole frontier in one round: number each question, give 1–4 options, and provide your recommended answer. Prefer giving your recommendation as **the first option** (A) for readability. Then publish the round to the hosted board and wait for the user's answers before the next round.
 
-Use the exact fresh inbox path supplied by the hook. If no path is supplied, report that the runtime hooks are missing or inactive.
+Each round the user answers reshapes the tree: settled decisions push the frontier outward and unblock questions that **depend** on them. Recompute the frontier and ask the next round. A question whose answer depends on another question still open in this round belongs to a _later_ round, not this one.
 
-Work in **rounds**. The **frontier** is every decision whose prerequisites are settled. Ask the whole frontier together, then wait for submitted answers. A question depending on another unanswered question belongs to a later round.
+Finding _facts_ is your job, never the user's. When a frontier question needs a fact from the environment (filesystem, tools, etc.), explore to find it; don't ask the user for anything you could look up yourself in the codebase. When working with sub-agents, don't block on them: a running exploration is an unsettled prerequisite, so only the questions downstream of it wait for the sub-agent(s) to report; ask the rest of the frontier now. The _decisions_ are the user's: present each to them and wait.
 
-Finding facts is your job: inspect the codebase and environment before asking for decisions. Prioritize high-impact choices about behavior, UX, scope, architecture, failure handling, dependencies, and migrations. The decisions belong to the user.
+Prioritize questioning high-impact decisions (e.g., UI/UX changes, failure behavior, scope boundaries, interaction with existing rules, architecture changes, dependency changes, migrations, security concerns) over low-impact decisions (e.g., creating a class, creating new tests, updating an endpoint).
 
-For each round:
+If a question cannot be answered solely from the code or from judgment, you may consider a web search to find real-world examples, open-source code to reuse, benchmarks, or prototyping before assuming your recommendation is correct. If so, propose your ideas to the user before proceeding (e.g., "This API doesn't provide enough documentation; we should consider prototyping it before assuming it's the right decision.").
 
-1. Compose numbered questions with stable IDs. Ask the actual question, then explain why it matters: relevant context, consequences, and uncertainty. Use several concise sentences or a compact visual explanation, scaled to the decision's difficulty.
-2. Provide normally four proposals, A–D; use fewer when further proposals would be artificial. Explain every proposal's behavior and tradeoff. Put the recommendation first as A when practical; its rationale belongs in that proposal's explanation.
-3. Write any supporting assets first in the supplied assets directory. Create the complete round JSON directly at the exact fresh path supplied by the hook. The runtime owns this directory outside the project, creates its parents, and reserves the filename. You are its sole inbox writer; create the file directly without listing the directory or reading a template. Write the round file last: a successful write publishes it automatically.
-4. The write hook validates and publishes the round, then returns its hosted URL without waiting for answers. End the turn normally. The user's next message may be a prompt copied or relayed from the board; treat it as ordinary user input, settle only its explicit answers, and recompute the frontier.
+Every question requires an explicit answer from the user. Silence, omission, an ambiguous response, or answering other questions does not approve your recommendation. Keep every unanswered question open and present it again in a later round; settle only the questions the user actually answered.
 
-Recommendations begin unselected. Drafts and omitted questions approve nothing. Freeform answers may replace or supplement a proposal. Publication or validation failures require a complete repaired round at the fresh path supplied by the hook.
+The session is done when the frontier is empty: every branch of the design tree has been visited, and nothing is left silently assumed. Do not act on it until the user confirms you have reached a shared understanding. Simply tell the user that you have reached a shared understanding, summarize the core solution decided upon to solve the initial problem in 1–3 sentences, and state that you are ready to proceed to the next steps.
 
-## Round contract
+## Publishing a round
 
-Create UTF-8 JSON shaped like this. The runtime assigns the round number; round titles and subtitles are unnecessary.
+The hook supplies the round path, the assets directory with its URL prefix, and the publishing steps, then reports each publication's outcome; follow it exactly. If it supplies no path, or writing a round gets no reply, tell the user the grill hooks did not respond and stop.
+
+Nothing persists between rounds or between questions: give every question all the context, styles, scripts, and images it needs.
+
+## Round JSON
 
 ```json
 {
   "questions": [{
     "id": "Q1",
     "question": "When should a round become visible?",
-    "explanation_html": "<p>Publication makes the questions available for review. A round may reference images or interactive examples, so the order of writes matters.</p><p>We need to choose whether writing the complete round commits it immediately or requires a separate publication step.</p>",
+    "explanation_html": "<p>Rounds may reference images, so the order of writes matters.</p>",
     "recommendation": "A",
     "options": [
-      {"letter": "A", "label": "Publish on write", "detail": "Write assets first and the round last. This avoids a separate publication command."},
-      {"letter": "B", "label": "Publish explicitly", "detail": "Prepare the content, then invoke publication. This adds a tool call but separates drafting from publication."}
-    ]
+      {"letter": "A", "label": "Publish on write", "detail": "Write assets first and the round last. No separate publication command."},
+      {"letter": "B", "label": "Publish explicitly", "detail": "Invoke publication after drafting. One more tool call, but drafting stays private."}
+    ],
+    "init_js": "root.querySelector('select').addEventListener('change', (e) => { root.querySelector('output').textContent = e.target.value; });"
   }]
 }
 ```
 
-IDs must be unique Q1, Q2, etc. Keep an unanswered decision's ID across rounds. Options use consecutive letters A onward, with 1–4 explained proposals and a recommendation naming one available letter. Question, option label, and detail are plain text; `explanation_html` is HTML.
+- These are the only fields; `init_js` is optional, and the runtime numbers the round.
+- IDs are unique `Q1`, `Q2`, …; an unanswered question keeps its ID in later rounds.
+- `question` is the plain-text heading. `explanation_html` says why the decision matters (context, consequences, uncertainty), scaled to its difficulty: a few sentences or a compact visual.
+- Options are lettered consecutively from A. Each plain-text `detail` explains that option's behavior and tradeoff; the recommended option's `detail` carries your rationale.
+- The board adds a "None of these" choice and a free-text note to every question, so skip catch-all options.
 
-For interactive explanations, add optional `init_js` to that question. It executes once after mounting, with `root` referring to that question's explanation element:
+## Explanation HTML
 
-```json
-"init_js": "const select = root.querySelector('select'); const preview = root.querySelector('output'); select.addEventListener('change', () => { preview.textContent = select.value; });"
-```
+Write semantic HTML; the board styles paragraphs, headings, tables, figures, code, and `<details>`. Custom styling uses the board's variables (`--paper`, `--surface`, `--ink`, `--ink-2`, `--ink-soft`, `--accent`, `--accent-soft`, `--font-head`, `--font-body`), never another theme or CDN design system; only a preview of a product's UI reproduces that product's real look. Helpers: `.grid` (two columns, stacked when narrow), `.panel` (inset card), `.note` (accent callout), `.table-wrap` (wide tables), and `<details>` for optional depth, with the essential rationale left visible. Label code blocks as `<pre><code class="language-python">`; guessing is unreliable, and `language-text` keeps diagrams and output plain.
 
-Put script logic in `init_js`, since script tags inserted as HTML do not initialize. Scope DOM queries to `root`, use distinct IDs such as `Q1-preview`, and keep demonstration controls local. The board owns answer forms, queueing, and submission. For larger examples, `init_js` may load a script from the supplied empty assets directory. Use the hook-supplied relative URL prefix for supporting files, including images with useful alt text.
+Every visual explains the decision rather than decorating it:
 
-## HTML and visual style
-
-The board supplies its style: warm paper (`--paper`), cream cards (`--surface`), charcoal text (`--ink`, `--ink-2`), muted secondary text (`--ink-soft`), and restrained indigo emphasis (`--accent`, `--accent-soft`). Headings use `--font-head` (Space Grotesk); body text uses `--font-body` (DM Sans). Match these variables instead of introducing another page theme or a CDN design system. Product UI previews should reproduce the subject product's actual appearance inside this explanation.
-
-Use semantic HTML. The explanation automatically styles paragraphs, headings, figures, captions, tables, code blocks, and disclosures. The board syntax-highlights `<pre><code class="language-ts">` blocks; name the language (`python`, `bash`, `powershell`, `json`, `diff`, …) because guessing is unreliable, and use `language-text` for diagrams or output that should stay plain. Available helpers:
-
-- `.grid`: two equal columns, stacked on narrow screens; `.panel`: a lightly bordered inset card.
-- `.note`: a restrained accent callout; `.table-wrap`: a horizontally contained table wrapper.
-- `<details><summary>…</summary>…</details>`: optional supporting detail, with the essential rationale visible.
-
-Use these focused board-authoring principles:
-
-- **Comparison:** align the same criteria, show concrete behavior, and make costs as visible as benefits. Keep the recommendation in its proposal.
-- **Table:** use a table when rows share fields. State what the comparison demonstrates before the table; use semantic headers and `.table-wrap` for wide content.
-- **Diagram:** explain one concept at a time with responsive inline SVG (`viewBox`, width 100%). Give meaningful elements stable IDs and `<title>` descriptions. Use page color variables and short labels, with explanatory prose outside the SVG. External SVGs loaded through `<img>` cannot inherit page CSS variables; define their colors/fonts locally or use literal fallbacks such as `var(--surface, #fbfaf6)`.
-- **Interaction:** native selectors, sliders, and buttons can demonstrate behavior, but changes remain local until the board's explicit answer submission. Label controls and keep explanations understandable without interaction.
-- **Layout:** contain media and code; use `minmax(0, 1fr)` and `min-width: 0` for custom grids. Scope additional CSS beneath `#explanation-Q1` (or the relevant ID). The board disables explanation animations for reduced-motion preferences.
-
-Use real project screenshots when they clarify a UI decision. Tables, SVG, images, or animations should explain the decision rather than decorate it. Verify custom visuals at narrow widths and inspect SVG interiors directly.
-
-When the frontier is empty, summarize the agreed solution in chat. If the user cancels or changes tasks, continue in chat. Hosted rounds remain available as read-only history; publish a new round only when more frontier decisions exist.
+- **Comparisons** align the same criteria and show costs as plainly as benefits.
+- **Tables** hold rows that share fields; say what the table shows before it.
+- **Diagrams** show one concept each in inline SVG (`viewBox`, `width="100%"`, `<title>`), with page variables, short labels, and prose outside. SVGs loaded through `<img>` cannot read page variables, so give them literal fallbacks such as `var(--surface, #fbfaf6)`.
+- **Images**, such as real project screenshots for UI decisions, use the assets URL prefix and useful alt text.
+- **Demos** use native controls wired in `init_js`, which runs once after mounting with `root` as the question's explanation element; `<script>` tags never run. Query within `root`, prefix IDs with the question ID (`Q1-preview`), keep the explanation clear without interaction, and leave answering to the board's form.
+- **Custom CSS** is scoped under `#explanation-Q1`; custom grids use `minmax(0, 1fr)` and `min-width: 0`. Check narrow widths and that SVG labels fit their shapes.
