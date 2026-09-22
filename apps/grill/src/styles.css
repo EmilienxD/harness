@@ -14,6 +14,14 @@
   --danger: #c0392b;
   --font-head: "Space Grotesk", system-ui, sans-serif;
   --font-body: "DM Sans", system-ui, sans-serif;
+  --font-code: ui-monospace, "Cascadia Code", "SF Mono", Menlo, Consolas, monospace;
+  --code-keyword: #4a42d6;
+  --code-string: #1b7a45;
+  --code-number: #a84d00;
+  --code-function: #0a5fb4;
+  --code-type: #0b7280;
+  --code-variable: #b02d5c;
+  --code-meta: #7a5a00;
   --radius-sm: 6px;
   --radius-md: 10px;
   --shadow-card: 10px 10px 0 var(--ink-2);
@@ -748,12 +756,117 @@ kbd {
   margin-top: 8px;
   font-size: 12px;
 }
+.explanation code {
+  font-family: var(--font-code);
+  font-size: 0.9em;
+  font-variant-ligatures: none;
+}
+.explanation :not(pre) > code {
+  padding: 1px 5px;
+  border: 1px solid var(--paper-3);
+  border-radius: 4px;
+  background: var(--paper);
+  color: var(--ink-2);
+}
 .explanation pre {
   max-width: 100%;
   overflow-x: auto;
-  padding: 12px;
-  background: var(--paper-2);
+  padding: 12px 14px;
+  border: 1px solid var(--paper-3);
   border-radius: var(--radius-sm);
+  background: var(--paper);
+  color: var(--ink-2);
+  font: 13px/1.6 var(--font-code);
+  tab-size: 2;
+}
+.explanation pre code {
+  font-size: inherit;
+}
+/* highlight.js tokens, tuned to stay legible on the paper background. */
+.hljs-comment,
+.hljs-quote {
+  color: var(--ink-faint);
+  font-style: italic;
+}
+.hljs-keyword,
+.hljs-selector-tag,
+.hljs-name,
+.hljs-section,
+.hljs-doctag {
+  color: var(--code-keyword);
+}
+.hljs-string,
+.hljs-regexp,
+.hljs-char.escape_,
+.hljs-link {
+  color: var(--code-string);
+}
+.hljs-number,
+.hljs-literal,
+.hljs-symbol,
+.hljs-bullet {
+  color: var(--code-number);
+}
+.hljs-title.function_,
+.hljs-title,
+.hljs-function .hljs-title {
+  color: var(--code-function);
+}
+.hljs-title.class_,
+.hljs-title.class_.inherited__,
+.hljs-type,
+.hljs-built_in,
+.hljs-selector-class,
+.hljs-selector-pseudo {
+  color: var(--code-type);
+}
+.hljs-variable,
+.hljs-variable.language_,
+.hljs-template-variable,
+.hljs-params,
+.hljs-attr,
+.hljs-attribute,
+.hljs-property,
+.hljs-selector-id,
+.hljs-selector-attr {
+  color: var(--code-variable);
+}
+.hljs-meta,
+.hljs-meta .hljs-keyword {
+  color: var(--code-meta);
+}
+.hljs-meta .hljs-string {
+  color: var(--code-string);
+}
+.hljs-operator,
+.hljs-punctuation,
+.hljs-tag,
+.hljs-subst {
+  color: var(--ink-soft);
+}
+.hljs-tag .hljs-name {
+  color: var(--code-keyword);
+}
+.hljs-tag .hljs-attr {
+  color: var(--code-variable);
+}
+.hljs-tag .hljs-string {
+  color: var(--code-string);
+}
+.hljs-addition {
+  color: var(--code-string);
+  background: var(--success-soft);
+}
+.hljs-deletion {
+  color: var(--danger);
+  background: #fbe3df;
+}
+.hljs-emphasis {
+  font-style: italic;
+}
+.hljs-strong,
+.hljs-section {
+  font-weight: 700;
 }
 .explanation select,
 .explanation input,

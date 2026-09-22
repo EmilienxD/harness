@@ -60,7 +60,7 @@ Put script logic in `init_js`, since script tags inserted as HTML do not initial
 
 The board supplies its style: warm paper (`--paper`), cream cards (`--surface`), charcoal text (`--ink`, `--ink-2`), muted secondary text (`--ink-soft`), and restrained indigo emphasis (`--accent`, `--accent-soft`). Headings use `--font-head` (Space Grotesk); body text uses `--font-body` (DM Sans). Match these variables instead of introducing another page theme or a CDN design system. Product UI previews should reproduce the subject product's actual appearance inside this explanation.
 
-Use semantic HTML. The explanation automatically styles paragraphs, headings, figures, captions, tables, code blocks, and disclosures. Available helpers:
+Use semantic HTML. The explanation automatically styles paragraphs, headings, figures, captions, tables, code blocks, and disclosures. The board syntax-highlights `<pre><code class="language-ts">` blocks; name the language (`python`, `bash`, `powershell`, `json`, `diff`, …) because guessing is unreliable, and use `language-text` for diagrams or output that should stay plain. Available helpers:
 
 - `.grid`: two equal columns, stacked on narrow screens; `.panel`: a lightly bordered inset card.
 - `.note`: a restrained accent callout; `.table-wrap`: a horizontally contained table wrapper.

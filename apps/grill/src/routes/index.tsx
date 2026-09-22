@@ -1,6 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Check, ChevronLeft, CircleHelp, Folder, LoaderCircle, Lock, PanelLeft, Send, Trash2, X } from "lucide-react";
+import type { HLJSApi } from "highlight.js";
 import type { AnswerDraft, GrillQuestion } from "@/lib/grill-contract";
 import {
   ignoresShortcuts,
@@ -1317,12 +1318,73 @@ function QuestionCard({
   );
 }
 
+let highlighter: Promise<HLJSApi> | undefined;
+
+/** highlight.js loads only once an explanation shows code, with shells the common bundle lacks. */
+function loadHighlighter(): Promise<HLJSApi> {
+  highlighter ??= Promise.all([
+    import("highlight.js/lib/common"),
+    import("highlight.js/lib/languages/powershell"),
+    import("highlight.js/lib/languages/dockerfile"),
+  ]).then(([{ default: hljs }, powershell, dockerfile]) => {
+    hljs.registerLanguage("powershell", powershell.default);
+    hljs.registerLanguage("dockerfile", dockerfile.default);
+    return hljs;
+  });
+  return highlighter;
+}
+
+// Below this relevance, a guessed language is usually wrong, such as an ASCII tree read as CSS.
+const MIN_AUTO_RELEVANCE = 3;
+const highlightedText = new WeakMap<Element, string>();
+
+function highlightCode(hljs: HLJSApi, root: HTMLElement) {
+  for (const block of root.querySelectorAll<HTMLElement>("pre > code")) {
+    const text = block.textContent ?? "";
+    // Unchanged output is skipped, and markup the agent wrote itself is kept.
+    if (highlightedText.get(block) === text || block.children.length) continue;
+    const classes = `${block.className} ${block.parentElement?.className ?? ""}`;
+    if (/\bnohighlight\b/u.test(classes)) continue;
+    const language = /\blang(?:uage)?-([\w+#-]+)/u.exec(classes)?.[1];
+    let html: string;
+    if (language) {
+      // A named language highlight.js does not know, such as "text", stays plain.
+      if (!hljs.getLanguage(language)) continue;
+      html = hljs.highlight(text, { language, ignoreIllegals: true }).value;
+    } else {
+      const guess = hljs.highlightAuto(text);
+      if (guess.relevance < MIN_AUTO_RELEVANCE) continue;
+      html = guess.value;
+    }
+    block.innerHTML = html;
+    block.classList.add("hljs");
+    highlightedText.set(block, text);
+  }
+}
+
 function Explanation({ question }: { question: GrillQuestion }) {
   const root = useRef<HTMLDivElement>(null);
   const [failed, setFailed] = useState(false);
   // React 19 rewrites innerHTML whenever this object's identity changes, which would reset open
   // <details>, dropdowns, and init_js listeners on every poll; only new HTML may replace the DOM.
   const html = useMemo(() => ({ __html: question.explanation_html }), [question.explanation_html]);
+  useEffect(() => {
+    const element = root.current;
+    if (!element) return;
+    let live = true;
+    const refresh = () => {
+      if (element.querySelector("pre > code"))
+        void loadHighlighter().then((hljs) => live && highlightCode(hljs, element));
+    };
+    refresh();
+    // New HTML and init_js can replace or add code samples later, so those are highlighted too.
+    const observer = new MutationObserver(refresh);
+    observer.observe(element, { childList: true, subtree: true, characterData: true });
+    return () => {
+      live = false;
+      observer.disconnect();
+    };
+  }, []);
   useEffect(() => {
     setFailed(false);
     if (!question.init_js || !root.current) return;
