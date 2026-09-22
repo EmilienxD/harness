@@ -227,4 +227,4 @@ npm run check
 npm test
 ```
 
-Run `npm run e2e:remove-anthropic-coauthor` from `tests/e2e/` to verify the attribution-removal hook with the real `claude -p` CLI and the fake Anthropic endpoint. This journey requires the ownership-recorded `EmilienxD/harness-e2e` checkout; set `HARNESS_E2E_FIXTURE_ROOT` to its runtime directory (defaults to `ABOARD_E2E_ROOT`, then `~/dev/harness-e2e-runtime`). It commits in a temporary clone, verifies two model trailers are removed while human co-authors and staged changes survive, and leaves the shared checkout and remote unchanged.
+Run `npm run e2e:remove-anthropic-coauthor` from `tests/e2e/` to verify the attribution-removal hook with the real `claude -p` CLI and the fake Anthropic endpoint. This journey creates a temporary Git repository, verifies two model trailers are removed while human co-authors and staged changes survive, and leaves the Harness checkout unchanged.

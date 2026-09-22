@@ -6,7 +6,7 @@ import { startFakeAnthropicServer } from "../core/anthropic-server.js";
 import { parseAnthropicMessagesRequest } from "../core/anthropic-protocol.js";
 import { MARKER, scenarioCatalogHash, transition } from "../tools/remove-anthropic-coauthor/scenario.js";
 
-test("real Claude CLI commits on harness-e2e lose only Claude attribution", { timeout: 180_000 }, async () => {
+test("real Claude CLI commits in an isolated repository lose only Claude attribution", { timeout: 180_000 }, async () => {
   const result = await runRemoveAnthropicCoauthorJourney();
   assert.deepEqual(result.checkpoints, ["commit-opus", "commit-sonnet", "complete"]);
   assert.deepEqual(result.messages, [
