@@ -11,16 +11,16 @@ function snapshot(): AboardBranchDiscovery {
     defaultBranch: "main",
     branches: [
       { name: "issue/12-local", localSha: SHA_A, ahead: 1, behind: 2 },
-      { name: "run/old", localSha: SHA_B, remoteSha: SHA_B, ahead: 3, behind: 0, checkout: { path: "C:\\old", dirtyPaths: ["src/a.ts"], primary: false } },
+      { name: "abd/2026-09-22", localSha: SHA_B, remoteSha: SHA_B, ahead: 3, behind: 0, checkout: { path: "C:\\old", dirtyPaths: ["src/a.ts"], primary: false } },
     ],
-    pullRequests: [{ number: 7, title: "Old run", state: "open", head: "run/old", base: "main" }],
+    pullRequests: [{ number: 7, title: "Old run", state: "open", head: "abd/2026-09-22", base: "main" }],
   };
 }
 
 test("discovery explains location, history, worktree dirt, and pull requests", () => {
   const detail = describeAboardBranchDiscovery(snapshot());
   assert.match(detail, /issue\/12-local[\s\S]*local only[\s\S]*1 ahead \/ 2 behind main/);
-  assert.match(detail, /run\/old[\s\S]*local \+ GitHub, in sync[\s\S]*uncommitted path[\s\S]*src\/a\.ts[\s\S]*#7 open “Old run”/);
+  assert.match(detail, /abd\/2026-09-22[\s\S]*local \+ GitHub, in sync[\s\S]*uncommitted path[\s\S]*src\/a\.ts[\s\S]*#7 open “Old run”/);
 });
 
 test("clear uses the discovered SHAs and retains checked-out dirty work", async () => {
@@ -33,9 +33,9 @@ test("clear uses the discovered SHAs and retains checked-out dirty work", async 
   };
   const cleanup = new AboardBranchCleanup(git, { listPullRequestsForBranches: async () => snapshot().pullRequests });
   const result = await cleanup.clear(await cleanup.discover());
-  assert.deepEqual(calls, [`local issue/12-local ${SHA_A}`, `remote run/old ${SHA_B}`]);
+  assert.deepEqual(calls, [`local issue/12-local ${SHA_A}`, `remote abd/2026-09-22 ${SHA_B}`]);
   assert.deepEqual(result.deletedLocal, ["issue/12-local"]);
-  assert.deepEqual(result.deletedRemote, ["run/old"]);
+  assert.deepEqual(result.deletedRemote, ["abd/2026-09-22"]);
   assert.match(result.retained.join("\n"), /checked out at C:\\old/);
 });
 

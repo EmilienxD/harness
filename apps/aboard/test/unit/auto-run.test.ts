@@ -80,16 +80,18 @@ test("slug normalization collapses punctuation, trims, and never cuts mid-word",
 });
 
 test("run-owned branch names are generic and carry the issue number", () => {
-  assert.deepEqual(RUN_OWNED_BRANCH_PREFIXES, ["issue/", "run/"]);
+  assert.deepEqual(RUN_OWNED_BRANCH_PREFIXES, ["issue/", "abd/"]);
   assert.equal(branchName(34, "Add retry backoff"), "issue/34-add-retry-backoff");
   // Colliding slugs stay distinct because the number is part of the name.
   assert.notEqual(branchName(34, "Same title"), branchName(35, "Same title"));
 });
 
 test("run-owned branches are reserved and cannot become auto-run targets", () => {
-  assert.match(autoRunTargetBranchBlocker("run/old") ?? "", /run-owned artifacts/);
+  assert.match(autoRunTargetBranchBlocker("abd/2026-09-22") ?? "", /run-owned artifacts/);
   assert.match(autoRunTargetBranchBlocker("issue/34-old-issue") ?? "", /final run pull request/);
   assert.equal(autoRunTargetBranchBlocker("feature/wip"), undefined);
+  // Only the namespace is reserved, not every branch that happens to share its letters.
+  assert.equal(autoRunTargetBranchBlocker("abd-fix-login"), undefined);
 });
 
 test("commit subject and pull request body are bounded and carry the closing trailer", () => {
@@ -100,12 +102,12 @@ test("commit subject and pull request body are bounded and carry the closing tra
   assert.ok(pullRequestBody("y".repeat(5_000), 34).length <= 4_000 + "\n\nCloses #34".length);
 });
 
-test("a session branch is derived from the run id and stays out of the issue namespace", () => {
-  assert.equal(sessionBranchName("run_k3f9x1"), "run/k3f9x1");
-  // Same id, same branch: a resumed run finds the branch it created.
-  assert.equal(sessionBranchName("run_k3f9x1"), sessionBranchName("run_k3f9x1"));
-  assert.notEqual(sessionBranchName("run_a"), sessionBranchName("run_b"));
-  assert.ok(sessionBranchName("run_k3f9x1").startsWith("run/"));
+test("a session branch is named after the local day and numbered after the first", () => {
+  const day = new Date(2026, 0, 5, 23, 59);
+  assert.equal(sessionBranchName(day), "abd/2026-01-05");
+  assert.equal(sessionBranchName(day, 1), "abd/2026-01-05");
+  assert.equal(sessionBranchName(day, 2), "abd/2026-01-05-2");
+  assert.equal(sessionBranchName(new Date(2026, 11, 31, 0, 0)), "abd/2026-12-31");
 });
 
 test("the run's pull request indexes what landed and closes nothing itself", () => {

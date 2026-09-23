@@ -251,10 +251,8 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
     if (!initialized) { grillRelay?.dispose(); grillRelay = undefined; return; }
     grillRelay = createGrillCloudRelay({ fleet, terminals, workspaceRoot, prompts: promptSubmissions, log: (message) => output.appendLine(message) });
     grillRelay?.start();
-    // A window reload reuses the existing host environment, so pointing at a
-    // reload here would send the user in a circle when the variables are new.
     output.appendLine(grillRelay === undefined
-      ? "Grill relay is inactive: HARNESS_GRILL_URL and HARNESS_GRILL_CODE are not in this VS Code process's environment. Setting them for the agent alone (for example in .claude/settings.local.json) does not reach the extension host; set them for the user or shell that starts VS Code and restart VS Code entirely."
+      ? "Grill relay is inactive: no grill board is configured in .harness/config.local.json, .harness/config.json, ~/.harness/config.json, or this VS Code process's HARNESS_GRILL_URL and HARNESS_GRILL_CODE. After adding one, reload the window."
       : `Grill relay started for this project as instance ${grillRelay.instanceId}.`);
   };
   context.subscriptions.push({ dispose: () => grillRelay?.dispose() });

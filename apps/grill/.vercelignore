@@ -1,0 +1,8 @@
+# CLI deploys upload this folder; local secrets and build output stay behind.
+.env*
+!.env.example
+.output
+.tanstack
+.vercel
+.wrangler
+node_modules

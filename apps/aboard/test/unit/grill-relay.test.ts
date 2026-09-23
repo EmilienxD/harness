@@ -1,8 +1,10 @@
 import assert from "node:assert/strict";
-import { sep } from "node:path";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join, sep } from "node:path";
 import test from "node:test";
 
-import { createGrillCloudRelay, workspaceIdentity } from "../../src/grill/cloud-relay.js";
+import { createGrillCloudRelay, grillTarget, workspaceIdentity } from "../../src/grill/cloud-relay.js";
 import type { AgentId, AgentPlatformId, AgentSession, IsoTimestamp, SessionId, TerminalId } from "../../src/domain/contracts.js";
 import { FleetRegistry } from "../../src/domain/fleet.js";
 import { PromptSubmissions } from "../../src/platform/prompt-submissions.js";
@@ -40,6 +42,50 @@ test("two windows on one workspace share a project scope but not an instance", (
   first.dispose();
   second.dispose();
   other.dispose();
+});
+
+/** Writes Harness config files into a disposable workspace and home, as the grill hook would find them. */
+function configured(t: { after(fn: () => void): void }, files: { local?: object; shared?: object; user?: object | string }) {
+  const base = mkdtempSync(join(tmpdir(), "aboard-grill-"));
+  t.after(() => rmSync(base, { recursive: true, force: true }));
+  const workspaceRoot = join(base, "project");
+  const home = join(base, "home");
+  mkdirSync(join(workspaceRoot, ".harness"), { recursive: true });
+  mkdirSync(join(home, ".harness"), { recursive: true });
+  const write = (path: string, value: object | string | undefined) => {
+    if (value !== undefined) writeFileSync(path, typeof value === "string" ? value : JSON.stringify({ version: 1, grill: value }));
+  };
+  write(join(workspaceRoot, ".harness", "config.local.json"), files.local);
+  write(join(workspaceRoot, ".harness", "config.json"), files.shared);
+  write(join(home, ".harness", "config.json"), files.user);
+  return { workspaceRoot, home };
+}
+
+test("the relay targets the board the project's config names, not the extension host's environment", (t) => {
+  const { workspaceRoot, home } = configured(t, { local: { url: "https://board.example.test", code: "4321" } });
+  const localDev = { HARNESS_GRILL_URL: "http://127.0.0.1:4173", HARNESS_GRILL_CODE: "1111" };
+  assert.deepEqual(grillTarget(workspaceRoot, localDev, home), { origin: "https://board.example.test", code: "4321" });
+});
+
+test("each grill field comes from its first configured source, and the committed config never supplies the code", (t) => {
+  const { workspaceRoot, home } = configured(t, {
+    shared: { url: "https://shared.example.test", code: "9999" },
+    user: { url: "https://user.example.test", code: "2468" },
+  });
+  assert.deepEqual(grillTarget(workspaceRoot, environment, home), { origin: "https://shared.example.test", code: "2468" });
+  assert.deepEqual(grillTarget(workspaceRoot, { ...environment, HARNESS_STATE_DIR: join(home, "elsewhere") }, home), {
+    origin: "https://shared.example.test", code: "1234",
+  });
+});
+
+test("an unreadable Harness config disables the relay with a diagnostic instead of falling back", (t) => {
+  const { workspaceRoot, home } = configured(t, { user: "{ not json" });
+  const logged: string[] = [];
+  const relay = createGrillCloudRelay({
+    fleet: new FleetRegistry(), terminals, prompts: new PromptSubmissions(), workspaceRoot, home, environment, log: (message) => logged.push(message),
+  });
+  assert.equal(relay, undefined);
+  assert.equal(logged.length, 1);
 });
 
 test("prompts typed into one session confirm in order, and an unconfirmed one times out", async () => {
@@ -93,7 +139,7 @@ function harness(t: { after(fn: () => void): void }, confirmationTimeoutMs: numb
   }) as typeof fetch;
   const prompts = new PromptSubmissions();
   const relay = createGrillCloudRelay({
-    fleet, terminals: fakeTerminals, prompts, workspaceRoot: "C:/work/unloopedit", log: () => undefined,
+    fleet, terminals: fakeTerminals, prompts, workspaceRoot: "C:/work/unloopedit", home: "C:/nonexistent-home", log: () => undefined,
     environment, activeIntervalMs: 10, idleIntervalMs: 10, confirmationTimeoutMs,
   });
   assert.ok(relay);

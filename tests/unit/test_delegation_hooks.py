@@ -75,7 +75,7 @@ def test_direct_ask_skill_opens_an_unpredictable_task_bound_inbox(
     finally:
         connection.close()
     assert selected_parent == parent
-    assert Path(inbox).parent.name == parent
+    assert parent not in inbox
     assert Path(inbox).is_relative_to(tmp_path / "state")
 
 

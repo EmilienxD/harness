@@ -116,10 +116,10 @@ export async function run(): Promise<void> {
     const pullRequests = await eventually(async () => {
       const rows = JSON.parse((await execFileAsync("gh", ["pr", "list", "--repo", repository, "--state", "all", "--limit", "20", "--json", "number,state,headRefName,baseRefName,body,mergeCommit"], { encoding: "utf8" })).stdout) as { state?: string; headRefName?: string; baseRefName?: string; body?: string; mergeCommit?: { oid?: string } }[];
       const issuePullRequest = rows.find((row) => row.body?.includes(`Closes #${issueNumber}`));
-      const runPullRequest = rows.find((row) => row.headRefName?.startsWith("run/") && row.baseRefName === "main");
+      const runPullRequest = rows.find((row) => row.headRefName?.startsWith("abd/") && row.baseRefName === "main");
       return issuePullRequest?.state === "MERGED" && runPullRequest?.state === "MERGED" ? { issuePullRequest, runPullRequest } : undefined;
     }, "auto-run did not merge its issue and run pull requests", 480);
-    assert.ok(pullRequests.runPullRequest.headRefName?.startsWith("run/"));
+    assert.ok(pullRequests.runPullRequest.headRefName?.startsWith("abd/"));
     for (const pullRequest of [pullRequests.issuePullRequest, pullRequests.runPullRequest]) {
       assert.ok(pullRequest.mergeCommit?.oid, "merged pull request exposes its merge commit");
       const commit = JSON.parse((await execFileAsync("gh", ["api", `repos/${repository}/git/commits/${pullRequest.mergeCommit.oid}`], { encoding: "utf8" })).stdout) as { parents?: unknown[] };
@@ -183,7 +183,7 @@ export async function run(): Promise<void> {
     }, "HITL acceptance commit did not advance Auto Run", 480);
     const runPullRequest = await eventually(async () => {
       const rows = JSON.parse((await execFileAsync("gh", ["pr", "list", "--repo", repository, "--state", "open", "--limit", "10", "--json", "number,headRefName,baseRefName,body"], { encoding: "utf8" })).stdout) as { number?: number; headRefName?: string; baseRefName?: string; body?: string }[];
-      return rows.find((row) => row.headRefName?.startsWith("run/") && row.baseRefName === "main");
+      return rows.find((row) => row.headRefName?.startsWith("abd/") && row.baseRefName === "main");
     }, "HITL run did not open its cumulative pull request", 480);
     if (!review) await eventually(async () => {
       const value = await diagnostics();

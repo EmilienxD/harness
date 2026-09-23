@@ -150,7 +150,7 @@ def _publish(payload: dict, provider: str, session: str, project: Path, runtime:
     return context(
         event,
         f"Round {published['round_number']} was published: {published['url']}\n"
-        "Only reply \"Done. Round available at: <URL>\", replacing `<URL>` with the round's URL, then end your turn; the user's answer will be automatically routed to you as the next user message.\n\n"
+        "Only reply \"Round available at: <URL>\", replacing `<URL>` with the round's URL, then end your turn; the user's answer will be automatically routed to you as the next user message.\n\n"
         f"A fresh path is reserved for a later round.\n{instructions(runtime.current(provider, session))}",
     )
 

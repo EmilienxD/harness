@@ -21,6 +21,15 @@ def test_fresh_conversation_does_not_bind_inherited_unbound_session(tmp_path, mo
         assert connection.execute("SELECT provider_session_id FROM sessions WHERE id='original'").fetchone() == (None,)
 
 
+def test_conversation_inbox_is_short_and_reused_across_invocations(tmp_path, monkeypatch):
+    monkeypatch.setenv("HARNESS_STATE_DIR", str(tmp_path / "state"))
+    sessions._register("parent", tmp_path, "claude")
+    inbox = enable_delegation("parent", "work-with-agent").inbox
+    assert inbox.is_dir() and len(inbox.name) <= 8
+    assert enable_delegation("parent", "review-with-agent").inbox == inbox
+    assert list(inbox.parent.iterdir()) == [inbox]
+
+
 def test_resume_refuses_live_provider_without_birth_identity_even_if_supervisor_exited(tmp_path, monkeypatch):
     from subagents_runtime import processes
     monkeypatch.setenv("HARNESS_STATE_DIR", str(tmp_path / "state"))
