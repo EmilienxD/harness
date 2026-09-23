@@ -146,18 +146,52 @@ def test_hook_stays_silent_for_sessions_that_never_used_grill(tmp_path, monkeypa
     assert "not configured" in grill_me_in_cloud_hook.handle(invoked, "claude")["hookSpecificOutput"]["additionalContext"]
 
 
-def test_project_config_overrides_stale_process_environment(tmp_path, monkeypatch):
+def write_config(path, **grill):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps({"version": 1, "grill": grill}), encoding="utf-8")
+
+
+def test_config_files_override_stale_process_environment(tmp_path, monkeypatch):
     project = tmp_path / "project"
-    config = project / ".harness" / "grill.json"
-    config.parent.mkdir(parents=True)
-    config.write_text(json.dumps({"url": "http://127.0.0.1:4173", "code": "2468"}), encoding="utf-8")
+    write_config(project / ".harness" / "config.local.json", url="http://127.0.0.1:4173", code="2468")
+    monkeypatch.setenv("HARNESS_STATE_DIR", str(tmp_path / "home"))
     monkeypatch.setenv("HARNESS_GRILL_URL", "http://localhost:8080/")
     monkeypatch.setenv("HARNESS_GRILL_CODE", "0000")
 
     client = HostedClient.from_environment(project)
 
-    assert client.origin == "http://127.0.0.1:4173"
-    assert client.code == "2468"
+    assert (client.origin, client.code) == ("http://127.0.0.1:4173", "2468")
+
+
+def test_committed_project_config_supplies_the_url_but_never_the_code(tmp_path, monkeypatch):
+    project = tmp_path / "project"
+    write_config(project / ".harness" / "config.json", url="https://project.test", code="1111")
+    write_config(tmp_path / "home" / "config.json", url="https://user.test", code="2468")
+    monkeypatch.setenv("HARNESS_STATE_DIR", str(tmp_path / "home"))
+
+    client = HostedClient.from_environment(project)
+
+    assert (client.origin, client.code) == ("https://project.test", "2468")
+
+
+def test_project_config_without_a_code_source_is_not_configured(tmp_path, monkeypatch):
+    project = tmp_path / "project"
+    write_config(project / ".harness" / "config.json", url="https://project.test", code="1111")
+    monkeypatch.setenv("HARNESS_STATE_DIR", str(tmp_path / "home"))
+    monkeypatch.delenv("HARNESS_GRILL_CODE", raising=False)
+
+    with pytest.raises(ValueError):
+        HostedClient.from_environment(project)
+
+
+def test_config_files_require_the_shared_version_marker(tmp_path, monkeypatch):
+    project = tmp_path / "project"
+    (project / ".harness").mkdir(parents=True)
+    (project / ".harness" / "config.local.json").write_text(json.dumps({"grill": {"code": "2468"}}), encoding="utf-8")
+    monkeypatch.setenv("HARNESS_STATE_DIR", str(tmp_path / "home"))
+
+    with pytest.raises(ValueError, match="version-1"):
+        HostedClient.from_environment(project)
 
 
 def test_failed_publication_keeps_one_idempotent_outbox_for_retry(tmp_path):

@@ -8,10 +8,9 @@ import {
   leaveTextEntry,
   shortcutLetter,
   matchesShortcut,
-  shortcutAria,
   shortcutLabel,
   SHORTCUTS,
-  shortcutTitle,
+  useShortcuts,
 } from "@/lib/keyboard-shortcuts";
 
 export const Route = createFileRoute("/")({ component: GrillBoard });
@@ -107,6 +106,23 @@ async function awaitDelivery(id: string): Promise<void> {
   }
 }
 
+/**
+ * Safari only lets a tap write to the clipboard before the handler first awaits, so the write
+ * starts at once and receives the text as a promise that the snapshot request settles later.
+ */
+function copyText(text: Promise<string>): Promise<void> {
+  const copy =
+    typeof ClipboardItem === "undefined"
+      ? text.then((value) => navigator.clipboard.writeText(value))
+      : navigator.clipboard.write([
+          new ClipboardItem({ "text/plain": text.then((value) => new Blob([value], { type: "text/plain" })) }),
+        ]);
+  // Browser clipboard errors are long and technical, such as Safari's NotAllowedError.
+  return copy.catch(() => {
+    throw new Error("Copy failed. Try again.");
+  });
+}
+
 const PROVIDERS: Record<string, { name: string; icon: string }> = {
   claude: { name: "Claude", icon: "/anthropic.svg" },
   chatgpt: { name: "ChatGPT", icon: "/openai.svg" },
@@ -157,6 +173,7 @@ function GrillBoard() {
   const [railOpen, setRailOpen] = useState(false);
   const [switching, setSwitching] = useState(false);
   const [error, setError] = useState("");
+  const shortcuts = useShortcuts();
   const cache = useRef(new Map<string, Round>());
   const page = useRef<HTMLElement>(null);
   const activeRound = useRef<HTMLDivElement>(null);
@@ -320,6 +337,7 @@ function GrillBoard() {
   }, []);
 
   useEffect(() => {
+    if (!shortcuts.enabled) return;
     const handleShortcut = (event: KeyboardEvent) => {
       if (ignoresShortcuts(event) || deleteTarget || review || shortcutsOpen) return;
       if (matchesShortcut(event, "help")) {
@@ -358,7 +376,7 @@ function GrillBoard() {
     };
     window.addEventListener("keydown", handleShortcut, true);
     return () => window.removeEventListener("keydown", handleShortcut, true);
-  }, [deleteTarget, displayedRoundId, railOpen, review, rounds, scrollToRound, shortcutsOpen]);
+  }, [deleteTarget, displayedRoundId, railOpen, review, rounds, scrollToRound, shortcuts.enabled, shortcutsOpen]);
 
   const closeReview = useCallback(() => setReview(null), []);
 
@@ -434,9 +452,9 @@ function GrillBoard() {
             <button
               className="icon-button rail-toggle"
               aria-label="Hide sessions"
-              aria-keyshortcuts={shortcutAria("toggleSessions")}
+              aria-keyshortcuts={shortcuts.aria("toggleSessions")}
               aria-expanded={true}
-              title={shortcutTitle("Hide sessions", "toggleSessions")}
+              title={shortcuts.title("Hide sessions", "toggleSessions")}
               onClick={() => setRailOpen(false)}
             >
               <PanelLeft size={17} />
@@ -491,14 +509,16 @@ function GrillBoard() {
               </div>
             ))}
           </nav>
-          <button
-            type="button"
-            className="rail__shortcuts"
-            aria-keyshortcuts={shortcutAria("help")}
-            onClick={() => setShortcutsOpen(true)}
-          >
-            <CircleHelp size={15} /> Keyboard shortcuts <kbd>{shortcutLabel("help")}</kbd>
-          </button>
+          {shortcuts.enabled && (
+            <button
+              type="button"
+              className="rail__shortcuts"
+              aria-keyshortcuts={shortcuts.aria("help")}
+              onClick={() => setShortcutsOpen(true)}
+            >
+              <CircleHelp size={15} /> Keyboard shortcuts <kbd>{shortcutLabel("help")}</kbd>
+            </button>
+          )}
         </aside>
         <button className="scrim" aria-label="Close sessions" onClick={() => setRailOpen(false)} />
         <div className="content">
@@ -506,9 +526,9 @@ function GrillBoard() {
             <button
               className="icon-button rail-toggle"
               aria-label="Show sessions"
-              aria-keyshortcuts={shortcutAria("toggleSessions")}
+              aria-keyshortcuts={shortcuts.aria("toggleSessions")}
               aria-expanded={false}
-              title={shortcutTitle("Show sessions", "toggleSessions")}
+              title={shortcuts.title("Show sessions", "toggleSessions")}
               onClick={() => setRailOpen(true)}
             >
               <PanelLeft size={17} />
@@ -571,7 +591,11 @@ function GrillBoard() {
                           <Questionnaire
                             round={item}
                             shortcutActive={
-                              item.id === displayedRoundId && !reviewed && !shortcutsOpen && !deleteTarget
+                              shortcuts.enabled &&
+                              item.id === displayedRoundId &&
+                              !reviewed &&
+                              !shortcutsOpen &&
+                              !deleteTarget
                             }
                             onSave={saveAnswer}
                             onRevealRound={() => scrollToRound(item.id)}
@@ -1069,6 +1093,7 @@ function QuestionCard({
   const [saving, setSaving] = useState(false);
   const [failure, setFailure] = useState("");
   const [saved, confirmSaved] = useConfirmation();
+  const shortcuts = useShortcuts();
   const noteField = useRef<HTMLTextAreaElement>(null);
   const options = useRef<HTMLDivElement>(null);
   // Timers, page-hide listeners, and unmounting read these refs so they always save the newest edit.
@@ -1237,7 +1262,7 @@ function QuestionCard({
                   name={`${round.id}-${question.id}`}
                   checked={shownSelection === option.letter}
                   disabled={readOnly}
-                  aria-keyshortcuts={shortcutAria("selectOption", option.letter)}
+                  aria-keyshortcuts={shortcuts.aria("selectOption", option.letter)}
                   onChange={() => edit({ selection: option.letter, note }, 0)}
                 />
                 <span className="option__copy">
@@ -1257,7 +1282,7 @@ function QuestionCard({
                 name={`${round.id}-${question.id}`}
                 checked={shownSelection === noneLetter}
                 disabled={readOnly}
-                aria-keyshortcuts={shortcutAria("selectOption", noneLetter)}
+                aria-keyshortcuts={shortcuts.aria("selectOption", noneLetter)}
                 onChange={chooseNone}
               />
               <span className="option__copy">
@@ -1273,8 +1298,8 @@ function QuestionCard({
               maxLength={2000}
               value={note}
               aria-label="Add context or write your own answer"
-              aria-keyshortcuts={shortcutAria("focusNote")}
-              title={shortcutTitle("Additional context", "focusNote")}
+              aria-keyshortcuts={shortcuts.aria("focusNote")}
+              title={shortcuts.title("Additional context", "focusNote")}
               onChange={(event) => edit({ selection, note: event.target.value }, NOTE_SAVE_DELAY)}
               onBlur={() => void flush()}
               placeholder="Add context or write your own answer..."
@@ -1305,8 +1330,8 @@ function QuestionCard({
               type="button"
               className="submit round-submit"
               disabled={!canReview || reviewing}
-              aria-keyshortcuts={shortcutAria("reviewPrompt")}
-              title={shortcutTitle("Review prompt", "reviewPrompt")}
+              aria-keyshortcuts={shortcuts.aria("reviewPrompt")}
+              title={shortcuts.title("Review prompt", "reviewPrompt")}
               onClick={() => void onReview()}
             >
               {reviewing ? <LoaderCircle className="spin" size={16} /> : null} Review prompt
@@ -1427,6 +1452,7 @@ function PromptModal({
   const [sent, confirmSend] = useConfirmation();
   const [confirmingResend, setConfirmingResend] = useState(false);
   const [message, setMessage] = useState("");
+  const shortcuts = useShortcuts();
   const readOnly = round.status !== "active";
   // Only a confirmed delivery counts: retrying after a failed send needs no warning.
   const alreadySent = round.prompt_snapshots.some(
@@ -1439,24 +1465,24 @@ function PromptModal({
       setBusy(reason);
       setMessage("");
       try {
-        // A historical round cannot record snapshots, so its copy comes straight from the preview.
-        if (readOnly) {
-          await navigator.clipboard.writeText(prompt);
-          confirmCopy();
-          return;
-        }
-        const result = await api<{ snapshot: { id: string; prompt: string } }>(`rounds/${round.id}/prompt-snapshots`, {
-          method: "POST",
-          body: JSON.stringify({ reason, expected_prompt: prompt }),
-        });
+        const record = () =>
+          api<{ snapshot: { id: string; prompt: string } }>(`rounds/${round.id}/prompt-snapshots`, {
+            method: "POST",
+            body: JSON.stringify({ reason, expected_prompt: prompt }),
+          }).then((result) => result.snapshot);
         if (reason === "copy") {
-          await navigator.clipboard.writeText(result.snapshot.prompt);
+          // A historical round cannot record snapshots, so its copy comes straight from the preview.
+          const text = readOnly ? Promise.resolve(prompt) : record().then((recorded) => recorded.prompt);
+          // A failed snapshot fails the copy too, and settles first, so its own error is the one reported.
+          await Promise.all([text, copyText(text)]);
           confirmCopy();
+          if (readOnly) return;
         } else {
-          const { delivery } = await api<{ delivery: { id: string } }>(
-            `prompt-snapshots/${result.snapshot.id}/deliveries`,
-            { method: "POST", body: "{}" },
-          );
+          const recorded = await record();
+          const { delivery } = await api<{ delivery: { id: string } }>(`prompt-snapshots/${recorded.id}/deliveries`, {
+            method: "POST",
+            body: "{}",
+          });
           await awaitDelivery(delivery.id);
           confirmSend();
         }
@@ -1479,7 +1505,7 @@ function PromptModal({
         onClose();
         return;
       }
-      if (matchesShortcut(event, "copyPrompt") && prompt && !busy) {
+      if (shortcuts.enabled && matchesShortcut(event, "copyPrompt") && prompt && !busy) {
         event.preventDefault();
         void snapshot("copy");
         return;
@@ -1487,7 +1513,7 @@ function PromptModal({
     };
     window.addEventListener("keydown", handleShortcut, true);
     return () => window.removeEventListener("keydown", handleShortcut, true);
-  }, [aboardReady, busy, confirmingResend, onClose, prompt, readOnly, snapshot]);
+  }, [aboardReady, busy, confirmingResend, onClose, prompt, readOnly, shortcuts.enabled, snapshot]);
 
   return (
     <div className="modal" role="dialog" aria-modal="true" aria-label="Prompt review">
@@ -1514,9 +1540,9 @@ function PromptModal({
             type="button"
             className="icon-button"
             aria-label={copied ? "Prompt copied" : "Copy prompt"}
-            aria-keyshortcuts={shortcutAria("copyPrompt")}
+            aria-keyshortcuts={shortcuts.aria("copyPrompt")}
             disabled={!prompt || Boolean(busy)}
-            title={shortcutTitle(copied ? "Prompt copied" : "Copy prompt", "copyPrompt")}
+            title={shortcuts.title(copied ? "Prompt copied" : "Copy prompt", "copyPrompt")}
             onClick={() => void snapshot("copy")}
           >
             {busy === "copy" ? (

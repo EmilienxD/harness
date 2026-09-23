@@ -22,6 +22,14 @@
         "claude": { "$ref": "#/$defs/claudeProvider" },
         "chatgpt": { "$ref": "#/$defs/chatgptProvider" }
       }
+    },
+    "grill": {
+      "type": "object",
+      "description": "Hosted Grill-Me board. Put code only in .harness/config.local.json or ~/.harness/config.json.",
+      "properties": {
+        "url": { "type": "string", "pattern": "^https?://[^/?#]+$" },
+        "code": { "type": "string", "pattern": "^[0-9]{4}$" }
+      }
     }
   },
   "$defs": {

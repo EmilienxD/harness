@@ -92,7 +92,8 @@ export function parseLaunchFile(text: string): ParsedLaunchFile {
   const claude = parseClaudeLaunchFile(providerSection(providerValues.claude, "claude"));
   const chatgpt = parseChatGptLaunchFile(providerSection(providerValues.chatgpt, "chatgpt"));
   const unknownFields = [
-    ...Object.keys(root).filter((field) => !["version", "autoRun", "providers", "session"].includes(field)),
+    // `grill` belongs to the grill-me-in-cloud hook, which shares this file.
+    ...Object.keys(root).filter((field) => !["version", "autoRun", "providers", "session", "grill"].includes(field)),
     ...Object.keys(autoRun).filter((field) => field !== "provider").map((field) => `autoRun.${field}`),
     ...Object.keys(providerValues).filter((field) => field !== "claude" && field !== "chatgpt").map((field) => `providers.${field}`),
     ...session.unknownFields.map((field) => `session.${field}`),

@@ -1,3 +1,5 @@
+import { useMemo, useSyncExternalStore } from "react";
+
 export type ShortcutId =
   | "help"
   | "toggleSessions"
@@ -62,9 +64,46 @@ export function shortcutLabel(id: ShortcutId, letter?: string): string {
   return letter?.toUpperCase() ?? KEY_LABELS[key] ?? key.toUpperCase();
 }
 
-export function shortcutAria(id: ShortcutId, letter?: string): string {
+function shortcutAria(id: ShortcutId, letter?: string): string {
   const key = SHORTCUTS[id].key;
   return letter?.toUpperCase() ?? (key.length === 1 ? key.toUpperCase() : key);
+}
+
+function shortcutTitle(label: string, id: ShortcutId): string {
+  return `${label} (${shortcutLabel(id)})`;
+}
+
+// A fine, hovering primary pointer is the closest signal of a keyboard; phones and tablets fail it.
+const KEYBOARD_DEVICE = "(hover: hover) and (pointer: fine)";
+
+function watchKeyboardDevice(onChange: () => void): () => void {
+  const query = window.matchMedia(KEYBOARD_DEVICE);
+  query.addEventListener("change", onChange);
+  return () => query.removeEventListener("change", onChange);
+}
+
+export type Shortcuts = {
+  /** Whether handlers run and hints show. The server renders without them. */
+  enabled: boolean;
+  aria: (id: ShortcutId, letter?: string) => string | undefined;
+  title: (label: string, id: ShortcutId) => string;
+};
+
+/** Shortcut availability and hints; a device without a keyboard gets neither handlers nor hints. */
+export function useShortcuts(): Shortcuts {
+  const enabled = useSyncExternalStore(
+    watchKeyboardDevice,
+    () => window.matchMedia(KEYBOARD_DEVICE).matches,
+    () => false,
+  );
+  return useMemo(
+    () => ({
+      enabled,
+      aria: (id, letter) => (enabled ? shortcutAria(id, letter) : undefined),
+      title: (label, id) => (enabled ? shortcutTitle(label, id) : label),
+    }),
+    [enabled],
+  );
 }
 
 export function matchesShortcut(event: KeyboardEvent | React.KeyboardEvent, id: ShortcutId): boolean {
@@ -104,8 +143,4 @@ export function leaveTextEntry(event: KeyboardEvent): void {
   if (event.isComposing || !matchesShortcut(event, "closeOverlay") || !isTextEntry(event.target)) return;
   event.preventDefault();
   event.target.blur();
-}
-
-export function shortcutTitle(label: string, id: ShortcutId): string {
-  return `${label} (${shortcutLabel(id)})`;
 }
