@@ -56,12 +56,12 @@ Nothing persists between rounds or between questions: give every question all th
 
 ## Explanation HTML
 
-Write semantic HTML; the board styles paragraphs, headings, tables, figures, code, and `<details>`. Custom styling uses the board's variables (`--paper`, `--surface`, `--ink`, `--ink-2`, `--ink-soft`, `--accent`, `--accent-soft`, `--font-head`, `--font-body`), never another theme or CDN design system; only a preview of a product's UI reproduces that product's real look. Helpers: `.grid` (two columns, stacked when narrow), `.panel` (inset card), `.note` (accent callout), `.table-wrap` (wide tables), and `<details>` for optional depth, with the essential rationale left visible. Label code blocks as `<pre><code class="language-python">`; guessing is unreliable, and `language-text` keeps diagrams and output plain.
+Write semantic HTML; the board styles paragraphs, headings, tables, figures, code, and `<details>`. Custom styling uses the board's variables (`--paper`, `--surface`, `--ink`, `--ink-2`, `--ink-soft`, `--accent`, `--accent-soft`, `--font-head`, `--font-body`), never another theme or CDN design system; only a preview of a product's UI reproduces that product's real look. Helpers: `.grid` (two columns, stacked when narrow), `.panel` (inset card), `.note` (accent callout), and `<details>` for optional depth, with the essential rationale left visible. Label code blocks as `<pre><code class="language-python">`; guessing is unreliable, and `language-text` keeps diagrams and output plain.
 
 Every visual explains the decision rather than decorating it:
 
 - **Comparisons** align the same criteria and show costs as plainly as benefits.
-- **Tables** hold rows that share fields; say what the table shows before it.
+- **Tables** hold rows that share fields; say what the table shows before it. The board scrolls every table horizontally when it is too wide, so never force cell widths or wrapping.
 - **Diagrams** show one concept each in inline SVG (`viewBox`, `width="100%"`, `<title>`), with page variables, short labels, and prose outside. SVGs loaded through `<img>` cannot read page variables, so give them literal fallbacks such as `var(--surface, #fbfaf6)`.
 - **Images**, such as real project screenshots for UI decisions, use the assets URL prefix and useful alt text.
 - **Demos** use native controls wired in `init_js`, which runs once after mounting with `root` as the question's explanation element; `<script>` tags never run. Query within `root`, prefix IDs with the question ID (`Q1-preview`), keep the explanation clear without interaction, and leave answering to the board's form.

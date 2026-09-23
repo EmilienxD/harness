@@ -1436,6 +1436,17 @@ function highlightCode(hljs: HLJSApi, root: HTMLElement) {
   }
 }
 
+// Agents often omit .table-wrap, so every table gets its own horizontal scroller on narrow screens.
+function wrapTables(root: HTMLElement) {
+  for (const table of root.querySelectorAll("table")) {
+    if (table.parentElement?.classList.contains("table-wrap")) continue;
+    const wrap = document.createElement("div");
+    wrap.className = "table-wrap";
+    table.replaceWith(wrap);
+    wrap.append(table);
+  }
+}
+
 function Explanation({ question }: { question: GrillQuestion }) {
   const root = useRef<HTMLDivElement>(null);
   const [failed, setFailed] = useState(false);
@@ -1447,11 +1458,12 @@ function Explanation({ question }: { question: GrillQuestion }) {
     if (!element) return;
     let live = true;
     const refresh = () => {
+      wrapTables(element);
       if (element.querySelector("pre > code"))
         void loadHighlighter().then((hljs) => live && highlightCode(hljs, element));
     };
     refresh();
-    // New HTML and init_js can replace or add code samples later, so those are highlighted too.
+    // New HTML and init_js can replace or add tables and code samples later, so those are handled too.
     const observer = new MutationObserver(refresh);
     observer.observe(element, { childList: true, subtree: true, characterData: true });
     return () => {
