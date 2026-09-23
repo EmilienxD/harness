@@ -983,6 +983,60 @@ def test_approved_overwrite_installs_the_payload_and_takes_ownership(tmp_path):
     assert not existing.exists()
 
 
+def secretive_package(tmp_path):
+    root = tmp_path / "secretive"
+    root.mkdir()
+    (root / "payload").write_text("secretive")
+    (root / "harness.toml").write_text(
+        'name="secretive"\nversion="1.0.0"\ndescription="x"\n'
+        'workspace_gitignore=[".harness/config.local.json"]\n'
+        '[platforms.claude]\nstatus="supported"\n[platforms.chatgpt]\nstatus="supported"\n'
+        '[[files]]\nsrc="payload"\ndest="secretive.txt"\n'
+    )
+    return load_tool(root)
+
+
+def test_shared_workspace_ignore_stays_until_its_last_installation_is_removed(tmp_path):
+    tool = secretive_package(tmp_path)
+    project = tmp_path / "project"
+    project.mkdir()
+    store = ReceiptStore.load(tmp_path / "receipts.json")
+    claude, chatgpt = (
+        CatalogueInstaller({tool.name: tool}, Target.for_project(project, platform), store)
+        for platform in (Platform.CLAUDE, Platform.CHATGPT)
+    )
+    claude.reconcile({tool.name})
+    chatgpt.reconcile({tool.name})
+
+    claude.reconcile(set())
+
+    assert ".harness/config.local.json" in (project / ".gitignore").read_text().splitlines()
+
+    chatgpt.reconcile(set())
+
+    assert not (project / ".gitignore").exists()
+
+
+def test_uninstall_keeps_ignoring_files_the_user_left_behind(tmp_path):
+    tool = secretive_package(tmp_path)
+    project = tmp_path / "project"
+    secret = project / ".harness" / "config.local.json"
+    secret.parent.mkdir(parents=True)
+    secret.write_text("{}")
+    selected = manager({tool.name: tool}, Target.for_project(project), tmp_path)
+    selected.reconcile({tool.name})
+
+    selected.reconcile(set())
+
+    assert ".harness/config.local.json" in (project / ".gitignore").read_text().splitlines()
+
+    selected.reconcile({tool.name})
+    secret.unlink()
+    selected.reconcile(set())
+
+    assert not (project / ".gitignore").exists()
+
+
 def test_failed_host_action_rolls_back_local_installation(monkeypatch, tmp_path):
     tool = transactional_package(tmp_path, "failing", action=True)
     project = tmp_path / "project"

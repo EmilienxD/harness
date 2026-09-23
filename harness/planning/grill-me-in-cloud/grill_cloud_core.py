@@ -72,6 +72,27 @@ def project_identity(project: Path, home: Path | None = None) -> dict[str, str]:
     return {"name": resolved.name or resolved.anchor, "path": display_path}
 
 
+def user_config_path() -> Path:
+    override = os.environ.get("HARNESS_STATE_DIR")
+    return (Path(override).expanduser() if override else Path.home() / ".harness") / "config.json"
+
+
+def grill_section(path: Path) -> dict:
+    """Return the `grill` section of a Harness config file, empty when the file is absent."""
+    if not path.is_file():
+        return {}
+    try:
+        config = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError) as error:
+        raise ValueError(f"Invalid Harness config at {path}: {error}") from error
+    if not isinstance(config, dict) or config.get("version") != 1:
+        raise ValueError(f"Harness config at {path} must be a version-1 JSON object")
+    section = config.get("grill", {})
+    if not isinstance(section, dict):
+        raise ValueError(f"Harness config at {path}: grill must be an object")
+    return section
+
+
 def validate_round(data: object) -> dict:
     if not isinstance(data, dict):
         raise RoundError("Round must be a JSON object")
@@ -230,7 +251,7 @@ class Interview:
 class HostedClient:
     def __init__(self, origin: str, code: str, timeout: float = 15.0):
         if not re.fullmatch(r"\d{4}", code):
-            raise ValueError("HARNESS_GRILL_CODE must contain exactly four ASCII digits")
+            raise ValueError("The grill code must contain exactly four ASCII digits")
         parsed = urllib.parse.urlsplit(origin)
         if (
             parsed.scheme not in {"http", "https"}
@@ -242,28 +263,23 @@ class HostedClient:
             or parsed.password
             or origin.endswith("/")
         ):
-            raise ValueError("HARNESS_GRILL_URL must be an HTTP(S) origin without a path")
+            raise ValueError("The grill URL must be an HTTP(S) origin without a path")
         self.origin = origin
         self.code = code
         self.timeout = timeout
 
     @classmethod
     def from_environment(cls, project: Path | None = None) -> "HostedClient":
-        origin = os.environ.get("HARNESS_GRILL_URL", "")
-        code = os.environ.get("HARNESS_GRILL_CODE", "")
-        config_path = project / ".harness" / "grill.json" if project else None
-        if config_path and config_path.is_file():
-            try:
-                config = json.loads(config_path.read_text(encoding="utf-8"))
-            except (OSError, UnicodeError, json.JSONDecodeError) as error:
-                raise ValueError(f"Invalid hosted grill config at {config_path}: {error}") from error
-            if not isinstance(config, dict):
-                raise ValueError(f"Invalid hosted grill config at {config_path}: expected a JSON object")
-            origin = config.get("url", origin)
-            code = config.get("code", code)
+        """Resolve each field from its first configured source; the committed project config never supplies the code."""
+        local = grill_section(project / ".harness" / "config.local.json") if project else {}
+        shared = grill_section(project / ".harness" / "config.json") if project else {}
+        user = grill_section(user_config_path())
+        origin = local.get("url") or shared.get("url") or user.get("url") or os.environ.get("HARNESS_GRILL_URL", "")
+        code = local.get("code") or user.get("code") or os.environ.get("HARNESS_GRILL_CODE", "")
         if not origin or not code:
             raise ValueError(
-                "HARNESS_GRILL_URL and HARNESS_GRILL_CODE are required, or configure .harness/grill.json"
+                "grill.url and grill.code are required in .harness/config.local.json or ~/.harness/config.json "
+                "(grill.url may also live in .harness/config.json), or set HARNESS_GRILL_URL and HARNESS_GRILL_CODE"
             )
         if not isinstance(origin, str) or not isinstance(code, str):
             raise ValueError("Hosted grill URL and code must be strings")

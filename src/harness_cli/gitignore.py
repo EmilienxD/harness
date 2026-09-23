@@ -1,7 +1,8 @@
 """Idempotent, reversible management of the `.gitignore` entries a tool needs.
 
-Same contract as `settings_merge`: installing twice is a no-op, and uninstalling
-removes exactly what installing added and nothing the user wrote themselves.
+Installing twice is a no-op, and removing a block never touches a line the user
+wrote themselves. The installer keeps a block's pattern past uninstall while a
+file it matches still exists.
 
 A tool's patterns live inside a fenced block tagged with the tool name. That
 fence is not decoration — `.gitignore` has no trailing-comment syntax, so

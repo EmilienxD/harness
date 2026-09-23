@@ -190,7 +190,23 @@ The deployable TanStack Start application lives in `apps/grill/`; its Supabase m
 - `CRON_SECRET`: a separate bearer secret used by the scheduled cleanup route.
 - `SUPABASE_URL` and `SUPABASE_SECRET_KEY`: server-only Supabase credentials.
 
-Set `HARNESS_GRILL_URL` and `HARNESS_GRILL_CODE` in Claude Code or Codex before installing/running the grill hook. Set the same values in the VS Code extension host to enable Aboard relay; each initialized project relays on its own, and Aboard passes the values to terminals it launches. The included Vercel cron calls the cleanup route daily and authenticates with `CRON_SECRET`. The application tables have RLS enabled with no `anon` or `authenticated` grants, and the `grill-assets` bucket is private.
+The grill hook reads its board from the `grill` section of Harness config files, resolving each field from the first source that sets it:
+
+| Source | Committed | Fields |
+| :-- | :-- | :-- |
+| `.harness/config.local.json` | No; a project install adds it to `.gitignore`, and uninstall keeps the entry while the file exists | `url`, `code` |
+| `.harness/config.json` | Yes | `url` only; a `code` here is ignored |
+| `~/.harness/config.json` (or `$HARNESS_STATE_DIR/config.json`) | No | `url`, `code` |
+| `HARNESS_GRILL_URL`, `HARNESS_GRILL_CODE` | No | `url`, `code` |
+
+```json
+// .harness/config.json
+{ "version": 1, "grill": { "url": "https://grill.example.com" } }
+// ~/.harness/config.json or .harness/config.local.json
+{ "version": 1, "grill": { "code": "1234" } }
+```
+
+Every file needs `"version": 1`. Aboard relay reads only the environment: set `HARNESS_GRILL_URL` and `HARNESS_GRILL_CODE` in the VS Code extension host to enable it; each initialized project relays on its own, and Aboard passes the values to terminals it launches. The included Vercel cron calls the cleanup route daily and authenticates with `CRON_SECRET`. The application tables have RLS enabled with no `anon` or `authenticated` grants, and the `grill-assets` bucket is private.
 
 The access cookie is marked `Secure` whenever the request arrives over HTTPS, so local HTTP development needs no override. From `apps/grill/`, run `npm ci`, `npm run dev`, or `npm run build`.
 

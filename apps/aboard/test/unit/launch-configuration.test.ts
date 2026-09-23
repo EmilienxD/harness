@@ -328,6 +328,10 @@ test("shared session settings are validated without becoming provider configurat
   assert.match(parseLaunchFile(JSON.stringify({ version: 1, autoRun: { provider: "claude" }, providers: { claude: {}, chatgpt: {} }, stopWaitHours: 1.5 })).diagnostics[0]!.message, /stopWaitHours/u);
 });
 
+test("the grill hook's shared section is not an unsupported field", () => {
+  assert.equal(parseLaunchFile(JSON.stringify({ version: 1, grill: { url: "https://grill.test" } })).diagnostics.length, 0);
+});
+
 test("provider diagnostics identify unknown and cross-platform settings", () => {
   assert.throws(() => parseLaunchFile('{"version":1,"autoRun":{"provider":"codex"}}'), /autoRun\.provider must be.*claude.*chatgpt.*codex/u);
   assert.throws(
