@@ -16,8 +16,9 @@ import type { DelegationLaunchInput } from "../../src/bridge/delegation.js";
 const WORKTREE_OFF = { enabled: false, root: "", keep: false, setupTimeoutSeconds: 600 } as const;
 const SETTINGS: AutoRunSettings = { review: false, exploreBeforeAddress: false, issueContextDepth: 1, permanentPrompt: "", discardBehavior: "record-only", mergeStrategy: "squash", mergeRunPullRequest: false, worktree: WORKTREE_OFF };
 
-/** `runIdFactory` is fixed at `run_test`, so every run's session branch is this. */
-const SESSION = "run/test";
+/** `now` is fixed at noon local time on this day, so every run's session branch is this. */
+const TODAY = new Date(2026, 8, 23, 12);
+const SESSION = "abd/2026-09-23";
 
 interface FakePullRequest {
   readonly state: "open" | "closed" | "merged";
@@ -667,6 +668,7 @@ function harness(options: HarnessOptions = {}): Harness {
     log: (message) => logs.push(message),
     settings: () => ({ ...SETTINGS, ...options.settings }),
     runIdFactory: () => "run_test",
+    now: () => TODAY,
     // A macrotask, not an immediately-resolved promise: a microtask-only poll
     // would starve the event loop and never observe an abort.
     sleep: () => new Promise((resolve) => { setImmediate(resolve); }),
@@ -1687,13 +1689,25 @@ test("a dirty working tree refuses the run and names the dirty paths", async () 
 });
 
 test("an aboard session branch cannot become another run's target", async () => {
-  const context = harness({ startBranch: "run/old" });
+  const context = harness({ startBranch: "abd/2026-09-22" });
   const result = await context.engine.start();
 
   assert.equal(result.started, false);
-  assert.match((result as { reason: string }).reason, /cannot start from run\/old.*run-owned artifacts/);
+  assert.match((result as { reason: string }).reason, /cannot start from abd\/2026-09-22.*run-owned artifacts/);
   assert.deepEqual(context.saved, []);
   assert.deepEqual(context.launches, []);
+});
+
+test("a second run on the same day takes the next free dated branch", async () => {
+  const context = harness({ preExistingPullRequestBranches: ["abd/2026-09-23-2"] });
+  context.createBranch(SESSION);
+
+  const result = await context.engine.start();
+
+  assert.equal(result.started, true);
+  if (!result.started) return;
+  assert.equal(result.sessionBranch, "abd/2026-09-23-3", "a name already used by a branch or any pull request is never reused");
+  await context.engine.settle();
 });
 
 test("an aboard issue branch is refused as a target even in worktree mode", async () => {
@@ -1724,7 +1738,7 @@ test("a dry run forecasts the exact queue and branches without creating run stat
   if (!result.inspected) return;
   assert.equal(result.ready, false);
   assert.deepEqual(result.blockers, ["the working tree is not clean: src/a.ts"]);
-  assert.equal(result.sessionBranch, "run/<run-id>");
+  assert.equal(result.sessionBranch, "abd/<date>");
   assert.equal(result.sessionBase, "feature/wip");
   assert.equal(result.reviewMode, true);
   assert.equal(result.exploresBeforeAddress, true);
@@ -1814,14 +1828,14 @@ test("a dry run with nothing to run reports an empty queue, not a blocker", asyn
 });
 
 test("a dry run reports an aboard target branch as a blocker", async () => {
-  const context = harness({ startBranch: "run/old", worktree: true });
+  const context = harness({ startBranch: "abd/2026-09-22", worktree: true });
   const result = await context.engine.dryRun();
 
   assert.equal(result.inspected, true);
   if (!result.inspected) return;
   assert.equal(result.ready, false);
-  assert.match(result.blockers.join("\n"), /cannot start from run\/old/);
-  assert.equal(result.sessionBase, "run/old");
+  assert.match(result.blockers.join("\n"), /cannot start from abd\/2026-09-22/);
+  assert.equal(result.sessionBase, "abd/2026-09-22");
   assert.deepEqual(context.saved, []);
   assert.deepEqual(context.launches, []);
 });

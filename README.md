@@ -190,7 +190,7 @@ The deployable TanStack Start application lives in `apps/grill/`; its Supabase m
 - `CRON_SECRET`: a separate bearer secret used by the scheduled cleanup route.
 - `SUPABASE_URL` and `SUPABASE_SECRET_KEY`: server-only Supabase credentials.
 
-The grill hook reads its board from the `grill` section of Harness config files, resolving each field from the first source that sets it:
+The grill hook and Aboard's relay read the board from the `grill` section of Harness config files, resolving each field from the first source that sets it:
 
 | Source | Committed | Fields |
 | :-- | :-- | :-- |
@@ -206,7 +206,7 @@ The grill hook reads its board from the `grill` section of Harness config files,
 { "version": 1, "grill": { "code": "1234" } }
 ```
 
-Every file needs `"version": 1`. Aboard relay reads only the environment: set `HARNESS_GRILL_URL` and `HARNESS_GRILL_CODE` in the VS Code extension host to enable it; each initialized project relays on its own, and Aboard passes the values to terminals it launches. The included Vercel cron calls the cleanup route daily and authenticates with `CRON_SECRET`. The application tables have RLS enabled with no `anon` or `authenticated` grants, and the `grill-assets` bucket is private.
+Every file needs `"version": 1`. For Aboard's relay, the environment row means the VS Code extension host's variables, not the agent's. The relay resolves the sources when the project initializes or the window reloads. Each initialized project relays on its own, and Aboard passes the environment values to terminals it launches. The included Vercel cron calls the cleanup route daily and authenticates with `CRON_SECRET`. The application tables have RLS enabled with no `anon` or `authenticated` grants, and the `grill-assets` bucket is private.
 
 The access cookie is marked `Secure` whenever the request arrives over HTTPS, so local HTTP development needs no override. From `apps/grill/`, run `npm ci`, `npm run dev`, or `npm run build`.
 

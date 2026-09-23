@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
+import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { basename, parse, relative, sep } from "node:path";
+import { basename, join, parse, relative, sep } from "node:path";
 import type { FleetRegistry } from "../domain/fleet.js";
 import type { AgentPlatformId, SessionId } from "../domain/contracts.js";
 import type { PromptSubmissions } from "../platform/prompt-submissions.js";
@@ -161,24 +162,63 @@ export class GrillCloudRelay {
   }
 }
 
+type GrillSection = { readonly url?: unknown; readonly code?: unknown };
+
+function grillSection(path: string): GrillSection {
+  let text: string;
+  try { text = readFileSync(path, "utf8"); }
+  catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return {};
+    throw new Error(`Harness config at ${path} could not be read`);
+  }
+  let config: unknown;
+  try { config = JSON.parse(text) as unknown; }
+  catch { throw new Error(`Harness config at ${path} contains invalid JSON`); }
+  if (typeof config !== "object" || config === null || Array.isArray(config) || (config as { version?: unknown }).version !== 1) {
+    throw new Error(`Harness config at ${path} must be a version-1 JSON object`);
+  }
+  const section = (config as { grill?: unknown }).grill ?? {};
+  if (typeof section !== "object" || section === null || Array.isArray(section)) throw new Error(`Harness config at ${path}: grill must be an object`);
+  return section;
+}
+
+/**
+ * Mirror the publishing hook's `HostedClient.from_environment`, so the relay
+ * heartbeats to the same board that received the project's rounds.
+ */
+export function grillTarget(workspaceRoot: string, environment: NodeJS.ProcessEnv, home: string = homedir()): { readonly origin: unknown; readonly code: unknown } {
+  const local = grillSection(join(workspaceRoot, ".harness", "config.local.json"));
+  const shared = grillSection(join(workspaceRoot, ".harness", "config.json"));
+  const user = grillSection(join(environment.HARNESS_STATE_DIR || join(home, ".harness"), "config.json"));
+  return {
+    origin: local.url || shared.url || user.url || environment.HARNESS_GRILL_URL,
+    // The committed project config never supplies the code.
+    code: local.code || user.code || environment.HARNESS_GRILL_CODE,
+  };
+}
+
 /**
  * Callers create one relay per initialized lifetime of the workspace, so a
  * project that is not initialized never reports presence or polls the board.
  */
 export function createGrillCloudRelay(options: Omit<GrillCloudRelayOptions, "origin" | "code"> & { readonly environment?: NodeJS.ProcessEnv }): GrillCloudRelay | undefined {
-  const environment = options.environment ?? process.env;
-  const origin = environment.HARNESS_GRILL_URL;
-  const code = environment.HARNESS_GRILL_CODE;
+  let target: ReturnType<typeof grillTarget>;
+  try { target = grillTarget(options.workspaceRoot, options.environment ?? process.env, options.home); }
+  catch (error) {
+    options.log(`Grill relay disabled: ${error instanceof Error ? error.message : "Harness config is invalid"}.`);
+    return undefined;
+  }
+  const { origin, code } = target;
   if (!origin && !code) return undefined;
-  if (!origin || !code || !/^\d{4}$/u.test(code)) {
-    options.log("Grill relay disabled: HARNESS_GRILL_URL and a four-digit HARNESS_GRILL_CODE must both be set.");
+  if (typeof origin !== "string" || !origin || typeof code !== "string" || !/^\d{4}$/u.test(code)) {
+    options.log("Grill relay disabled: grill.url and a four-digit grill.code must both be set in .harness/config.local.json or ~/.harness/config.json (grill.url may also live in .harness/config.json), or through HARNESS_GRILL_URL and HARNESS_GRILL_CODE.");
     return undefined;
   }
   try {
     const url = new URL(origin);
     if (!(["http:", "https:"] as string[]).includes(url.protocol) || url.origin !== origin) throw new Error();
   } catch {
-    options.log("Grill relay disabled: HARNESS_GRILL_URL must be an HTTP(S) origin without a trailing slash.");
+    options.log("Grill relay disabled: the grill URL must be an HTTP(S) origin without a trailing slash.");
     return undefined;
   }
   return new GrillCloudRelay({ ...options, origin, code });

@@ -13,6 +13,8 @@ from pathlib import Path
 
 import yaml
 
+from subagents_runtime.storage import new_inbox
+
 PROVIDERS = frozenset({"claude", "chatgpt"})
 # Request frontmatter spells ChatGPT as "chatgpt" or "codex"; both normalize to
 # the canonical provider name before validation, storage, and launch.
@@ -203,18 +205,21 @@ def enable_delegation(
             raise sessions.SessionError(
                 "the current Harness parent session is not registered"
             )
-        inbox = (
-            sessions.state_dir() / "runtime" / "sessions" / parent_session_id / "inbox"
-        )
-        inbox.mkdir(parents=True, exist_ok=True)
-        connection.execute(
-            "INSERT OR IGNORE INTO session_delegation(parent_session_id,inbox) VALUES (?,?)",
-            (parent_session_id, str(inbox.resolve())),
-        )
-        stored = connection.execute(
-            "SELECT inbox FROM session_delegation WHERE parent_session_id=?",
-            (parent_session_id,),
-        ).fetchone()[0]
+        select = "SELECT inbox FROM session_delegation WHERE parent_session_id=?"
+        existing = connection.execute(select, (parent_session_id,)).fetchone()
+        if existing is None:
+            inbox = new_inbox()
+            connection.execute(
+                "INSERT OR IGNORE INTO session_delegation(parent_session_id,inbox) VALUES (?,?)",
+                (parent_session_id, str(inbox)),
+            )
+            stored = connection.execute(select, (parent_session_id,)).fetchone()[0]
+            if Path(stored) != inbox:
+                # A concurrent invocation enabled this conversation first.
+                inbox.rmdir()
+        else:
+            stored = existing[0]
+            Path(stored).mkdir(parents=True, exist_ok=True)
     return DelegationInbox(
         parent_session_id, parent_session_id, row[0], Path(row[1]), Path(stored)
     )

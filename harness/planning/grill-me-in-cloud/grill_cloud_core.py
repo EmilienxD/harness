@@ -6,6 +6,7 @@ import json
 import mimetypes
 import os
 import re
+import secrets
 import shutil
 import tempfile
 import urllib.error
@@ -22,6 +23,8 @@ SCHEMA_VERSION = 1
 MAX_IMAGE_BYTES = 6 * 1024 * 1024
 MAX_ROUND_BYTES = 24 * 1024 * 1024
 MAX_IMAGES = 20
+# Lowercase letters and digits without the look-alikes 0/o and 1/i/l.
+INBOX_ALPHABET = "abcdefghjkmnpqrstuvwxyz23456789"
 MEDIA_TYPES = {
     ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
     ".webp": "image/webp", ".gif": "image/gif", ".avif": "image/avif",
@@ -237,7 +240,7 @@ class Interview:
 
     @property
     def source(self) -> Path:
-        return self.directory / "inbox" / f"round-{self.sequence:03d}.json"
+        return self.directory / f"round-{self.sequence:03d}.json"
 
     @property
     def assets(self) -> Path:
@@ -359,6 +362,18 @@ class InterviewRuntime:
     def key(provider: str, session: str) -> str:
         return hashlib.sha256(f"{provider}:{session}".encode()).hexdigest()
 
+    def new_inbox(self) -> Path:
+        """Create an unused inbox whose short, sparse name agents copy cheaply and rarely mistype into a sibling's."""
+        parent = self.root / "inboxes"
+        parent.mkdir(parents=True, exist_ok=True)
+        while True:
+            inbox = parent / "".join(secrets.choice(INBOX_ALPHABET) for _ in range(6))
+            try:
+                inbox.mkdir()
+            except FileExistsError:
+                continue
+            return inbox
+
     @contextmanager
     def claim(self, provider: str, session: str):
         lock_path = self.root / "locks" / f"{self.key(provider, session)}.lock"
@@ -409,7 +424,7 @@ class InterviewRuntime:
     def start(self, provider: str, session: str, project: Path) -> Interview:
         if self.root.is_relative_to(project.resolve()):
             raise ValueError("Grill runtime directory must be outside the project")
-        interview = self.current(provider, session) or Interview(self.root / "inboxes" / self.key(provider, session))
+        interview = self.current(provider, session) or Interview(self.new_inbox())
         self.reserve_fresh(interview)
         self.save(provider, session, interview)
         return interview

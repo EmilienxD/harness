@@ -90,7 +90,7 @@ function preview(overrides: Partial<AutoRunPreview> = {}): AutoRunPreview {
     exploresBeforeAddress: false,
     isolatedWorkspace: false,
     keepsWorkspace: false,
-    sessionBranch: "run/<run-id>",
+    sessionBranch: "abd/<date>",
     sessionBase: "feature/wip",
     targetHeadSha: "a".repeat(40),
     unpublishedTargetCommits: 0,

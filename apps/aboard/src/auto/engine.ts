@@ -212,6 +212,9 @@ interface ImplementationResult {
   readonly report: string;
 }
 
+/** Dated run-branch names probed per lookup round trip. */
+const SESSION_BRANCH_BATCH = 5;
+
 function samePreview(left: InspectedAutoRunPreview, right: InspectedAutoRunPreview): boolean {
   return JSON.stringify(left) === JSON.stringify(right);
 }
@@ -423,7 +426,7 @@ export class AutoRunEngine {
       ...guidelineProperty(options.additionalGuideline),
       isolatedWorkspace: this.options.workspaces?.isolates() ?? settings.worktree.enabled,
       keepsWorkspace: settings.worktree.keep,
-      sessionBranch: "run/<run-id>",
+      sessionBranch: "abd/<date>",
       sessionBase,
       targetHeadSha: publication.headSha,
       unpublishedTargetCommits: publication.unpublishedCommits,
@@ -512,6 +515,12 @@ export class AutoRunEngine {
   ): Promise<AutoRunStartResult> {
     const runId = this.#runId();
     const isolated = this.options.workspaces?.isolates() ?? settings.worktree.enabled;
+    let sessionBranch: string;
+    try {
+      sessionBranch = await this.#freeSessionBranch();
+    } catch (error) {
+      return { started: false, reason: `the run branch name could not be chosen (${message(error)})` };
+    }
 
     const frozen: FrozenRunSettings = {
       branchMode: settings.branchMode ?? "per-issue",
@@ -540,7 +549,7 @@ export class AutoRunEngine {
       settings: frozen,
       plan: plan.issues,
       progress: Object.fromEntries(plan.issues.map((issue) => [String(issue.number), { state: "pending" } as IssueProgress])),
-      sessionBranch: sessionBranchName(runId),
+      sessionBranch,
       targetBranch: returnBranch,
       targetHeadSha: publication.headSha,
       ...(publication.unpublishedCommits === 0 ? {} : { unpublishedTargetCommits: publication.unpublishedCommits }),
@@ -600,6 +609,25 @@ export class AutoRunEngine {
       }
     }
     return undefined;
+  }
+
+  /**
+   * The first dated name no branch or pull request has used, in any state: a
+   * reused name would let the run adopt somebody else's branch or pull request.
+   */
+  async #freeSessionBranch(): Promise<string> {
+    const today = this.#now();
+    for (let first = 1; ; first += SESSION_BRANCH_BATCH) {
+      const candidates = Array.from({ length: SESSION_BRANCH_BATCH }, (_unused, index) => sessionBranchName(today, first + index));
+      const [existing, pullRequests] = await Promise.all([
+        this.options.git.existingBranches(candidates),
+        this.options.github.findPullRequestsByHead !== undefined
+          ? this.options.github.findPullRequestsByHead(candidates)
+          : this.#findPullRequestsIndividually(candidates),
+      ]);
+      const free = candidates.find((name) => !existing.local.has(name) && !existing.remote.has(name) && !pullRequests.has(name));
+      if (free !== undefined) return free;
+    }
   }
 
   async #findPullRequestsIndividually(branches: readonly string[]): Promise<ReadonlyMap<string, number>> {

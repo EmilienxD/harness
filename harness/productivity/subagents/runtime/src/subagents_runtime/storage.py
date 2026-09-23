@@ -3,11 +3,14 @@
 from __future__ import annotations
 
 import os
+import secrets
 import sqlite3
 import uuid
 from pathlib import Path
 
 SCHEMA_VERSION = 4
+# Lowercase letters and digits without the look-alikes 0/o and 1/i/l.
+INBOX_ALPHABET = "abcdefghjkmnpqrstuvwxyz23456789"
 
 
 def state_dir() -> Path:
@@ -17,6 +20,19 @@ def state_dir() -> Path:
         if configured
         else Path.home() / ".harness"
     )
+
+
+def new_inbox() -> Path:
+    """Create an unused inbox whose short, sparse name agents copy cheaply and rarely mistype into a sibling's."""
+    parent = state_dir() / "inboxes"
+    parent.mkdir(parents=True, exist_ok=True)
+    while True:
+        inbox = parent / "".join(secrets.choice(INBOX_ALPHABET) for _ in range(6))
+        try:
+            inbox.mkdir()
+        except FileExistsError:
+            continue
+        return inbox.resolve()
 
 
 class Connection(sqlite3.Connection):
@@ -155,22 +171,18 @@ def _migrate(connection):
         for row in saved["reply_authorizations"]:
             _insert(connection, "reply_authorizations", row)
         for grant in saved["grants"]:
-            inbox = (
-                state_dir()
-                / "runtime"
-                / "sessions"
-                / grant["parent_session_id"]
-                / "inbox"
-            )
-            inbox.mkdir(parents=True, exist_ok=True)
-            connection.execute(
-                "INSERT OR IGNORE INTO session_delegation(parent_session_id,inbox,enabled_at) VALUES (?,?,COALESCE(?,CURRENT_TIMESTAMP))",
-                (
-                    grant["parent_session_id"],
-                    str(inbox.resolve()),
-                    grant.get("created_at"),
-                ),
-            )
+            stored = connection.execute(
+                "SELECT inbox FROM session_delegation WHERE parent_session_id=?",
+                (grant["parent_session_id"],),
+            ).fetchone()
+            if stored is None:
+                inbox = new_inbox()
+                connection.execute(
+                    "INSERT INTO session_delegation(parent_session_id,inbox,enabled_at) VALUES (?,?,COALESCE(?,CURRENT_TIMESTAMP))",
+                    (grant["parent_session_id"], str(inbox), grant.get("created_at")),
+                )
+            else:
+                inbox = Path(stored[0])
             old = Path(grant["inbox"])
             if old.is_dir() and not old.is_symlink():
                 for source in old.iterdir():
