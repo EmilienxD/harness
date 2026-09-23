@@ -121,7 +121,7 @@ Hooks do not need a skill invocation. Select them in the catalogue and restart t
 | Package | Platforms | What it does |
 | --- | --- | --- |
 | `command-guard` | Claude Code, ChatGPT | Denies shell commands matching an editable dangerous-command policy. It is a guardrail, not a security sandbox. |
-| `no-new-documents` | Claude Code, ChatGPT | Prevents agents from creating files in configured documentation directories while allowing edits to existing files. |
+| `no-new-documents` | Claude Code, ChatGPT | Stops agents from creating files in configured documentation directories and has them write a draft for your approval instead. Edits to existing files are allowed. |
 | `on-read-reminder` | Claude Code | Reminds the agent to read required guidance when it reads paths matching configured patterns. |
 | `on-edit-reminder` | Claude Code | Lets a matching edit land, then requires the relevant guidance to be read and violations corrected. |
 | `on-edit-block` | Claude Code | Denies a matching edit until the required guidance has been read in the current session. |
@@ -133,6 +133,8 @@ Hooks do not need a skill invocation. Select them in the catalogue and restart t
 | `usage-limit-wait` | Claude Code, ChatGPT | Pauses at an exhausted subscription window and resumes after reset; usage-reader failures always fail open. |
 
 `mid-prompt-skills` covers the case where Claude Code expands only skills at the start of a message. A `/skill-name` elsewhere in the prompt is loaded the same way. Its arguments are the rest of that line, up to the next skill, and it gets the same argument placeholders, `${CLAUDE_SKILL_DIR}`, `${CLAUDE_SESSION_ID}`, and `${CLAUDE_PROJECT_DIR}` substitutions. Skills that Claude Code already expanded are never loaded twice. Only skills you can type are eligible; `user-invocable: false`, `context: fork`, and skills turned `"off"` in `skillOverrides` are skipped. The hook finds managed, personal, and project skills plus `.claude/commands/` files. It does not see plugin skills or directories added with `--add-dir`, and it can't reproduce `` !`command` `` injection or frontmatter such as `allowed-tools` and `model`. Mentions inside fenced code blocks are ignored.
+
+When `no-new-documents` blocks a new file such as `docs/arch/plan.md`, it tells the agent to write it to the mirrored draft path `.harness/doc-drafts/docs/arch/plan.md` instead. That folder is git-ignored, and the agent cannot move or copy drafts into place itself. Review the draft, then run `/approve-doc-draft docs/arch/plan.md` to move it into place or `/reject-doc-draft docs/arch/plan.md` to delete it (`$approve-doc-draft` and `$reject-doc-draft` in ChatGPT). Both commands take files or whole directories, list the pending drafts when run without a path, and run without a model call. Approval never overwrites a file that already exists at the target path. The agent learns the outcome with your next message. To request changes, just reply with feedback and the agent revises the draft.
 
 #### Guard configuration
 
