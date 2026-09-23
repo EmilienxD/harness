@@ -64,12 +64,17 @@ def session_title(payload: dict, provider: str) -> str:
     return _last_jsonl_value(Path(transcript), "sessionId", "aiTitle", session)
 
 
+def project_root(payload: dict) -> Path:
+    """The project where the session started; the payload cwd follows the agent's `cd` into subdirectories."""
+    return Path(os.environ.get("CLAUDE_PROJECT_DIR") or payload.get("cwd") or Path.cwd())
+
+
 def handle(payload: dict, provider: str, runtime: InterviewRuntime | None = None) -> dict | None:
     session = payload.get("session_id")
     event = payload.get("hook_event_name")
     if not isinstance(session, str) or not session or event not in {"UserPromptSubmit", "PostToolUse"}:
         return None
-    project = Path(payload.get("cwd") or Path.cwd())
+    project = project_root(payload)
     runtime = runtime or InterviewRuntime.from_environment(project=project)
     with runtime.claim(provider, session) as acquired:
         return _handle(payload, provider, runtime) if acquired else None
@@ -92,7 +97,7 @@ def _handle(payload: dict, provider: str, runtime: InterviewRuntime) -> dict | N
     grilling = invocation or skill_loaded or runtime.current(provider, session) is not None
     if runtime.configuration_error is not None:
         return context(event, f"Hosted grill is not configured: {runtime.configuration_error}. {STOP}") if grilling else None
-    project = Path(payload.get("cwd") or Path.cwd())
+    project = project_root(payload)
     if event == "UserPromptSubmit" or skill_loaded:
         return _prepare(event, provider, session, project, runtime, invocation or skill_loaded, grilling)
     return _publish(payload, provider, session, project, runtime)

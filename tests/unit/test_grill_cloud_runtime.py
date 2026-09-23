@@ -173,6 +173,24 @@ def test_config_files_override_stale_process_environment(tmp_path, monkeypatch):
     assert (client.origin, client.code) == ("http://127.0.0.1:4173", "2468")
 
 
+def test_hook_reads_project_config_after_the_agent_changes_into_a_subdirectory(tmp_path, monkeypatch):
+    project = tmp_path / "project"
+    write_config(project / ".harness" / "config.local.json", url="https://project.test", code="2468")
+    (project / "src").mkdir()
+    monkeypatch.setenv("HARNESS_STATE_DIR", str(tmp_path / "state"))
+    monkeypatch.setenv("HARNESS_GRILL_URL", "http://127.0.0.1:4173")
+    monkeypatch.setenv("HARNESS_GRILL_CODE", "0000")
+    monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(project))
+    captured = {}
+    monkeypatch.setattr(grill_me_in_cloud_hook, "_handle", lambda payload, provider, runtime: captured.setdefault("client", runtime.client))
+
+    grill_me_in_cloud_hook.handle(
+        {"session_id": "session", "hook_event_name": "PostToolUse", "cwd": str(project / "src")}, "claude",
+    )
+
+    assert captured["client"].origin == "https://project.test"
+
+
 def test_committed_project_config_supplies_the_url_but_never_the_code(tmp_path, monkeypatch):
     project = tmp_path / "project"
     write_config(project / ".harness" / "config.json", url="https://project.test", code="1111")
