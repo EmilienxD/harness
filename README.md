@@ -61,7 +61,7 @@ Claude Code invokes a skill as `/skill-name`; ChatGPT uses `$skill-name`. The ex
 
 - **`grill-me-in-cloud`**: Stress-tests a plan through branching rounds on a persistent hosted board. The hook supplies fresh round and asset paths outside the project, uploads local explanation images, publishes without waiting for answers, and returns the session URL. Drafts survive refreshes; only queued answers enter the deterministic prompt. Copy that prompt into any provider session, or let Aboard submit it into the exact session's open terminal; the send completes only once the provider confirms it received the prompt.
 
-- **`prototype`**: Builds a throwaway logic or UI prototype in a separate workspace to answer one explicit design question. It keeps prototype code and dependencies outside the repository, exercises only the decisive paths, and reports what the result supports and where its evidence stops.
+- **`prototype`**: Builds a throwaway logic or UI prototype to answer one explicit design question. It keeps prototype code and dependencies in a git-ignored prototype folder inside the repository, following the project's conventions or falling back to a new folder such as `prototypes/`, exercises only the decisive paths, and reports what the result supports and where its evidence stops.
 
 - **`read-all-adrs`**: Reads every Markdown ADR under `docs/adr/` from start to finish so the current work is informed by the project's recorded architectural decisions.
 
