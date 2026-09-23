@@ -17,7 +17,7 @@ export type AutoRunPhase = (typeof AUTO_RUN_PHASES)[number];
 export type IssueDisposition = "afk" | "hitl";
 
 /** Branches in this namespace are automation artifacts, never run targets. */
-export const RUN_OWNED_BRANCH_PREFIXES = ["issue/", "run/"] as const;
+export const RUN_OWNED_BRANCH_PREFIXES = ["issue/", "abd/"] as const;
 
 export function isAboardBranch(branch: string): boolean {
   return RUN_OWNED_BRANCH_PREFIXES.some((prefix) => branch.startsWith(prefix));
@@ -25,7 +25,7 @@ export function isAboardBranch(branch: string): boolean {
 
 export function autoRunTargetBranchBlocker(branch: string): string | undefined {
   if (!isAboardBranch(branch)) return undefined;
-  return `auto-run cannot start from ${branch} because issue/* and run/* branches are run-owned artifacts; check out the branch that should receive the final run pull request and start again`;
+  return `auto-run cannot start from ${branch} because issue/* and abd/* branches are run-owned artifacts; check out the branch that should receive the final run pull request and start again`;
 }
 
 export function unpublishedTargetWarning(base: string, count: number): string {
@@ -115,7 +115,7 @@ export type AutoRunDryRunResult =
       readonly additionalGuideline?: string;
       readonly isolatedWorkspace: boolean;
       readonly keepsWorkspace: boolean;
-      readonly sessionBranch: "run/<run-id>";
+      readonly sessionBranch: "abd/<date>";
       readonly sessionBase: string;
       /** Full local target tip inspected for this forecast. */
       readonly targetHeadSha: string;
@@ -244,8 +244,14 @@ export function branchName(issueNumber: number, title: string): string {
   return `issue/${issueNumber}-${slugify(title)}`;
 }
 
-export function sessionBranchName(runId: string): string {
-  return `run/${slugify(runId.replace(/^run_/u, ""))}`;
+/**
+ * The run branch is named like a person's dated work branch, so nothing a
+ * worker sees marks the checkout as an automated loop. A second run on the
+ * same local day takes `-2`, then `-3`, and so on.
+ */
+export function sessionBranchName(date: Date, sequence = 1): string {
+  const day = [date.getFullYear(), date.getMonth() + 1, date.getDate()].map((part) => String(part).padStart(2, "0")).join("-");
+  return `abd/${day}${sequence > 1 ? `-${sequence}` : ""}`;
 }
 
 const SLUG_MAX_CHARS = 40;

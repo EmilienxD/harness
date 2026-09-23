@@ -155,7 +155,7 @@ export class ProcessAboardBranchRepository implements AboardBranchRepository {
 }
 
 export function describeAboardBranchDiscovery(snapshot: AboardBranchDiscovery): string {
-  if (snapshot.branches.length === 0) return "No local or GitHub issue/* or run/* branches were found.";
+  if (snapshot.branches.length === 0) return "No local or GitHub issue/* or abd/* branches were found.";
   const lines = snapshot.branches.map((branch) => {
     const location = branch.localSha !== undefined && branch.remoteSha !== undefined ? (branch.localSha === branch.remoteSha ? "local + GitHub, in sync" : "local + GitHub, diverged") : branch.localSha !== undefined ? "local only" : "GitHub only";
     const checkout = branch.checkout === undefined ? "" : branch.checkout.dirtyPaths.length > 0 ? `; checked out with ${branch.checkout.dirtyPaths.length} uncommitted path(s): ${branch.checkout.dirtyPaths.join(", ")}` : `; checked out at ${branch.checkout.path} (clean)`;
