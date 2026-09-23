@@ -1,5 +1,6 @@
 import type { Disposable } from "vscode";
 
+import { agentLabel } from "../domain/contracts.js";
 import { describeReopenOutcome, type ReopenCoordinator, type ReopenOption } from "../platform/reopen.js";
 import { describeIssueNumbers } from "../shared/issues.js";
 
@@ -25,11 +26,12 @@ export function renderReopenItems(
 ): readonly ReopenQuickPickItem[] {
   return options.map((option) => {
     const { candidate } = option;
+    const label = agentLabel(candidate);
     const described = candidate.issueNumbers === undefined ? "" : describeIssueNumbers(candidate.issueNumbers);
-    const issues = described.length === 0 ? "" : ` · ${described}`;
     return {
-      label: `aboard-${candidate.type}-${candidate.agentId}`,
-      description: `${candidate.description}${issues}`,
+      label,
+      // Terminals are usually named after the agent; repeat only a description that adds something.
+      description: [candidate.description === label ? "" : candidate.description, described].filter(Boolean).join(" · "),
       detail: detailFor(option, now),
       option,
     };
