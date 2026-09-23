@@ -368,9 +368,12 @@ kbd {
   object-fit: contain;
 }
 .session-row b {
+  min-width: 0;
+  overflow: hidden;
   color: var(--ink-2);
   font: 600 13px/1.25 var(--font-head);
-  overflow-wrap: anywhere;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .session-row span {
   color: var(--ink-soft);
@@ -394,43 +397,63 @@ kbd {
   display: flex;
   flex-direction: column;
 }
+/* Sits where the open rail's padding places its own toggle, so opening and closing never shifts it. */
 .rail-toggle {
   position: absolute;
-  top: 12px;
-  left: 12px;
+  top: 14px;
+  left: 16px;
   z-index: 20;
 }
 .rail__brand .rail-toggle {
   position: static;
 }
-.aboard-badge {
-  position: absolute;
-  top: 12px;
-  right: 16px;
-  z-index: 20;
+/* Top badges share one look; only their icon carries color. Centered on the 30px toggle beside them. */
+.aboard-badge,
+.save-badge__pill {
   display: inline-flex;
   align-items: center;
-  gap: 8px;
   min-height: 28px;
-  padding: 0 12px 0 8px;
+  border: 1px solid var(--ink-2);
   border-radius: 999px;
   color: var(--ink-2);
-  background: color-mix(in srgb, var(--danger) 14%, var(--surface));
+  background: #fff;
   font: 700 11px/1 var(--font-head);
-  letter-spacing: 0.08em;
+  letter-spacing: 0.03em;
+  white-space: nowrap;
 }
-.aboard-badge.is-online {
-  background: var(--success-soft);
+.aboard-badge {
+  position: absolute;
+  top: 15px;
+  right: 16px;
+  z-index: 20;
+  gap: 7px;
+  padding: 0 12px 0 9px;
 }
 .aboard-badge__dot {
-  width: 14px;
-  height: 14px;
+  width: 10px;
+  height: 10px;
   flex: none;
   border-radius: 50%;
   background: var(--danger);
 }
 .aboard-badge.is-online .aboard-badge__dot {
   background: var(--success);
+}
+/* Floats over the page's top edge so it never competes with a card's own buttons. */
+.save-badge {
+  position: absolute;
+  top: 15px;
+  left: 50%;
+  z-index: 20;
+  transform: translateX(-50%);
+  pointer-events: none;
+}
+.save-badge__pill {
+  gap: 6px;
+  padding: 0 12px 0 10px;
+}
+.save-badge__pill.is-saved svg {
+  color: var(--success);
 }
 .page.is-rail-closed .page__inner {
   padding-top: 52px;
@@ -1167,18 +1190,37 @@ kbd {
   display: flex;
   align-items: center;
   justify-content: center;
-  flex-wrap: wrap;
-  gap: 7px;
-  text-align: center;
+  gap: 8px;
   color: var(--ink-2);
-  font: 650 11px/1.3 var(--font-head);
-  letter-spacing: 0.04em;
-  overflow-wrap: anywhere;
+  font: 650 12px/1.3 var(--font-head);
+  letter-spacing: 0.02em;
+}
+.modal__label img {
+  display: block;
+  width: 15px;
+  height: 15px;
+  flex: none;
+  object-fit: contain;
 }
 .modal__label .provider-tag {
   color: inherit;
   font: inherit;
   letter-spacing: inherit;
+}
+.modal__title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.modal__round {
+  flex: none;
+  padding: 3px 7px;
+  border-radius: 999px;
+  color: var(--ink-soft);
+  background: var(--paper-2);
+  font: 700 10px/1 var(--font-head);
+  letter-spacing: 0.06em;
 }
 .modal__card pre {
   flex: 1 1 auto;
@@ -1451,6 +1493,15 @@ kbd {
     }
     to {
       opacity: 1;
+    }
+  }
+  .save-badge__pill {
+    animation: badge-in 160ms ease-out both;
+  }
+  @keyframes badge-in {
+    from {
+      opacity: 0;
+      transform: translateY(-4px);
     }
   }
 }

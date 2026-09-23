@@ -34,6 +34,8 @@ type RoundSummary = { id: string; number: number; status: "active" | "superseded
 type Answer = AnswerDraft & { updated_at: string; queued_at: string | null };
 type AnswerBody = { selected_option: string | null; note: string | null };
 type SaveAnswer = (roundId: string, questionId: string, body: AnswerBody, keepalive: boolean) => Promise<void>;
+type SaveState = "saving" | "saved";
+type ReportSave = (key: string, state: SaveState | null) => void;
 type Round = {
   id: string;
   session_id: string;
@@ -138,9 +140,11 @@ function ProviderTag({ provider }: { provider: string }) {
   );
 }
 
-function ProviderIcon({ provider }: { provider: string }) {
+/** A labelled icon stands alone for its provider; an unlabelled one decorates a title that already names it. */
+function ProviderIcon({ provider, labelled = false }: { provider: string; labelled?: boolean }) {
   const known = PROVIDERS[provider];
-  return known ? <img src={known.icon} alt="" /> : null;
+  if (!known) return labelled ? <span className="provider-tag">{provider}</span> : null;
+  return <img src={known.icon} alt={labelled ? known.name : ""} title={labelled ? known.name : undefined} />;
 }
 
 function sessionTitle(session: SessionSummary): string {
@@ -173,6 +177,8 @@ function GrillBoard() {
   const [railOpen, setRailOpen] = useState(false);
   const [switching, setSwitching] = useState(false);
   const [error, setError] = useState("");
+  // Each question card reports its own save progress; the page shows them as one badge.
+  const [saveStates, setSaveStates] = useState<ReadonlyMap<string, SaveState>>(new Map());
   const shortcuts = useShortcuts();
   const cache = useRef(new Map<string, Round>());
   const page = useRef<HTMLElement>(null);
@@ -431,15 +437,31 @@ function GrillBoard() {
     }
   }, []);
 
+  const reportSave = useCallback<ReportSave>((key, state) => {
+    setSaveStates((current) => {
+      if ((current.get(key) ?? null) === state) return current;
+      const next = new Map(current);
+      if (state) next.set(key, state);
+      else next.delete(key);
+      return next;
+    });
+  }, []);
+
+  // The board's error banner is not on screen yet, so a failed first load reports here instead.
   if (authorized === null)
     return (
-      <div className="center">
-        <LoaderCircle className="spin" size={18} /> Loading board…
+      <div className="center" role={error ? "alert" : undefined}>
+        {error || (
+          <>
+            <LoaderCircle className="spin" size={18} /> Loading board…
+          </>
+        )}
       </div>
     );
-  if (!authorized) return <CodeGate onSuccess={() => void loadSessions()} />;
+  if (!authorized) return <CodeGate failure={error} onSuccess={loadSessions} />;
 
   const online = Boolean(detail?.aboard);
+  const saveState = [...saveStates.values()].includes("saving") ? "saving" : saveStates.size ? "saved" : null;
   const reviewed = review && rounds.find((item) => item.id === review.roundId);
   const orderedRounds = [...rounds].sort((left, right) => left.number - right.number);
   // One divider marks where frozen history ends and the current round begins.
@@ -476,7 +498,7 @@ function GrillBoard() {
                 <button className="session-row__select" onClick={() => chooseSession(session)}>
                   <span className="session-row__title">
                     <ProviderIcon provider={session.provider} />
-                    <b>{sessionTitle(session)}</b>
+                    <b title={sessionTitle(session)}>{sessionTitle(session)}</b>
                   </span>
                   <span
                     className={`session-row__project ${session.project_name ? "" : "is-unknown"}`}
@@ -545,10 +567,25 @@ function GrillBoard() {
               }
             >
               <span className="aboard-badge__dot" aria-hidden="true" />
-              ABOARD
+              Aboard
               <span className="visually-hidden">{online ? "online" : "offline"}</span>
             </span>
           )}
+          <div className="save-badge" role="status">
+            {saveState && (
+              <span key={saveState} className={`save-badge__pill is-${saveState}`}>
+                {saveState === "saving" ? (
+                  <>
+                    <LoaderCircle className="spin" size={13} /> Saving…
+                  </>
+                ) : (
+                  <>
+                    <Check size={13} /> Saved
+                  </>
+                )}
+              </span>
+            )}
+          </div>
           <main ref={page} className={railOpen ? "page" : "page is-rail-closed"}>
             <div className="page__inner">
               {error && (
@@ -598,6 +635,7 @@ function GrillBoard() {
                               !deleteTarget
                             }
                             onSave={saveAnswer}
+                            onSaveState={reportSave}
                             onRevealRound={() => scrollToRound(item.id)}
                             onReview={async () => {
                               const result = await api<{ prompt: string }>(`rounds/${item.id}/prompt-preview`, {
@@ -812,7 +850,7 @@ function ConfirmModal({
   );
 }
 
-function CodeGate({ onSuccess }: { onSuccess: () => void }) {
+function CodeGate({ failure, onSuccess }: { failure: string; onSuccess: () => Promise<void> }) {
   const [digits, setDigits] = useState(["", "", "", ""]);
   const [busy, setBusy] = useState(false);
   const [failed, setFailed] = useState(false);
@@ -831,7 +869,8 @@ function CodeGate({ onSuccess }: { onSuccess: () => void }) {
     setMessage("");
     try {
       await api("access", { method: "POST", body: JSON.stringify({ code }) });
-      onSuccess();
+      // The code was right even if the board then fails to load, so the digits stay for another try.
+      await onSuccess();
     } catch (cause) {
       const failure = cause as ApiError;
       if (failure.code === "too_many_attempts") setMessage(failure.message);
@@ -891,7 +930,11 @@ function CodeGate({ onSuccess }: { onSuccess: () => void }) {
               />
             ))}
           </div>
-          {message ? <div className="gate__message">{message}</div> : null}
+          {message || failure ? (
+            <div className="gate__message" role="alert">
+              {message || failure}
+            </div>
+          ) : null}
           <button className="submit" disabled={busy || code.length !== 4}>
             {busy ? <LoaderCircle className="spin" size={17} /> : "Open"}
           </button>
@@ -924,12 +967,14 @@ function Questionnaire({
   round,
   shortcutActive,
   onSave,
+  onSaveState,
   onRevealRound,
   onReview,
 }: {
   round: Round;
   shortcutActive: boolean;
   onSave: SaveAnswer;
+  onSaveState: ReportSave;
   onRevealRound: () => void;
   onReview: () => Promise<void>;
 }) {
@@ -1043,6 +1088,7 @@ function Questionnaire({
               </div>
             }
             onSave={onSave}
+            onSaveState={onSaveState}
             registerFlush={registerFlush}
             onReview={reviewPrompt}
           />
@@ -1063,6 +1109,7 @@ function QuestionCard({
   shortcutsEnabled,
   map,
   onSave,
+  onSaveState,
   registerFlush,
   onReview,
 }: {
@@ -1076,6 +1123,7 @@ function QuestionCard({
   shortcutsEnabled: boolean;
   map: React.ReactNode;
   onSave: SaveAnswer;
+  onSaveState: ReportSave;
   registerFlush: (id: string, flush: () => Promise<boolean>) => () => void;
   onReview: () => Promise<void>;
 }) {
@@ -1089,7 +1137,6 @@ function QuestionCard({
   );
   const [selection, setSelection] = useState(serverSelection);
   const [note, setNote] = useState(serverNote);
-  const [syncedKey, setSyncedKey] = useState(() => draftKey({ selection: serverSelection, note: serverNote }));
   const [saving, setSaving] = useState(false);
   const [failure, setFailure] = useState("");
   const [saved, confirmSaved] = useConfirmation();
@@ -1098,16 +1145,23 @@ function QuestionCard({
   const options = useRef<HTMLDivElement>(null);
   // Timers, page-hide listeners, and unmounting read these refs so they always save the newest edit.
   const latest = useRef<Draft>({ selection: serverSelection, note: serverNote });
-  const synced = useRef(syncedKey);
+  const synced = useRef(draftKey(latest.current));
   const inFlight = useRef(false);
   const queue = useRef(Promise.resolve(true));
   const timer = useRef<number>(undefined);
-  const firstEdit = useRef(0);
+  const typingTimer = useRef<number>(undefined);
+  // A save made mid-typing stays silent, so the pause after it still owes a confirmation.
+  const unconfirmed = useRef(false);
 
-  const stored = storedDraft({ selection, note }, noneLetter);
-  const dirty = draftKey(stored) !== syncedKey;
   // A note without an option is answered as "None of these", so that radio shows it.
-  const shownSelection = stored.selection || selection;
+  const shownSelection = storedDraft({ selection, note }, noneLetter).selection || selection;
+  const saveState = readOnly || failure ? null : saving ? "saving" : saved ? "saved" : null;
+  const saveKey = `${round.id}:${question.id}`;
+
+  useEffect(() => {
+    onSaveState(saveKey, saveState);
+    return () => onSaveState(saveKey, null);
+  }, [onSaveState, saveKey, saveState]);
 
   // Another device's change replaces the fields only when this card has nothing unsaved of its own.
   useEffect(() => {
@@ -1115,21 +1169,24 @@ function QuestionCard({
     if (key === synced.current || inFlight.current || draftKey(latest.current) !== synced.current) return;
     latest.current = { selection: serverSelection, note: serverNote };
     synced.current = key;
-    setSyncedKey(key);
     setSelection(serverSelection);
     setNote(serverNote);
   }, [serverSelection, serverNote]);
 
   const sendLatest = useCallback(
-    async (keepalive: boolean): Promise<boolean> => {
+    async (keepalive: boolean, quiet: boolean): Promise<boolean> => {
       const target = latest.current;
       const key = draftKey(target);
       if (key === synced.current) {
         setFailure("");
+        if (!quiet && unconfirmed.current) {
+          unconfirmed.current = false;
+          confirmSaved();
+        }
         return true;
       }
       inFlight.current = true;
-      setSaving(true);
+      if (!quiet) setSaving(true);
       try {
         await onSave(
           round.id,
@@ -1141,9 +1198,12 @@ function QuestionCard({
           keepalive,
         );
         synced.current = key;
-        setSyncedKey(key);
         setFailure("");
-        if (draftKey(latest.current) === key) confirmSaved();
+        if (quiet) unconfirmed.current = true;
+        else if (draftKey(latest.current) === key) {
+          unconfirmed.current = false;
+          confirmSaved();
+        }
         return true;
       } catch (cause) {
         setFailure((cause as Error).message);
@@ -1157,11 +1217,13 @@ function QuestionCard({
   );
 
   const flush = useCallback(
-    (keepalive = false) => {
-      window.clearTimeout(timer.current);
-      firstEdit.current = 0;
+    (keepalive = false, quiet = false) => {
+      // A quiet save leaves the pending pause in place, so its confirmation still arrives.
+      if (!quiet) window.clearTimeout(timer.current);
+      window.clearTimeout(typingTimer.current);
+      typingTimer.current = undefined;
       // Saves run one at a time, so a slow response can never land after a newer edit.
-      const run = queue.current.then(() => sendLatest(keepalive));
+      const run = queue.current.then(() => sendLatest(keepalive, quiet));
       queue.current = run;
       return run;
     },
@@ -1177,12 +1239,10 @@ function QuestionCard({
         void flush();
         return;
       }
-      const now = Date.now();
-      firstEdit.current ||= now;
       window.clearTimeout(timer.current);
-      // Continuous typing still saves every few seconds instead of waiting for a pause.
-      const wait = Math.min(delay, firstEdit.current + NOTE_SAVE_MAX_WAIT - now);
-      timer.current = window.setTimeout(() => void flush(), Math.max(0, wait));
+      timer.current = window.setTimeout(() => void flush(), delay);
+      // Continuous typing still saves every few seconds, silently, instead of waiting for a pause.
+      typingTimer.current ??= window.setTimeout(() => void flush(false, true), NOTE_SAVE_MAX_WAIT);
     },
     [flush, noneLetter],
   );
@@ -1306,26 +1366,15 @@ function QuestionCard({
             />
           </div>
           <div className="question__foot">
-            {readOnly ? null : failure ? (
+            {/* Progress shows in the page's save badge; only a failure, which needs this card's Retry, stays here. */}
+            {!readOnly && failure ? (
               <span className="save-status is-error" role="alert">
                 {failure}
                 <button type="button" onClick={() => void flush()}>
                   Retry
                 </button>
               </span>
-            ) : (
-              <span className="save-status" role="status">
-                {saving || dirty ? (
-                  <>
-                    <LoaderCircle className="spin" size={14} /> Saving…
-                  </>
-                ) : saved ? (
-                  <>
-                    <Check size={14} /> Saved
-                  </>
-                ) : null}
-              </span>
-            )}
+            ) : null}
             <button
               type="button"
               className="submit round-submit"
@@ -1530,11 +1579,14 @@ function PromptModal({
             <ChevronLeft size={17} />
           </button>
           <span className="modal__label">
-            {session.display_title || "Grill review"}
-            <span aria-hidden="true">•</span>
-            <ProviderTag provider={session.provider} />
-            <span aria-hidden="true">•</span>
-            Round {round.number}
+            <ProviderIcon provider={session.provider} labelled />
+            <span className="modal__title" title={session.display_title ?? undefined}>
+              {session.display_title || "Grill review"}
+            </span>
+            <span className="modal__round" title={`Round ${round.number}`}>
+              <span aria-hidden="true">R{round.number}</span>
+              <span className="visually-hidden">Round {round.number}</span>
+            </span>
           </span>
           <button
             type="button"
