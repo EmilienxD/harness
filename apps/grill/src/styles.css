@@ -515,6 +515,8 @@ kbd {
   flex: 1 1 auto;
   min-height: 0;
   width: 100%;
+  /* The deck's rotated back cards reach past narrow margins; they must not make the page pan sideways. */
+  overflow-x: hidden;
   overflow-y: auto;
   overscroll-behavior: contain;
 }
@@ -1202,7 +1204,7 @@ kbd {
 }
 .modal__message {
   margin-right: auto;
-  color: var(--accent);
+  color: var(--danger);
   font-size: 12px;
   font-weight: 700;
 }
@@ -1458,6 +1460,13 @@ kbd {
   .explanation *::after {
     animation: none !important;
     transition: none !important;
+  }
+}
+/* iOS zooms into any focused text field under 16px and never zooms back out. */
+@media (pointer: coarse) {
+  .freeform textarea,
+  .explanation :is(input, select, textarea) {
+    font-size: 16px;
   }
 }
 @media (max-width: 900px) {
