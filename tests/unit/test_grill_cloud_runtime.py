@@ -85,6 +85,16 @@ def test_publication_returns_immediately_and_reserves_the_next_inbox(tmp_path):
     assert not list((tmp_path / "runtime" / "outbox").rglob("publication.json"))
 
 
+def test_each_session_gets_a_short_distinct_inbox_that_survives_restarts(tmp_path):
+    project = tmp_path / "project"
+    project.mkdir()
+    runtime = InterviewRuntime(tmp_path / "runtime")
+    first = runtime.start("claude", "first", project).directory
+    second = runtime.start("claude", "second", project).directory
+    assert first != second and len(first.name) <= 8 and len(second.name) <= 8
+    assert InterviewRuntime(tmp_path / "runtime").start("claude", "first", project).directory == first
+
+
 def test_project_identity_replaces_the_home_directory_and_keeps_the_project_name(tmp_path):
     project = tmp_path / "work" / "same-name"
     assert project_identity(project, home=tmp_path) == {
