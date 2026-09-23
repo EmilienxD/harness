@@ -1,0 +1,15 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Grill: deploy to Vercel (production)",
+      "detail": "Builds and deploys apps/grill to the Vercel project it is linked to",
+      "type": "shell",
+      "command": "vercel",
+      "args": ["deploy", "--prod"],
+      "options": { "cwd": "${workspaceFolder}/apps/grill" },
+      "problemMatcher": [],
+      "presentation": { "reveal": "always", "panel": "dedicated", "clear": true }
+    }
+  ]
+}
