@@ -1,8 +1,9 @@
 name = "grill-me-in-cloud"
-version = "2.0.7"
+version = "2.1.1"
 description = "Publishes visual design interviews to a persistent hosted board"
 docs = "https://github.com/EmilienxD/harness/blob/main/README.md#user-invoked-skills"
 requires = []
+workspace_gitignore = [".harness/config.local.json"]
 
 [platforms.claude]
 status = "supported"

@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { HeadContent, Outlet, Scripts, createRootRouteWithContext } from "@tanstack/react-router";
+import { HeadContent, Link, Outlet, Scripts, createRootRouteWithContext } from "@tanstack/react-router";
 import type { ReactNode } from "react";
 import appCss from "../styles.css?url";
 
@@ -12,6 +12,7 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
       { name: "description", content: "Private hosted review rounds for Harness agents." },
     ],
     links: [
+      { rel: "icon", type: "image/svg+xml", href: "/logo.svg" },
       { rel: "stylesheet", href: appCss },
       { rel: "preconnect", href: "https://fonts.googleapis.com" },
       {
@@ -32,6 +33,7 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
     </html>
   ),
   component: RootComponent,
+  notFoundComponent: NotFound,
 });
 
 function RootComponent() {
@@ -40,5 +42,14 @@ function RootComponent() {
     <QueryClientProvider client={queryClient}>
       <Outlet />
     </QueryClientProvider>
+  );
+}
+
+function NotFound() {
+  return (
+    <div className="center">
+      Page not found.
+      <Link to="/">Open the board</Link>
+    </div>
   );
 }

@@ -382,6 +382,32 @@ class CatalogueInstaller:
     def _file_owned_in_another_installation(self, path: str) -> bool:
         return self._owned_file_in_another_installation(path) is not None
 
+    def _gitignore_peers(self, name: str, removed: set[str]) -> list[tuple[str, list[str]]]:
+        """Blocks sharing this `.gitignore` that also want a removed pattern.
+
+        `gitignore.apply` writes a pattern only into the first block that wants it,
+        so removing that block must hand the pattern to a remaining one.
+        """
+        if not removed:
+            return []
+        installations = [self.installation]
+        if not self.target.is_user:
+            # Every platform of one project shares its root `.gitignore`.
+            root = str(self.target.scope_root.resolve())
+            installations.extend(
+                installation
+                for installation in self.store.data["installations"].values()
+                if installation is not self.installation and installation.get("scopeRoot") == root
+            )
+        return [
+            (receipt["gitignoreBlock"], receipt["gitignorePatterns"])
+            for installation in installations
+            for package, receipt in installation["packages"].items()
+            if not (installation is self.installation and package == name)
+            and isinstance(receipt.get("gitignoreBlock"), str)
+            and removed & set(receipt.get("gitignorePatterns", []))
+        ]
+
     def _validate_receipt_paths(self, packages: dict[str, Any]) -> None:
         """Reject receipt paths that could make an operation touch elsewhere."""
         root = self.target.scope_root.resolve()
@@ -883,6 +909,7 @@ class CatalogueInstaller:
             "files": files,
             "fragment": fragment,
             "gitignoreBlock": block if patterns else None,
+            "gitignorePatterns": patterns,
             "actions": [{"type": action.type, **action.data} for action in tool.actions],
         }
 
@@ -958,6 +985,13 @@ class CatalogueInstaller:
             if self.target.gitignore_path.is_symlink():
                 raise InstallError(f"refusing to modify symlink {self.target.gitignore_path}")
             after = gitignore.remove(self.target.gitignore_path.read_text(encoding="utf-8"), block)
+            patterns = receipt.get("gitignorePatterns", [])
+            for peer_block, peer_patterns in self._gitignore_peers(name, set(patterns)):
+                after = gitignore.apply(after, peer_block, peer_patterns)
+            # Files the user created under an ignore, such as a local secret, outlive the
+            # package; dropping their ignore would expose them to the next `git add`.
+            base = self.target.gitignore_path.parent
+            after = gitignore.apply(after, block, [pattern for pattern in patterns if any(base.glob(pattern))])
             if after.strip():
                 self.target.gitignore_path.write_text(after, encoding="utf-8")
             else:
