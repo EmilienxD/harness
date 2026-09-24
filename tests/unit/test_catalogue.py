@@ -996,6 +996,67 @@ def secretive_package(tmp_path):
     return load_tool(root)
 
 
+def test_project_install_keeps_secret_ignores_inside_their_directories(tmp_path):
+    tool = secretive_package(tmp_path)
+    project = tmp_path / "project"
+    project.mkdir()
+    subprocess.run(["git", "init", "-q"], cwd=project, check=True)
+    (project / ".gitignore").write_text("user-rule\n")
+    selected = manager({tool.name: tool}, Target.for_project(project), tmp_path)
+
+    selected.reconcile({tool.name})
+
+    assert (project / ".gitignore").read_text() == "user-rule\n"
+    assert "config.local.json" in (project / ".harness/.gitignore").read_text().splitlines()
+    secret = project / ".harness/config.local.json"
+    secret.write_text("{}")
+    assert subprocess.run(
+        ["git", "check-ignore", "--no-index", "-q", str(secret)], cwd=project
+    ).returncode == 0
+
+
+@pytest.mark.parametrize("platform, directory", [(Platform.CLAUDE, ".claude"), (Platform.CHATGPT, ".codex")])
+def test_commit_install_ignores_local_files_without_editing_project_gitignore(tmp_path, platform, directory):
+    tool = discover()["commit"]
+    project = tmp_path / "project"
+    project.mkdir()
+    (project / ".gitignore").write_text("user-rule\n")
+    selected = manager({tool.name: tool}, Target.for_project(project, platform), tmp_path)
+
+    selected.reconcile({tool.name})
+
+    assert (project / ".gitignore").read_text() == "user-rule\n"
+    assert {"commit-ai.key", "settings.local.json"} <= set(
+        (project / directory / ".gitignore").read_text().splitlines()
+    )
+
+
+def test_upgrade_moves_existing_secret_ignore_out_of_project_gitignore(tmp_path):
+    tool = secretive_package(tmp_path)
+    project = tmp_path / "project"
+    secret = project / ".harness/config.local.json"
+    secret.parent.mkdir(parents=True)
+    secret.write_text("{}")
+    root_ignore = project / ".gitignore"
+    root_ignore.write_text(
+        "user-rule\n\n# >>> harness:secretive:claude >>>\n"
+        ".harness/config.local.json\n# <<< harness:secretive:claude <<<\n"
+    )
+    selected = manager({tool.name: tool}, Target.for_project(project), tmp_path)
+    selected.installation["packages"][tool.name] = {
+        "version": "0.9.0",
+        "ownership": "selected",
+        "files": [],
+        "gitignoreBlock": "secretive:claude",
+        "gitignorePatterns": [".harness/config.local.json"],
+    }
+
+    selected.reconcile({tool.name})
+
+    assert root_ignore.read_text() == "user-rule\n"
+    assert "config.local.json" in (project / ".harness/.gitignore").read_text().splitlines()
+
+
 def test_shared_workspace_ignore_stays_until_its_last_installation_is_removed(tmp_path):
     tool = secretive_package(tmp_path)
     project = tmp_path / "project"
@@ -1010,11 +1071,12 @@ def test_shared_workspace_ignore_stays_until_its_last_installation_is_removed(tm
 
     claude.reconcile(set())
 
-    assert ".harness/config.local.json" in (project / ".gitignore").read_text().splitlines()
+    assert "config.local.json" in (project / ".harness/.gitignore").read_text().splitlines()
+    assert not (project / ".gitignore").exists()
 
     chatgpt.reconcile(set())
 
-    assert not (project / ".gitignore").exists()
+    assert not (project / ".harness/.gitignore").exists()
 
 
 def test_uninstall_keeps_ignoring_files_the_user_left_behind(tmp_path):
@@ -1028,13 +1090,14 @@ def test_uninstall_keeps_ignoring_files_the_user_left_behind(tmp_path):
 
     selected.reconcile(set())
 
-    assert ".harness/config.local.json" in (project / ".gitignore").read_text().splitlines()
+    assert "config.local.json" in (project / ".harness/.gitignore").read_text().splitlines()
+    assert not (project / ".gitignore").exists()
 
     selected.reconcile({tool.name})
     secret.unlink()
     selected.reconcile(set())
 
-    assert not (project / ".gitignore").exists()
+    assert not (project / ".harness/.gitignore").exists()
 
 
 def test_failed_host_action_rolls_back_local_installation(monkeypatch, tmp_path):

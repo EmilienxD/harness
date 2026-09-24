@@ -193,7 +193,7 @@ The grill hook and Aboard's relay read the board from the `grill` section of Har
 
 | Source | Committed | Fields |
 | :-- | :-- | :-- |
-| `.harness/config.local.json` | No; a project install adds it to `.gitignore`, and uninstall keeps the entry while the file exists | `url`, `code` |
+| `.harness/config.local.json` | No; a project install adds it to `.harness/.gitignore`, and uninstall keeps the entry while the file exists | `url`, `code` |
 | `.harness/config.json` | Yes | `url` only; a `code` here is ignored |
 | `~/.harness/config.json` (or `$HARNESS_STATE_DIR/config.json`) | No | `url`, `code` |
 | `HARNESS_GRILL_URL`, `HARNESS_GRILL_CODE` | No | `url`, `code` |

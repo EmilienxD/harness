@@ -382,7 +382,35 @@ class CatalogueInstaller:
     def _file_owned_in_another_installation(self, path: str) -> bool:
         return self._owned_file_in_another_installation(path) is not None
 
-    def _gitignore_peers(self, name: str, removed: set[str]) -> list[tuple[str, list[str]]]:
+    def _ignore_locations(self, tool: Tool) -> dict[Path, list[str]]:
+        locations: dict[Path, list[str]] = {}
+        if tool.gitignore:
+            locations[self.target.install_root / ".gitignore"] = list(tool.gitignore)
+        if not self.target.is_user:
+            for entry in tool.workspace_gitignore:
+                relative = Path(entry)
+                if entry.endswith("/") or any(
+                    character in str(relative.parent) for character in "*?[]"
+                ):
+                    # Directory rules and globbed parent paths need root-relative
+                    # matching; relocating them would change their meaning.
+                    locations.setdefault(self.target.scope_root / ".gitignore", []).append(entry)
+                else:
+                    path = self.target.scope_root / relative.parent / ".gitignore"
+                    locations.setdefault(path, []).append(relative.name)
+        return locations
+
+    def _receipt_ignores(self, receipt: dict[str, Any]) -> list[tuple[Path, str, list[str]]]:
+        ignores = [
+            (Path(record["path"]), record["block"], record["patterns"])
+            for record in receipt.get("gitignoreFiles", [])
+        ]
+        block = receipt.get("gitignoreBlock")
+        if isinstance(block, str):
+            ignores.append((self.target.gitignore_path, block, receipt.get("gitignorePatterns", [])))
+        return ignores
+
+    def _gitignore_peers(self, name: str, path: Path, removed: set[str]) -> list[tuple[str, list[str]]]:
         """Blocks sharing this `.gitignore` that also want a removed pattern.
 
         `gitignore.apply` writes a pattern only into the first block that wants it,
@@ -400,19 +428,19 @@ class CatalogueInstaller:
                 if installation is not self.installation and installation.get("scopeRoot") == root
             )
         return [
-            (receipt["gitignoreBlock"], receipt["gitignorePatterns"])
+            (block, patterns)
             for installation in installations
             for package, receipt in installation["packages"].items()
             if not (installation is self.installation and package == name)
-            and isinstance(receipt.get("gitignoreBlock"), str)
-            and removed & set(receipt.get("gitignorePatterns", []))
+            for peer_path, block, patterns in self._receipt_ignores(receipt)
+            if peer_path == path and removed & set(patterns)
         ]
 
     def _validate_receipt_paths(self, packages: dict[str, Any]) -> None:
         """Reject receipt paths that could make an operation touch elsewhere."""
         root = self.target.scope_root.resolve()
         for package, receipt in packages.items():
-            for record in receipt.get("files", []):
+            for record in [*receipt.get("files", []), *receipt.get("gitignoreFiles", [])]:
                 path = Path(record["path"])
                 try:
                     resolved = path.resolve(strict=False)
@@ -543,7 +571,19 @@ class CatalogueInstaller:
 
     def _local_paths(self, resolved: list[ResolvedPackage]) -> set[Path]:
         packages = self.installation["packages"]
-        paths = {self.target.settings_path, self.target.gitignore_path}
+        paths = {self.target.settings_path}
+        if any(isinstance(receipt.get("gitignoreBlock"), str) for receipt in packages.values()):
+            paths.add(self.target.gitignore_path)
+        paths.update(
+            Path(record["path"])
+            for receipt in packages.values()
+            for record in receipt.get("gitignoreFiles", [])
+        )
+        paths.update(
+            path
+            for item in resolved
+            for path in self._ignore_locations(item.tool)
+        )
         paths.update(
             Path(record["path"])
             for receipt in packages.values()
@@ -731,7 +771,11 @@ class CatalogueInstaller:
                 if current is None or current.get("version") != item.tool.version:
                     replacing = current is not None
                     if current is not None:
-                        self._remove(item.tool.name, remove_actions=False)
+                        self._remove(
+                            item.tool.name,
+                            remove_actions=False,
+                            replacement_ignores=self._ignore_locations(item.tool),
+                        )
                     self._install(
                         item,
                         prepared.get(item.tool.name, []),
@@ -871,24 +915,23 @@ class CatalogueInstaller:
             before = self.target.read_settings()
             _write_json(self.target.settings_path, self.target.adapter.merge_config(before, fragment))
             fragment = settings_merge.additions(before, fragment)
-        patterns = [entry if self.target.is_user else f"{self.target.adapter.project_platform_dir}/{entry}" for entry in tool.gitignore]
-        if not self.target.is_user:
-            patterns.extend(tool.workspace_gitignore)
         block = f"{tool.name}:{self.target.platform.value}"
-        if patterns:
-            if self.target.gitignore_path.is_symlink():
-                raise InstallError(f"refusing to replace symlink {self.target.gitignore_path}")
-            before = self.target.gitignore_path.read_text(encoding="utf-8") if self.target.gitignore_path.is_file() else ""
-            self.target.gitignore_path.parent.mkdir(parents=True, exist_ok=True)
+        ignore_files = []
+        for path, patterns in self._ignore_locations(tool).items():
+            if path.is_symlink():
+                raise InstallError(f"refusing to replace symlink {path}")
+            before = path.read_text(encoding="utf-8") if path.is_file() else ""
+            path.parent.mkdir(parents=True, exist_ok=True)
             updated = gitignore.apply(before, block, patterns)
-            temporary = self.target.gitignore_path.with_name(
-                f".{self.target.gitignore_path.name}.harness-{os.getpid()}-{next(tempfile._get_candidate_names())}"
+            temporary = path.with_name(
+                f".{path.name}.harness-{os.getpid()}-{next(tempfile._get_candidate_names())}"
             )
             try:
                 temporary.write_text(updated, encoding="utf-8")
-                os.replace(temporary, self.target.gitignore_path)
+                os.replace(temporary, path)
             finally:
                 temporary.unlink(missing_ok=True)
+            ignore_files.append({"path": str(path.resolve()), "block": block, "patterns": patterns})
         restorable = [previous for previous in previous_actions if previous is not None]
         restore_previous = bool(restorable)
         for action in prepared:
@@ -908,8 +951,7 @@ class CatalogueInstaller:
             ],
             "files": files,
             "fragment": fragment,
-            "gitignoreBlock": block if patterns else None,
-            "gitignorePatterns": patterns,
+            "gitignoreFiles": ignore_files,
             "actions": [{"type": action.type, **action.data} for action in tool.actions],
         }
 
@@ -919,6 +961,7 @@ class CatalogueInstaller:
         remove_actions: bool = True,
         host_undo: list[tuple[str, HostAction | PreparedAction]] | None = None,
         rollback_actions: list[PreparedAction | None] | None = None,
+        replacement_ignores: dict[Path, list[str]] | None = None,
     ) -> None:
         receipt = self.installation["packages"].get(name)
         if receipt is None:
@@ -980,22 +1023,31 @@ class CatalogueInstaller:
                 self.target.settings_path,
                 self.target.adapter.unmerge_config(self.target.read_settings(), fragment),
             )
-        block = receipt.get("gitignoreBlock")
-        if isinstance(block, str) and self.target.gitignore_path.is_file():
-            if self.target.gitignore_path.is_symlink():
-                raise InstallError(f"refusing to modify symlink {self.target.gitignore_path}")
-            after = gitignore.remove(self.target.gitignore_path.read_text(encoding="utf-8"), block)
-            patterns = receipt.get("gitignorePatterns", [])
-            for peer_block, peer_patterns in self._gitignore_peers(name, set(patterns)):
+        replacement_paths = {
+            path.parent / pattern
+            for path, patterns in (replacement_ignores or {}).items()
+            for pattern in patterns
+        }
+        for path, block, patterns in self._receipt_ignores(receipt):
+            if not path.is_file():
+                continue
+            if path.is_symlink():
+                raise InstallError(f"refusing to modify symlink {path}")
+            after = gitignore.remove(path.read_text(encoding="utf-8"), block)
+            for peer_block, peer_patterns in self._gitignore_peers(name, path, set(patterns)):
                 after = gitignore.apply(after, peer_block, peer_patterns)
             # Files the user created under an ignore, such as a local secret, outlive the
             # package; dropping their ignore would expose them to the next `git add`.
-            base = self.target.gitignore_path.parent
-            after = gitignore.apply(after, block, [pattern for pattern in patterns if any(base.glob(pattern))])
+            base = path.parent
+            retained = [
+                pattern for pattern in patterns
+                if any(base.glob(pattern)) and base / pattern not in replacement_paths
+            ]
+            after = gitignore.apply(after, block, retained)
             if after.strip():
-                self.target.gitignore_path.write_text(after, encoding="utf-8")
+                path.write_text(after, encoding="utf-8")
             else:
-                self.target.gitignore_path.unlink(missing_ok=True)
+                path.unlink(missing_ok=True)
         del self.installation["packages"][name]
 
 def reconcile_targets(
