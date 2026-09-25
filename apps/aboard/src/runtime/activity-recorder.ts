@@ -10,7 +10,7 @@ import {
   type AgentOutcome,
   type RunOutcome,
 } from "../domain/activity.js";
-import type { AgentSession, IsoTimestamp, TerminalId } from "../domain/contracts.js";
+import type { AgentSession, IsoTimestamp, SessionId, TerminalId } from "../domain/contracts.js";
 import type { FileActivityStore } from "./persistence.js";
 
 export interface ActivityRecorderOptions {
@@ -49,6 +49,21 @@ export class ActivityRecorder {
     options: { readonly reason?: string; readonly terminalId?: TerminalId } = {},
   ): void {
     this.#append(agentActivity(session, outcome, at, options));
+  }
+
+  public setTitle(sessionId: SessionId, title: string): void {
+    const clean = title.trim();
+    if (!clean || !this.options.admission()) return;
+    let changed = false;
+    const entries = this.#cache.entries.map((entry) => {
+      if (entry.kind !== "agent" || entry.reopen?.sessionId !== sessionId || entry.title === clean) return entry;
+      changed = true;
+      return { ...entry, title: clean };
+    });
+    if (!changed) return;
+    this.#cache = { ...this.#cache, entries };
+    this.options.onDidChange();
+    this.#enqueue(() => this.#cache);
   }
 
   public recordRun(input: {

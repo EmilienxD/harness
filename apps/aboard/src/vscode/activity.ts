@@ -42,9 +42,8 @@ export class ActivityTreeModel {
     if (entry.pullRequest !== undefined) capabilities.push("pr");
     if (entry.kind === "agent" && entry.reopen !== undefined && !live) capabilities.push("reopen");
     return {
-      // The side panel is narrow and truncates the tail, so agent rows lead with
-      // the agent's name and leave the short outcome to the dimmed description.
-      label: entry.kind === "agent" ? agentLabel(entry) : describeActivity(entry),
+      // The side panel is narrow, so lead with the conversation title when known.
+      label: entry.kind === "agent" ? entry.title ?? agentLabel(entry) : describeActivity(entry),
       description: describeDetail(entry),
       tooltip: tooltip(entry),
       icon: icon(entry),
@@ -64,6 +63,7 @@ export function canOpenActivityIssue(entry: ActivityEntry): entry is ActivityEnt
 function describeDetail(entry: ActivityEntry): string {
   const parts = entry.kind === "agent" ? [
     agentOutcome(entry.outcome),
+    entry.title === undefined ? "" : agentLabel(entry),
     // Terminals are usually named after the agent; repeat only a description that adds something.
     entry.description === agentLabel(entry) ? "" : entry.description,
     entry.issueNumbers === undefined || entry.issueNumbers.length === 0 ? "" : formatIssueNumbers(entry.issueNumbers),

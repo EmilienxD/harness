@@ -21,6 +21,16 @@ test("an agent row leads with the agent's name so a narrow panel still shows who
   assert.equal(row.description, "ended · 10s");
 });
 
+test("an available conversation title leads an activity row while the agent id stays visible", () => {
+  const row = rowFor({
+    kind: "agent", id: "agent:10:ended", at: "2026-09-09T10:00:00.000Z" as IsoTimestamp,
+    agentId: "10" as AgentId, type: "interactive", description: "aboard-interactive-10",
+    title: "Fix checkout recovery", outcome: "ended",
+  });
+  assert.equal(row.label, "Fix checkout recovery");
+  assert.match(row.description, /aboard-interactive-10/u);
+});
+
 test("an agent row keeps a description that differs from the agent's name", () => {
   const row = rowFor({
     kind: "agent", id: "agent:3:failed", at: "2026-09-09T10:00:00.000Z" as IsoTimestamp,

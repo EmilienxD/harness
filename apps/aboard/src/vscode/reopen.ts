@@ -26,12 +26,12 @@ export function renderReopenItems(
 ): readonly ReopenQuickPickItem[] {
   return options.map((option) => {
     const { candidate } = option;
-    const label = agentLabel(candidate);
+    const label = candidate.title ?? agentLabel(candidate);
     const described = candidate.issueNumbers === undefined ? "" : describeIssueNumbers(candidate.issueNumbers);
     return {
       label,
       // Terminals are usually named after the agent; repeat only a description that adds something.
-      description: [candidate.description === label ? "" : candidate.description, described].filter(Boolean).join(" · "),
+      description: [candidate.title === undefined ? "" : agentLabel(candidate), candidate.description === label || candidate.title !== undefined ? "" : candidate.description, described].filter(Boolean).join(" · "),
       detail: detailFor(option, now),
       option,
     };

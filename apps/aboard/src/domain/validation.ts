@@ -721,6 +721,7 @@ export function parseActivityDto(value: unknown): ValidationResult<ActivityDto> 
     const agentId = readNonEmptyString(entry.agentId, "agentId", dropped);
     const type = parseAgentType(entry.type, "type", dropped);
     const description = readNonEmptyString(entry.description, "description", dropped);
+    const title = typeof entry.title === "string" && entry.title.trim() !== "" ? entry.title : undefined;
     const outcome = AGENT_OUTCOMES.includes(entry.outcome as AgentOutcome) ? entry.outcome as AgentOutcome : undefined;
     if (dropped.length > 0 || agentId === undefined || type === undefined || description === undefined || outcome === undefined) continue;
     // A malformed reopen block costs the reopen action, not the row: the outcome
@@ -730,6 +731,7 @@ export function parseActivityDto(value: unknown): ValidationResult<ActivityDto> 
     seen.add(id);
     entries.push({
       kind: "agent", id, at, agentId: agentId as AgentId, type, description, outcome,
+      ...(title === undefined ? {} : { title }),
       ...(reason === undefined ? {} : { reason }),
       ...(durationMs === undefined ? {} : { durationMs }),
       ...(issueNumbers === undefined ? {} : { issueNumbers }),

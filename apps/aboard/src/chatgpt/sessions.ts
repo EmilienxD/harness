@@ -68,6 +68,16 @@ export class ChatGptSessionProbe {
     }
     return { state: "resumable" };
   }
+
+  public async title(sessionId: SessionId, cwd: string, command: readonly string[] = DEFAULT_CHATGPT_COMMAND): Promise<string | undefined> {
+    const result = await this.#exchange({ command, cwd, method: "thread/read", params: { threadId: sessionId, includeTurns: false } });
+    const thread = record(record(result).thread);
+    if (thread.id !== sessionId) return undefined;
+    const value = typeof thread.name === "string" && thread.name.trim() !== "" ? thread.name : thread.preview;
+    if (typeof value !== "string") return undefined;
+    const title = value.trim().split(/\r?\n/u)[0]?.trim();
+    return title === undefined || title.length === 0 ? undefined : title.slice(0, 120);
+  }
 }
 
 async function exchangeWithAppServer(request: ChatGptAppServerRequest, timeoutMs = 15_000): Promise<unknown> {
