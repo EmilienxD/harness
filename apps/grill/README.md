@@ -78,6 +78,11 @@ npm ci
 npm run dev
 ```
 
+For a local Supabase stack, run `npx supabase start` from `apps/grill` and set
+`SUPABASE_URL=http://127.0.0.1:55421` in your local environment file. Get the
+local secret key from `npx supabase status`. Grill reserves ports 55420–55429 in
+`supabase/config.toml`, leaving Supabase's default ports available to other projects.
+
 Useful checks are:
 
 ```sh
