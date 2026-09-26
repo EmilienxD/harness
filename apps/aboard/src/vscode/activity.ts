@@ -1,8 +1,8 @@
 
-import { describeActivity, type ActivityDto, type ActivityEntry } from "../domain/activity.js";
+import { describeActivity, type ActivityDto, type ActivityEntry, type AgentOutcome } from "../domain/activity.js";
 import { formatIssueNumbers } from "../shared/issues.js";
 import { formatTimestamp } from "../shared/time.js";
-import type { TerminalId } from "../domain/contracts.js";
+import { agentLabel, type TerminalId } from "../domain/contracts.js";
 
 export interface ActivityNode {
   readonly kind: "activity";
@@ -42,7 +42,8 @@ export class ActivityTreeModel {
     if (entry.pullRequest !== undefined) capabilities.push("pr");
     if (entry.kind === "agent" && entry.reopen !== undefined && !live) capabilities.push("reopen");
     return {
-      label: describeActivity(entry),
+      // The side panel is narrow, so lead with the conversation title when known.
+      label: entry.kind === "agent" ? entry.title ?? agentLabel(entry) : describeActivity(entry),
       description: describeDetail(entry),
       tooltip: tooltip(entry),
       icon: icon(entry),
@@ -61,12 +62,15 @@ export function canOpenActivityIssue(entry: ActivityEntry): entry is ActivityEnt
 
 function describeDetail(entry: ActivityEntry): string {
   const parts = entry.kind === "agent" ? [
-    entry.description,
+    agentOutcome(entry.outcome),
+    entry.title === undefined ? "" : agentLabel(entry),
+    // Terminals are usually named after the agent; repeat only a description that adds something.
+    entry.description === agentLabel(entry) ? "" : entry.description,
     entry.issueNumbers === undefined || entry.issueNumbers.length === 0 ? "" : formatIssueNumbers(entry.issueNumbers),
     entry.pullRequest === undefined ? "" : `PR #${entry.pullRequest}`,
     formatDuration(entry.durationMs),
   ] : [
-    `attempt ${entry.attempt}`,
+    entry.attempt === 1 ? "" : `attempt ${entry.attempt}`,
     entry.completedIssues === undefined || entry.totalIssues === undefined ? "" : `${entry.completedIssues}/${entry.totalIssues} issues`,
     entry.currentIssue === undefined ? "" : `at #${entry.currentIssue}`,
     entry.pullRequest === undefined ? "" : `PR #${entry.pullRequest}`,
@@ -75,14 +79,28 @@ function describeDetail(entry: ActivityEntry): string {
   return parts.filter(Boolean).join(" · ");
 }
 
+/** The row's name already carries the agent type, so the outcome is one word or two. */
+function agentOutcome(outcome: AgentOutcome): string {
+  switch (outcome) {
+    case "succeeded": return "finished";
+    case "failed": return "failed";
+    case "cancelled": return "cancelled";
+    case "ended": return "ended";
+    case "killed": return "terminal closed";
+    case "launch-failed": return "could not start";
+    case "interrupted": return "interrupted";
+  }
+}
+
 function tooltip(entry: ActivityEntry): string {
   return [
+    entry.kind === "agent" ? agentLabel(entry) : "",
     describeActivity(entry),
     describeDetail(entry),
     entry.kind === "run" && (entry.issueNumbers?.length ?? 0) > 0
       ? `Planned issues: ${formatIssueNumbers(entry.issueNumbers ?? [])}`
       : "",
-    entry.kind === "agent" ? `Agent ${entry.agentId} (${entry.type})` : `Run ${entry.runId}, attempt ${entry.attempt}`,
+    entry.kind === "run" ? `Run ${entry.runId}, attempt ${entry.attempt}` : "",
     `At ${formatTimestamp(entry.at)}`,
     entry.reason === undefined ? "" : entry.reason,
     entry.kind === "agent" && entry.reopen !== undefined ? "This conversation can be reopened." : "",

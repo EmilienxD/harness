@@ -9,9 +9,8 @@ ROOT = Path(__file__).parents[2]
 PACKAGE = ROOT / "harness/planning/grill-me-in-cloud"
 sys.path.insert(0, str(PACKAGE))
 
-import grill_cloud_core
 import grill_me_in_cloud_hook
-from grill_cloud_core import HostedClient, HostedError, InterviewRuntime, RoundError, discover_references, project_identity, validate_assets, validate_round
+from grill_me_in_cloud_hook import HostedClient, HostedError, InterviewRuntime, RoundError, discover_references, project_identity, validate_assets, validate_round
 
 
 def round_data(html="<p>Context.</p>"):
@@ -119,7 +118,7 @@ def test_signed_storage_uploads_use_put(tmp_path, monkeypatch):
             return False
 
     monkeypatch.setattr(
-        grill_cloud_core.urllib.request, "urlopen",
+        grill_me_in_cloud_hook.urllib.request, "urlopen",
         lambda request, timeout=None: seen.append((request.get_method(), request.headers)) or Response(),
     )
     HostedClient("https://grill.test", "1234").upload({"signed_url": "https://uploads.test/x"}, image, "image/png")
@@ -171,6 +170,24 @@ def test_config_files_override_stale_process_environment(tmp_path, monkeypatch):
     client = HostedClient.from_environment(project)
 
     assert (client.origin, client.code) == ("http://127.0.0.1:4173", "2468")
+
+
+def test_hook_reads_project_config_after_the_agent_changes_into_a_subdirectory(tmp_path, monkeypatch):
+    project = tmp_path / "project"
+    write_config(project / ".harness" / "config.local.json", url="https://project.test", code="2468")
+    (project / "src").mkdir()
+    monkeypatch.setenv("HARNESS_STATE_DIR", str(tmp_path / "state"))
+    monkeypatch.setenv("HARNESS_GRILL_URL", "http://127.0.0.1:4173")
+    monkeypatch.setenv("HARNESS_GRILL_CODE", "0000")
+    monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(project))
+    captured = {}
+    monkeypatch.setattr(grill_me_in_cloud_hook, "_handle", lambda payload, provider, runtime: captured.setdefault("client", runtime.client))
+
+    grill_me_in_cloud_hook.handle(
+        {"session_id": "session", "hook_event_name": "PostToolUse", "cwd": str(project / "src")}, "claude",
+    )
+
+    assert captured["client"].origin == "https://project.test"
 
 
 def test_committed_project_config_supplies_the_url_but_never_the_code(tmp_path, monkeypatch):

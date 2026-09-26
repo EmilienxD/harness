@@ -66,6 +66,31 @@ test("fleet runtime metadata saves atomically and ignores corrupt recovery data"
   assert.equal((await readFile(path, "utf8")), "truncated");
 });
 
+test("activity title updates survive a reload without changing the conversation identity", async () => {
+  const root = await mkdtemp(join(tmpdir(), "aboard-activity-title-"));
+  const recorder = new ActivityRecorder({
+    store: new FileActivityStore(root), admission: () => true, now: () => new Date(),
+    log: () => undefined, onDidChange: () => undefined,
+  });
+  await recorder.settle();
+  const entry = {
+    kind: "agent" as const, id: "agent:5:ended", at: "2026-09-25T10:00:00.000Z" as import("../../src/domain/contracts.js").IsoTimestamp,
+    agentId: "5" as import("../../src/domain/contracts.js").AgentId,
+    type: "interactive" as const, description: "aboard-interactive-5", outcome: "ended" as const,
+    reopen: { platform: "claude" as const, sessionId: "11111111-1111-4111-8111-111111111111" as import("../../src/domain/contracts.js").SessionId },
+  };
+  const older = { ...entry, id: "agent:5:interrupted", outcome: "interrupted" as const,
+    reopen: { platform: "claude" as const, sessionId: "22222222-2222-4222-8222-222222222222" as import("../../src/domain/contracts.js").SessionId } };
+  await new FileActivityStore(root).save({ version: 1, entries: [entry, older] });
+  await recorder.load();
+  recorder.setTitle("11111111-1111-4111-8111-111111111111" as import("../../src/domain/contracts.js").SessionId, "Repair checkout recovery");
+  await recorder.settle();
+  const loaded = await new FileActivityStore(root).load();
+  assert.equal(loaded?.entries[0]?.kind === "agent" ? loaded.entries[0].title : undefined, "Repair checkout recovery");
+  assert.equal(loaded?.entries[0]?.kind === "agent" ? loaded.entries[0].agentId : undefined, "5");
+  assert.equal(loaded?.entries[1]?.kind === "agent" ? loaded.entries[1].title : undefined, undefined);
+});
+
 test("persistence drains queued writes and performs a final save on disposal", async () => {
   let listener: (() => void) | undefined;
   let saves = 0;

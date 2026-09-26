@@ -1,5 +1,5 @@
 import { spawn, type ChildProcess } from "node:child_process";
-import { closeSync, mkdirSync, openSync } from "node:fs";
+import { closeSync, mkdirSync, openSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { TerminalCreationOptions, TerminalHandle } from "./terminals.js";
 import type { ShellKind } from "./shell.js";
@@ -20,9 +20,20 @@ export function createBackgroundProcess(
       if (child !== undefined) throw new Error("Background execution already started");
       const root = options.env.ABOARD_RUNTIME_ROOT;
       if (root === undefined) throw new Error("Background execution requires persistent runtime storage");
-      const logs = join(root, "executions", options.env.HARNESS_EXECUTION_ID ?? options.env.ABOARD_EXECUTION_ID ?? options.env.ABOARD_AGENT_ID ?? "independent");
+      const harnessExecution = options.env.HARNESS_EXECUTION_ID;
+      const harnessState = options.env.HARNESS_STATE_DIR;
+      const logs = harnessState !== undefined && harnessExecution !== undefined && /^[0-9a-f-]{36}$/iu.test(harnessExecution)
+        ? join(harnessState, "runtime", "watch", harnessExecution)
+        : join(root, "executions", harnessExecution ?? options.env.ABOARD_EXECUTION_ID ?? options.env.ABOARD_AGENT_ID ?? "independent");
       mkdirSync(logs, { recursive: true });
-      const stdout = openSync(join(logs, "stdout.jsonl"), "a", 0o600);
+      const log = join(logs, "stdout.jsonl");
+      const agentId = options.env.ABOARD_AGENT_ID;
+      if (agentId !== undefined && /^[A-Za-z0-9._-]+$/u.test(agentId)) {
+        const watch = join(root, "watch");
+        mkdirSync(watch, { recursive: true });
+        writeFileSync(join(watch, `${agentId}.json`), JSON.stringify({ log, provider: options.provider }) + "\n", { mode: 0o600 });
+      }
+      const stdout = openSync(log, "a", 0o600);
       const stderr = openSync(join(logs, "stderr.log"), "a", 0o600);
       const executable = process.platform === "win32"
         ? shell === "cmd" ? "cmd.exe" : shell === "git-bash" ? "bash.exe" : "powershell.exe"

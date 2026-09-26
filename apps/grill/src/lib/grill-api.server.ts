@@ -59,9 +59,17 @@ export async function getRound(roundId: string) {
 }
 
 export async function promptForRound(roundId: string) {
-  const round = await getRound(roundId);
-  if (!round) return null;
-  return { round, prompt: compilePrompt(round.payload as RoundPayload, round.answers as AnswerDraft[]) };
+  // Preview and snapshot validation only need the payload and answers. The full round also
+  // fetches assets and every historical snapshot, which grows with each copy.
+  const [{ data: round, error }, { data: answers }] = await Promise.all([
+    supabaseAdmin.from("grill_rounds").select("id,session_id,status,payload").eq("id", roundId).maybeSingle(),
+    supabaseAdmin
+      .from("grill_answer_drafts")
+      .select("question_id,selected_option,note,state")
+      .eq("round_id", roundId),
+  ]);
+  if (error || !round) return null;
+  return { round, prompt: compilePrompt(round.payload as RoundPayload, (answers ?? []) as AnswerDraft[]) };
 }
 
 export async function touchSession(sessionId: string): Promise<void> {

@@ -3,7 +3,7 @@
   "displayName": "aboard; visible coding agents",
   "publisher": "aboard",
   "description": "VS Code integration for visible Claude Code and ChatGPT sessions, fleet tracking, and Auto Run orchestration.",
-  "version": "0.3.6",
+  "version": "0.3.7",
   "icon": "assets/aboard.png",
   "private": true,
   "repository": {
@@ -87,6 +87,12 @@
         "title": "Focus Agent",
         "category": "Aboard",
         "icon": "$(terminal)"
+      },
+      {
+        "command": "aboard.watchAgent",
+        "title": "Watch Background Agent",
+        "category": "Aboard",
+        "icon": "$(eye)"
       },
       {
         "command": "aboard.killAgent",
@@ -323,6 +329,10 @@
         {
           "command": "aboard.focusAgent",
           "when": "false"
+        },
+        {
+          "command": "aboard.watchAgent",
+          "when": "aboard.initialized"
         },
         {
           "command": "aboard.killAgent",

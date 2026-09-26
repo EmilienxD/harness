@@ -68,6 +68,13 @@ export function validateResumeMessage(message: string): void {
   if (/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/u.test(message)) throw new Error("Resume message contains terminal control characters");
 }
 
+function codexPasteSettleMs(message: string): number {
+  // VS Code's sendText has no completion signal. Larger pastes can still be
+  // arriving after the call returns, especially through Windows terminals.
+  const kibibytesBeyondFirst = Math.max(0, Math.ceil(Buffer.byteLength(message, "utf8") / 1024) - 1);
+  return Math.min(5_000, 250 + kibibytesBeyondFirst * 500);
+}
+
 export interface TerminalCreationOptions {
   readonly cwd: string;
   readonly provider?: AgentPlatformId;
@@ -149,6 +156,7 @@ export interface TerminalSnapshot {
 }
 
 interface TerminalRecord extends Omit<TerminalSnapshot, "sessionId" | "status" | "closedAt" | "exitCode"> {
+  provider: AgentPlatformId | undefined;
   sessionId: SessionId;
   status: TerminalSnapshot["status"];
   closedAt: string | null;
@@ -279,6 +287,7 @@ export class TerminalController {
     const createdAt = this.#now().toISOString();
     const record: TerminalRecord = {
       backend: headless ? "process" : "terminal",
+      provider: request.provider,
       terminalId,
       agentId: request.agentId,
       sessionId: request.sessionId,
@@ -409,7 +418,9 @@ export class TerminalController {
     if (record.backend === "process") throw new Error("Resume messages require an interactive terminal");
     validateResumeMessage(message);
     this.#requireOpenHandle(terminalId).sendText(`\u001b[200~${message.replace(/\r\n?/gu, "\n")}\u001b[201~`, false);
-    await this.#sleep(100);
+    // Codex treats Enter within 120 ms of a paste burst as a pasted newline.
+    // Wait longer for larger writes so the tail can reach its composer first.
+    await this.#sleep(record.provider === "chatgpt" ? codexPasteSettleMs(message) : 100);
     this.#requireOpenHandle(terminalId).sendText("\r", false);
     this.show(terminalId);
   }
@@ -481,7 +492,7 @@ export class TerminalController {
   }
 
   #snapshot(record: TerminalRecord): TerminalSnapshot {
-    const { handle: _handle, killRequested: _killRequested, ...snapshot } = record;
+    const { handle: _handle, killRequested: _killRequested, provider: _provider, ...snapshot } = record;
     return snapshot;
   }
 }

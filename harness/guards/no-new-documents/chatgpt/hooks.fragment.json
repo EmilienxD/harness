@@ -10,6 +10,16 @@
           }
         ]
       }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${PYTHON} \"${HOOKS_DIR}/no_new_documents_hook.py\" --chatgpt"
+          }
+        ]
+      }
     ]
   }
 }

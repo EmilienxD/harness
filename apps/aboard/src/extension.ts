@@ -20,6 +20,8 @@ import { createVsCodeTerminalHost } from "./vscode/terminals.js";
 import { spawnCommandRunner } from "./platform/preflight.js";
 import { ClaudeAgentPlatform } from "./claude/platform.js";
 import { ChatGptAgentPlatform } from "./chatgpt/platform.js";
+import { ChatGptSessionProbe } from "./chatgpt/sessions.js";
+import { claudeSessionTitle } from "./claude/sessions.js";
 import { ChatGptHookTrust } from "./chatgpt/hook-trust.js";
 import type { AgentPlatform, AgentPlatformId } from "./platform/agent-platform.js";
 import { GitHubBoundaryError, GitHubClient, ProcessGhExecutor } from "./github/client.js";
@@ -343,7 +345,27 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
       : undefined;
     return platform.isResumable(sessionId, cwd, command);
   };
+  const titleProbe = new ChatGptSessionProbe();
+  const refreshActivityTitles = async (): Promise<void> => {
+    if (!initialized) return;
+    await Promise.allSettled(activity.entries().filter((entry) => entry.kind === "agent" && entry.reopen !== undefined).map(async (entry) => {
+      if (entry.kind !== "agent" || entry.reopen === undefined) return;
+      const { platform, sessionId } = entry.reopen;
+      const cwd = entry.reopen.cwd ?? workspaceRoot;
+      let title: string | undefined;
+      if (platform === "claude") title = await claudeSessionTitle(sessionId, cwd);
+      else {
+        const configured = await launchFile.get(entry.type).catch(() => undefined);
+        const settings = configured?.platform === platform ? configured.settings : undefined;
+        const command = typeof settings === "object" && settings !== null && "declaredCommand" in settings
+          ? (settings as { readonly declaredCommand?: readonly string[] }).declaredCommand : undefined;
+        title = await titleProbe.title(sessionId, cwd, command);
+      }
+      if (title !== undefined) activity.setTitle(sessionId, title);
+    }));
+  };
   if (initialized) await activity.load().catch((error: unknown) => output.appendLine(`Activity store could not be read: ${error instanceof Error ? error.message : "unknown error"}`));
+  if (initialized) void refreshActivityTitles();
   const rememberEndedSession = async (
     session: AgentSession,
     endedAt: IsoTimestamp,
@@ -367,9 +389,14 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
       ...(reason === undefined ? {} : { reason }),
       ...(terminalId === undefined ? {} : { terminalId }),
     });
+    void refreshActivityTitles();
   };
   const github = new GitHubClient(new ProcessGhExecutor(workspaceRoot));
-  let agentIdCounter = WorkspaceAgentIdCounter.load(runtime.root, () => fleet.list().map((session) => session.identity.agentId as string), runtimeAdmission.isOpen);
+  const knownAgentIds = (): string[] => [
+    ...fleet.list().map((session) => session.identity.agentId as string),
+    ...activity.entries().filter((entry) => entry.kind === "agent").map((entry) => entry.agentId as string),
+  ];
+  let agentIdCounter = WorkspaceAgentIdCounter.load(runtime.root, knownAgentIds, runtimeAdmission.isOpen, storageRoot);
   const lease = new WriteLease();
   const launchConfigurations = workerConfigurations(workspaceRoot, launchFile);
   let launchFileNotice: string | undefined;
@@ -723,6 +750,7 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
     return autoRun.startPreviewed(preview);
   };
   fleetUi = registerNativeFleetUi(context, {
+    runtimeRoot: runtime.root,
     port: () => bridge?.port,
     fleet,
     lease,
@@ -838,23 +866,22 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
       const at = new Date().toISOString() as IsoTimestamp;
       if (lease.current() !== undefined) lease.forceRelease(at, reason);
       fleet.clear(at);
-      await activity.reset();
 
       bridgeEnvironment = undefined;
       await bridge?.stop();
       bridge = undefined;
       await commandEndpoint.clear().catch(() => undefined);
-      await rm(runtime.root, { recursive: true, force: true });
       output.appendLine(scaffoldState === "uninitialized"
-        ? "Project state directory .abd/ was removed; the aboard session was discarded."
+        ? "Project state directory .abd/ was removed; aboard runtime access is suspended. Saved activity is retained."
         : "aboard's project assets no longer match this extension; runtime access was closed until they are updated.");
     }
     initialized = next;
     if (initialized && !wasInitialized) {
       runtimeAdmission.open();
-      agentIdCounter = WorkspaceAgentIdCounter.load(runtime.root, () => fleet.list().map((session) => session.identity.agentId as string), runtimeAdmission.isOpen);
       // The store on disk is the only history a newly initialized project has.
       await activity.load().catch((error: unknown) => output.appendLine(`Activity store could not be read: ${error instanceof Error ? error.message : "unknown error"}`));
+      agentIdCounter = WorkspaceAgentIdCounter.load(runtime.root, knownAgentIds, runtimeAdmission.isOpen, storageRoot);
+      void refreshActivityTitles();
 
     }
     if (initialized) await startRuntimeBridge();
@@ -875,7 +902,7 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
   }
   context.subscriptions.push(
     scaffoldWatcher,
-    window.onDidChangeWindowState((state) => { if (state.focused) void publishScaffoldState(); }),
+    window.onDidChangeWindowState((state) => { if (state.focused) void publishScaffoldState().then(refreshActivityTitles); }),
   );
   const scaffold = async () => {
     try {

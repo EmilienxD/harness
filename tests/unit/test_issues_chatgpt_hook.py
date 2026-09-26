@@ -147,6 +147,29 @@ def test_chatgpt_publish_dry_run_uses_shared_oversized_body_logic(
     assert [path.name for path in drafts.iterdir()] == [draft.name]
 
 
+def test_chatgpt_dry_run_accepts_powershell_utf8_draft(tmp_path, monkeypatch, capsys):
+    batch_id = adapter.issues_session_id("thr_powershell")
+    drafts = tmp_path / ".harness/issue-drafts"
+    drafts.mkdir(parents=True)
+    (drafts / f"{batch_id}.issue-0.md").write_text(
+        "# Audio analysis\n\n> spec\n\nDraft body\n", encoding="utf-8-sig"
+    )
+    monkeypatch.setattr(
+        sys,
+        "stdin",
+        io.StringIO(json.dumps({
+            "session_id": "thr_powershell",
+            "cwd": str(tmp_path),
+            "prompt": "$publish-issues --dry",
+        })),
+    )
+
+    adapter.main(["--chatgpt"])
+
+    response = json.loads(capsys.readouterr().out)
+    assert "Dry run complete: 1 issue(s) ready to publish" in response["reason"]
+
+
 def test_chatgpt_publish_is_scoped_to_the_current_session(
     tmp_path, monkeypatch, capsys
 ):

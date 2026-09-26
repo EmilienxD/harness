@@ -1,0 +1,7 @@
+interface:
+  display_name: "Approve doc draft"
+  short_description: "Move a reviewed document draft into place without a model turn"
+  default_prompt: "Use $approve-doc-draft followed by a draft path or directory, or alone to list pending drafts."
+
+policy:
+  allow_implicit_invocation: false

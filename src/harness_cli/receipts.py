@@ -89,6 +89,16 @@ class ReceiptStore:
                     for record in files
                 ):
                     raise ValueError(f"invalid Harness receipt store at {selected}")
+                links = receipt.get("links", [])
+                if not isinstance(links, list) or any(
+                    not isinstance(record, dict)
+                    or not isinstance(record.get("path"), str)
+                    or not isinstance(record.get("target"), str)
+                    for record in links
+                ):
+                    raise ValueError(f"invalid Harness receipt store at {selected}")
+                if receipt.get("skillMode", "copy") not in {"copy", "symlink"}:
+                    raise ValueError(f"invalid Harness receipt store at {selected}")
                 actions = receipt.get("actions", [])
                 if not isinstance(actions, list) or any(
                     not isinstance(action, dict) or not isinstance(action.get("type"), str)

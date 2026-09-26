@@ -1,6 +1,6 @@
 name = "no-new-documents"
-version = "2.1.0"
-description = "Cross-platform PreToolUse guard that prevents agents from creating files in configured documentation directories"
+version = "3.0.0"
+description = "Cross-platform guard that routes new files in configured documentation directories through user-approved drafts"
 docs = "https://github.com/EmilienxD/harness/blob/main/README.md#hooks"
 
 [platforms.claude]
@@ -22,3 +22,25 @@ src = "no-new-documents.toml"
 dest = ".harness/guards/no-new-documents.toml"
 root = "workspace"
 starter = true
+
+[[files]]
+src = "approve-doc-draft"
+dest = "approve-doc-draft"
+root = "skills"
+
+[[files]]
+src = "reject-doc-draft"
+dest = "reject-doc-draft"
+root = "skills"
+
+[[files]]
+src = "chatgpt/agents/approve-doc-draft.yaml"
+dest = "approve-doc-draft/agents/openai.yaml"
+root = "skills"
+platforms = ["chatgpt"]
+
+[[files]]
+src = "chatgpt/agents/reject-doc-draft.yaml"
+dest = "reject-doc-draft/agents/openai.yaml"
+root = "skills"
+platforms = ["chatgpt"]

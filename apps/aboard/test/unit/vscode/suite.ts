@@ -64,7 +64,7 @@ export async function run(): Promise<void> {
 
   const available = await commands.getCommands(true);
   for (const command of [
-    "aboard.focusFleet", "aboard.focusAgent", "aboard.killAgent", "aboard.initializeProject", "aboard.updateProject", "aboard.reopenSession",
+    "aboard.focusFleet", "aboard.focusAgent", "aboard.watchAgent", "aboard.killAgent", "aboard.initializeProject", "aboard.updateProject", "aboard.reopenSession",
     "aboard.startAutoRun", "aboard.resumeAutoRun", "aboard.discardAutoRun", "aboard.autoRun.refresh",
     "aboard.autoRun.openCurrentIssue", "aboard.autoRun.openPullRequest", "aboard.openIssue", "aboard.openPullRequest",
     "aboard.activity.reopen", "aboard.activity.clear", "aboard.clearBranches",

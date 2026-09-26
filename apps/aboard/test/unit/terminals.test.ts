@@ -64,7 +64,7 @@ const agent = (value: string) => value as AgentId;
 const session = (value: string) => value as SessionId;
 const terminal = (value: string) => value as TerminalId;
 
-function setup() {
+function setup(sleep: (milliseconds: number) => Promise<void> = async () => undefined) {
   const host = new FakeTerminalHost();
   const events: TerminalLifecycleEvent[] = [];
   let id = 0;
@@ -74,7 +74,7 @@ function setup() {
     environment: () => ({ port: 4932, token: "secret", workspaceRoot: "C:\\work\\aboard" }),
     terminalIdFactory: () => terminal(`terminal-${++id}`),
     now: () => new Date("2026-07-30T10:00:00.000Z"),
-    sleep: async () => undefined,
+    sleep,
     onLifecycleEvent: (event) => events.push(event),
   });
   return { controller, host, events };
@@ -90,6 +90,43 @@ test("resuming in an open terminal pastes a multiline message and submits it onc
     { text: "\r", addNewLine: false },
   ]);
   assert.equal(controller.list().length, 1);
+});
+
+test("Codex receives Enter after its paste suppression window has elapsed", async () => {
+  let elapsedMs = 0;
+  const { controller, host } = setup(async (milliseconds) => { elapsedMs += milliseconds; });
+  const created = controller.create({
+    agentId: agent("codex-child"), sessionId: session("codex-conversation"),
+    agentType: "general", executionMode: "interactive", provider: "chatgpt",
+  });
+  const terminalInput = host.created[0]!.terminal;
+  terminalInput.sent.length = 0;
+
+  await controller.sendResumeMessage(created.terminalId, "Answers for round 2");
+
+  assert.deepEqual(terminalInput.sent.map(({ text }) => text), [
+    "\u001b[200~Answers for round 2\u001b[201~",
+    "\r",
+  ]);
+  assert.ok(elapsedMs > 120, "Enter must arrive after Codex's 120 ms paste suppression window");
+});
+
+test("a large Codex paste gets more time to reach the composer before Enter", async () => {
+  let elapsedMs = 0;
+  const { controller, host } = setup(async (milliseconds) => { elapsedMs += milliseconds; });
+  const created = controller.create({
+    agentId: agent("codex-child"), sessionId: session("codex-conversation"),
+    agentType: "general", executionMode: "interactive", provider: "chatgpt",
+  });
+  const terminalInput = host.created[0]!.terminal;
+  terminalInput.sent.length = 0;
+  const prompt = `Answers for round 2\n${"Long answer. ".repeat(400)}`;
+
+  await controller.sendResumeMessage(created.terminalId, prompt);
+
+  assert.equal(terminalInput.sent[0]?.text, `\u001b[200~${prompt}\u001b[201~`);
+  assert.equal(terminalInput.sent[1]?.text, "\r");
+  assert.ok(elapsedMs >= 2_000, "a multi-kilobyte paste needs time to reach Codex before Enter");
 });
 
 test("interactive delegation resumes use the matching live terminal and preserve its session", async () => {

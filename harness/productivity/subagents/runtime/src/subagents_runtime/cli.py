@@ -9,6 +9,7 @@ import sys
 from subagents_runtime import __version__
 from subagents_runtime.delegation import arm_reply, process_inbox
 from subagents_runtime.sessions import SessionError, launch, launch_delegated, resume
+from subagents_runtime.progress import choose_current_session, watch
 
 
 def cmd_run(args: argparse.Namespace) -> int:
@@ -26,9 +27,17 @@ def cmd_ask(args: argparse.Namespace) -> int:
         f"Processed {len(results)} requests: {launched} launched, {failed} failed, {uncertain} uncertain"
     )
     for result in results:
+        agent = ""
+        if result.child_session_id and result.status == "launched":
+            from subagents_runtime.storage import connect
+
+            with connect() as db:
+                row = db.execute("SELECT agent_index,execution_mode FROM sessions WHERE id=?", (result.child_session_id,)).fetchone()
+            if row and row[1] == "auto":
+                agent = f" (agent-{row[0]}; watch: harness watch {result.child_session_id})"
         print(
             f"{result.path.name}: {result.status}"
-            + (f" ({result.reason})" if result.reason else "")
+            + (f" ({result.reason})" if result.reason else agent)
         )
     return 0
 
@@ -45,6 +54,11 @@ def cmd_reply(_args: argparse.Namespace) -> int:
 def cmd_resume(args: argparse.Namespace) -> int:
     resume(args.session_id, " ".join(args.message).strip() or None)
     print(f"Resumed session {args.session_id}")
+    return 0
+
+
+def cmd_watch(args: argparse.Namespace) -> int:
+    watch(args.session_id or choose_current_session(), once=args.once)
     return 0
 
 
@@ -78,6 +92,10 @@ def build_parser() -> argparse.ArgumentParser:
     resume_parser.add_argument("session_id")
     resume_parser.add_argument("message", nargs="*")
     resume_parser.set_defaults(func=cmd_resume)
+    watch_parser = commands.add_parser("watch", help="follow a background session's progress")
+    watch_parser.add_argument("session_id", nargs="?", help="child session ID or agent-i inside its parent; omit when one background session is active here")
+    watch_parser.add_argument("--once", action="store_true", help="show recorded progress and exit")
+    watch_parser.set_defaults(func=cmd_watch)
     return parser
 
 

@@ -1,5 +1,5 @@
 name = "grill-me-in-cloud"
-version = "2.1.2"
+version = "2.1.6"
 description = "Publishes visual design interviews to a persistent hosted board"
 docs = "https://github.com/EmilienxD/harness/blob/main/README.md#user-invoked-skills"
 requires = []
@@ -20,12 +20,7 @@ root = "skills"
 
 [[files]]
 src = "grill_me_in_cloud_hook.py"
-dest = "grill-cloud/grill_me_in_cloud_hook.py"
-root = "hooks"
-
-[[files]]
-src = "grill_cloud_core.py"
-dest = "grill-cloud/grill_cloud_core.py"
+dest = "grill_me_in_cloud_hook.py"
 root = "hooks"
 
 [[files]]

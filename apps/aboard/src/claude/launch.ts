@@ -1,7 +1,6 @@
 
 import type { LaunchRestrictions, WriteCapability } from "../domain/capability.js";
 import {
-  agentLabel,
   isAutomatedAgentType,
   isAutoRunWorkerType,
   isHeadlessExecution,
@@ -442,8 +441,6 @@ export function planLaunch(request: LaunchPlanRequest): LaunchPlan {
     "--session-id",
     request.sessionId,
     ...(request.forkSessionId === undefined ? [] : ["--resume", request.forkSessionId, "--fork-session"]),
-    "--name",
-    agentLabel({ agentId: request.agentId, type: agentType }),
     ...shapeArguments,
 
     ...toolListArguments("--disallowedTools", denyRules([

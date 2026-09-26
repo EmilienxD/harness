@@ -40,6 +40,49 @@ export async function sessionIsResumable(
   return transcriptHoldsConversation(sessionTranscriptPath(sessionId, cwd, configDirectory));
 }
 
+/** Reads only display metadata from Claude's append-only conversation file. */
+export async function claudeSessionTitle(
+  sessionId: SessionId,
+  cwd: string,
+  configDirectory?: string,
+): Promise<string | undefined> {
+  const stream = createReadStream(sessionTranscriptPath(sessionId, cwd, configDirectory), { encoding: "utf8" });
+  let generated: string | undefined;
+  let named: string | undefined;
+  let preview: string | undefined;
+  try {
+    const lines = createInterface({ input: stream, crlfDelay: Infinity });
+    try {
+      for await (const line of lines) {
+        let record: Record<string, unknown>;
+        try {
+          const parsed: unknown = JSON.parse(line);
+          if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) continue;
+          record = parsed as Record<string, unknown>;
+        } catch { continue; } // The last line may still be in flight.
+        if (record.sessionId !== sessionId) continue;
+        if (record.type === "ai-title" && typeof record.aiTitle === "string") generated = displayTitle(record.aiTitle);
+        if (record.type === "custom-title" && typeof record.customTitle === "string") named = displayTitle(record.customTitle);
+        if (preview === undefined && record.type === "user" && record.isMeta !== true) {
+          const message = record.message;
+          if (typeof message === "object" && message !== null && !Array.isArray(message)) {
+            const content = (message as Record<string, unknown>).content;
+            if (typeof content === "string" && !content.trimStart().startsWith("<")) preview = displayTitle(content);
+          }
+        }
+      }
+    } finally { lines.close(); }
+  } catch { return undefined; }
+  finally { stream.destroy(); }
+  return named !== undefined && !/^aboard-(?:interactive|explore|prototype|websearch|brainstorm|general|address|review)-\d+$/u.test(named)
+    ? named : generated ?? preview;
+}
+
+function displayTitle(value: string): string | undefined {
+  const title = value.trim().split(/\r?\n/u)[0]?.trim();
+  return title === undefined || title.length === 0 ? undefined : title.slice(0, 120);
+}
+
 export async function transcriptHoldsConversation(path: string): Promise<boolean> {
   const stream = createReadStream(path, { encoding: "utf8" });
   try {

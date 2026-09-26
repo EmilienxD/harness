@@ -68,7 +68,7 @@ test("fleet rows distinguish execution mode and provider independently of the wr
   model.dispose();
 });
 
-test("only interactive fleet rows offer terminal focus", () => {
+test("interactive fleet rows focus a terminal and background rows open progress", () => {
   const interactiveId = agent("interactive-claude");
   const backgroundId = agent("background-codex");
   const fleet = new FleetRegistry();
@@ -82,7 +82,7 @@ test("only interactive fleet rows offer terminal focus", () => {
   assert.equal(rows.get(interactiveId)?.contextValue, "aboard.agent.interactive");
   assert.equal(rows.get(interactiveId)?.command?.command, "aboard.focusAgent");
   assert.equal(rows.get(backgroundId)?.contextValue, "aboard.agent.background");
-  assert.equal(rows.get(backgroundId)?.command, undefined);
+  assert.equal(rows.get(backgroundId)?.command?.command, "aboard.watchAgent");
   model.dispose();
 });
 
@@ -102,6 +102,6 @@ test("an Auto Run worker row stays focusable while its exploration row does not"
   assert.equal(rows.get(addressId)?.command?.command, "aboard.focusAgent");
   assert.equal(rows.get(exploreId)?.icon, "eye-closed");
   assert.equal(rows.get(exploreId)?.contextValue, "aboard.agent.background");
-  assert.equal(rows.get(exploreId)?.command, undefined);
+  assert.equal(rows.get(exploreId)?.command?.command, "aboard.watchAgent");
   model.dispose();
 });

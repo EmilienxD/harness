@@ -760,7 +760,9 @@ kbd {
   border-bottom: 1px solid var(--paper-3);
   text-align: left;
   vertical-align: top;
-  overflow-wrap: anywhere;
+  /* "anywhere" would let columns shrink to one character; whole words overflow into the scroller. */
+  overflow-wrap: normal;
+  min-width: 6em;
 }
 .explanation th {
   color: var(--ink-2);
