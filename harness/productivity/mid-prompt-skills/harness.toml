@@ -1,6 +1,6 @@
 name = "mid-prompt-skills"
-version = "1.0.0"
-description = "Load skills invoked after other prompt text, where Claude Code leaves them unexpanded"
+version = "1.1.0"
+description = "Load skills invoked after other prompt text, where Claude Code or ChatGPT leaves them unexpanded"
 docs = "https://github.com/EmilienxD/harness/blob/main/README.md#hooks"
 
 [platforms.claude]
@@ -8,12 +8,12 @@ status = "supported"
 fragment = "claude/settings.fragment.json"
 
 [platforms.chatgpt]
-status = "unsupported"
-reason = "ChatGPT already loads a $skill mention anywhere in the prompt."
+status = "supported"
+fragment = "chatgpt/hooks.fragment.json"
 
 [[files]]
 src = "mid_prompt_skills_hook.py"
 dest = "mid_prompt_skills_hook.py"
 root = "hooks"
-platforms = ["claude"]
+platforms = ["claude", "chatgpt"]
 executable = true

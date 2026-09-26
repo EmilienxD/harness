@@ -9,7 +9,7 @@ Install a package from the Harness catalogue, or run `harness install <package>`
 | [`decisions`](productivity/decisions.md) | Surface consequential choices in the current conversation that remain uncertain. | Both |
 | [`handoff`](productivity/handoff.md) | Create a detailed handoff document for another agent. | Both |
 | [`handoff-grilling`](productivity/handoff-grilling.md) | Preserve a grilling conversation in a handoff document. | Both |
-| [`mid-prompt-skills`](productivity/mid-prompt-skills.md) | Expand Claude skills mentioned after other text in a prompt. | Claude only |
+| [`mid-prompt-skills`](productivity/mid-prompt-skills.md) | Expand skills mentioned after other text in a prompt. | Both |
 | [`next-decision`](productivity/next-decision.md) | Resolve a plan's open choices one at a time. | Both |
 | [`report-gotchas`](productivity/report-gotchas.md) | Send meaningful remaining implementation caveats to Discord. | Both |
 | [`setup-command-aliases`](productivity/setup-command-aliases.md) | Add or change PowerShell, Bash, or Zsh aliases. | Both |
@@ -26,7 +26,7 @@ Invoke `decisions` after a discussion to see only the important low-confidence c
 
 Use `handoff` to capture the current conversation for a new agent, or `handoff-grilling` for a grilling session. `mark-as-todo-hitl` leaves a focused `TODO(HITL)` where human input is needed; `address-todo-hitl` investigates the highest-priority marker, agrees on a resolution with you, and implements it. `writing-for-agents` helps author skills and agent instructions. Invoke `setup-command-aliases` or, on Windows, `setup-text-replacements` to have the agent update the relevant shell or AutoHotkey configuration.
 
-`mid-prompt-skills` is a Claude Code hook: it expands an invocable `/skill-name` even when it appears after other prompt text. It skips fenced code, skills already expanded, and skills disabled or restricted from direct invocation. It searches managed, personal, and project skills and `.claude/commands/`, but cannot load plugin skills or `--add-dir` skills.
+`mid-prompt-skills` expands a skill mention after other prompt text: `/skill-name` in Claude Code and `$skill-name` in ChatGPT. It leaves leading invocations to the provider's native loader and ignores examples in fenced code blocks. Claude searches managed, personal, and project skills plus `.claude/commands/`; ChatGPT searches project and user `.agents/skills` and also follows the linked skill-picker form, including plugin skills.
 
 ## Subagents
 

@@ -1,0 +1,14 @@
+{
+  "hooks": {
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${PYTHON} \"${HOOKS_DIR}/mid_prompt_skills_hook.py\" --chatgpt"
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -1,4 +1,4 @@
-"""Load user-invocable skills that Claude Code leaves unexpanded later in a prompt."""
+"""Load skills that Claude Code or ChatGPT leaves unexpanded later in a prompt."""
 from __future__ import annotations
 
 import json
@@ -11,6 +11,11 @@ from pathlib import Path
 
 
 INVOCATION = re.compile(r"(?<!\S)/([A-Za-z0-9][\w.:-]*)(?=\s|$)")
+CHATGPT_INVOCATION = re.compile(
+    r"(?<!\S)(?:\[\$(?P<link_name>[A-Za-z0-9][\w.-]*)\]"
+    r"\((?P<link_path><[^>\r\n]+>|[^)\r\n]+)\)|"
+    r"\$(?P<bare_name>[A-Za-z0-9][\w.-]*))(?=\s|$)"
+)
 FENCE = re.compile(r"^[ \t]*(`{3,}|~{3,}).*?(?:^[ \t]*\1[ \t]*$|\Z)", re.MULTILINE | re.DOTALL)
 MANAGED_ROOTS: tuple[Path, ...] = tuple(Path(root) for root in {
     "win32": [r"C:\Program Files\ClaudeCode"],
@@ -51,6 +56,38 @@ def find_skill(name: str, cwd: Path) -> Path | None:
         if candidate.is_file():
             return candidate
     return None
+
+
+def find_chatgpt_skill(name: str, cwd: Path) -> Path | None:
+    """Resolve a bare Codex skill mention from documented local skill roots."""
+    if any(part in {"", ".", ".."} for part in name.split("/")):
+        return None
+    codex_home = Path(os.environ.get("CODEX_HOME") or Path.home() / ".codex")
+    roots = [
+        *(directory / ".agents" / "skills" for directory in project_dirs(cwd)),
+        Path.home() / ".agents" / "skills",
+        codex_home / "skills",
+        codex_home / "skills" / ".system",
+    ]
+    if sys.platform != "win32":
+        roots.append(Path("/etc/codex/skills"))
+    for root in roots:
+        candidate = root / name / "SKILL.md"
+        if candidate.is_file():
+            return candidate
+    return None
+
+
+def selected_chatgpt_skill(match: re.Match, cwd: Path) -> tuple[str, Path | None]:
+    name = match.group("link_name") or match.group("bare_name")
+    linked = match.group("link_path")
+    if linked is None:
+        return name, find_chatgpt_skill(name, cwd)
+    path = Path(linked.removeprefix("<").removesuffix(">"))
+    if path.name != "SKILL.md" or not path.is_file():
+        return name, None
+    fields, _ = split_frontmatter(path.read_text(encoding="utf-8"))
+    return name, path if fields.get("name") == name else None
 
 
 def skill_overrides(project: Path) -> dict:
@@ -157,6 +194,16 @@ def render(name: str, path: Path, args: str, session: str, project: Path, overri
     )
 
 
+def render_chatgpt(name: str, path: Path) -> str:
+    """Render the instruction body a native explicit Codex skill would load."""
+    _, body = split_frontmatter(path.read_text(encoding="utf-8"))
+    return (
+        f"<skill-name>${name}</skill-name>\n"
+        f"<skill-path>{path}</skill-path>\n\n"
+        f"Base directory for this skill: {path.parent}\n\n{body.strip()}"
+    )
+
+
 def expansions_file(session: str) -> Path:
     safe = re.sub(r"[^A-Za-z0-9_-]", "_", session)
     return Path(tempfile.gettempdir()) / f"harness_mid_prompt_skills_{safe}.jsonl"
@@ -188,7 +235,7 @@ def take_expansions(session: str, prompt: str) -> list[str]:
     return names
 
 
-def handle(payload: dict) -> dict | None:
+def handle(payload: dict, provider: str = "claude") -> dict | None:
     event, session = payload.get("hook_event_name"), payload.get("session_id")
     if not isinstance(session, str) or not session:
         return None
@@ -198,6 +245,23 @@ def handle(payload: dict) -> dict | None:
     prompt = payload.get("prompt")
     if event != "UserPromptSubmit" or not isinstance(prompt, str):
         return None
+    if provider == "chatgpt":
+        cwd = Path(payload.get("cwd") or os.getcwd())
+        fences = [fence.span() for fence in FENCE.finditer(prompt)]
+        found = [
+            selected_chatgpt_skill(match, cwd)
+            for match in CHATGPT_INVOCATION.finditer(prompt)
+            if prompt[:match.start()].strip()
+            and not any(start <= match.start() < end for start, end in fences)
+        ]
+        blocks = [render_chatgpt(name, path) for name, path in found if path is not None]
+        if not blocks:
+            return None
+        header = (
+            "The user's prompt explicitly invokes these skills after other text, where ChatGPT did not load them. "
+            "Follow their complete instructions before acting."
+        )
+        return {"hookSpecificOutput": {"hookEventName": "UserPromptSubmit", "additionalContext": "\n\n".join([header, *blocks])}}
     expanded = take_expansions(session, prompt)
     cwd = Path(payload.get("cwd") or os.getcwd())
     project = Path(os.environ.get("CLAUDE_PROJECT_DIR") or cwd)
@@ -236,7 +300,8 @@ def main() -> int:
         if hasattr(stream, "reconfigure"):
             stream.reconfigure(encoding="utf-8")
     try:
-        print(json.dumps(handle(json.load(sys.stdin)) or {}))
+        provider = "chatgpt" if "--chatgpt" in sys.argv[1:] else "claude"
+        print(json.dumps(handle(json.load(sys.stdin), provider) or {}))
         return 0
     except Exception as error:
         print(str(error), file=sys.stderr)
