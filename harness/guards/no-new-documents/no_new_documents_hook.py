@@ -4,7 +4,7 @@
 PreToolUse denies creating a file in a protected path and points the agent at
 the mirrored draft path under `.harness/doc-drafts/`. UserPromptSubmit handles
 `approve-doc-draft` and `reject-doc-draft` without a model turn, then tells
-the agent the outcome on its next prompt.
+the agent the current draft status on its next prompt.
 """
 
 from __future__ import annotations
@@ -406,6 +406,18 @@ def _flush_notice(path: Path) -> str | None:
     return "\n".join(lines) or None
 
 
+def _pending_notice(root: Path) -> str | None:
+    drafts = _drafts_below(root / DRAFTS_DIR, root / DRAFTS_DIR)
+    if not drafts:
+        return None
+    return (
+        "These document drafts are still pending the user's approval or rejection. "
+        "They remain under `.harness/doc-drafts/`. If the user requests changes, "
+        "revise the drafts: "
+        + ", ".join(f"`{target}`" for target in drafts)
+    )
+
+
 def handle_prompt(payload: dict[str, Any]) -> int:
     text = payload.get("prompt")
     match = DRAFT_COMMAND.search(text) if isinstance(text, str) else None
@@ -416,11 +428,16 @@ def handle_prompt(payload: dict[str, Any]) -> int:
             notice = _flush_notice(notices)
         except Exception:  # noqa: BLE001 - a damaged notice never blocks a prompt
             notice = None
-        if notice:
+        try:
+            pending = _pending_notice(root)
+        except OSError:
+            pending = None
+        context = "\n".join(part for part in (notice, pending) if part)
+        if context:
             print(json.dumps({
                 "hookSpecificOutput": {
                     "hookEventName": "UserPromptSubmit",
-                    "additionalContext": notice,
+                    "additionalContext": context,
                 }
             }))
         return 0
