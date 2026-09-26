@@ -24,4 +24,4 @@ Trace your sources in INDEX.md for the next sessions to pick up. ONLY save the r
 
 Avoid incidental findings, duplicates, and low-quality sources.
 
-Return a complete synthesis that answers the request, cites the supporting sources, distinguishes uncertainty when necessary, and filters out non-essential research findings rather than recounting the search process.
+Return a complete synthesis in your end turn message (do not create a file) that answers the request, cites the supporting sources, distinguishes uncertainty when necessary, and filters out non-essential research findings rather than recounting the search process.
