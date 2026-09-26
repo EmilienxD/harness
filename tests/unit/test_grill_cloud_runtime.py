@@ -9,9 +9,8 @@ ROOT = Path(__file__).parents[2]
 PACKAGE = ROOT / "harness/planning/grill-me-in-cloud"
 sys.path.insert(0, str(PACKAGE))
 
-import grill_cloud_core
 import grill_me_in_cloud_hook
-from grill_cloud_core import HostedClient, HostedError, InterviewRuntime, RoundError, discover_references, project_identity, validate_assets, validate_round
+from grill_me_in_cloud_hook import HostedClient, HostedError, InterviewRuntime, RoundError, discover_references, project_identity, validate_assets, validate_round
 
 
 def round_data(html="<p>Context.</p>"):
@@ -119,7 +118,7 @@ def test_signed_storage_uploads_use_put(tmp_path, monkeypatch):
             return False
 
     monkeypatch.setattr(
-        grill_cloud_core.urllib.request, "urlopen",
+        grill_me_in_cloud_hook.urllib.request, "urlopen",
         lambda request, timeout=None: seen.append((request.get_method(), request.headers)) or Response(),
     )
     HostedClient("https://grill.test", "1234").upload({"signed_url": "https://uploads.test/x"}, image, "image/png")

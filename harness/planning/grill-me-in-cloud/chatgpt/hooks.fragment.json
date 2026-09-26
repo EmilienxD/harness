@@ -5,7 +5,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "${PYTHON} \"${HOOKS_DIR}/grill-cloud/grill_me_in_cloud_hook.py\" --chatgpt",
+            "command": "${PYTHON} \"${HOOKS_DIR}/grill_me_in_cloud_hook.py\" --chatgpt",
             "additionalContextLimit": 0
           }
         ]
@@ -16,7 +16,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "${PYTHON} \"${HOOKS_DIR}/grill-cloud/grill_me_in_cloud_hook.py\" --chatgpt",
+            "command": "${PYTHON} \"${HOOKS_DIR}/grill_me_in_cloud_hook.py\" --chatgpt",
             "timeout": 120,
             "additionalContextLimit": 0
           }
