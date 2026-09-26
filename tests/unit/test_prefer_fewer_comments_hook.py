@@ -193,6 +193,41 @@ def test_heredoc_write_is_scanned_with_the_target_language():
     assert hook.findings(text, added, hook.PYTHON, dict(hook.DEFAULT_LIMITS))
 
 
+def test_cat_heredoc_piped_to_tee_is_scanned():
+    command = "cat <<'EOF' | tee sample.py\n# one\n# two\n# three\n# four\n# five\nvalue = 1\nEOF"
+    code, output = run_hook({"tool_name": "Bash", "tool_input": {"command": command}, "cwd": "."}, session="tee1")
+    assert code == 0
+    assert output is not None
+
+
+def test_codex_apply_patch_event_delivers_a_finding():
+    patch = "*** Begin Patch\n*** Add File: sample.py\n+# one\n+# two\n+# three\n+# four\n+# five\n+value = 1\n*** End Patch"
+    code, output = run_hook({"tool_name": "apply_patch", "tool_input": {"command": patch}, "cwd": "."}, session="patch1")
+    assert code == 0
+    assert output is not None
+    assert "5-line comment" in output["hookSpecificOutput"]["additionalContext"]
+
+
+def test_powershell_set_content_is_scanned_after_the_write():
+    command = "Set-Content -LiteralPath sample.py -Value @('# one','# two','# three','# four','# five','value = 1')"
+    code, output = run_hook({"tool_name": "Bash", "tool_input": {"command": command}, "cwd": "."}, session="ps1")
+    assert code == 0
+    assert output is not None
+    assert "5-line comment" in output["hookSpecificOutput"]["additionalContext"]
+
+
+def test_printf_redirect_is_scanned_after_the_write():
+    command = "printf '# one\\n# two\\n# three\\n# four\\n# five\\nvalue = 1\\n' > sample.py"
+    code, output = run_hook({"tool_name": "Bash", "tool_input": {"command": command}, "cwd": "."}, session="printf1")
+    assert code == 0
+    assert output is not None
+
+
+def test_power_shell_write_does_not_report_comment_syntax_in_a_string():
+    command = "Set-Content -LiteralPath sample.py -Value @('url = \"https://example.com/#fragment\"', 'value = 1')"
+    assert run_hook({"tool_name": "Bash", "tool_input": {"command": command}, "cwd": "."}, session="ps2") == (0, None)
+
+
 def test_heredoc_without_a_file_target_is_ignored():
     assert not hook.changes({"tool_name": "Bash", "tool_input": {"command": "python <<'EOF'\n# a\nEOF\n"}})
 

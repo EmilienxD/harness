@@ -3,7 +3,7 @@
 PostToolUse hook: prefer-fewer-comments. Runs on Claude Code and ChatGPT.
 
 Fires after a write -- Write/Edit/MultiEdit, ChatGPT's `apply_patch`, or a
-shell heredoc -- and reads only the text that call added. An oversized
+literal shell write -- and reads only the text that call added. An oversized
 comment, an oversized docstring, or a change that is more comment than code
 leaves the write alone and returns `additionalContext` asking for less
 commentary from here on.
@@ -20,6 +20,7 @@ file every REMIND_INTERVAL_SECONDS, tracked in a per-session marker file.
 """
 from __future__ import annotations
 
+import ast
 import difflib
 import json
 import os
@@ -369,25 +370,55 @@ def every_line(text: str) -> set[int]:
 
 
 # Heredoc body, plus the file the surrounding command writes to.
-HEREDOC = re.compile(r"<<-?\s*[\"']?(?P<tag>[A-Za-z_][A-Za-z0-9_]*)[\"']?\r?\n(?P<body>.*?)\r?\n[ \t]*(?P=tag)",
+HEREDOC = re.compile(r"<<-?\s*[\"']?(?P<tag>[A-Za-z_][A-Za-z0-9_]*)[\"']?[^\r\n]*\r?\n(?P<body>.*?)\r?\n[ \t]*(?P=tag)",
                      re.DOTALL)
 REDIRECT_TARGET = re.compile(r">>?\s*(?![&>|])(?P<target>\"[^\"]*\"|'[^']*'|[^\s;&|)`<>]+)")
+TEE_TARGET = re.compile(r"\|\s*tee\s+(?:-a\s+)?(?P<target>\"[^\"]*\"|'[^']*'|[^\s;&|)`<>]+)", re.IGNORECASE)
+PRINT_REDIRECT = re.compile(
+    r"\b(?:printf|echo)\s+(?P<literal>'(?:[^']|''|\\')*'|\"(?:[^\"\\]|\\.)*\")"
+    r"\s*>\s*(?P<target>\"[^\"]*\"|'[^']*'|[^\s;&|)`<>]+)", re.IGNORECASE,
+)
+PS_CONTENT = re.compile(
+    r"\b(?:Set-Content|Add-Content)\s+-(?:LiteralPath|Path)\s+"
+    r"(?P<target>\"[^\"]*\"|'[^']*'|[^\s;&|)`<>]+)\s+-Value\s+"
+    r"(?P<value>@\((?:\s*'(?:[^']|'')*'\s*,?)*\)|'(?:[^']|'')*'|\"[^\"]*\")",
+    re.IGNORECASE,
+)
+PS_STRING = re.compile(r"'((?:[^']|'')*)'")
 PATCH_FILE = re.compile(r"^\*\*\*\s+(?:Add|Update)\s+File:\s*(?P<path>.+?)\s*$")
 
 
 def shell_changes(command: str) -> list[tuple[str, str, set[int]]]:
-    """(path, text, added lines) for each heredoc the command writes to a file."""
+    """(path, text, added lines) for common literal shell file writes."""
     changes: list[tuple[str, str, set[int]]] = []
     for match in HEREDOC.finditer(command):
         tail = command[match.end():]
-        target = REDIRECT_TARGET.search(tail.split("\n", 1)[0]) or REDIRECT_TARGET.search(
-            command[:match.start()]
-        )
+        header = command[:match.start()].rsplit("\n", 1)[-1] + command[match.start():].split("\n", 1)[0]
+        target = (REDIRECT_TARGET.search(tail.split("\n", 1)[0])
+                  or REDIRECT_TARGET.search(header)
+                  or TEE_TARGET.search(header))
         if target is None:
             continue
         path = target.group("target").strip("\"'")
         body = match.group("body")
         changes.append((path, body, every_line(body)))
+    for match in PRINT_REDIRECT.finditer(command):
+        literal = match.group("literal")
+        try:
+            body = ast.literal_eval(literal)
+        except (SyntaxError, ValueError):
+            continue
+        if isinstance(body, str):
+            changes.append((match.group("target").strip("\"'"), body, every_line(body)))
+    for match in PS_CONTENT.finditer(command):
+        raw = match.group("value")
+        if raw.startswith("@("):
+            body = "\n".join(part.replace("''", "'") for part in PS_STRING.findall(raw))
+        elif raw.startswith("'"):
+            body = raw[1:-1].replace("''", "'")
+        else:
+            body = raw[1:-1]
+        changes.append((match.group("target").strip("\"'"), body, every_line(body)))
     return changes
 
 
