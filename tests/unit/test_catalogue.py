@@ -119,6 +119,61 @@ def test_catalogue_defaults_to_both_providers_and_stops_when_up_to_date(monkeypa
     assert planned == {Platform.CLAUDE: {"aboard"}, Platform.CHATGPT: {"aboard"}}
 
 
+def test_catalogue_asks_for_skill_installation_mode(monkeypatch):
+    caveman = discover()["caveman"]
+    prompts = []
+    applied = []
+
+    class FakeUI:
+        def __init__(self, read_key):
+            pass
+
+        def intro(self, label):
+            pass
+
+        def multiselect(self, title, options, selected=None, **settings):
+            return {0, 1} if title == "Select providers" else {0}
+
+        def select(self, title, options, default=0):
+            prompts.append(title)
+            return 1 if title == "Skill installation" else 0
+
+        def note(self, title, lines):
+            pass
+
+        def confirm(self, title, default=True):
+            return True
+
+        def progress(self, active, complete, action):
+            return action()
+
+        def outro(self, message):
+            pass
+
+    class FakeInstaller:
+        def __init__(self, available, target, store):
+            self.target = target
+            self.skill_mode = "copy"
+
+        def plan(self, requested):
+            return [], [cli.Change("install", "caveman", "selected")]
+
+        def conflicts(self, requested):
+            return []
+
+        def unowned_host_products(self, requested):
+            return {}
+
+        def reconcile(self, requested, overwrite=(), adopt=()):
+            applied.append((self.target.platform, self.skill_mode))
+
+    wire_menu(monkeypatch, [caveman], FakeUI, FakeInstaller)
+
+    assert cli.catalogue_menu() == 0
+    assert prompts == ["Installation scope", "Skill installation"]
+    assert applied == [(Platform.CLAUDE, "symlink"), (Platform.CHATGPT, "symlink")]
+
+
 def test_catalogue_uses_the_skills_style_flow_with_only_claude_and_chatgpt(monkeypatch):
     aboard = discover()["aboard"]
     auto = discover()["auto"]
@@ -180,6 +235,7 @@ def test_catalogue_uses_the_skills_style_flow_with_only_claude_and_chatgpt(monke
         ("multiselect", "Select providers"),
         ("select", "Installation scope"),
         ("multiselect", "Select packages"),
+        ("select", "Skill installation"),
         ("note", "Installation Summary"),
         ("confirm", "Proceed with changes?"),
         ("progress", "Applying catalogue changes"),
@@ -610,6 +666,80 @@ def test_reconcile_repairs_a_missing_owned_file_at_the_same_version(tmp_path):
 
     assert changes == [Change("update", tool.name, "missing installed files")]
     assert skill.is_file()
+
+
+def test_shared_symlink_skill_upgrades_across_both_providers(tmp_path):
+    root = tmp_path / "shared-skill"
+    root.mkdir()
+    (root / "SKILL.md").write_text("first version", encoding="utf-8")
+    manifest = root / "harness.toml"
+
+    def tool(version):
+        manifest.write_text(
+            f'name="shared-skill"\nversion="{version}"\ndescription="x"\n'
+            '[platforms.claude]\nstatus="supported"\n'
+            '[platforms.chatgpt]\nstatus="supported"\n'
+            '[[files]]\nsrc="SKILL.md"\ndest="shared-skill/SKILL.md"\nroot="skills"\n',
+            encoding="utf-8",
+        )
+        return load_tool(root)
+
+    project = tmp_path / "project"
+    project.mkdir()
+    store = ReceiptStore.load(tmp_path / "receipts.json")
+
+    def install(selected):
+        installers = [
+            CatalogueInstaller({selected.name: selected}, Target.for_project(project, platform), store,
+                               skill_mode="symlink")
+            for platform in (Platform.CLAUDE, Platform.CHATGPT)
+        ]
+        reconcile_targets([(installer, {selected.name}) for installer in installers])
+
+    install(tool("1.0.0"))
+    (root / "SKILL.md").write_text("second version", encoding="utf-8")
+    install(tool("1.1.0"))
+
+    assert (project / ".agents/skills/shared-skill/SKILL.md").read_text() == "second version"
+    assert (project / ".claude/skills/shared-skill").is_symlink()
+
+
+def test_shared_skill_is_removed_after_one_provider_upgrades_then_both_uninstall(tmp_path):
+    root = tmp_path / "shared-skill"
+    root.mkdir()
+    manifest = root / "harness.toml"
+
+    def tool(version, content):
+        (root / "SKILL.md").write_text(content, encoding="utf-8")
+        manifest.write_text(
+            f'name="shared-skill"\nversion="{version}"\ndescription="x"\n'
+            '[platforms.claude]\nstatus="supported"\n'
+            '[platforms.chatgpt]\nstatus="supported"\n'
+            '[[files]]\nsrc="SKILL.md"\ndest="shared-skill/SKILL.md"\nroot="skills"\n',
+            encoding="utf-8",
+        )
+        return load_tool(root)
+
+    project = tmp_path / "project"
+    project.mkdir()
+    store = ReceiptStore.load(tmp_path / "receipts.json")
+
+    def installer(selected, platform):
+        return CatalogueInstaller({selected.name: selected}, Target.for_project(project, platform), store,
+                                  skill_mode="symlink")
+
+    old = tool("1.0.0", "first")
+    reconcile_targets([
+        (installer(old, platform), {old.name})
+        for platform in (Platform.CLAUDE, Platform.CHATGPT)
+    ])
+    new = tool("1.1.0", "second")
+    installer(new, Platform.CLAUDE).reconcile({new.name})
+    installer(new, Platform.CLAUDE).reconcile(set())
+    installer(new, Platform.CHATGPT).reconcile(set())
+
+    assert not (project / ".agents/skills/shared-skill/SKILL.md").exists()
+    assert not (project / ".claude/skills/shared-skill").is_symlink()
 
 
 def test_receipt_paths_cannot_escape_the_target_root(tmp_path):

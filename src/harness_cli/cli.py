@@ -107,6 +107,25 @@ def _root_packages(targets: list[Target], store: ReceiptStore) -> set[str]:
     }
 
 
+def _selection_has_claude_skills(available: dict[str, Tool], selected: set[str]) -> bool:
+    pending = list(selected)
+    seen: set[str] = set()
+    while pending:
+        name = pending.pop()
+        if name in seen or name not in available:
+            continue
+        seen.add(name)
+        tool = available[name]
+        if any(
+            spec.root == "skills"
+            and (spec.platforms is None or Platform.CLAUDE in spec.platforms)
+            for spec in tool.files
+        ):
+            return True
+        pending.extend(dependency.name for dependency in tool.dependencies)
+    return False
+
+
 def _skip_line(tool: Tool, platform: Platform) -> str:
     support = tool.support_for(platform)
     product = get_adapter(platform).product_name
@@ -269,7 +288,30 @@ def catalogue_menu(*, local: Path | None = None, root: Path | None = None) -> in
             return 0
         selected_names = {tools[index].name for index in package_selection}
 
+        skill_mode: str | None = None
+        if Platform.CLAUDE in platforms and _selection_has_claude_skills(available, selected_names):
+            claude_target = next(target for target in targets if target.platform is Platform.CLAUDE)
+            previous = installed_packages(claude_target, store)
+            default_mode = 1 if any(
+                receipt.get("skillMode") == "symlink" for receipt in previous.values()
+            ) else 0
+            choice = ui.select(
+                "Skill installation",
+                (
+                    MenuOption("Copy", "Install separate skill files for Claude Code and Codex"),
+                    MenuOption("Symlink", "Install in .agents and link Claude Code skills there"),
+                ),
+                default=default_mode,
+            )
+            if choice is None:
+                _cancel(ui)
+                return 0
+            skill_mode = ("copy", "symlink")[choice]
+
         installers = [CatalogueInstaller(available, target, store) for target in targets]
+        if skill_mode is not None:
+            for installer in installers:
+                installer.skill_mode = skill_mode
         requests = {
             target.platform: {
                 name
@@ -390,6 +432,9 @@ def catalogue_menu(*, local: Path | None = None, root: Path | None = None) -> in
                     CatalogueInstaller(available, target, locked_store)
                     for target in targets
                 ]
+                if skill_mode is not None:
+                    for installer in locked_installers:
+                        installer.skill_mode = skill_mode
                 for installer in locked_installers:
                     installer.update_packages = selected_updates
                 locked_changes = {
@@ -443,6 +488,10 @@ def build_parser() -> argparse.ArgumentParser:
     install.add_argument("--root", type=Path, default=argparse.SUPPRESS, help="project root (default: current directory)")
     install.add_argument("--dry-run", action="store_true", help="print the plan without changing files")
     install.add_argument(
+        "--skill-mode", choices=("copy", "symlink"),
+        help="copy skills for each provider or link Claude skills to .agents (default: preserve existing mode, then copy)",
+    )
+    install.add_argument(
         "--overwrite", action="store_true",
         help="replace existing destination files Harness does not own",
     )
@@ -484,6 +533,10 @@ def build_parser() -> argparse.ArgumentParser:
     )
     upgrade.add_argument("--root", type=Path, default=argparse.SUPPRESS, help="project root (default: current directory)")
     upgrade.add_argument("--dry-run", action="store_true", help="print the plan without changing files")
+    upgrade.add_argument(
+        "--skill-mode", choices=("copy", "symlink"),
+        help="copy skills for each provider or link Claude skills to .agents (default: preserve existing mode)",
+    )
     upgrade.add_argument(
         "--overwrite", action="store_true",
         help="replace existing destination files Harness does not own",
