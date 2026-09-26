@@ -15,7 +15,7 @@ export interface FleetTreeItem {
   readonly contextValue: "aboard.agent.interactive" | "aboard.agent.background";
   readonly collapsible: boolean;
   readonly command?:
-    | { readonly command: "aboard.focusAgent"; readonly title: string; readonly arguments: readonly [FleetTreeNode] };
+    | { readonly command: "aboard.focusAgent" | "aboard.watchAgent"; readonly title: string; readonly arguments: readonly [FleetTreeNode] };
 }
 
 export interface FleetTreeHost {
@@ -61,7 +61,9 @@ export class FleetTreeModel {
       icon: agentIcon(session),
       contextValue: background ? "aboard.agent.background" : "aboard.agent.interactive",
       collapsible: false,
-      ...(background ? {} : { command: { command: "aboard.focusAgent" as const, title: "Focus Agent", arguments: [node] as const } }),
+      command: background
+        ? { command: "aboard.watchAgent", title: "Watch Agent", arguments: [node] }
+        : { command: "aboard.focusAgent", title: "Focus Agent", arguments: [node] },
     };
   }
 

@@ -11,6 +11,8 @@ work uses detached processes with structured output and execution logs. Its Flee
 Recent Activity records useful completed work, and AUTO RUN coordinates the local Git checkout with GitHub
 issues and pull requests. An authenticated loopback bridge carries lifecycle events back to the extension.
 
+Click a background agent in **Agent Fleet**, or run **Aboard: Watch Background Agent** from the Command Palette, to open its live read-only progress channel. It shows observed provider steps, elapsed time, and the time since the last event. Harness-backed children can also be followed with `harness watch` from another terminal, with or without Aboard.
+
 ## Visible sessions
 
 Initialize the project once, then use **Run Agent** to choose Claude or ChatGPT and open an empty, attended

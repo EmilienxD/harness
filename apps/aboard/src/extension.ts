@@ -750,6 +750,7 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
     return autoRun.startPreviewed(preview);
   };
   fleetUi = registerNativeFleetUi(context, {
+    runtimeRoot: runtime.root,
     port: () => bridge?.port,
     fleet,
     lease,
