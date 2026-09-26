@@ -1,0 +1,7 @@
+interface:
+  display_name: "Reject doc draft"
+  short_description: "Discard a document draft without a model turn"
+  default_prompt: "Use $reject-doc-draft followed by a draft path or directory, or alone to list pending drafts."
+
+policy:
+  allow_implicit_invocation: false

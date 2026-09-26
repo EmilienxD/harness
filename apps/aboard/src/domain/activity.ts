@@ -56,6 +56,8 @@ export interface AgentActivityEntry {
   readonly type: AgentType;
   /** The launch description, as shown on the terminal. */
   readonly description: string;
+  /** Provider conversation title, independent of aboard's routing identity. */
+  readonly title?: string;
   readonly outcome: AgentOutcome;
   /** Wall-clock launch duration. Summary metadata only; no conversation telemetry. */
   readonly durationMs?: number;
@@ -239,6 +241,7 @@ export interface ReopenCandidate {
   readonly type: AgentType;
   readonly sessionId: SessionId;
   readonly description: string;
+  readonly title?: string;
   readonly origin: ReopenOrigin;
   /** When this session last mattered: its end, or its start while it still runs. */
   readonly at: IsoTimestamp;
@@ -289,6 +292,7 @@ export function reopenCandidates(
       type: entry.type,
       sessionId: entry.reopen.sessionId,
       description: entry.description,
+      ...(entry.title === undefined ? {} : { title: entry.title }),
       origin: "ended",
       at: entry.at,
       ...(entry.reopen.issueNumbers === undefined ? {} : { issueNumbers: entry.reopen.issueNumbers }),

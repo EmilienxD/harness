@@ -169,7 +169,7 @@ def run_install(args: Namespace) -> int:
             }
             for name in sorted(requested - compatible_requested)
         ]
-        installer = CatalogueInstaller(available, target, store)
+        installer = CatalogueInstaller(available, target, store, skill_mode=args.skill_mode)
         installer.update_packages = compatible_requested
         _, changes = installer.plan(selected)
         result = {
@@ -285,7 +285,7 @@ def run_upgrade(args: Namespace) -> int:
         }
         selected = roots
         skipped = []
-        installer = CatalogueInstaller(available, target, store)
+        installer = CatalogueInstaller(available, target, store, skill_mode=args.skill_mode)
         _, changes = installer.plan(selected)
         result = {
             "platform": target.platform.value,

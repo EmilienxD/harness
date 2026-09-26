@@ -108,6 +108,128 @@ def test_install_is_non_interactive_and_emits_one_json_result(tmp_path, monkeypa
     assert (tmp_path / ".claude/skills/caveman/SKILL.md").is_file()
 
 
+def test_symlink_mode_shares_skill_directories_between_providers(tmp_path, monkeypatch, capsys):
+    monkeypatch.setenv("HARNESS_STATE_DIR", str(tmp_path / "state"))
+
+    assert main([
+        "install", "caveman", "--root", str(tmp_path), "--skill-mode", "symlink", "--json",
+    ]) == 0
+    assert json.loads(capsys.readouterr().out)["ok"] is True
+
+    canonical = tmp_path / ".agents/skills/caveman"
+    claude = tmp_path / ".claude/skills/caveman"
+    assert (canonical / "SKILL.md").is_file()
+    assert (canonical / "agents/openai.yaml").is_file()
+    assert claude.is_symlink()
+    assert claude.resolve() == canonical.resolve()
+
+    assert main(["uninstall", "caveman", "--root", str(tmp_path), "--json"]) == 0
+    capsys.readouterr()
+    assert not claude.exists() and not claude.is_symlink()
+    assert not canonical.exists()
+
+
+def test_skill_mode_can_switch_between_copy_and_symlink(tmp_path, monkeypatch, capsys):
+    monkeypatch.setenv("HARNESS_STATE_DIR", str(tmp_path / "state"))
+    args = ["install", "caveman", "--root", str(tmp_path), "--platform", "claude", "--json"]
+    claude = tmp_path / ".claude/skills/caveman"
+    canonical = tmp_path / ".agents/skills/caveman"
+
+    assert main(args) == 0
+    capsys.readouterr()
+    assert claude.is_dir() and not claude.is_symlink()
+
+    assert main([*args, "--skill-mode", "symlink"]) == 0
+    capsys.readouterr()
+    assert claude.is_symlink()
+    assert (canonical / "SKILL.md").is_file()
+
+    assert main([*args, "--skill-mode", "copy"]) == 0
+    capsys.readouterr()
+    assert claude.is_dir() and not claude.is_symlink()
+    assert (claude / "SKILL.md").is_file()
+    assert not canonical.exists()
+
+
+def test_symlink_mode_preserves_shared_skill_when_only_one_provider_is_removed(
+    tmp_path, monkeypatch, capsys,
+):
+    monkeypatch.setenv("HARNESS_STATE_DIR", str(tmp_path / "state"))
+    assert main([
+        "install", "caveman", "--root", str(tmp_path), "--skill-mode", "symlink", "--json",
+    ]) == 0
+    capsys.readouterr()
+
+    assert main([
+        "uninstall", "caveman", "--root", str(tmp_path), "--platform", "chatgpt", "--json",
+    ]) == 0
+    capsys.readouterr()
+    assert (tmp_path / ".claude/skills/caveman").is_symlink()
+    assert (tmp_path / ".agents/skills/caveman/SKILL.md").is_file()
+    assert not (tmp_path / ".agents/skills/caveman/agents/openai.yaml").exists()
+
+    assert main([
+        "uninstall", "caveman", "--root", str(tmp_path), "--platform", "claude", "--json",
+    ]) == 0
+    capsys.readouterr()
+    assert not (tmp_path / ".agents/skills/caveman").exists()
+    assert not (tmp_path / ".claude/skills/caveman").is_symlink()
+
+
+def test_symlink_mode_links_every_skill_in_a_multi_skill_package(tmp_path, monkeypatch, capsys):
+    monkeypatch.setenv("HARNESS_STATE_DIR", str(tmp_path / "state"))
+    assert main([
+        "install", "todo-hitl", "--root", str(tmp_path), "--skill-mode", "symlink", "--json",
+    ]) == 0
+    capsys.readouterr()
+
+    for name in ("mark-as-todo-hitl", "address-todo-hitl"):
+        canonical = tmp_path / ".agents/skills" / name
+        claude = tmp_path / ".claude/skills" / name
+        assert (canonical / "SKILL.md").is_file()
+        assert (canonical / "agents/openai.yaml").is_file()
+        assert claude.is_symlink()
+        assert claude.resolve() == canonical.resolve()
+
+
+def test_symlink_install_rolls_back_files_and_links_on_failure(tmp_path, monkeypatch, capsys):
+    monkeypatch.setenv("HARNESS_STATE_DIR", str(tmp_path / "state"))
+
+    def fail_settings(path, value):
+        raise OSError("settings failed")
+
+    monkeypatch.setattr("harness_cli.installer._write_json", fail_settings)
+    assert main([
+        "install", "commit", "--root", str(tmp_path), "--platform", "claude",
+        "--skill-mode", "symlink", "--json",
+    ]) == 1
+    assert "settings failed" in json.loads(capsys.readouterr().out)["results"][0]["error"]
+    assert not (tmp_path / ".claude/skills/commit").is_symlink()
+    assert not (tmp_path / ".agents/skills/commit/SKILL.md").exists()
+    assert not (tmp_path / "state/receipts.json").exists()
+
+
+def test_failed_switch_from_symlink_to_copy_restores_original_layout(
+    tmp_path, monkeypatch, capsys,
+):
+    monkeypatch.setenv("HARNESS_STATE_DIR", str(tmp_path / "state"))
+    args = ["install", "commit", "--root", str(tmp_path), "--platform", "claude", "--json"]
+    assert main([*args, "--skill-mode", "symlink"]) == 0
+    capsys.readouterr()
+    before = (tmp_path / "state/receipts.json").read_bytes()
+
+    def fail_settings(path, value):
+        raise OSError("settings failed")
+
+    monkeypatch.setattr("harness_cli.installer._write_json", fail_settings)
+    assert main([*args, "--skill-mode", "copy"]) == 1
+    capsys.readouterr()
+
+    assert (tmp_path / ".claude/skills/commit").is_symlink()
+    assert (tmp_path / ".agents/skills/commit/SKILL.md").is_file()
+    assert (tmp_path / "state/receipts.json").read_bytes() == before
+
+
 def test_list_json_reports_installed_catalogue_packages(tmp_path, monkeypatch, capsys):
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("HARNESS_STATE_DIR", str(tmp_path / "state"))

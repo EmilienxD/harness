@@ -6,6 +6,7 @@ import { OpenAiProtocolError, type OpenAiResponseOutput, type OpenAiResponsesReq
 
 export const MARKER = "[E2E:no-new-documents]";
 export const DOCUMENT = "nested/docs/proposal.md";
+export const DRAFT = `.harness/doc-drafts/${DOCUMENT}`;
 export const FINAL_MESSAGE = `Should I add ${DOCUMENT}? I wanted to add it because the task called for a durable proposal.`;
 export const scenarioCatalogHash = createHash("sha256").update("no-new-documents:v1").digest("hex");
 
@@ -24,8 +25,8 @@ export function claudeTransition(request: AnthropicMessagesRequest, repoRoot: st
     };
   }
   const denial = deepText(result);
-  if (result.is_error !== true || !denial.includes("not authorized") || !denial.includes("final response") || !denial.includes(DOCUMENT)) {
-    throw new E2eProtocolError("$.messages", "creation was not denied with actionable feedback", "no-new-documents");
+  if (result.is_error !== true || !denial.includes(DRAFT)) {
+    throw new E2eProtocolError("$.messages", "creation was not redirected to its draft path", "no-new-documents");
   }
   return {
     scenario: "no-new-documents", checkpoint: "complete", messageId: stableId("claude-complete"), stopReason: "end_turn",
@@ -52,8 +53,8 @@ export function codexTransition(request: OpenAiResponsesRequest): OpenAiScenario
     return { scenario: "no-new-documents", checkpoint: "create-denied", output };
   }
   const denial = deepText(outputs.at(-1));
-  if (!/not authorized|blocked|denied/iu.test(denial) || !denial.includes(DOCUMENT) || !denial.includes("final response")) {
-    throw new OpenAiProtocolError("$.input", "creation was not denied with actionable feedback", "no-new-documents");
+  if (!denial.includes(DRAFT)) {
+    throw new OpenAiProtocolError("$.input", "creation was not redirected to its draft path", "no-new-documents");
   }
   return { scenario: "no-new-documents", checkpoint: "complete", output: finalOutput(FINAL_MESSAGE) };
 }

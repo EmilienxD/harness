@@ -10,7 +10,8 @@ export function createVsCodeTerminalHost(): TerminalHost {
       cwd: options.cwd,
       env: { ...options.env },
       ...(options.provider === undefined ? {} : { iconPath: new ThemeIcon(options.provider === "claude" ? "claude" : "openai") }),
-      ...(options.name === undefined ? {} : { name: options.name }),
+      // A fixed VS Code name masks the provider's own terminal title.
+      ...(options.provider !== undefined || options.name === undefined ? {} : { name: options.name }),
       ...(options.shellPath === undefined ? {} : { shellPath: options.shellPath }),
       ...(options.shellArgs === undefined ? {} : { shellArgs: [...options.shellArgs] }),
     }),

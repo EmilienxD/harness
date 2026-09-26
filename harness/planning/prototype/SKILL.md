@@ -1,6 +1,6 @@
 ---
 name: prototype
-description: Build a disposable prototype outside the codebase to answer a design question. Use when implementation evidence is needed before choosing a design.
+description: Build a disposable prototype in a dedicated prototype folder to answer a design question. Use when implementation evidence is needed before choosing a design.
 argument-hint: "[design question]"
 license: MIT
 metadata:
@@ -25,11 +25,18 @@ If the question is ambiguous, ask the user when they are available. Otherwise,
 infer the shape from the surrounding work and show the assumption in the
 prototype.
 
-## Work outside the codebase
+## Choose the prototype workspace
 
-Put the prototype in a **prototype workspace**: a separate folder outside the
-repository. Use a location supplied by the user; otherwise create a sibling
-folder named `<repository>-prototypes/<prototype-name>`.
+Put the prototype in a **prototype workspace**: a dedicated folder inside the
+current repository. Use a location supplied by the user; otherwise follow the
+project's conventions for prototypes or scratch work (check `AGENTS.md`,
+`CLAUDE.md`, contributor docs, and existing folders). If the project specifies
+nothing, create a new top-level folder whose name clearly marks it as
+prototype work, such as `prototypes/` or `scratch/`, choosing a name that does
+not already exist. Put each prototype in its own `<prototype-name>/` subfolder.
+
+When you create the workspace folder, add a `.gitignore` inside it containing
+`*` so its contents stay out of version control.
 
 Inspect the repository for domain language, behavior, dimensions, and visual
 conventions. Keep every prototype artifact and dependency in the prototype

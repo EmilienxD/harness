@@ -108,17 +108,9 @@ async function awaitDelivery(id: string): Promise<void> {
   }
 }
 
-/**
- * Safari only lets a tap write to the clipboard before the handler first awaits, so the write
- * starts at once and receives the text as a promise that the snapshot request settles later.
- */
-function copyText(text: Promise<string>): Promise<void> {
-  const copy =
-    typeof ClipboardItem === "undefined"
-      ? text.then((value) => navigator.clipboard.writeText(value))
-      : navigator.clipboard.write([
-          new ClipboardItem({ "text/plain": text.then((value) => new Blob([value], { type: "text/plain" })) }),
-        ]);
+/** Start the clipboard write during the user gesture, including on Safari. */
+function copyText(text: string): Promise<void> {
+  const copy = navigator.clipboard.writeText(text);
   // Browser clipboard errors are long and technical, such as Safari's NotAllowedError.
   return copy.catch(() => {
     throw new Error("Copy failed. Try again.");
@@ -1436,6 +1428,17 @@ function highlightCode(hljs: HLJSApi, root: HTMLElement) {
   }
 }
 
+// Agents often omit .table-wrap, so every table gets its own horizontal scroller on narrow screens.
+function wrapTables(root: HTMLElement) {
+  for (const table of root.querySelectorAll("table")) {
+    if (table.parentElement?.classList.contains("table-wrap")) continue;
+    const wrap = document.createElement("div");
+    wrap.className = "table-wrap";
+    table.replaceWith(wrap);
+    wrap.append(table);
+  }
+}
+
 function Explanation({ question }: { question: GrillQuestion }) {
   const root = useRef<HTMLDivElement>(null);
   const [failed, setFailed] = useState(false);
@@ -1447,11 +1450,12 @@ function Explanation({ question }: { question: GrillQuestion }) {
     if (!element) return;
     let live = true;
     const refresh = () => {
+      wrapTables(element);
       if (element.querySelector("pre > code"))
         void loadHighlighter().then((hljs) => live && highlightCode(hljs, element));
     };
     refresh();
-    // New HTML and init_js can replace or add code samples later, so those are highlighted too.
+    // New HTML and init_js can replace or add tables and code samples later, so those are handled too.
     const observer = new MutationObserver(refresh);
     observer.observe(element, { childList: true, subtree: true, characterData: true });
     return () => {
@@ -1513,28 +1517,39 @@ function PromptModal({
     async (reason: "copy" | "aboard") => {
       setBusy(reason);
       setMessage("");
-      try {
-        const record = () =>
-          api<{ snapshot: { id: string; prompt: string } }>(`rounds/${round.id}/prompt-snapshots`, {
-            method: "POST",
-            body: JSON.stringify({ reason, expected_prompt: prompt }),
-          }).then((result) => result.snapshot);
-        if (reason === "copy") {
-          // A historical round cannot record snapshots, so its copy comes straight from the preview.
-          const text = readOnly ? Promise.resolve(prompt) : record().then((recorded) => recorded.prompt);
-          // A failed snapshot fails the copy too, and settles first, so its own error is the one reported.
-          await Promise.all([text, copyText(text)]);
+      const record = () =>
+        api<{ snapshot: { id: string; prompt: string } }>(`rounds/${round.id}/prompt-snapshots`, {
+          method: "POST",
+          body: JSON.stringify({ reason, expected_prompt: prompt }),
+        }).then((result) => result.snapshot);
+      if (reason === "copy") {
+        try {
+          await copyText(prompt);
           confirmCopy();
-          if (readOnly) return;
-        } else {
-          const recorded = await record();
-          const { delivery } = await api<{ delivery: { id: string } }>(`prompt-snapshots/${recorded.id}/deliveries`, {
-            method: "POST",
-            body: "{}",
-          });
-          await awaitDelivery(delivery.id);
-          confirmSend();
+        } catch (cause) {
+          setMessage((cause as Error).message);
+          return;
+        } finally {
+          setBusy("");
         }
+        if (readOnly) return;
+        // Recording is useful history, but the visible prompt is ready to copy without a round trip.
+        try {
+          await record();
+          // The regular poll refreshes snapshot history without delaying the copy confirmation.
+        } catch (cause) {
+          setMessage(`Prompt copied, but the copy was not recorded. ${(cause as Error).message}`);
+        }
+        return;
+      }
+      try {
+        const recorded = await record();
+        const { delivery } = await api<{ delivery: { id: string } }>(`prompt-snapshots/${recorded.id}/deliveries`, {
+          method: "POST",
+          body: "{}",
+        });
+        await awaitDelivery(delivery.id);
+        confirmSend();
         await onReload();
       } catch (cause) {
         setMessage((cause as Error).message);

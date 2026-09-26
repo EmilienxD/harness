@@ -507,7 +507,7 @@ def sweep_stale(root: Path, now: float | None = None) -> None:
 
 def parse_issue_file(path: Path) -> tuple[str, str]:
     """Split a draft file into (title, rest). Title = first '# ' header."""
-    text = path.read_text(encoding="utf-8")
+    text = path.read_text(encoding="utf-8-sig")
     lines = text.splitlines()
     title = None
     rest_start = 0

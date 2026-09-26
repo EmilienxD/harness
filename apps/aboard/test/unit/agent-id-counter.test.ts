@@ -62,3 +62,20 @@ test("the supplied persisted identity contributes to the ceiling", () => {
   const counter = WorkspaceAgentIdCounter.load(tempRoot(), () => ["2"]);
   assert.equal(counter.next(), "3");
 });
+
+test("a durable counter keeps numbers increasing when the runtime directory is replaced", () => {
+  const runtime = tempRoot();
+  const durable = tempRoot();
+  const first = WorkspaceAgentIdCounter.load(runtime, undefined, () => true, durable);
+  assert.equal(first.next(), "1");
+  const replacement = WorkspaceAgentIdCounter.load(tempRoot(), undefined, () => true, durable);
+  assert.equal(replacement.next(), "2");
+});
+
+test("a failed counter write refuses to issue an id that could be reused after restart", () => {
+  const root = tempRoot();
+  const blocked = join(root, "blocked");
+  writeFileSync(blocked, "not a directory", "utf8");
+  const counter = WorkspaceAgentIdCounter.load(root, undefined, () => true, blocked);
+  assert.throws(() => counter.next());
+});

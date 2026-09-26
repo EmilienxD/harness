@@ -16,6 +16,8 @@ uvx --from "git+https://github.com/EmilienxD/harness" harness
 
 The interactive catalogue asks for Claude Code and/or ChatGPT, project or user scope, and the packages you want. Rerun it to add, upgrade, or remove selections. Existing selections start checked, dependencies are handled automatically, user-edited starter files are preserved, and the final plan is shown before anything changes. Removing a selection retains reusable dependencies as independent selections; dependencies declared as coupled components are removed when nothing else requires them. When a package would land on a file Harness does not own, the installer lists those files and asks whether to overwrite them or abandon the installation; approved files become Harness-owned and are removed again on uninstall. A machine-level product a package installs — a `uv` tool or a VS Code extension — gets the same treatment: if one is already present and no Harness receipt accounts for it, the installer names it and asks whether to take ownership, which replaces it with the pinned version and removes it again on uninstall.
 
+When selected packages include skills for Claude Code, the catalogue asks whether to copy the skills or install them in `.agents/skills` and symlink each `.claude/skills/<name>` directory to its counterpart. Copy is the default for a new installation; later runs remember the chosen mode. Non-interactive `install` and `upgrade` accept `--skill-mode copy|symlink` to choose or change it. Hooks and other platform-specific files still use their own provider directories.
+
 When rerunning the interactive catalogue, optional updates appear in a separate
 dot picker with nothing selected. Leave a package unselected there to keep its
 installed version. Updates required by a newly selected or updated package are
@@ -61,7 +63,7 @@ Claude Code invokes a skill as `/skill-name`; ChatGPT uses `$skill-name`. The ex
 
 - **`grill-me-in-cloud`**: Stress-tests a plan through branching rounds on a persistent hosted board. The hook supplies fresh round and asset paths outside the project, uploads local explanation images, publishes without waiting for answers, and returns the session URL. Drafts survive refreshes; only queued answers enter the deterministic prompt. Copy that prompt into any provider session, or let Aboard submit it into the exact session's open terminal; the send completes only once the provider confirms it received the prompt.
 
-- **`prototype`**: Builds a throwaway logic or UI prototype in a separate workspace to answer one explicit design question. It keeps prototype code and dependencies outside the repository, exercises only the decisive paths, and reports what the result supports and where its evidence stops.
+- **`prototype`**: Builds a throwaway logic or UI prototype to answer one explicit design question. It keeps prototype code and dependencies in a git-ignored prototype folder inside the repository, following the project's conventions or falling back to a new folder such as `prototypes/`, exercises only the decisive paths, and reports what the result supports and where its evidence stops.
 
 - **`read-all-adrs`**: Reads every Markdown ADR under `docs/adr/` from start to finish so the current work is informed by the project's recorded architectural decisions.
 
@@ -98,9 +100,10 @@ harness run --provider claude|chatgpt [initial prompt]
 harness ask <session-id>
 harness reply
 harness resume <session-id|agent-i> [next message...]
+harness watch [session-id|agent-i] [--once]
 ```
 
-`run` opens an independent visible terminal. The first explicit delegation skill invocation enables one persistent inbox for the saved conversation, shared across all task types. Request files and execution logs live under `~/.harness/runtime/sessions/` (`HARNESS_STATE_DIR` overrides `~/.harness`), never in the project. Automatic children run headlessly with native provider permissions; interactive children open visible sessions. Children receive stable `agent-i` identifiers scoped to the parent. After an Aboard-launched interactive child sends its reply, its hook shows a VS Code link that returns to the exact parent terminal without switching focus automatically. Use `resume-agent` or `harness resume agent-i "next message"` inside the parent to continue a child, preserving its provider, mode, directory, and conversation. A child whose session is still live, such as an idle terminal, normally continues in a fork of its transcript that keeps the same `agent-i` identifier and leaves the original session open. Aboard's `aboard.sessions.interactiveResumeMode` setting can instead use `reuse-terminal` to send the next message into a matching live interactive terminal; the default remains `fork`. Results survive parent shutdown and replay after interrupted delivery. Full delegation instructions are reinjected after successful compaction.
+`run` opens an independent visible terminal. The first explicit delegation skill invocation enables one persistent inbox for the saved conversation, shared across all task types. Request files and execution logs live under `~/.harness/runtime/` (`HARNESS_STATE_DIR` overrides `~/.harness`), never in the project. Automatic children run headlessly with native provider permissions; interactive children open visible sessions. `harness watch` follows structured Claude or Codex progress for the one active background session in the current directory; pass a child session ID to select a particular agent from another terminal, or use `agent-i` inside its parent. `--once` prints the progress recorded so far. The `ask` command prints each launched child's watch command. Progress reports observed searches, tool activity, messages, errors, elapsed time, and provider-reported usage; it does not judge research quality. Children receive stable `agent-i` identifiers scoped to the parent. After an Aboard-launched interactive child sends its reply, its hook shows a VS Code link that returns to the exact parent terminal without switching focus automatically. Use `resume-agent` or `harness resume agent-i "next message"` inside the parent to continue a child, preserving its provider, mode, directory, and conversation. A child whose session is still live, such as an idle terminal, normally continues in a fork of its transcript that keeps the same `agent-i` identifier and leaves the original session open. Aboard's `aboard.sessions.interactiveResumeMode` setting can instead use `reuse-terminal` to send the next message into a matching live interactive terminal; the default remains `fork`. Results survive parent shutdown and replay after interrupted delivery. Full delegation instructions are reinjected after successful compaction.
 
 Launch settings come from `.harness/config.json`, then the user-level file, then built-in defaults. A file containing only `{ "version": 1 }` is valid; add provider sections only for project-specific overrides. Manual delegation profiles live under `providers.<provider>.delegations` with independent `explore`, `prototype`, `websearch`, `brainstorm`, `address`, `review`, and `general` keys. Exploration defaults to Haiku/low for Claude and GPT-5.6 Luna/low for ChatGPT; the other manual profiles inherit native provider settings. `autoRun.provider` defaults to Claude and does not limit explicit `harness run --provider ...` launches. The optional provider-neutral `session.stopWaitHours` controls how long a parent Stop hook waits for an outstanding reply.
 
@@ -121,7 +124,7 @@ Hooks do not need a skill invocation. Select them in the catalogue and restart t
 | Package | Platforms | What it does |
 | --- | --- | --- |
 | `command-guard` | Claude Code, ChatGPT | Denies shell commands matching an editable dangerous-command policy. It is a guardrail, not a security sandbox. |
-| `no-new-documents` | Claude Code, ChatGPT | Prevents agents from creating files in configured documentation directories while allowing edits to existing files. |
+| `no-new-documents` | Claude Code, ChatGPT | Stops agents from creating files in configured documentation directories and has them write a draft for your approval instead. Edits to existing files are allowed. |
 | `on-read-reminder` | Claude Code | Reminds the agent to read required guidance when it reads paths matching configured patterns. |
 | `on-edit-reminder` | Claude Code | Lets a matching edit land, then requires the relevant guidance to be read and violations corrected. |
 | `on-edit-block` | Claude Code | Denies a matching edit until the required guidance has been read in the current session. |
@@ -130,12 +133,11 @@ Hooks do not need a skill invocation. Select them in the catalogue and restart t
 | `prefer-fewer-comments` | Claude Code, ChatGPT | Flags newly written comments or docstrings that exceed an editable budget. |
 | `mid-prompt-skills` | Claude Code | Loads skills typed after other prompt text, which Claude Code otherwise leaves as plain text. |
 | `redirect-subagents` | Claude Code | Redirects built-in Agent tool work to configured alternate providers and returns the result to the parent session. |
-| `remove-anthropic-coauthor` | Claude Code | Amends new Git commits to remove `Co-Authored-By: Claude … <noreply@anthropic.com>`, preserving human co-authors. |
 | `usage-limit-wait` | Claude Code, ChatGPT | Pauses at an exhausted subscription window and resumes after reset; usage-reader failures always fail open. |
 
-`remove-anthropic-coauthor` runs after successful Bash/PowerShell calls that report a Git commit. It checks that the reported commit is still HEAD, removes matching lines from the final trailer paragraph, and reports the new hash to Claude. The amend preserves the tree, parents, original author, index, and worktree; commit hooks are not rerun, and configured commit signing is honored. Keep commit and push in separate tool calls so the hook can clean the message before it is pushed. Quiet commits or redirected commit output cannot be detected. Repository lookup supports the hook's working directory and literal `cd` or `git -C` paths; shell variables and computed paths are not expanded.
-
 `mid-prompt-skills` covers the case where Claude Code expands only skills at the start of a message. A `/skill-name` elsewhere in the prompt is loaded the same way. Its arguments are the rest of that line, up to the next skill, and it gets the same argument placeholders, `${CLAUDE_SKILL_DIR}`, `${CLAUDE_SESSION_ID}`, and `${CLAUDE_PROJECT_DIR}` substitutions. Skills that Claude Code already expanded are never loaded twice. Only skills you can type are eligible; `user-invocable: false`, `context: fork`, and skills turned `"off"` in `skillOverrides` are skipped. The hook finds managed, personal, and project skills plus `.claude/commands/` files. It does not see plugin skills or directories added with `--add-dir`, and it can't reproduce `` !`command` `` injection or frontmatter such as `allowed-tools` and `model`. Mentions inside fenced code blocks are ignored.
+
+When `no-new-documents` blocks a new file such as `docs/arch/plan.md`, it tells the agent to write it to the mirrored draft path `.harness/doc-drafts/docs/arch/plan.md` instead. That folder is git-ignored, and the agent cannot move or copy drafts into place itself. Review the draft, then run `/approve-doc-draft docs/arch/plan.md` to move it into place or `/reject-doc-draft docs/arch/plan.md` to delete it (`$approve-doc-draft` and `$reject-doc-draft` in ChatGPT). Both commands take files or whole directories, list the pending drafts when run without a path, and run without a model call. Approval never overwrites a file that already exists at the target path. The agent learns the outcome with your next message. To request changes, just reply with feedback and the agent revises the draft.
 
 #### Guard configuration
 
@@ -194,7 +196,7 @@ The grill hook and Aboard's relay read the board from the `grill` section of Har
 
 | Source | Committed | Fields |
 | :-- | :-- | :-- |
-| `.harness/config.local.json` | No; a project install adds it to `.gitignore`, and uninstall keeps the entry while the file exists | `url`, `code` |
+| `.harness/config.local.json` | No; a project install adds it to `.harness/.gitignore`, and uninstall keeps the entry while the file exists | `url`, `code` |
 | `.harness/config.json` | Yes | `url` only; a `code` here is ignored |
 | `~/.harness/config.json` (or `$HARNESS_STATE_DIR/config.json`) | No | `url`, `code` |
 | `HARNESS_GRILL_URL`, `HARNESS_GRILL_CODE` | No | `url`, `code` |
@@ -245,5 +247,3 @@ npm install
 npm run check
 npm test
 ```
-
-Run `npm run e2e:remove-anthropic-coauthor` from `tests/e2e/` to verify the attribution-removal hook with the real `claude -p` CLI and the fake Anthropic endpoint. This journey creates a temporary Git repository, verifies two model trailers are removed while human co-authors and staged changes survive, and leaves the Harness checkout unchanged.

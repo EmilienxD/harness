@@ -38,7 +38,6 @@ export class AtomicJsonFile<T> {
     const temporary = `${this.path}.${process.pid}.tmp`;
     await mkdir(dirname(this.path), { recursive: true });
     await writeFile(temporary, `${JSON.stringify(value, null, 2)}\n`, { encoding: "utf8", mode: 0o600 });
-    await rm(this.path, { force: true });
     await rename(temporary, this.path);
   }
   public async remove(): Promise<void> {

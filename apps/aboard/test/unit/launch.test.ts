@@ -199,7 +199,7 @@ test("spills long skill prompts and keeps the original task separately", () => {
 test("names the Claude session after its fleet agent label", () => {
   const plan = planLaunch(request({ agentId: "7" as AgentId, agentType: "review", configuration: workerConfiguration("review") }));
 
-  assert.equal(hasPair(plan.args, "--name", "aboard-review-7"), true);
+  assert.equal(plan.args.includes("--name"), false);
 });
 
 test("uses a wrapper request to keep child argv out of terminal input", () => {

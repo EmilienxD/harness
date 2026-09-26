@@ -1,4 +1,4 @@
-import { closeSync, existsSync, mkdirSync, openSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import type { AgentId } from "../domain/contracts.js";
 
@@ -13,9 +13,10 @@ export class WorkspaceAgentIdCounter {
     this.#next = next;
   }
 
-  public static load(runtimeRoot: string, seeder?: () => Iterable<string>, admission: () => boolean = () => true): WorkspaceAgentIdCounter {
-    const path = join(runtimeRoot, "state", AGENT_COUNTER_FILE_NAME);
-    const persisted = this.#readCeiling(path);
+  public static load(runtimeRoot: string, seeder?: () => Iterable<string>, admission: () => boolean = () => true, durableRoot?: string): WorkspaceAgentIdCounter {
+    const legacyPath = join(runtimeRoot, "state", AGENT_COUNTER_FILE_NAME);
+    const path = durableRoot === undefined ? legacyPath : join(durableRoot, AGENT_COUNTER_FILE_NAME);
+    const persisted = Math.max(this.#readCeiling(path), this.#readCeiling(legacyPath));
     const fleet = seeder === undefined ? 0 : this.#fleetCeiling(seeder());
     return new WorkspaceAgentIdCounter(path, Math.max(persisted, fleet) + 1, admission);
   }
@@ -23,8 +24,8 @@ export class WorkspaceAgentIdCounter {
   public next(): AgentId {
     if (!this.admission()) throw new Error("aboard runtime is not initialized");
     const value = this.#next;
-    this.#next = value + 1;
     this.#persistCeiling(value);
+    this.#next = value + 1;
     return String(value) as AgentId;
   }
 
@@ -58,18 +59,10 @@ export class WorkspaceAgentIdCounter {
     try {
       mkdirSync(dirname(this.#path), { recursive: true });
       writeFileSync(temporary, `${JSON.stringify({ version: 1, value })}\n`, { encoding: "utf8", mode: 0o600 });
-      try {
-        closeSync(openSync(this.#path, "wx"));
-      } catch (error: unknown) {
-        if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
-      }
-      // mkdir above guarantees the parent exists, so rename cannot race a
-      // missing directory on the steady-state path.
       renameSync(temporary, this.#path);
-    } catch {
-      // Persistence is best-effort: a failed write skips ids at worst, never
-      // repeats them. Drop only the temp file; never the real counter.
+    } catch (error) {
       rmSync(temporary, { force: true });
+      throw error;
     }
   }
 }

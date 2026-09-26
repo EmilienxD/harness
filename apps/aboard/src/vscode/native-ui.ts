@@ -1,6 +1,6 @@
-import { EventEmitter, ProgressLocation, ThemeIcon, TreeItem, TreeItemCollapsibleState, Uri, commands, env, window, workspace, type Disposable, type ExtensionContext, type TreeDataProvider } from "vscode";
+import { EventEmitter, ProgressLocation, ThemeIcon, TreeItem, TreeItemCollapsibleState, Uri, commands, env, window, workspace, type Disposable, type ExtensionContext, type OutputChannel, type TreeDataProvider } from "vscode";
 
-import type { AgentSession, TerminalId } from "../domain/contracts.js";
+import { isHeadlessExecution, type AgentSession, type TerminalId } from "../domain/contracts.js";
 
 import type { TerminalController } from "../platform/terminals.js";
 import type { FleetRegistry } from "../domain/fleet.js";
@@ -12,6 +12,7 @@ import type { ActivityDto, ActivityEntry } from "../domain/activity.js";
 import { continuationSessionFor, type AutoRunEngine, type AutoRunPreviewedStartResult } from "../auto/engine.js";
 import type { DiscardBehavior } from "../domain/run-cleanup.js";
 import { describeDiscard } from "../domain/run-cleanup.js";
+import { ProgressTail, progressLogForAgent } from "./progress.js";
 
 const AUTO_RUN_POLL_MS = 30_000;
 
@@ -41,6 +42,7 @@ export interface ActivityUiHost {
 }
 
 export interface NativeUiOptions {
+  readonly runtimeRoot: string;
   readonly port: () => number | undefined;
   readonly fleet: FleetRegistry;
   readonly lease: WriteLease;
@@ -64,6 +66,65 @@ export function registerNativeFleetUi(context: ExtensionContext, options: Native
     { refresh: () => fleetChanges.fire(undefined) },
     (terminalId) => isTerminalOpen(terminalId),
   );
+  const watches = new Map<string, { readonly channel: OutputChannel; timer: ReturnType<typeof setInterval> | undefined }>();
+  const watchSession = (session: AgentSession): void => {
+    const agentId = session.identity.agentId;
+    const existing = watches.get(agentId);
+    if (existing !== undefined) { existing.channel.show(true); return; }
+    const channel = window.createOutputChannel(`aboard: ${session.identity.type} ${agentId} progress`);
+    const current: { readonly channel: OutputChannel; timer: ReturnType<typeof setInterval> | undefined } = { channel, timer: undefined };
+    watches.set(agentId, current);
+    channel.appendLine(`Watching ${session.identity.type} (${session.platform === "claude" ? "Claude" : "Codex"})`);
+    channel.appendLine(`Session: ${session.sessionId}`);
+    channel.show(true);
+    let tail: ProgressTail | undefined;
+    let reading = false;
+    let lastEvent: number | undefined;
+    let lastHeartbeat = 0;
+    const poll = async (): Promise<void> => {
+      if (reading) return;
+      reading = true;
+      try {
+        if (tail === undefined) {
+          const path = await progressLogForAgent(options.runtimeRoot, agentId);
+          if (path !== undefined) tail = new ProgressTail(path);
+        }
+        if (tail !== undefined) {
+          for (const summary of await tail.next()) { channel.appendLine(summary); lastEvent = Date.now(); }
+        }
+        const live = fleet.get(agentId);
+        const running = live !== undefined && ["starting", "running", "awaiting-user"].includes(live.lifecycle.status);
+        const now = Date.now();
+        if (!running) {
+          channel.appendLine(tail === undefined ? "Session ended; no progress stream was captured." : "Session ended.");
+          if (current.timer !== undefined) clearInterval(current.timer);
+          current.timer = undefined;
+          return;
+        }
+        if (now - lastHeartbeat >= 30_000) {
+          const elapsed = Math.max(0, Math.floor((now - Date.parse(session.lifecycle.startedAt)) / 1_000));
+          const recent = lastEvent === undefined ? "no events yet" : `last event ${Math.floor((now - lastEvent) / 1_000)}s ago`;
+          channel.appendLine(`Status: ${live.lifecycle.status} · elapsed ${Math.floor(elapsed / 60)}m ${elapsed % 60}s · ${recent}`);
+          lastHeartbeat = now;
+        }
+      } catch (error) {
+        channel.appendLine(`Progress read error: ${error instanceof Error ? error.message : "unknown error"}`);
+      } finally { reading = false; }
+    };
+    current.timer = setInterval(() => { void poll(); }, 1_000);
+    void poll();
+  };
+  disposables.push({ dispose: () => { for (const watch of watches.values()) { if (watch.timer !== undefined) clearInterval(watch.timer); watch.channel.dispose(); } watches.clear(); } });
+  disposables.push(commands.registerCommand("aboard.watchAgent", async (value?: FleetTreeNode) => {
+    let session = value?.kind === "agent" ? value.session : undefined;
+    if (session === undefined) {
+      const choices = fleet.list().filter((candidate) => isHeadlessExecution(candidate.identity.type, candidate.executionMode))
+        .map((candidate) => ({ label: `${candidate.identity.type} · ${candidate.identity.agentId}`, description: candidate.platform === "claude" ? "Claude" : "Codex", session: candidate }));
+      if (choices.length === 0) { void window.showInformationMessage("No background agents are available to watch."); return; }
+      session = (await window.showQuickPick(choices, { placeHolder: "Choose a background agent to watch" }))?.session;
+    }
+    if (session !== undefined && isHeadlessExecution(session.identity.type, session.executionMode)) watchSession(session);
+  }));
   disposables.push(
     window.registerTreeDataProvider("aboard.fleet", {
       onDidChangeTreeData: fleetChanges.event,
