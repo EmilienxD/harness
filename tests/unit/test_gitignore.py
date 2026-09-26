@@ -1,13 +1,13 @@
 from harness_cli import gitignore
 
-PATTERNS = [".claude/commit-ai.key", ".claude/settings.local.json"]
+PATTERNS = [".harness/config.local.json", ".claude/settings.local.json"]
 
 
 def test_apply_appends_a_fenced_block():
     out = gitignore.apply("", "commit", PATTERNS)
     assert out.startswith("# >>> harness:commit >>>")
     assert out.endswith("# <<< harness:commit <<<\n")
-    assert ".claude/commit-ai.key" in gitignore.existing_patterns(out)
+    assert ".harness/config.local.json" in gitignore.existing_patterns(out)
 
 
 def test_apply_is_idempotent():
@@ -37,11 +37,11 @@ def test_remove_of_an_absent_block_changes_nothing():
 
 
 def test_a_pattern_the_user_already_had_is_not_duplicated():
-    before = ".claude/commit-ai.key\n"
+    before = ".harness/config.local.json\n"
     out = gitignore.apply(before, "commit", PATTERNS)
-    assert out.count(".claude/commit-ai.key") == 1
+    assert out.count(".harness/config.local.json") == 1
     # And since we never owned their line, uninstalling must not take it away.
-    assert ".claude/commit-ai.key" in gitignore.remove(out, "commit")
+    assert ".harness/config.local.json" in gitignore.remove(out, "commit")
 
 
 def test_all_patterns_already_present_writes_no_block():
@@ -56,7 +56,7 @@ def test_two_tools_coexist():
 
 
 def test_a_hand_deleted_closing_fence_does_not_eat_the_rest():
-    text = "# >>> harness:commit >>>\n.claude/commit-ai.key\nmy-own-rule\n"
+    text = "# >>> harness:commit >>>\n.harness/config.local.json\nmy-own-rule\n"
     out = gitignore.remove(text, "commit")
     assert "my-own-rule" in out
     assert "harness:commit" not in out

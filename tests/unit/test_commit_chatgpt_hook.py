@@ -144,11 +144,28 @@ def test_chatgpt_unhandled_hook_exception_blocks_with_exit_2(monkeypatch, capsys
     assert "RuntimeError: adapter failure" in stderr
 
 
-def test_chatgpt_ai_key_uses_codex_locations(repo, monkeypatch):
+def test_chatgpt_ai_key_uses_harness_local_config(repo, monkeypatch):
     monkeypatch.delenv("GEMINI_API_KEY", raising=False)
     monkeypatch.delenv("GOOGLE_API_KEY", raising=False)
-    key = repo / ".codex/commit-ai.key"
+    key = repo / ".harness/config.local.json"
     key.parent.mkdir()
-    key.write_text("chatgpt-key\n", encoding="utf-8")
+    key.write_text(json.dumps({"version": 1, "commit": {"geminiApiKey": "chatgpt-key"}}), encoding="utf-8")
 
-    assert core.find_api_key(str(repo)) == ("chatgpt-key", str(key))
+    assert core.find_api_key(str(repo)) == ("chatgpt-key", f"{key} (commit.geminiApiKey)")
+
+
+def test_ai_key_uses_user_harness_config_but_not_committed_project_config(repo, tmp_path, monkeypatch):
+    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+    monkeypatch.delenv("GOOGLE_API_KEY", raising=False)
+    state_dir = tmp_path / "state"
+    state_dir.mkdir()
+    monkeypatch.setenv("HARNESS_STATE_DIR", str(state_dir))
+    project_config = repo / ".harness/config.json"
+    project_config.parent.mkdir()
+    project_config.write_text(json.dumps({"version": 1, "commit": {"geminiApiKey": "committed-secret"}}), encoding="utf-8")
+
+    assert core.find_api_key(str(repo)) == (None, None)
+
+    user_config = state_dir / "config.json"
+    user_config.write_text(json.dumps({"version": 1, "commit": {"geminiApiKey": "user-secret"}}), encoding="utf-8")
+    assert core.find_api_key(str(repo)) == ("user-secret", f"{user_config} (commit.geminiApiKey)")

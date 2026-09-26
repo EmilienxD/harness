@@ -1146,7 +1146,7 @@ def test_project_install_keeps_secret_ignores_inside_their_directories(tmp_path)
 
 
 @pytest.mark.parametrize("platform, directory", [(Platform.CLAUDE, ".claude"), (Platform.CHATGPT, ".codex")])
-def test_commit_install_ignores_local_files_without_editing_project_gitignore(tmp_path, platform, directory):
+def test_commit_install_ignores_local_config_without_editing_project_gitignore(tmp_path, platform, directory):
     tool = discover()["commit"]
     project = tmp_path / "project"
     project.mkdir()
@@ -1156,9 +1156,8 @@ def test_commit_install_ignores_local_files_without_editing_project_gitignore(tm
     selected.reconcile({tool.name})
 
     assert (project / ".gitignore").read_text() == "user-rule\n"
-    assert {"commit-ai.key", "settings.local.json"} <= set(
-        (project / directory / ".gitignore").read_text().splitlines()
-    )
+    assert "config.local.json" in (project / ".harness/.gitignore").read_text().splitlines()
+    assert not (project / directory / ".gitignore").exists()
 
 
 def test_upgrade_moves_existing_secret_ignore_out_of_project_gitignore(tmp_path):

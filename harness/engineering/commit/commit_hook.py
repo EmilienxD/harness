@@ -792,117 +792,51 @@ SECRET_PATTERNS = [
     ),
 ]
 
-# Resolution order for the API key. Live env vars come first, matching the
-# conventional Gemini setup so anyone who already has a key configured needs
-# to do nothing. Then the `env` dict of each settings file -- Claude
-# Code's own mechanism for handing environment variables to hooks, and where a
-# user would reasonably expect to put this. Then a bare key file, for a secret
-# that outlives shells and is trivially easy to keep out of git.
+# Live Gemini environment variables take precedence over Harness config.
 KEY_ENV_VARS = ("GEMINI_API_KEY", "GOOGLE_API_KEY")
-KEY_FILE_NAME = "commit-ai.key"
-# Most specific first, mirroring Claude Code's own settings precedence.
-SETTINGS_NAMES = ("settings.local.json", "settings.json")
-# The selected provider determines where its settings live.
-HOST_CONFIG_DIR = ".claude"
 
 
-def _host_dirs(repo_root: str | None) -> list[str]:
-    """Every host config directory that could hold a key, nearest scope first.
-
-    `CLAUDE_PROJECT_DIR` is set by Claude Code itself and is authoritative when
-    present; `repo_root` covers the standalone-CLI case where it is not.
-    """
-    candidates = []
-    project = os.environ.get("CLAUDE_PROJECT_DIR")
-    if project:
-        candidates.append(os.path.join(project, HOST_CONFIG_DIR))
-    if repo_root:
-        candidates.append(os.path.join(repo_root, HOST_CONFIG_DIR))
-    candidates.append(os.path.join(os.path.expanduser("~"), HOST_CONFIG_DIR))
-
-    seen, out = set(), []
-    for path in candidates:
-        key = os.path.normcase(os.path.abspath(path))
-        if key not in seen:
-            seen.add(key)
-            out.append(path)
-    return out
-
-
-def _settings_env(path: str) -> dict[str, Any]:
-    """The `env` dict from a settings file, or {} if unreadable or absent.
-
-    A malformed settings file is not this hook's problem to report: Claude Code
-    surfaces that far more clearly than a commit failure would.
-    """
+def _commit_config_key(path: str) -> str | None:
+    """Read a credential from a versioned Harness config file, if present."""
     try:
-        with open(path, "r", encoding="utf-8-sig", errors="replace") as fh:
-            data = json.load(fh)
-    except (OSError, ValueError):
-        return {}
-    env = data.get("env") if isinstance(data, dict) else None
-    return env if isinstance(env, dict) else {}
-
-
-def _read_key_file(path: str) -> str | None:
-    try:
-        with open(path, "r", encoding="utf-8-sig", errors="replace") as fh:
-            for line in fh:
-                line = line.strip()
-                if line and not line.startswith("#"):
-                    return line
-    except OSError:
-        pass
-    return None
+        with open(path, "r", encoding="utf-8-sig") as fh:
+            config = json.load(fh)
+    except FileNotFoundError:
+        return None
+    except (OSError, UnicodeError, ValueError) as exc:
+        raise AiError(f"Invalid Harness config at {path}: {exc}") from exc
+    if not isinstance(config, dict) or config.get("version") != 1:
+        raise AiError(f"Harness config at {path} must be a version-1 JSON object")
+    section = config.get("commit", {})
+    if not isinstance(section, dict):
+        raise AiError(f"Harness config at {path}: commit must be an object")
+    key = section.get("geminiApiKey")
+    if key is not None and not isinstance(key, str):
+        raise AiError(f"Harness config at {path}: commit.geminiApiKey must be a string")
+    return key.strip() if key else None
 
 
 def key_setup_help(repo_root: str | None) -> str:
     """Setup instructions with this project's real paths filled in."""
-    if HOST_CONFIG_DIR == ".codex":
-        project_key = os.path.join(repo_root or ".", HOST_CONFIG_DIR, KEY_FILE_NAME)
-        user_key = os.path.join(os.path.expanduser("~"), HOST_CONFIG_DIR, KEY_FILE_NAME)
-        return f"""No Google AI Studio API key found. Get one (the free tier is ample
+    local = os.path.join(repo_root or ".", ".harness", "config.local.json")
+    state_dir = os.environ.get("HARNESS_STATE_DIR") or os.path.join(os.path.expanduser("~"), ".harness")
+    user = os.path.join(os.path.expanduser(state_dir), "config.json")
+    return f"""No Google AI Studio API key found. Get one (the free tier is ample
 for commit messages) at https://aistudio.google.com/apikey then pick one:
 
-  1. Key file -- one line, nothing else, no restart needed:
-       {project_key}
-     Or {user_key} for every repository. Both locations are gitignored by
-     this tool's installer where applicable.
+  1. Harness local config (gitignored for project installs) -- {local}
+       {{"version": 1, "commit": {{"geminiApiKey": "your-key-here"}}}}
+     Or {user} for every repository.
 
   2. Environment variable -- shared with every other Gemini tool:
        setx GEMINI_API_KEY "your-key-here"        (Windows, new shells only)
        export GEMINI_API_KEY="your-key-here"      (add to ~/.bashrc / ~/.zshrc)
 
-Checked in the order: live environment, then each {HOST_CONFIG_DIR}/{KEY_FILE_NAME}
--- project scope before user scope.
+Checked in the order: live environment, project-local Harness config, then
+user-level Harness config. Do not put the key in committed .harness/config.json.
 
-Do NOT paste the key into a ChatGPT prompt. Restart ChatGPT after setting an
+Do NOT paste the key into a prompt. Restart the provider after setting an
 environment variable."""
-
-    local = os.path.join(repo_root or ".", ".claude", "settings.local.json")
-    key_file = os.path.join(os.path.expanduser("~"), ".claude", KEY_FILE_NAME)
-    return f"""No Google AI Studio API key found. Get one (the free tier is ample
-for commit messages) at https://aistudio.google.com/apikey then pick one:
-
-  1. Claude Code's own env passthrough -- {local}
-       {{"env": {{"GEMINI_API_KEY": "your-key-here"}}}}
-     settings.local.json is per-machine and gitignored by this tool's installer.
-
-  2. Key file -- one line, nothing else, no restart needed:
-       {key_file}
-     Or .claude/{KEY_FILE_NAME} inside this repo, also gitignored for you.
-
-  3. Environment variable -- shared with every other Gemini tool:
-       setx GEMINI_API_KEY "your-key-here"        (Windows, new shells only)
-       export GEMINI_API_KEY="your-key-here"      (add to ~/.bashrc / ~/.zshrc)
-
-Checked in the order: live environment, then each .claude/settings*.json `env`,
-then each .claude/{KEY_FILE_NAME} -- project scope before user scope throughout.
-
-Do NOT paste the key into a Claude prompt: prompts are written verbatim to the
-session transcript. Prefer settings.local.json over a committed settings.json.
-
-Restart Claude Code after editing settings.json or setting an env var."""
 
 
 class AiError(Exception):
@@ -924,22 +858,15 @@ def find_api_key(repo_root: str | None = None) -> tuple[str | None, str | None]:
         if value:
             return value, f"${var}"
 
-    dirs = _host_dirs(repo_root)
-    if HOST_CONFIG_DIR == ".claude":
-        for directory in dirs:
-            for name in SETTINGS_NAMES:
-                path = os.path.join(directory, name)
-                env = _settings_env(path)
-                for var in KEY_ENV_VARS:
-                    value = str(env.get(var) or "").strip()
-                    if value:
-                        return value, f"{path} (env.{var})"
-
-    for directory in dirs:
-        path = os.path.join(directory, KEY_FILE_NAME)
-        file_val = _read_key_file(path)
-        if file_val:
-            return file_val, path
+    state_dir = os.environ.get("HARNESS_STATE_DIR") or os.path.join(os.path.expanduser("~"), ".harness")
+    paths = []
+    if repo_root:
+        paths.append(os.path.join(repo_root, ".harness", "config.local.json"))
+    paths.append(os.path.join(os.path.expanduser(state_dir), "config.json"))
+    for path in paths:
+        key = _commit_config_key(path)
+        if key:
+            return key, f"{path} (commit.geminiApiKey)"
 
     return None, None
 
@@ -1843,7 +1770,6 @@ PROVIDER = CLAUDE
 PRODUCT = {CLAUDE: "Claude Code", CHATGPT: "ChatGPT"}
 # How the commit trailer and the staging report name whoever did the writing.
 AUTHOR = {CLAUDE: "Claude", CHATGPT: "ChatGPT"}
-CONFIG_DIR = {CLAUDE: ".claude", CHATGPT: ".codex"}
 
 USAGE = (
     "Usage: /commit [--dry] [--ai] <message>\n"
@@ -1867,9 +1793,8 @@ def provider_from_argv(argv: list[str]) -> tuple[str, list[str]]:
 
 def set_provider(provider: str) -> None:
     """Point this process, and the commit functions, at one provider."""
-    global PROVIDER, HOST_CONFIG_DIR
+    global PROVIDER
     PROVIDER = provider
-    HOST_CONFIG_DIR = CONFIG_DIR[provider]
 
 
 # shared commit flow

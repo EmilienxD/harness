@@ -1,12 +1,11 @@
 name = "commit"
-version = "1.6.5"
+version = "1.6.6"
 description = "Zero-model-call /commit — stages and commits via native prompt hooks"
 requires = ["git"]
 docs = "https://github.com/EmilienxD/harness/blob/main/README.md#user-invoked-skills"
 
-# Secret/config files used by `--ai`. Their ignore rules live in the selected
-# platform directory, `.claude/` or `.codex/` for project installs.
-gitignore = ["commit-ai.key", "settings.local.json"]
+# Project-local credentials used by `--ai` stay outside version control.
+workspace_gitignore = [".harness/config.local.json"]
 
 [platforms.claude]
 status = "supported"
