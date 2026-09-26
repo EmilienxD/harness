@@ -13,19 +13,13 @@ from harness_cli.receipts import ReceiptStore
 
 
 ROOT = Path(__file__).resolve().parents[2]
-CORE = ROOT / "harness/engineering/commit/commit_core.py"
 ADAPTER = ROOT / "harness/engineering/commit/commit_hook.py"
-
-core_spec = importlib.util.spec_from_file_location("commit_core", CORE)
-core = importlib.util.module_from_spec(core_spec)
-sys.modules["commit_core"] = core
-assert core_spec.loader is not None
-core_spec.loader.exec_module(core)
 
 adapter_spec = importlib.util.spec_from_file_location("commit_hook_chatgpt", ADAPTER)
 adapter = importlib.util.module_from_spec(adapter_spec)
 assert adapter_spec.loader is not None
 adapter_spec.loader.exec_module(adapter)
+core = adapter
 
 
 @pytest.fixture(autouse=True)
@@ -61,7 +55,6 @@ def test_chatgpt_install_uses_native_hooks_and_skill_roots(tmp_path):
     target = Target.for_project(tmp_path, platform="chatgpt")
     CatalogueInstaller({tool.name: tool}, target, ReceiptStore.load(tmp_path / "receipts.json")).reconcile({tool.name})
 
-    assert (tmp_path / ".codex/hooks/commit_core.py").is_file()
     assert (tmp_path / ".codex/hooks/commit_hook.py").is_file()
     assert (tmp_path / ".agents/skills/commit/SKILL.md").is_file()
     assert (tmp_path / ".agents/skills/commit/agents/openai.yaml").is_file()

@@ -32,10 +32,6 @@ export async function runCommitJourney(): Promise<void> {
       join(harness, "harness", "engineering", "commit", "commit_hook.py"),
       hook,
     );
-    await copyFile(
-      join(harness, "harness", "engineering", "commit", "commit_core.py"),
-      join(project, ".claude", "hooks", "commit_core.py"),
-    );
     await writeFile(
       join(project, ".claude", "settings.json"),
       JSON.stringify({
