@@ -1,6 +1,19 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { Check, ChevronLeft, CircleHelp, Folder, LoaderCircle, Lock, PanelLeft, Send, Trash2, X } from "lucide-react";
+import {
+  Check,
+  CheckCheck,
+  ChevronLeft,
+  CircleHelp,
+  Folder,
+  LoaderCircle,
+  Lock,
+  PanelLeft,
+  Send,
+  Trash2,
+  Undo2,
+  X,
+} from "lucide-react";
 import type { HLJSApi } from "highlight.js";
 import type { AnswerDraft, GrillQuestion } from "@/lib/grill-contract";
 import {
@@ -23,7 +36,8 @@ type SessionSummary = {
   project_name: string | null;
   project_path: string | null;
   last_activity_at: string;
-  expires_at: string;
+  finished_at: string | null;
+  expires_at: string | null;
   active_round_id: string | null;
   active_round_number: number | null;
   answered_count: number;
@@ -143,8 +157,103 @@ function sessionTitle(session: SessionSummary): string {
   return session.display_title || `${PROVIDERS[session.provider]?.name ?? session.provider} session`;
 }
 
+function preferredSession(sessions: SessionSummary[]): SessionSummary | undefined {
+  return sessions.find((session) => !session.finished_at) ?? sessions[0];
+}
+
 function daysUntilPurge(session: SessionSummary): number {
-  return Math.max(0, Math.ceil((Date.parse(session.expires_at) - Date.now()) / 86_400_000));
+  return session.expires_at ? Math.max(0, Math.ceil((Date.parse(session.expires_at) - Date.now()) / 86_400_000)) : 0;
+}
+
+function SessionRailSection({
+  title,
+  sessions,
+  selected,
+  onChoose,
+  onFinish,
+  onRestore,
+  onDelete,
+}: {
+  title: string;
+  sessions: SessionSummary[];
+  selected: string | null;
+  onChoose: (session: SessionSummary) => void;
+  onFinish: (session: SessionSummary) => void;
+  onRestore: (session: SessionSummary) => void;
+  onDelete: (session: SessionSummary) => void;
+}) {
+  return (
+    <section className="rail__section" aria-label={`${title} sessions`}>
+      <h2 className="rail__title">
+        {title} <span>{sessions.length}</span>
+      </h2>
+      {sessions.map((session) => (
+        <div
+          key={session.id}
+          className={`session-row ${selected === `${session.provider}:${session.provider_session_id}` ? "is-selected" : ""} ${session.finished_at ? "is-finished" : ""}`}
+        >
+          <button className="session-row__select" onClick={() => onChoose(session)}>
+            <span className="session-row__title">
+              <ProviderIcon provider={session.provider} />
+              <b title={sessionTitle(session)}>{sessionTitle(session)}</b>
+            </span>
+            <span
+              className={`session-row__project ${session.project_name ? "" : "is-unknown"}`}
+              title={session.project_path ?? session.project_name ?? "Unknown project"}
+            >
+              <Folder size={13} aria-hidden="true" />
+              <strong>{session.project_name ?? "Unknown project"}</strong>
+              {session.project_path ? (
+                <span className="session-row__path" dir="rtl">
+                  <bdi dir="ltr">{session.project_path}</bdi>
+                </span>
+              ) : null}
+            </span>
+            <span className="session-row__summary">
+              <span>Round {session.active_round_number ?? "—"}</span>
+              <span aria-hidden="true">•</span>
+              <span>
+                {session.answered_count}/{session.question_count} answered
+              </span>
+            </span>
+            {session.finished_at && (
+              <span className="session-row__retention">Deletes in {daysUntilPurge(session)} days</span>
+            )}
+          </button>
+          <div className="session-row__actions">
+            {session.finished_at ? (
+              <button
+                type="button"
+                aria-label={`Restore ${sessionTitle(session)}`}
+                title="Restore session"
+                onClick={() => onRestore(session)}
+              >
+                <Undo2 size={15} />
+              </button>
+            ) : (
+              <button
+                type="button"
+                aria-label={`Finish ${sessionTitle(session)}`}
+                title="Finish session"
+                onClick={() => onFinish(session)}
+              >
+                <CheckCheck size={15} />
+              </button>
+            )}
+            <button
+              type="button"
+              className="is-danger"
+              aria-label={`Delete ${sessionTitle(session)}`}
+              title="Delete session"
+              onClick={() => onDelete(session)}
+            >
+              <Trash2 size={15} />
+            </button>
+          </div>
+        </div>
+      ))}
+    </section>
+  );
 }
 
 function CopyIcon({ size = 17 }: { size?: number }) {
@@ -164,6 +273,7 @@ function GrillBoard() {
   const [rounds, setRounds] = useState<Round[]>([]);
   const [review, setReview] = useState<{ roundId: string; prompt: string } | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<SessionSummary | null>(null);
+  const [finishTarget, setFinishTarget] = useState<SessionSummary | null>(null);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const [displayedRoundId, setDisplayedRoundId] = useState<string | null>(null);
   const [railOpen, setRailOpen] = useState(false);
@@ -190,11 +300,8 @@ function GrillBoard() {
       setAuthorized(true);
       setSessions(result.sessions);
       setError("");
-      setSelected(
-        (current) =>
-          current ??
-          (result.sessions[0] ? `${result.sessions[0].provider}:${result.sessions[0].provider_session_id}` : null),
-      );
+      const first = preferredSession(result.sessions);
+      setSelected((current) => current ?? (first ? `${first.provider}:${first.provider_session_id}` : null));
     } catch (cause) {
       if ((cause as ApiError).code === "unauthorized") setAuthorized(false);
       else setError((cause as Error).message);
@@ -337,7 +444,7 @@ function GrillBoard() {
   useEffect(() => {
     if (!shortcuts.enabled) return;
     const handleShortcut = (event: KeyboardEvent) => {
-      if (ignoresShortcuts(event) || deleteTarget || review || shortcutsOpen) return;
+      if (ignoresShortcuts(event) || deleteTarget || finishTarget || review || shortcutsOpen) return;
       if (matchesShortcut(event, "help")) {
         event.preventDefault();
         setShortcutsOpen(true);
@@ -374,9 +481,38 @@ function GrillBoard() {
     };
     window.addEventListener("keydown", handleShortcut, true);
     return () => window.removeEventListener("keydown", handleShortcut, true);
-  }, [deleteTarget, displayedRoundId, railOpen, review, rounds, scrollToRound, shortcuts.enabled, shortcutsOpen]);
+  }, [
+    deleteTarget,
+    displayedRoundId,
+    finishTarget,
+    railOpen,
+    review,
+    rounds,
+    scrollToRound,
+    shortcuts.enabled,
+    shortcutsOpen,
+  ]);
 
   const closeReview = useCallback(() => setReview(null), []);
+
+  const setFinished = useCallback(
+    async (session: SessionSummary, finished: boolean) => {
+      await api(
+        `sessions/${encodeURIComponent(session.provider)}/${encodeURIComponent(session.provider_session_id)}/${finished ? "finish" : "restore"}`,
+        {
+          method: "POST",
+          body: "{}",
+        },
+      );
+      await Promise.all([loadSessions(), loadSelected()]);
+    },
+    [loadSelected, loadSessions],
+  );
+
+  const restoreSession = useCallback(
+    (session: SessionSummary) => void setFinished(session, false).catch((cause) => setError((cause as Error).message)),
+    [setFinished],
+  );
 
   const deleteSession = useCallback(
     async (session: SessionSummary) => {
@@ -388,7 +524,7 @@ function GrillBoard() {
       setSessions(remaining);
       cache.current.clear();
       if (selected === key) {
-        const next = remaining[0];
+        const next = preferredSession(remaining);
         const nextKey = next ? `${next.provider}:${next.provider_session_id}` : null;
         setSelected(nextKey);
         setDetail(null);
@@ -455,12 +591,17 @@ function GrillBoard() {
   const online = Boolean(detail?.aboard);
   const saveState = [...saveStates.values()].includes("saving") ? "saving" : saveStates.size ? "saved" : null;
   const reviewed = review && rounds.find((item) => item.id === review.roundId);
+  const activeSessions = sessions.filter((session) => !session.finished_at);
+  const finishedSessions = sessions.filter((session) => Boolean(session.finished_at));
   const orderedRounds = [...rounds].sort((left, right) => left.number - right.number);
   // One divider marks where frozen history ends and the current round begins.
   const currentRoundStart = orderedRounds.findIndex((item) => item.status === "active");
   return (
     <>
-      <div className={`shell ${railOpen ? "is-open" : ""}`} inert={deleteTarget || shortcutsOpen ? true : undefined}>
+      <div
+        className={`shell ${railOpen ? "is-open" : ""}`}
+        inert={deleteTarget || finishTarget || shortcutsOpen ? true : undefined}
+      >
         <aside className="rail">
           <div className="rail__brand">
             <button
@@ -480,48 +621,27 @@ function GrillBoard() {
               <span className="brand__name">Grill-Me</span>
             </span>
           </div>
-          <div className="rail__title">Recent sessions</div>
-          <nav className="rail__list">
-            {sessions.map((session) => (
-              <div
-                key={session.id}
-                className={`session-row ${selected === `${session.provider}:${session.provider_session_id}` ? "is-selected" : ""}`}
-              >
-                <button className="session-row__select" onClick={() => chooseSession(session)}>
-                  <span className="session-row__title">
-                    <ProviderIcon provider={session.provider} />
-                    <b title={sessionTitle(session)}>{sessionTitle(session)}</b>
-                  </span>
-                  <span
-                    className={`session-row__project ${session.project_name ? "" : "is-unknown"}`}
-                    title={session.project_path ?? session.project_name ?? "Unknown project"}
-                  >
-                    <Folder size={13} aria-hidden="true" />
-                    <strong>{session.project_name ?? "Unknown project"}</strong>
-                    {session.project_path ? (
-                      <span className="session-row__path" dir="rtl">
-                        <bdi dir="ltr">{session.project_path}</bdi>
-                      </span>
-                    ) : null}
-                  </span>
-                  <span className="session-row__summary">
-                    <span>Round {session.active_round_number ?? "—"}</span>
-                    <span aria-hidden="true">•</span>
-                    <span>
-                      {session.answered_count}/{session.question_count} answered
-                    </span>
-                  </span>
-                </button>
-                <button
-                  type="button"
-                  className="session-row__delete"
-                  aria-label={`Delete ${sessionTitle(session)}`}
-                  onClick={() => setDeleteTarget(session)}
-                >
-                  <Trash2 size={15} />
-                </button>
-              </div>
-            ))}
+          <nav className="rail__list" aria-label="Sessions">
+            <SessionRailSection
+              title="Active"
+              sessions={activeSessions}
+              selected={selected}
+              onChoose={chooseSession}
+              onFinish={setFinishTarget}
+              onRestore={restoreSession}
+              onDelete={setDeleteTarget}
+            />
+            {finishedSessions.length > 0 && (
+              <SessionRailSection
+                title="Finished"
+                sessions={finishedSessions}
+                selected={selected}
+                onChoose={chooseSession}
+                onFinish={setFinishTarget}
+                onRestore={restoreSession}
+                onDelete={setDeleteTarget}
+              />
+            )}
           </nav>
           {shortcuts.enabled && (
             <button
@@ -624,7 +744,8 @@ function GrillBoard() {
                               item.id === displayedRoundId &&
                               !reviewed &&
                               !shortcutsOpen &&
-                              !deleteTarget
+                              !deleteTarget &&
+                              !finishTarget
                             }
                             onSave={saveAnswer}
                             onSaveState={reportSave}
@@ -666,6 +787,24 @@ function GrillBoard() {
             setDeleteTarget(null);
           }}
         />
+      )}
+      {finishTarget && (
+        <ConfirmModal
+          title="Finish this session?"
+          cancelLabel="Cancel finishing session"
+          confirmLabel="Finish session"
+          tone="neutral"
+          onCancel={() => setFinishTarget(null)}
+          onConfirm={async () => {
+            await setFinished(finishTarget, true);
+            setFinishTarget(null);
+          }}
+        >
+          <p className="delete-modal__note">
+            {sessionTitle(finishTarget)} will move to Finished and be deleted after 30 days. You can restore it before
+            then.
+          </p>
+        </ConfirmModal>
       )}
       {shortcutsOpen && <ShortcutHelpModal onClose={() => setShortcutsOpen(false)} />}
     </>
@@ -734,6 +873,7 @@ function DeleteSessionModal({
     <ConfirmModal
       title="Delete this session?"
       cancelLabel="Cancel session deletion"
+      confirmLabel="Delete session"
       onCancel={onCancel}
       onConfirm={onConfirm}
     >
@@ -756,10 +896,12 @@ function DeleteSessionModal({
             {session.answered_count}/{session.question_count} answered
           </dd>
         </div>
-        <div>
-          <dt>Auto-purge</dt>
-          <dd>In {daysUntilPurge(session)} days</dd>
-        </div>
+        {session.finished_at && (
+          <div>
+            <dt>Auto-purge</dt>
+            <dd>In {daysUntilPurge(session)} days</dd>
+          </div>
+        )}
       </dl>
     </ConfirmModal>
   );
@@ -769,6 +911,7 @@ function DeleteSessionModal({
 function ConfirmModal({
   title,
   cancelLabel,
+  confirmLabel = "Confirm",
   tone = "danger",
   onCancel,
   onConfirm,
@@ -777,6 +920,7 @@ function ConfirmModal({
   title: string;
   /** Names what the scrim cancels, for assistive technology. */
   cancelLabel: string;
+  confirmLabel?: string;
   tone?: "danger" | "neutral";
   onCancel: () => void;
   onConfirm: () => Promise<void>;
@@ -834,7 +978,7 @@ function ConfirmModal({
             onClick={() => void confirm()}
           >
             {busy ? <LoaderCircle className="spin" size={16} /> : null}
-            Confirm
+            {confirmLabel}
           </button>
         </div>
       </div>
@@ -1474,12 +1618,7 @@ function Explanation({ question }: { question: GrillQuestion }) {
   }, [question.id, question.init_js, question.explanation_html]);
   return (
     <>
-      <div
-        ref={root}
-        id={`explanation-${question.id}`}
-        className="explanation"
-        dangerouslySetInnerHTML={html}
-      />
+      <div ref={root} id={`explanation-${question.id}`} className="explanation" dangerouslySetInnerHTML={html} />
       {failed && <div className="explanation-error">This question's interactive explanation could not initialize.</div>}
     </>
   );

@@ -91,6 +91,13 @@ async function handle(request: Request, path: string, method: string): Promise<R
     return readSession(decodeURIComponent(sessionMatch[1] ?? ""), decodeURIComponent(sessionMatch[2] ?? ""));
   if (sessionMatch && method === "DELETE")
     return deleteSession(decodeURIComponent(sessionMatch[1] ?? ""), decodeURIComponent(sessionMatch[2] ?? ""));
+  const finishMatch = /^sessions\/([^/]+)\/(.+)\/(finish|restore)$/u.exec(path);
+  if (finishMatch && method === "POST")
+    return setSessionFinished(
+      decodeURIComponent(finishMatch[1] ?? ""),
+      decodeURIComponent(finishMatch[2] ?? ""),
+      finishMatch[3] === "finish",
+    );
 
   const roundMatch = /^rounds\/([0-9a-f-]+)$/u.exec(path);
   if (roundMatch && method === "GET") {
@@ -126,7 +133,7 @@ async function listSessions(): Promise<Response> {
   const { data, error } = await supabaseAdmin
     .from("grill_sessions")
     .select(
-      "id,provider,provider_session_id,display_title,project_name,project_path,last_activity_at,expires_at,grill_rounds(id,number,status,payload,grill_answer_drafts(state))",
+      "id,provider,provider_session_id,display_title,project_name,project_path,last_activity_at,finished_at,expires_at,grill_rounds(id,number,status,payload,grill_answer_drafts(state))",
     )
     .eq("grill_rounds.status", "active")
     .order("last_activity_at", { ascending: false });
@@ -154,6 +161,7 @@ async function listSessions(): Promise<Response> {
       project_name: session.project_name,
       project_path: session.project_path,
       last_activity_at: session.last_activity_at,
+      finished_at: session.finished_at,
       expires_at: session.expires_at,
       active_round_id: active?.id ?? null,
       active_round_number: active?.number ?? null,
@@ -191,6 +199,25 @@ async function readSession(provider: string, sessionId: string): Promise<Respons
     .limit(1)
     .maybeSingle();
   return json({ session, rounds: rounds ?? [], aboard: presence ?? null });
+}
+
+async function setSessionFinished(provider: string, sessionId: string, finished: boolean): Promise<Response> {
+  if (!(provider === "claude" || provider === "chatgpt"))
+    return problem(404, "session_not_found", "Session not found.");
+  const { data: session, error } = await supabaseAdmin
+    .from("grill_sessions")
+    .select("id,finished_at")
+    .eq("provider", provider)
+    .eq("provider_session_id", sessionId)
+    .maybeSingle();
+  if (error || !session) return problem(404, "session_not_found", "Session not found.");
+  if (Boolean(session.finished_at) === finished) return json({ ok: true });
+  const { error: updateError } = await supabaseAdmin.rpc("grill_set_session_finished", {
+    target_session: session.id,
+    is_finished: finished,
+  });
+  if (updateError) return problem(500, "session_update_failed", "The session could not be updated.");
+  return json({ ok: true });
 }
 
 async function deleteSession(provider: string, sessionId: string): Promise<Response> {
