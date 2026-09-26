@@ -1,0 +1,6 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "framework": null,
+  "buildCommand": "mkdocs build --strict -f mkdocs.yml",
+  "outputDirectory": "site"
+}

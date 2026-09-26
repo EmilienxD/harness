@@ -12,6 +12,7 @@ build/
 node_modules/
 .output/
 .vercel/
+docs/site/
 .wrangler/
 commit-ai.key
 .aboard/runtime/
