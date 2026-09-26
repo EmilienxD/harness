@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import json
+import sys
 from argparse import Namespace
 from pathlib import Path
 
+from harness_cli.catalogue import ResolvedPackage
 from harness_cli.installer import (
     CatalogueInstaller,
     Change,
@@ -16,6 +18,7 @@ from harness_cli.installer import (
     installed_packages,
     reconcile_targets,
 )
+from harness_cli.git_warnings import symlink_worktree_warning
 from harness_cli.manifest import ManifestError, SupportStatus, Tool, discover
 from harness_cli.platforms import Platform
 from harness_cli.receipts import ReceiptStore, installation_lock, package_ownership
@@ -134,6 +137,20 @@ def _validate_selectable(names: set[str], available: dict[str, Tool]) -> None:
         raise InstallError("unknown catalogue package(s): " + ", ".join(unknown))
 
 
+def _warn_for_symlink_worktree(
+    installer: CatalogueInstaller, resolved: list[ResolvedPackage]
+) -> None:
+    target = installer.target
+    if (
+        target.platform is Platform.CLAUDE
+        and not target.is_user
+        and installer.skill_mode == "symlink"
+        and any(payload.root == "skills" for item in resolved for payload in installer._payloads(item.tool))
+        and (warning := symlink_worktree_warning(target.scope_root))
+    ):
+        print(f"warning: {warning}", file=sys.stderr)
+
+
 def run_install(args: Namespace) -> int:
     available = discover(local=args.local) if getattr(args, "local", None) is not None else discover()
     requested = set(args.packages)
@@ -171,7 +188,8 @@ def run_install(args: Namespace) -> int:
         ]
         installer = CatalogueInstaller(available, target, store, skill_mode=args.skill_mode)
         installer.update_packages = compatible_requested
-        _, changes = installer.plan(selected)
+        resolved, changes = installer.plan(selected)
+        _warn_for_symlink_worktree(installer, resolved)
         result = {
             "platform": target.platform.value,
             "product": target.adapter.product_name,
@@ -286,7 +304,8 @@ def run_upgrade(args: Namespace) -> int:
         selected = roots
         skipped = []
         installer = CatalogueInstaller(available, target, store, skill_mode=args.skill_mode)
-        _, changes = installer.plan(selected)
+        resolved, changes = installer.plan(selected)
+        _warn_for_symlink_worktree(installer, resolved)
         result = {
             "platform": target.platform.value,
             "product": target.adapter.product_name,

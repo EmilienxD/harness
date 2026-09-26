@@ -18,6 +18,8 @@ The interactive catalogue asks for Claude Code and/or ChatGPT, project or user s
 
 When selected packages include skills for Claude Code, the catalogue asks whether to copy the skills or install them in `.agents/skills` and symlink each `.claude/skills/<name>` directory to its counterpart. Copy is the default for a new installation; later runs remember the chosen mode. Non-interactive `install` and `upgrade` accept `--skill-mode copy|symlink` to choose or change it. Hooks and other platform-specific files still use their own provider directories.
 
+In a Git repository, symlink mode depends on Git and the operating system recreating directory symlinks when a clone or worktree is checked out. On Windows, set `git config --global core.symlinks true` and enable symlink creation before creating worktrees. If symlink checkout is disabled, Git writes each link target as a plain text file. Harness warns when project symlink mode is selected in a Git worktree. Use copy mode when the committed project files must work without symlink support.
+
 When rerunning the interactive catalogue, optional updates appear in a separate
 dot picker with nothing selected. Leave a package unselected there to keep its
 installed version. Updates required by a newly selected or updated package are
