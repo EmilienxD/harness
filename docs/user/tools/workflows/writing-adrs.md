@@ -2,7 +2,7 @@
 
 ## When to use
 
-Use `writing-adrs` when a task creates, changes, or supersedes an architectural decision record. It is model-invoked for ADR authoring and can also be requested explicitly after the decision is settled.
+Use `writing-adrs` when a task creates an architectural decision record or changes a recorded decision. It is model-invoked for ADR authoring and can also be requested explicitly after the decision is settled.
 
 ## Invocation
 
@@ -10,11 +10,11 @@ Use `/writing-adrs [decision or ADR path]` in Claude Code or `$writing-adrs` in 
 
 ## What happens
 
-The agent writes a concise decision contract: the decision first, exact values and rules, accepted trade-offs, and references to related ADRs. It avoids implementation identifiers, file paths within the ADR body, and verification claims. A reversal gets a new numbered record with a `supersedes` link, while the old record is marked superseded.
+The agent writes a concise decision contract: the decision first, exact values and rules, accepted trade-offs, and references to related ADRs. It avoids implementation identifiers, file paths within the ADR body, and verification claims. When an agreed decision changes or reverses, the agent updates its existing ADR in place, removes outdated rules, and updates affected related ADRs and index entries. A distinct new decision gets a new numbered ADR.
 
 ## Files and prerequisites
 
-Both providers are supported. ADRs go in `docs/adr/NNNN-kebab-case-title.md`, and the agent adds an index row to `docs/adr/README.md`. The package installs the authoring skill, not an ADR template in the target project.
+Both providers are supported. ADRs go in `docs/adr/NNNN-kebab-case-title.md`. The agent adds an index row for each new ADR and updates the existing row when an ADR changes. The package installs the authoring skill, not an ADR template in the target project.
 
 ## Example
 

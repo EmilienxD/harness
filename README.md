@@ -115,7 +115,7 @@ Launch settings come from `.harness/config.json`, then the user-level file, then
 
 - **`writing-for-agents`**: Guides the creation of predictable skills and agent instruction files. It treats invocation pointers, information hierarchy, completion criteria, progressive disclosure, leading words, and pruning as concrete controls over agent behavior and document load.
 
-- **`writing-adrs`**: Writes architectural decision records as durable contracts. It records only settled decisions, binding values, terse rules, accepted trade-offs, and ADR cross-references in a strict, refactor-resistant format.
+- **`writing-adrs`**: Creates architectural decision records and updates existing records in place when agreed decisions change. It records settled decisions, binding values, terse rules, accepted trade-offs, and ADR cross-references in a refactor-resistant format.
 
 - **`report-gotchas`**: Near the end of complicated implementation work, records meaningful caveats, failed checks, unfinished work, or required human action in a configured Discord channel. It does nothing when there is nothing noteworthy to report. Configure its webhook with `harness-report-gotchas configure`.
 
