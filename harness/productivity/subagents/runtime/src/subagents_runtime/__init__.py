@@ -1,3 +1,3 @@
 """Persistent runtime for Harness subagent workflows."""
 
-__version__ = "2.2.7"
+__version__ = "2.2.8"

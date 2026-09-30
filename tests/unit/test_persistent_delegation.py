@@ -765,6 +765,62 @@ def test_verified_dead_process_completes_abandoned_request_and_allows_resume(
     )
 
 
+@pytest.mark.parametrize("provider", ["claude", "chatgpt"])
+@pytest.mark.parametrize("mode", ["auto", "interactive"])
+def test_parent_resume_delivers_dead_child_interruption_without_restarting_it(
+    tmp_path, monkeypatch, provider, mode
+):
+    from subagents_runtime.delegation import claim_parent_delivery, has_pending_children
+
+    monkeypatch.setenv("HARNESS_STATE_DIR", str(tmp_path / "state"))
+    monkeypatch.delenv("HARNESS_SESSION_ID", raising=False)
+    sessions.register_observed("parent", tmp_path, provider)
+    inbox = enable_delegation("parent", "work-with-agent").inbox
+    (inbox / "task.md").write_text(
+        f"---\ntask: general\nmode: {mode}\n---\nTask.", encoding="utf-8"
+    )
+    [child] = process_inbox("parent", launch=lambda *_: "saved-conversation")
+    with sessions._connect() as connection:
+        connection.execute(
+            "UPDATE executions SET supervisor_pid=2147483647,supervisor_birth='dead',provider_pid=2147483647,provider_birth='dead'"
+        )
+    # Acknowledge the original instructions, so only the interruption produces context.
+    handle({"session_id": "parent", "cwd": str(tmp_path), "hook_event_name": "UserPromptSubmit"}, provider)
+    handle({"session_id": "parent", "cwd": str(tmp_path), "hook_event_name": "PreToolUse"}, provider)
+    output = handle(
+        {"session_id": "parent", "cwd": str(tmp_path), "hook_event_name": "SessionStart", "source": "resume"},
+        provider,
+    )
+    assert output is not None
+    assert not has_pending_children("parent")
+    assert claim_parent_delivery("parent", "SessionStart") is not None
+    assert sessions.resolve_session("agent-1", "parent") == child.child_session_id
+    assert not list(inbox.iterdir())
+
+
+@pytest.mark.parametrize("provider", ["claude", "chatgpt"])
+def test_inbox_resume_refuses_child_without_saved_conversation(tmp_path, monkeypatch, provider):
+    from subagents_runtime.delegation import report_child_stop
+
+    monkeypatch.setenv("HARNESS_STATE_DIR", str(tmp_path / "state"))
+    sessions.register_observed("parent", tmp_path, provider)
+    inbox = enable_delegation("parent", "work-with-agent").inbox
+    (inbox / "task.md").write_text(
+        "---\ntask: general\nmode: auto\n---\nTask.", encoding="utf-8"
+    )
+    [child] = process_inbox("parent", launch=lambda *_: "conversation")
+    report_child_stop(child.child_session_id, "", success=False, cancelled=True)
+    with sessions._connect() as connection:
+        connection.execute("UPDATE executions SET state='exited'")
+        connection.execute("UPDATE sessions SET provider_session_id=NULL WHERE id=?", (child.child_session_id,))
+    (inbox / "resume.md").write_text("---\nresume: agent-1\n---\nContinue.", encoding="utf-8")
+    launches = []
+    [result] = process_inbox("parent", launch=lambda *args: launches.append(args) or child.child_session_id)
+    assert result.status == "failed"
+    assert result.reason == "Provider conversation has not been bound; resume refused"
+    assert not launches
+
+
 def test_legacy_grants_consolidate_running_files_and_preserve_indices_and_acks(
     tmp_path, monkeypatch
 ):

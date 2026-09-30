@@ -520,6 +520,10 @@ def process_inbox(
                         raise RequestFileError(
                             "child is not owned by this conversation"
                         )
+                    if not row[4]:
+                        raise RequestFileError(
+                            "Provider conversation has not been bound; resume refused"
+                        )
                     original = connection.execute(
                         "SELECT task FROM requests WHERE child_session_id=? ORDER BY created_at LIMIT 1",
                         (child_id,),
@@ -532,10 +536,6 @@ def process_inbox(
                             f"unsupported mode {row[1]!r} for task {original[0]!r}"
                         )
                     if fork:
-                        if not row[4]:
-                            raise RequestFileError(
-                                "child has no bound conversation to fork"
-                            )
                         fork_of = row[4]
                         _supersede_child(connection, child_id)
                     request = replace(

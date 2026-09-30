@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { existsSync, readFileSync, realpathSync } from "node:fs";
-import { basename, dirname, isAbsolute, resolve } from "node:path";
+import { isAbsolute, resolve } from "node:path";
 
 import { E2eProtocolError, isRecord, type AnthropicMessagesRequest, type AnthropicScenarioResponse } from "../../core/anthropic-protocol.js";
 import { containsPath } from "../../core/path.js";
@@ -12,25 +12,97 @@ export const CHILD_REPLY = "HARNESS_SUBAGENTS_CHILD_COMPLETE_48CF: inspected the
 export const NEXT_MARKER = "HARNESS_SUBAGENTS_NEXT_E2E_C241";
 export const NEXT_REPLY = "HARNESS_SUBAGENTS_NEXT_COMPLETE_640C: continued the saved conversation.";
 export const PARENT_REPLY = "HARNESS_SUBAGENTS_PARENT_COMPLETE_33A1: received the child reply.";
-export const scenarioCatalogHash = createHash("sha256").update("subagents:v1").digest("hex");
+export const RECOVERY_MARKER = "HARNESS_SUBAGENTS_RECOVERY_E2E_762B";
+export const RECOVERY_PARENT_REPLY = "HARNESS_SUBAGENTS_RECOVERY_COMPLETE_639A: received the resumed child reply.";
+export const CHILD_PROGRESS = "child checkpoint before interruption\n";
+export const scenarioCatalogHash = createHash("sha256").update("subagents:v2:interrupted-parent-and-child").digest("hex");
 
 const CLAUDE_WRITE_ID = "toolu_e2e_subagents_request";
 const CLAUDE_REPLY_ID = "toolu_e2e_subagents_reply";
 const CODEX_WRITE_ID = "call_e2e_subagents_request";
 const CODEX_REPLY_ID = "call_e2e_subagents_reply";
+const CLAUDE_PROGRESS_ID = "toolu_e2e_subagents_progress";
+const CODEX_PROGRESS_ID = "call_e2e_subagents_progress";
+const CLAUDE_RESUME_ID = "toolu_e2e_subagents_resume";
+const CODEX_RESUME_ID = "call_e2e_subagents_resume";
 
-export function claudeTransition(request: AnthropicMessagesRequest, repoRoot: string, mode: "interactive" | "auto" = "interactive"): AnthropicScenarioResponse {
+export function claudeTransition(request: AnthropicMessagesRequest, repoRoot: string, mode: "interactive" | "auto" = "interactive", recovery = false): AnthropicScenarioResponse {
   const text = deepText(request.messages);
+  if (recovery && text.includes(PARENT_MARKER) && text.includes(RECOVERY_MARKER)) {
+    if (claudeResult(request, CLAUDE_WRITE_ID) === undefined) throw new E2eProtocolError("$.messages", "parent history was not restored", "subagents");
+    if (claudeResult(request, CLAUDE_RESUME_ID) === undefined) {
+      if (!text.includes("execution ended before delivering a result")) throw new E2eProtocolError("$.messages", "child interruption was not delivered at parent resume", "subagents");
+      return claudeResponse("parent-resume-request-write", "tool_use", [{
+        type: "tool_use", id: CLAUDE_RESUME_ID, name: "Write",
+        input: { file_path: resolve(requireInbox(text, repoRoot, "claude"), "resume.md"), content: resumeBody() },
+      }]);
+    }
+    return claudeResponse(text.includes(NEXT_REPLY) ? "parent-received-resumed-reply" : "parent-recovery-waiting", "end_turn", [{
+      type: "text", text: text.includes(NEXT_REPLY) ? RECOVERY_PARENT_REPLY : "Waiting for the resumed child.",
+    }]);
+  }
+  if (recovery && !text.includes(PARENT_MARKER) && text.includes(CHILD_MARKER)) {
+    const progress = claudeResult(request, CLAUDE_PROGRESS_ID);
+    if (text.includes(NEXT_MARKER)) {
+      if (!progress || progress.is_error) throw new E2eProtocolError("$.messages", "child history was not restored", "subagents");
+      return claudeChild(request, mode, true);
+    }
+    if (!progress) return claudeResponse("child-progress-write", "tool_use", [{
+      type: "tool_use", id: CLAUDE_PROGRESS_ID, name: "Write",
+      input: { file_path: resolve(repoRoot, "child-progress.txt"), content: CHILD_PROGRESS },
+    }]);
+    if (progress.is_error) {
+      const detail = deepText(progress).toLowerCase();
+      const category = ["permission", "read", "path", "denied", "hook", "invalid"].find((item) => detail.includes(item)) ?? "unknown";
+      throw new E2eProtocolError("$.messages", `child checkpoint failed (${category})`, "subagents");
+    }
+    return claudeResponse("child-interruption-ready", "end_turn", [{ type: "text", text: "Interrupted fixture response." }]);
+  }
   if (text.includes(PARENT_MARKER)) return claudeParent(request, repoRoot, text, mode);
   if (text.includes(CHILD_MARKER)) return claudeChild(request,mode,text.includes(NEXT_MARKER));
   throw new E2eProtocolError("$.messages", "does not select the subagents scenario", "subagents");
 }
 
-export function codexTransition(request: OpenAiResponsesRequest, repoRoot: string, mode: "interactive" | "auto" = "interactive"): OpenAiScenarioResponse {
+export function codexTransition(request: OpenAiResponsesRequest, repoRoot: string, mode: "interactive" | "auto" = "interactive", recovery = false): OpenAiScenarioResponse {
   const text = deepText([request.instructions, request.input]);
+  const hasOutput = (id: string) => request.input.some((item) => (item.type === "custom_tool_call_output" || item.type === "function_call_output") && item.call_id === id);
+  if (recovery && text.includes(PARENT_MARKER) && text.includes(RECOVERY_MARKER)) {
+    if (!hasOutput(CODEX_WRITE_ID)) throw new OpenAiProtocolError("$.input", "parent history was not restored", "subagents");
+    if (!hasOutput(CODEX_RESUME_ID)) {
+      if (!text.includes("execution ended before delivering a result")) throw new OpenAiProtocolError("$.input", "child interruption was not delivered at parent resume", "subagents");
+      const path = resolve(requireInbox(text, repoRoot, "codex"), "resume.md");
+      const command = `harness-e2e-request ${Buffer.from(path).toString("base64")} ${Buffer.from(resumeBody()).toString("base64")}`;
+      return codexCommand(request, CODEX_RESUME_ID, "parent-resume-request-write", command);
+    }
+    const ready = text.includes(NEXT_REPLY);
+    const checkpoint = ready ? "parent-received-resumed-reply" : "parent-recovery-waiting";
+    return { scenario: "subagents", checkpoint, output: finalOutput(checkpoint, ready ? RECOVERY_PARENT_REPLY : "Waiting for the resumed child.") };
+  }
+  if (recovery && !text.includes(PARENT_MARKER) && text.includes(CHILD_MARKER)) {
+    if (text.includes(NEXT_MARKER)) {
+      if (!hasOutput(CODEX_PROGRESS_ID)) throw new OpenAiProtocolError("$.input", "child history was not restored", "subagents");
+      return codexChild(request, mode, true);
+    }
+    if (!hasOutput(CODEX_PROGRESS_ID)) {
+      const command = `node -e "require('fs').writeFileSync('child-progress.txt',Buffer.from('${Buffer.from(CHILD_PROGRESS).toString("base64")}','base64'))"`;
+      return codexCommand(request, CODEX_PROGRESS_ID, "child-progress-write", command);
+    }
+    return { scenario: "subagents", checkpoint: "child-interruption-ready", output: finalOutput("child-interruption-ready", "Interrupted fixture response.") };
+  }
   if (text.includes(PARENT_MARKER)) return codexParent(request, repoRoot, text,mode);
   if (text.includes(CHILD_MARKER)) return codexChild(request,mode,text.includes(NEXT_MARKER));
   throw new OpenAiProtocolError("$.input", "does not select the subagents scenario", "subagents");
+}
+
+function resumeBody(): string {
+  return `---\nresume: agent-1\n---\n${NEXT_MARKER}\nContinue the interrupted work.\n`;
+}
+
+function codexCommand(request: OpenAiResponsesRequest, id: string, checkpoint: string, command: string): OpenAiScenarioResponse {
+  const input = { cmd: command, yield_time_ms: 10_000, max_output_tokens: 1_000 };
+  return { scenario: "subagents", checkpoint, output: request.codeMode
+    ? { type: "custom_tool_call", id: `ctc_${id}`, call_id: id, name: "exec", status: "completed", input: `const result = await tools.exec_command(${JSON.stringify(input)}); text(JSON.stringify(result));` }
+    : { type: "function_call", id: `fc_${id}`, call_id: id, name: "exec_command", status: "completed", arguments: JSON.stringify(input) } };
 }
 
 function claudeParent(request: AnthropicMessagesRequest, repoRoot: string, text: string, mode: "interactive" | "auto"): AnthropicScenarioResponse {
@@ -83,8 +155,7 @@ function codexParent(request: OpenAiResponsesRequest, repoRoot: string, text: st
       throw new OpenAiProtocolError("$.tools", `exec_command is unavailable; offered: ${offered.join(", ")}`, "subagents");
     }
     const requestPath = resolve(inbox, "child.md");
-    const grantId = basename(dirname(inbox));
-    const command = `harness-e2e-request ${Buffer.from(requestPath).toString("base64")} ${Buffer.from(requestBody(mode)).toString("base64")} ${grantId}`;
+    const command = `harness-e2e-request ${Buffer.from(requestPath).toString("base64")} ${Buffer.from(requestBody(mode)).toString("base64")}`;
     const output: OpenAiResponseOutput = request.codeMode
       ? {
           type: "custom_tool_call",
@@ -143,7 +214,7 @@ function requireInbox(text: string, repoRoot: string, provider: "claude" | "code
   if (inbox !== undefined && isAbsolute(inbox)) {
     try {
       const canonicalInbox = realpathSync(inbox);
-      if (containsPath(realpathSync(resolve(repoRoot,"..","state","runtime","sessions")), canonicalInbox)) return canonicalInbox;
+      if (containsPath(realpathSync(resolve(repoRoot,"..","state","inboxes")), canonicalInbox)) return canonicalInbox;
     } catch { /* the inbox must exist before the model can write its request */ }
   }
   if (provider === "claude") throw new E2eProtocolError("$.messages", "missing a contained delegation inbox", "subagents");

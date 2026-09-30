@@ -37,7 +37,7 @@ export class OpenAiProtocolError extends Error {
 export async function startFakeOpenAiServer(options: {
   readonly diagnosticsPath?: string;
   readonly scenarioCatalogHash: string;
-  readonly transition: (request: OpenAiResponsesRequest) => OpenAiScenarioResponse;
+  readonly transition: (request: OpenAiResponsesRequest) => OpenAiScenarioResponse | Promise<OpenAiScenarioResponse>;
 }) {
   const authToken = `harness-e2e-${randomBytes(24).toString("hex")}`;
   const sessionSalt = randomBytes(32);
@@ -60,7 +60,7 @@ export async function startFakeOpenAiServer(options: {
       }
       raw = await readBody(request);
       body = parseRequest(JSON.parse(raw.toString("utf8")) as unknown);
-      const result = options.transition(body);
+      const result = await options.transition(body);
       checkpoints.add(result.checkpoint);
       writeResponse(response, body.model, raw, result.output);
       observations.push(observation(request, url, raw, body, sessionSalt, ++sequence, 200, "success", result.scenario, result.checkpoint));

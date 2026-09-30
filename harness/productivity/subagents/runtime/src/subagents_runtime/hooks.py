@@ -189,6 +189,15 @@ def handle(
             ).fetchone()
         if enabled:
             recovered = reconcile_inbox(session_id, launch=sessions.launch_delegated)
+            from subagents_runtime.processes import live_executions
+
+            with sessions._connect() as connection:
+                children = connection.execute(
+                    "SELECT DISTINCT child_session_id FROM requests WHERE parent_session_id=? AND child_session_id IS NOT NULL AND state IN ('launching','pending','uncertain')",
+                    (session_id,),
+                ).fetchall()
+            for (child_id,) in children:
+                live_executions(child_id)
         instructions = claim_instructions(
             session_id, compact=payload.get("source") == "compact"
         )
