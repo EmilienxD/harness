@@ -4,11 +4,11 @@ build-backend = "hatchling.build"
 
 [project]
 name = "harness-subagents-runtime"
-version = "2.2.9"
+version = "2.3.2"
 description = "Persistent delegation and execution runtime for Harness"
 requires-python = ">=3.11"
 license = { text = "MIT" }
-dependencies = ["PyYAML>=6.0,<7.0"]
+dependencies = ["PyYAML>=6.0,<7.0", "tomlkit>=0.13,<1.0"]
 
 [project.scripts]
 harness = "subagents_runtime.cli:main"

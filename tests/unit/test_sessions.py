@@ -269,7 +269,6 @@ def test_standalone_claude_delegation_profile_applies_tool_denials():
         ("claude", {"model": "gpt-5.6-sol"}),
         ("claude", {"effort": "minimal"}),
         ("chatgpt", {"model": "opus"}),
-        ("chatgpt", {"model": "by-difficulty"}),
         ("chatgpt", {"effort": "max"}),
     ],
 )

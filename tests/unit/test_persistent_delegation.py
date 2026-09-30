@@ -303,6 +303,9 @@ def test_terminal_continuations_reply_through_the_original_process_hooks(tmp_pat
         original = connection.execute("SELECT id FROM executions WHERE request_id=?", (first.request_id,)).fetchone()[0]
         connection.execute("UPDATE executions SET backend='aboard',aboard_agent_id='child',aboard_handle='terminal' WHERE id=?", (original,))
         if schema_version == 3:
+            connection.execute("DROP TABLE loop_messages")
+            connection.execute("DROP TABLE loop_waits")
+            connection.execute("DROP TABLE loop_sessions")
             connection.execute("ALTER TABLE executions DROP COLUMN input_execution_id")
             connection.execute("PRAGMA user_version=3")
 

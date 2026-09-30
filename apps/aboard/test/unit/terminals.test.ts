@@ -80,6 +80,20 @@ function setup(sleep: (milliseconds: number) => Promise<void> = async () => unde
   return { controller, host, events };
 }
 
+test("loop implementers have visible worktree terminals with the loop environment", () => {
+  const { controller, host } = setup();
+  const created = controller.create({ agentId: agent("child"), sessionId: session("conversation"), agentType: "general",
+    executionMode: "loop", provider: "chatgpt", cwd: "C:\\feature", harnessRequestId: "request",
+    providerEnvironment: { HARNESS_SESSION_ID: "child", HARNESS_EXECUTION_ID: "execution", HARNESS_STATE_DIR: "C:\\state" },
+  });
+  assert.equal(created.backend, "terminal");
+  assert.equal(host.created[0]?.options.cwd, "C:\\feature");
+  assert.equal(host.created[0]?.options.env.HARNESS_EXECUTION_MODE, "loop");
+  assert.equal(host.created[0]?.options.env.HARNESS_SESSION_ID, "child");
+  assert.equal(host.created[0]?.options.env.HARNESS_EXECUTION_ID, "execution");
+  assert.equal(host.created[0]?.options.env.HARNESS_STATE_DIR, "C:\\state");
+});
+
 test("resuming in an open terminal pastes a multiline message and submits it once", async () => {
   const { controller, host } = setup();
   const created = controller.create({ agentId: agent("child"), sessionId: session("conversation"), agentType: "general", executionMode: "interactive" });
@@ -129,13 +143,13 @@ test("a large Codex paste gets more time to reach the composer before Enter", as
   assert.ok(elapsedMs >= 2_000, "a multi-kilobyte paste needs time to reach Codex before Enter");
 });
 
-test("interactive delegation resumes use the matching live terminal and preserve its session", async () => {
-  for (const provider of ["claude", "chatgpt"] as const) {
+test("interactive and loop delegation resumes use the matching live terminal and preserve its session", async () => {
+  for (const provider of ["claude", "chatgpt"] as const) for (const executionMode of ["interactive", "loop"] as const) {
     const { controller, host } = setup();
-    const opened = controller.create({ agentId: agent("child"), sessionId: session("conversation"), agentType: "general", executionMode: "interactive", provider });
-    const binding: DelegationBinding = { agentId: "child", sessionId: "conversation", terminalId: opened.terminalId, provider, type: "general", task: "general", executionMode: "interactive", cwd: opened.cwd, description: "Child", harnessSessionId: "stable" };
+    const opened = controller.create({ agentId: agent("child"), sessionId: session("conversation"), agentType: "general", executionMode, provider });
+    const binding: DelegationBinding = { agentId: "child", sessionId: "conversation", terminalId: opened.terminalId, provider, type: "general", task: "general", executionMode, cwd: opened.cwd, description: "Child", harnessSessionId: "stable" };
     const request: ManualDelegationLaunch = { ...binding, requestId: "next", resumeAgentId: "child", resumeSessionId: "conversation", forkSessionId: "conversation", executionId: "execution", prompt: "Continue" };
-    const saved: AgentSession = { platform: provider, identity: { agentId: agent("child"), type: "general" }, sessionId: session("conversation"), sessionBinding: "bound", terminal: { terminalId: opened.terminalId, name: opened.name }, lifecycle: { status: "awaiting-user", startedAt: opened.createdAt as IsoTimestamp }, executionMode: "interactive", resultDelivery: { mode: "none" }, telemetry: { totalTokens: 0, totalDurationMs: 0, totalToolUseCount: 0, compactionCount: 0 } };
+    const saved: AgentSession = { platform: provider, identity: { agentId: agent("child"), type: "general" }, sessionId: session("conversation"), sessionBinding: "bound", terminal: { terminalId: opened.terminalId, name: opened.name }, lifecycle: { status: "awaiting-user", startedAt: opened.createdAt as IsoTimestamp }, executionMode, resultDelivery: { mode: "none" }, telemetry: { totalTokens: 0, totalDurationMs: 0, totalToolUseCount: 0, compactionCount: 0 } };
     host.created[0]!.terminal.sent.length = 0;
     const prepare = async () => { assert.equal(host.created[0]!.terminal.sent.length, 0); };
     const resumed = await resumeInOpenTerminal(request, binding, saved, controller, prepare);

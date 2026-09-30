@@ -1,0 +1,5 @@
+interface:
+  display_name: "Clean up Git"
+  short_description: "Inspect every branch and worktree and confirm cleanup"
+policy:
+  allow_implicit_invocation: false

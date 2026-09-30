@@ -1,0 +1,29 @@
+name = "cleanup-git"
+version = "1.0.0"
+description = "Explain every local branch and worktree before confirming cleanup"
+requires = ["git", "gh"]
+
+[platforms.claude]
+status = "supported"
+fragment = "claude/settings.fragment.json"
+
+[platforms.chatgpt]
+status = "supported"
+fragment = "chatgpt/hooks.fragment.json"
+
+[[files]]
+src = "SKILL.md"
+dest = "cleanup-git/SKILL.md"
+root = "skills"
+
+[[files]]
+src = "cleanup_git_hook.py"
+dest = "cleanup_git_hook.py"
+root = "hooks"
+executable = true
+
+[[files]]
+src = "chatgpt/openai.yaml"
+dest = "cleanup-git/agents/openai.yaml"
+root = "skills"
+platforms = ["chatgpt"]

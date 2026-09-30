@@ -44,6 +44,7 @@ TASK_POLICIES = {
     "address-with-agent": TaskPolicy("address", frozenset({"interactive", "auto"})),
     "review-with-agent": TaskPolicy("review", frozenset({"interactive", "auto"})),
     "work-with-agent": TaskPolicy("general", frozenset({"interactive", "auto"})),
+    "ship": TaskPolicy("loop", frozenset({"loop"})),
 }
 
 
@@ -55,6 +56,9 @@ class DelegationRequest:
     mode: str
     prompt: str
     resume: str | None = None
+    cwd: Path | None = None
+    difficulty: str | None = None
+    prompt_path: Path | None = None
 
 
 @dataclass(frozen=True)
@@ -136,7 +140,7 @@ def parse_request_file(
     if not isinstance(metadata, dict):
         raise RequestFileError("frontmatter must be a mapping")
     keys = set(metadata)
-    accepted = {"task", "provider", "mode", "resume"}
+    accepted = {"task", "provider", "mode", "resume", "cwd", "difficulty", "prompt-file"}
     if extras := keys - accepted:
         raise RequestFileError(
             "unsupported frontmatter keys: " + ", ".join(sorted(map(str, extras)))
@@ -172,6 +176,19 @@ def parse_request_file(
         raise RequestFileError(f"unsupported mode {mode!r} for task {task!r}")
     if provider not in PROVIDERS:
         raise RequestFileError(f"unsupported provider {provider!r}")
+    if task != "loop" and keys & {"cwd", "difficulty", "prompt-file"}:
+        raise RequestFileError("cwd, difficulty and prompt-file are only supported for loop requests")
+    if task == "loop":
+        if provider != parent_provider:
+            raise RequestFileError("loop implementers must use the Lead's provider")
+        if not {"cwd", "prompt-file"} <= keys:
+            raise RequestFileError("loop requires cwd and prompt-file")
+        if not Path(metadata["cwd"]).is_absolute() or not Path(metadata["cwd"]).is_dir():
+            raise RequestFileError("loop cwd must be an existing absolute directory")
+        if not Path(metadata["prompt-file"]).is_absolute() or not Path(metadata["prompt-file"]).is_file():
+            raise RequestFileError("loop prompt-file must be an existing absolute file")
+        if metadata.get("difficulty") not in (None, "routine", "basic", "advanced", "expert"):
+            raise RequestFileError("unsupported loop difficulty")
     prompt = "\n".join(lines[closing + 1 :]).strip()
     if not prompt:
         raise RequestFileError("request body must be nonempty")
@@ -179,7 +196,12 @@ def parse_request_file(
         raise RequestFileError(
             "request body must be a plain prompt, not a skill invocation"
         )
-    return DelegationRequest(canonical_path, task, provider, mode, prompt)
+    return DelegationRequest(
+        canonical_path, task, provider, mode, prompt,
+        cwd=Path(metadata["cwd"]).resolve() if task == "loop" else None,
+        difficulty=metadata.get("difficulty"),
+        prompt_path=Path(metadata["prompt-file"]).resolve() if task == "loop" else None,
+    )
 
 
 def _sessions_module():
@@ -281,6 +303,8 @@ def _fail_request(path, request_id, execution_id, child_id, exc, session_id):
                 "UPDATE executions SET state=? WHERE id=?",
                 ("uncertain" if uncertain else "failed", execution_id),
             )
+            if not uncertain:
+                connection.execute("UPDATE loop_sessions SET active=0,released_at=CURRENT_TIMESTAMP WHERE session_id=?", (child_id,))
         else:
             connection.execute(
                 "INSERT OR IGNORE INTO requests(id,parent_session_id,source_name,state,reason,delivery_id,completed_at) VALUES (?,?,?,'failed',?,?,CURRENT_TIMESTAMP)",
@@ -452,7 +476,8 @@ def reconcile_inbox(session_id: str, *, launch: Callable | None = None) -> list[
 
 
 def process_inbox(
-    session_id: str, *, launch: Callable, request_paths: set[Path] | None = None
+    session_id: str, *, launch: Callable, request_paths: set[Path] | None = None,
+    allow_loop_resume: bool = False,
 ) -> list[ProcessResult]:
     """Claim, reserve, and start requests in a persistent conversation inbox."""
     from dataclasses import replace
@@ -498,6 +523,10 @@ def process_inbox(
                         sessions.resolve_session(request.resume, session_id)
                     )
                 )
+            elif request.mode == "loop":
+                from subagents_runtime.loop import reconcile_worktree
+
+                reconcile_worktree(request.cwd or delegation.original_cwd)
             with sessions._connect() as connection:
                 connection.execute("BEGIN IMMEDIATE")
                 if connection.execute(
@@ -524,6 +553,22 @@ def process_inbox(
                         raise RequestFileError(
                             "Provider conversation has not been bound; resume refused"
                         )
+                    if row[1] == "loop":
+                        if not allow_loop_resume:
+                            raise RequestFileError("Use loop feedback or loop resume for a loop implementer")
+                        record = connection.execute("SELECT active,difficulty FROM loop_sessions WHERE session_id=?", (child_id,)).fetchone()
+                        if record[0]:
+                            raise RequestFileError("Release the previous wait before resuming an idle implementer")
+                        if fork:
+                            backend = connection.execute("SELECT backend FROM executions WHERE session_id=? AND superseded_at IS NULL AND state IN ('running','starting','uncertain','prepared')", (child_id,)).fetchone()
+                            if not backend or backend[0] != "aboard":
+                                raise RequestFileError("Standalone implementer terminal is still open; close it before resuming, or launch a fresh implementer")
+                        try:
+                            connection.execute("UPDATE loop_sessions SET active=1,released_at=NULL WHERE session_id=?", (child_id,))
+                            connection.execute("DELETE FROM loop_waits WHERE session_id=?", (child_id,))
+                        except Exception as exc:
+                            raise RequestFileError("worktree already has an active loop implementer") from exc
+                        request = replace(request, difficulty=record[1])
                     original = connection.execute(
                         "SELECT task FROM requests WHERE child_session_id=? ORDER BY created_at LIMIT 1",
                         (child_id,),
@@ -536,7 +581,7 @@ def process_inbox(
                             f"unsupported mode {row[1]!r} for task {original[0]!r}"
                         )
                     if fork:
-                        fork_of = row[4]
+                        fork_of = row[4] if row[1] != "loop" else None
                         _supersede_child(connection, child_id)
                     request = replace(
                         request, provider=row[0], mode=row[1], task=original[0]
@@ -548,7 +593,11 @@ def process_inbox(
                         (session_id, session_id),
                     ).fetchone()[0]
                     child_id = str(uuid.uuid4())
-                    cwd = delegation.original_cwd
+                    cwd = request.cwd or delegation.original_cwd
+                    if request.mode == "loop":
+                        from subagents_runtime.loop import worktree_key
+                        if connection.execute("SELECT 1 FROM loop_sessions WHERE worktree_key=? AND active=1", (worktree_key(cwd),)).fetchone():
+                            raise RequestFileError("worktree already has an active loop implementer; release it first")
                     connection.execute(
                         "INSERT INTO sessions(id,cwd,provider,execution_mode,parent_session_id,agent_index) VALUES (?,?,?,?,?,?)",
                         (
@@ -560,6 +609,11 @@ def process_inbox(
                             number,
                         ),
                     )
+                    if request.mode == "loop":
+                        connection.execute(
+                            "INSERT INTO loop_sessions(session_id,worktree_key,prompt_path,difficulty) VALUES (?,?,?,?)",
+                            (child_id, worktree_key(cwd), str(request.prompt_path), request.difficulty),
+                        )
                 connection.execute(
                     "INSERT INTO requests(id,kind,parent_session_id,child_session_id,agent_number,source_name,task,provider,mode,prompt_hash,state) VALUES (?,?,?,?,?,?,?,?,?,?,'launching')",
                     (
@@ -892,6 +946,10 @@ def wait_parent_delivery(
         delivery = claim_parent_delivery(parent_session_id, "Stop")
         if delivery is not None:
             return delivery
-        if not has_pending_children(parent_session_id) or time.monotonic() >= deadline:
+        if not has_pending_children(parent_session_id):
             return None
+        if time.monotonic() >= deadline:
+            from subagents_runtime.loop import expire_parent_wait
+            expire_parent_wait(parent_session_id)
+            return claim_parent_delivery(parent_session_id, "Stop")
         time.sleep(min(poll_seconds, max(0.0, deadline - time.monotonic())))

@@ -1,0 +1,28 @@
+name = "test-workflows"
+version = "1.0.1"
+description = "Define and confirm end-to-end workflows when their covered code changes"
+requires = ["git"]
+
+[platforms.claude]
+status = "supported"
+fragment = "claude/settings.fragment.json"
+
+[platforms.chatgpt]
+status = "supported"
+fragment = "chatgpt/hooks.fragment.json"
+
+[[files]]
+src = "SKILL.md"
+dest = "test-workflows/SKILL.md"
+root = "skills"
+
+[[files]]
+src = "chatgpt/openai.yaml"
+dest = "test-workflows/agents/openai.yaml"
+root = "skills"
+platforms = ["chatgpt"]
+
+[[actions]]
+type = "uv-tool"
+package = "harness-test-workflows"
+source = "git+https://github.com/EmilienxD/harness@869884a08b41d34355e7e2db68a863d7187e38be#subdirectory=harness/building/test-workflows"

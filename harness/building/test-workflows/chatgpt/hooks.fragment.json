@@ -1,0 +1,8 @@
+{
+  "hooks": {
+    "SessionStart": [{"hooks": [{"type": "command", "command": "test-workflows hook --provider chatgpt"}]}],
+    "UserPromptSubmit": [{"hooks": [{"type": "command", "command": "test-workflows hook --provider chatgpt"}]}],
+    "PostToolUse": [{"hooks": [{"type": "command", "command": "test-workflows hook --provider chatgpt"}]}],
+    "Stop": [{"hooks": [{"type": "command", "command": "test-workflows hook --provider chatgpt"}]}]
+  }
+}

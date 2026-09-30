@@ -54,7 +54,7 @@ def test_published_schemas_describe_the_implemented_contracts() -> None:
     modes = {mode for policy in TASK_POLICIES.values() for mode in policy.modes}
 
     # The prompt is the Markdown body, so it is never a frontmatter key.
-    assert set(request["properties"]) == {"task", "provider", "mode", "resume"}
+    assert set(request["properties"]) == {"task", "provider", "mode", "resume", "cwd", "difficulty", "prompt-file"}
     assert request["oneOf"][0]["required"] == ["task", "mode"]
     assert set(request["properties"]["task"]["enum"]) == tasks
     assert set(request["properties"]["mode"]["enum"]) == modes
@@ -215,6 +215,7 @@ def test_grant_policy_is_the_exact_authorization_table() -> None:
         "address-with-agent": TaskPolicy("address", frozenset({"interactive", "auto"})),
         "review-with-agent": TaskPolicy("review", frozenset({"interactive", "auto"})),
         "work-with-agent": TaskPolicy("general", frozenset({"interactive", "auto"})),
+        "ship": TaskPolicy("loop", frozenset({"loop"})),
     }
 
 

@@ -8,7 +8,7 @@ import sqlite3
 import uuid
 from pathlib import Path
 
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 6
 # Lowercase letters and digits without the look-alikes 0/o and 1/i/l.
 INBOX_ALPHABET = "abcdefghjkmnpqrstuvwxyz23456789"
 
@@ -72,8 +72,15 @@ def _migrate(connection):
         if version >= SCHEMA_VERSION:
             connection.commit()
             return
-        if version == 3:
-            connection.execute("ALTER TABLE executions ADD COLUMN input_execution_id TEXT REFERENCES executions(id)")
+        if version == 5:
+            _create_loop_tables(connection, lifecycle_only=True)
+            connection.execute(f"PRAGMA user_version={SCHEMA_VERSION}")
+            connection.commit()
+            return
+        if version in (3, 4):
+            if version == 3:
+                connection.execute("ALTER TABLE executions ADD COLUMN input_execution_id TEXT REFERENCES executions(id)")
+            _create_loop_tables(connection)
             connection.execute(f"PRAGMA user_version={SCHEMA_VERSION}")
             connection.commit()
             return
@@ -93,6 +100,7 @@ def _migrate(connection):
             )
             connection.execute(f"INSERT INTO executions ({carried}) SELECT {carried} FROM executions_previous")
             connection.execute("DROP TABLE executions_previous")
+            _create_loop_tables(connection)
             if connection.execute("PRAGMA foreign_key_check").fetchall():
                 raise sqlite3.IntegrityError("Invalid execution/request ownership")
             connection.execute(f"PRAGMA user_version={SCHEMA_VERSION}")
@@ -273,6 +281,16 @@ def _reconcile_migration_files(connection):
             (source_value,),
         )
     connection.commit()
+
+
+def _create_loop_tables(connection, *, lifecycle_only=False):
+    schema = (Path(__file__).parent / "resources" / "schema.sql").read_text(encoding="utf-8")
+    for statement in schema.split(";"):
+        prefixes = ("CREATE TABLE loop_waits", "CREATE TABLE loop_messages")
+        if not lifecycle_only:
+            prefixes += ("CREATE TABLE loop_sessions", "CREATE UNIQUE INDEX loop_worktree_active")
+        if statement.strip().startswith(prefixes):
+            connection.execute(statement)
 
 
 def connect():

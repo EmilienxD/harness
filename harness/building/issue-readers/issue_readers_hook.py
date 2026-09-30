@@ -223,6 +223,25 @@ def fetch_issue(repository: str, number: int, cwd: Path, skill: str) -> dict | N
     }
 
 
+def graphql(query: str, variables: dict, cwd: Path, skill: str = "issue-context") -> dict:
+    """Shared unbounded GraphQL transport for explicit context commands."""
+    arguments = ["gh", "api", "graphql", "-f", f"query={query}"]
+    for name, value in variables.items():
+        if value is not None:
+            arguments.extend(["-F" if isinstance(value, (int, bool)) else "-f", f"{name}={value}"])
+    result = subprocess.run(arguments, cwd=cwd, capture_output=True, text=True,
+                            encoding="utf-8", timeout=GITHUB_SECONDS)
+    try:
+        payload = json.loads(result.stdout)
+    except ValueError as error:
+        raise Blocked(f"{skill}: unreadable GitHub response. {result.stderr.strip()}") from error
+    if result.returncode or payload.get("errors"):
+        raise Blocked(f"{skill}: GitHub query failed: {result.stderr.strip() or payload.get('errors')}")
+    if not isinstance(payload.get("data"), dict):
+        raise Blocked(f"{skill}: GitHub returned no data.")
+    return payload["data"]
+
+
 def require_issue(
     repository: str, number: int, cwd: Path, skill: str, open_only: bool,
 ) -> dict:

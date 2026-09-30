@@ -1,4 +1,4 @@
-"""Read native transcript usage; intentionally not wired into commands or hooks.
+"""Read native transcript usage for optional loop report telemetry.
 
 These are last-request measurements, not counts of pending messages/tool results.
 Codex percentages reproduce the 12,000-token baseline used by its TUI (0.155–0.156).
@@ -18,9 +18,24 @@ CapacitySource = Literal["transcript", "model", "override"]
 
 # Confirmed capacities for the model IDs sampled in this project. Add explicit
 # entries as models are validated; extended/custom provider windows use overrides.
+# Checked 2026-09-30: platform.claude.com/docs/en/{models/overview,build-with-claude/context-windows}, code.claude.com/docs/en/model-config.
 CLAUDE_CONTEXT_WINDOWS = {
+    "claude-fable-5-1": 1_000_000,
+    "claude-fable-5": 1_000_000,
     "claude-opus-5-5": 1_000_000,
+    "claude-opus-5": 1_000_000,
+    "claude-opus-4-8": 1_000_000,
+    "claude-opus-4-7": 1_000_000,
+    "claude-opus-4-6": 200_000,
+    "claude-opus-4-5": 200_000,
+    "claude-opus-4-5-20251101": 200_000,
+    "claude-sonnet-5-5": 1_000_000,
+    "claude-sonnet-5": 1_000_000,
+    "claude-sonnet-4-6": 200_000,
     "claude-sonnet-4-5": 200_000,
+    "claude-sonnet-4-5-20250929": 200_000,
+    "claude-haiku-4-5": 200_000,
+    "claude-haiku-4-5-20251001": 200_000,
 }
 
 

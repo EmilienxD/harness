@@ -23,7 +23,8 @@ from subagents_runtime.delegation import (
     wait_parent_delivery,
 )
 
-SKILL_NAME = r"((?:work|explore|prototype|websearch|brainstorm|address|review)-with-agent|reply-to-agent|resume-agent)"
+SKILL_NAME = r"((?:work|explore|prototype|websearch|brainstorm|address|review)-with-agent|reply-to-agent|resume-agent|ship)"
+SHIP_INVOCATION = re.compile(r"(?<!\S)(?:[/$]ship|\[\$ship\]\([^\r\n]+\))(?=\s|$)")
 INVOCATIONS = {
     "claude": re.compile(rf"(?<!\S)/{SKILL_NAME}(?=\s|$)"),
     "chatgpt": re.compile(rf"(?<!\S)\${SKILL_NAME}(?=\s|$)"),
@@ -176,6 +177,8 @@ def handle(
             session_id, cwd, selected_provider, execution_mode
         )
     observe_parent_event(session_id, event)
+    from subagents_runtime import loop
+    loop.observe_event(session_id, event, payload.get("prompt"))
     if event == "SessionStart" and execution_id and (continued or not fresh):
         from subagents_runtime.processes import confirm_startup
 
@@ -222,8 +225,8 @@ def handle(
         prompt = payload.get("prompt")
         pattern = INVOCATIONS[selected_provider]
         match = pattern.search(prompt) if isinstance(prompt, str) else None
-        if match:
-            skill = match.group(1)
+        if match or (isinstance(prompt, str) and SHIP_INVOCATION.search(prompt)):
+            skill = match.group(1) if match else "ship"
             if skill == "reply-to-agent":
                 arm_reply(session_id, execution_id)
                 context = (
@@ -243,6 +246,8 @@ def handle(
                 )
                 if item
             )
+            if skill == "ship":
+                text += f"\n\nShip Lead runtime session: {session_id}. Pass --parent {session_id} to harness loop launch when HARNESS_SESSION_ID is unset."
             return _context(event, text) if text else None
         instructions = claim_instructions(session_id)
         text = "\n\n".join(
@@ -276,6 +281,8 @@ def handle(
             else:
                 enable_delegation(session_id, skill)
                 instructions = claim_instructions(session_id)
+                if skill == "ship":
+                    instructions = (instructions or "") + f"\n\nShip Lead runtime session: {session_id}. Pass --parent {session_id} to harness loop launch when HARNESS_SESSION_ID is unset."
                 if instructions:
                     return _context(event, instructions)
         processed = []
@@ -301,6 +308,17 @@ def handle(
         if not isinstance(message, str):
             message = ""
         success = event == "Stop" and bool(message.strip())
+        if loop.is_implementer(session_id):
+            if not success:
+                return None
+            feedback = loop.report_and_wait(
+                session_id, message, payload.get("transcript_path"), selected_provider,
+                timeout_seconds=_stop_wait_seconds(cwd),
+            )
+            if feedback is None:
+                return None
+            return (_context(event, feedback) if selected_provider == "claude"
+                    else {"decision": "block", "reason": feedback})
         reported = report_child_stop(
             session_id,
             message,

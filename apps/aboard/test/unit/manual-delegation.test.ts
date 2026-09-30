@@ -3,6 +3,61 @@ import test from "node:test";
 
 import { createDelegationRoutes, continueHarnessDelegation, delegationParentSession } from "../../src/bridge/manual-delegation.js";
 
+test("loop delegation retains runtime ownership and difficulty without a worker skill", async () => {
+  const launches: unknown[] = [];
+  const handler = createDelegationRoutes({ launch: async (request) => {
+    launches.push(request);
+    return { agentId: "implementer", sessionId: "child", terminalId: "visible" };
+  } });
+  const response = await handler({
+    method: "POST", url: new URL("http://127.0.0.1/delegations"), headers: {},
+    signal: new AbortController().signal,
+    body: { requestId: "loop-1", task: "loop", mode: "loop", provider: "chatgpt", cwd: "C:\\feature",
+      prompt: "Read the implementer file.", difficulty: "routine", harnessSessionId: "child", parentSessionId: "lead", executionId: "execution" },
+  });
+  assert.equal(response.status, 201);
+  const received = launches[0] as Record<string, unknown>;
+  assert.equal(received.task, "loop");
+  assert.equal(received.type, "general");
+  assert.equal(received.executionMode, "loop");
+  assert.equal(received.harnessSessionId, "child");
+  assert.equal(received.parentSessionId, "lead");
+  assert.equal(received.executionId, "execution");
+  assert.equal(received.difficulty, "routine");
+  assert.equal(received.skill, undefined);
+});
+
+test("loop scoped credentials admit a registered sibling worktree and refuse unrelated directories", async () => {
+  const { execFile } = await import("node:child_process");
+  const { promisify } = await import("node:util");
+  const { mkdtemp, mkdir, rm } = await import("node:fs/promises");
+  const { tmpdir } = await import("node:os");
+  const { join } = await import("node:path");
+  const root = await mkdtemp(join(tmpdir(), "aboard-loop-"));
+  const project = join(root, "project"), worktree = join(root, "feature"), other = join(root, "other");
+  try {
+    await mkdir(other);
+    const git = promisify(execFile);
+    await git("git", ["init", project]);
+    await git("git", ["-C", project, "-c", "user.name=Test", "-c", "user.email=test@example.invalid", "commit", "--allow-empty", "-m", "initial"]);
+    await git("git", ["-C", project, "worktree", "add", "-b", "feature", worktree]);
+    const launched: string[] = [];
+    const handler = createDelegationRoutes({ launch: async (request) => {
+      launched.push(request.cwd); return { agentId: "implementer", sessionId: "child", terminalId: "visible" };
+    } }, { workspaceRoot: project });
+    for (const [cwd, mode, status] of [[worktree, "loop", 201], [other, "loop", 403], [worktree, "interactive", 403]] as const) {
+      const response = await handler({ method: "POST", url: new URL("http://localhost/delegations"), headers: {}, authorizationScope: "delegation",
+        signal: new AbortController().signal,
+        body: { requestId: `${cwd}-${mode}`, task: mode === "loop" ? "loop" : "general", provider: "claude", mode, prompt: "Read the task file.", cwd },
+      });
+      assert.equal(response.status, status);
+    }
+    assert.deepEqual(launched, [worktree]);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("manual delegation maps task identity and explicit execution mode", async () => {
   const launches: unknown[] = [];
   const handler = createDelegationRoutes({

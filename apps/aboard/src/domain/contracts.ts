@@ -19,7 +19,7 @@ export const AGENT_TYPES = [
 ] as const;
 
 export type AgentType = (typeof AGENT_TYPES)[number];
-export type ExecutionMode = "interactive" | "auto" | "auto-run";
+export type ExecutionMode = "interactive" | "auto" | "auto-run" | "loop";
 /** Who controls the first message sent to an agent. */
 export type PromptAuthority = "auto-run" | "delegation" | "user";
 

@@ -24,7 +24,8 @@
         "brainstorm",
         "address",
         "review",
-        "general"
+        "general",
+        "loop"
       ]
     },
     "provider": {
@@ -36,7 +37,8 @@
     "mode": {
       "enum": [
         "interactive",
-        "auto"
+        "auto",
+        "loop"
       ]
     },
     "prompt": {
@@ -82,6 +84,14 @@
     "forkSessionId": {
       "type": "string",
       "minLength": 1
+    },
+    "difficulty": {
+      "enum": [
+        "routine",
+        "basic",
+        "advanced",
+        "expert"
+      ]
     }
   },
   "if": {

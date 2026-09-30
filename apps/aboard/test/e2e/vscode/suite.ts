@@ -80,7 +80,7 @@ export async function run(): Promise<void> {
     await commands.executeCommand("aboard.autoRun.refresh");
     await commands.executeCommand("aboard.startAutoRun");
     const implementer = await eventually(
-      () => opened.find((terminal) => terminal.name.startsWith("aboard:")),
+      () => opened.find((terminal) => "env" in terminal.creationOptions && terminal.creationOptions.env?.ABOARD_AGENT_ID),
       "auto-run did not launch a visible implementer terminal",
     );
     assert.ok(await implementer.processId);
@@ -90,9 +90,9 @@ export async function run(): Promise<void> {
       return value?.observations.some((item) => item.checkpoint === "auto-review-complete") ? value : undefined;
     }, "auto-run workers did not complete", 480);
     terminalListener.dispose();
-    const workerTerminals = opened.filter((terminal) => terminal.name.startsWith("aboard:"));
+    const workerTerminals = opened.filter((terminal) => "env" in terminal.creationOptions && terminal.creationOptions.env?.ABOARD_AGENT_ID);
     assert.equal(workerTerminals.length, 2, "the implementer and the reviewer each ran in a visible terminal");
-    assert.equal(workerTerminals.some((terminal) => /explore/iu.test(terminal.name)), false, "exploration runs headless without a terminal");
+    assert.equal(workerTerminals.some((terminal) => "env" in terminal.creationOptions && terminal.creationOptions.env?.ABOARD_AGENT_TYPE === "explore"), false, "exploration runs headless without a terminal");
     assert.equal(completed.upstreamMode, "forbidden");
     const rows = completed.observations.filter((item) => item.scenario === "auto-run-afk" && item.result === "success");
     assert.deepEqual(rows.map((item) => item.checkpoint), [

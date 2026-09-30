@@ -14,7 +14,8 @@
         "brainstorm",
         "address",
         "review",
-        "general"
+        "general",
+        "loop"
       ]
     },
     "provider": {
@@ -28,12 +29,29 @@
     "mode": {
       "enum": [
         "interactive",
-        "auto"
+        "auto",
+        "loop"
       ]
     },
     "resume": {
       "type": "string",
       "pattern": "^agent-[1-9][0-9]*$"
+    },
+    "difficulty": {
+      "enum": [
+        "routine",
+        "basic",
+        "advanced",
+        "expert"
+      ]
+    },
+    "cwd": {
+      "type": "string",
+      "minLength": 1
+    },
+    "prompt-file": {
+      "type": "string",
+      "minLength": 1
     }
   },
   "oneOf": [
@@ -68,6 +86,21 @@
             "required": [
               "provider"
             ]
+          },
+          {
+            "required": [
+              "cwd"
+            ]
+          },
+          {
+            "required": [
+              "difficulty"
+            ]
+          },
+          {
+            "required": [
+              "prompt-file"
+            ]
           }
         ]
       }
@@ -89,5 +122,70 @@
         "const": "interactive"
       }
     }
-  }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "task": {
+            "const": "loop"
+          }
+        },
+        "required": [
+          "task"
+        ]
+      },
+      "then": {
+        "required": [
+          "cwd",
+          "prompt-file"
+        ],
+        "properties": {
+          "mode": {
+            "const": "loop"
+          }
+        }
+      },
+      "else": {
+        "not": {
+          "anyOf": [
+            {
+              "required": [
+                "cwd"
+              ]
+            },
+            {
+              "required": [
+                "difficulty"
+              ]
+            },
+            {
+              "required": [
+                "prompt-file"
+              ]
+            }
+          ]
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "mode": {
+            "const": "loop"
+          }
+        },
+        "required": [
+          "mode"
+        ]
+      },
+      "then": {
+        "properties": {
+          "task": {
+            "const": "loop"
+          }
+        }
+      }
+    }
+  ]
 }

@@ -26,6 +26,29 @@ from subagents_runtime.storage import state_dir
 _CLAUDE_MODELS = frozenset({"haiku", "sonnet", "opus"})
 _CLAUDE_EFFORTS = frozenset({"low", "medium", "high", "xhigh", "max"})
 _CHATGPT_EFFORTS = frozenset({"minimal", "low", "medium", "high", "xhigh"})
+DIFFICULTIES = ("routine", "basic", "advanced", "expert")
+_DIFFICULTY_PROFILES = {
+    "claude": (("haiku", "medium"), ("sonnet", "high"), ("opus", "medium"), ("opus", "high")),
+    "chatgpt": (("gpt-5.6-luna", "medium"), ("gpt-5.6-terra", "high"), ("gpt-5.6-sol", "medium"), ("gpt-5.6-sol", "high")),
+}
+
+
+def loop_configuration(config: dict[str, Any]) -> dict[str, int | float]:
+    """Validated loop limits; omitted fields use the product defaults."""
+    value = config.get("loop", {})
+    if not isinstance(value, dict):
+        raise SessionError("loop must be a JSON object")
+    limits = {"maxFeedback": 3, "maxImplementers": 2, "freshContextPercent": 65}
+    for key, default in limits.items():
+        selected = value.get(key, default)
+        if key == "freshContextPercent":
+            valid = isinstance(selected, (int, float)) and not isinstance(selected, bool) and math.isfinite(selected) and 0 <= selected <= 100
+        else:
+            valid = isinstance(selected, int) and not isinstance(selected, bool) and selected >= (1 if key == "maxImplementers" else 0)
+        if not valid:
+            raise SessionError(f"loop.{key} is invalid")
+        limits[key] = selected
+    return limits
 
 
 def _config() -> dict[str, Any]:
@@ -89,6 +112,7 @@ def launch_configuration(cwd: Path) -> dict[str, Any]:
             raise SessionError(
                 f"Harness configuration {path} session.stopWaitHours must be a non-negative finite number"
             )
+        loop_configuration(value)
         return value
     return {"version": 1}
 
@@ -140,7 +164,7 @@ def _provider_command(config: dict[str, Any], provider: str) -> list[str]:
 
 
 def delegation_profile_arguments(
-    config: dict[str, Any], provider: str, task: str
+    config: dict[str, Any], provider: str, task: str, *, difficulty: str | None = None
 ) -> list[str]:
     """Resolve one manual task without coupling it to another launch profile."""
     providers = config.get("providers", {})
@@ -161,6 +185,12 @@ def delegation_profile_arguments(
         model = effort = None
     model = selected.get("model", model)
     effort = selected.get("effort", effort)
+    if difficulty is not None and difficulty not in DIFFICULTIES:
+        raise SessionError(f"unsupported difficulty {difficulty!r}")
+    if model == "by-difficulty":
+        model, routed_effort = _DIFFICULTY_PROFILES[provider][DIFFICULTIES.index(difficulty or "expert")]
+        if "effort" not in selected:
+            effort = routed_effort
     model = None if model == "inherit" else model
     effort = None if effort == "inherit" else effort
     model_invalid = (
@@ -171,7 +201,7 @@ def delegation_profile_arguments(
             or (provider == "claude" and model not in _CLAUDE_MODELS)
             or (
                 provider == "chatgpt"
-                and (model in _CLAUDE_MODELS or model == "by-difficulty")
+                and model in _CLAUDE_MODELS
             )
         )
     )
@@ -333,7 +363,7 @@ def register_observed(
 ) -> None:
     if provider not in {"claude", "chatgpt"}:
         raise SessionError(f"unsupported provider {provider!r}")
-    if execution_mode not in {"interactive", "auto", "auto-run"}:
+    if execution_mode not in {"interactive", "auto", "auto-run", "loop"}:
         raise SessionError(f"unsupported execution mode {execution_mode!r}")
     with _connect() as connection:
         connection.execute(
@@ -435,7 +465,7 @@ def provider_arguments(
     """
     arguments = []
     if provider == "claude":
-        if mode != "interactive":
+        if mode not in {"interactive", "loop"}:
             arguments.extend(["-p", "--output-format", "stream-json", "--verbose"])
         if fork:
             arguments.extend(["--resume", conversation, "--fork-session"])
@@ -443,7 +473,7 @@ def provider_arguments(
                 arguments.extend(["--session-id", fork_id])
         elif conversation:
             arguments.extend(["--resume" if resume else "--session-id", conversation])
-    elif mode != "interactive":
+    elif mode not in {"interactive", "loop"}:
         arguments.extend(["exec"])
         if fork or resume:
             arguments.extend(["fork" if fork else "resume", conversation])
@@ -480,7 +510,7 @@ def launch_delegated(request, request_id: str, agent_number: int, cwd: Path) -> 
             "HARNESS_PROVIDER": request.provider,
         }
     )
-    if request.provider == "claude" and request.mode == "interactive":
+    if request.provider == "claude" and request.mode in {"interactive", "loop"}:
         # Claude exports this marker to commands it starts. An interactive Harness
         # child is a separately resumable conversation, so inheriting the marker
         # would make Claude suppress its transcript and break the next --resume.
@@ -490,12 +520,24 @@ def launch_delegated(request, request_id: str, agent_number: int, cwd: Path) -> 
     environment["PYTHONPATH"] = (
         runtime_root + os.pathsep + environment.get("PYTHONPATH", "")
     )
+    if request.mode == "loop" and request.provider == "chatgpt":
+        from subagents_runtime.codex_trust import trust_worktree
+        trust_worktree(cwd)
     if aboard_session := _launch_through_aboard(request, request_id, cwd):
         with _connect() as connection:
             connection.execute("UPDATE sessions SET provider_session_id=? WHERE id=?", (aboard_session, child_id))
             connection.execute("UPDATE executions SET backend='aboard' WHERE id=?", (execution_id,))
         processes.confirm_startup(execution_id)
         return child_id
+    if request.mode == "loop" and request.resume:
+        with _connect() as connection:
+            previous = connection.execute(
+                "SELECT 1 FROM executions WHERE session_id=? AND superseded_at IS NOT NULL "
+                "AND backend='aboard' AND state IN ('running','starting','uncertain') LIMIT 1",
+                (child_id,),
+            ).fetchone()
+        if previous:
+            raise SessionError("Aboard is unavailable for the live released implementer; launch a fresh implementer instead")
     if fork_of:
         # The original session is still open and still owns its provider handle, so a
         # fork starts its own process here and takes over the child's identity.
@@ -515,7 +557,7 @@ def launch_delegated(request, request_id: str, agent_number: int, cwd: Path) -> 
                 fork=True,
                 fork_id=forked,
                 launch_options=delegation_profile_arguments(
-                    launch_config, request.provider, request.task
+                    launch_config, request.provider, request.task, difficulty=getattr(request, "difficulty", None)
                 ),
             ),
         ]
@@ -524,7 +566,7 @@ def launch_delegated(request, request_id: str, agent_number: int, cwd: Path) -> 
             command,
             environment,
             cwd,
-            visible=request.mode == "interactive",
+            visible=request.mode in {"interactive", "loop"},
         )
         return child_id
     skill = {
@@ -554,12 +596,12 @@ def launch_delegated(request, request_id: str, agent_number: int, cwd: Path) -> 
             prompt,
             resume=continuing,
             launch_options=delegation_profile_arguments(
-                launch_config, request.provider, request.task
+                launch_config, request.provider, request.task, difficulty=getattr(request, "difficulty", None)
             ),
         )
     )
     processes.start(
-        execution_id, command, environment, cwd, visible=request.mode == "interactive"
+        execution_id, command, environment, cwd, visible=request.mode in {"interactive", "loop"}
     )
     return child_id
 
@@ -594,7 +636,22 @@ def _process_alive(pid: int) -> bool:
     return process_alive(pid)
 
 
-def _discover_delegation_endpoint(cwd: Path) -> tuple[str, int, str] | None:
+def _registered_worktree(root: Path, cwd: Path) -> bool:
+    try:
+        result = subprocess.run(
+            ["git", "-C", str(root), "worktree", "list", "--porcelain", "-z"],
+            capture_output=True, check=True, timeout=10,
+            **({"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}),
+        )
+        return any(
+            Path(os.fsdecode(field[9:])).resolve() == cwd.resolve()
+            for field in result.stdout.split(b"\0") if field.startswith(b"worktree ")
+        )
+    except (OSError, subprocess.SubprocessError):
+        return False
+
+
+def _discover_delegation_endpoint(cwd: Path, *, include_worktrees: bool = False) -> tuple[str, int, str] | None:
     inherited_port = os.environ.get("ABOARD_BRIDGE_PORT")
     inherited_token = os.environ.get("ABOARD_BRIDGE_TOKEN")
     if inherited_port is not None or inherited_token is not None:
@@ -621,7 +678,8 @@ def _discover_delegation_endpoint(cwd: Path) -> tuple[str, int, str] | None:
                 and isinstance(record.get("workspaceRoot"), str)
                 and isinstance(record.get("pid"), int)
                 and _process_alive(record["pid"])
-                and _path_contains(Path(record["workspaceRoot"]), cwd)
+                and (_path_contains(Path(record["workspaceRoot"]), cwd)
+                     or (include_worktrees and _registered_worktree(Path(record["workspaceRoot"]), cwd)))
             ):
                 candidates.append(
                     (
@@ -657,7 +715,10 @@ def _aboard_error(exc: urllib.error.HTTPError) -> tuple[str | None, str]:
 
 
 def _launch_through_aboard(request, request_id: str, cwd: Path) -> str | None:
-    endpoint = _discover_delegation_endpoint(cwd)
+    def discover():
+        return (_discover_delegation_endpoint(cwd, include_worktrees=True)
+                if request.mode == "loop" else _discover_delegation_endpoint(cwd))
+    endpoint = discover()
     if endpoint is None:
         return None
     with _connect() as connection:
@@ -712,6 +773,7 @@ def _launch_through_aboard(request, request_id: str, cwd: Path) -> str | None:
             "mode": request.mode,
             "prompt": request.prompt,
             "cwd": str(cwd.resolve()),
+            **({"difficulty": request.difficulty} if getattr(request, "difficulty", None) else {}),
         }
     ).encode("utf-8")
     result = None
@@ -734,7 +796,7 @@ def _launch_through_aboard(request, request_id: str, cwd: Path) -> str | None:
             if exc.code == 401 and attempt == 0 and not os.environ.get(
                 "ABOARD_BRIDGE_TOKEN"
             ):
-                refreshed = _discover_delegation_endpoint(cwd)
+                refreshed = discover()
                 if refreshed is None:
                     raise SessionError(
                         "Aboard delegation endpoint authentication expired"

@@ -406,9 +406,9 @@ export function parseAgentSession(value: unknown): ValidationResult<AgentSession
     issues,
   );
   const executionMode = record.executionMode === undefined ? undefined
-    : record.executionMode === "interactive" || record.executionMode === "auto" || record.executionMode === "auto-run"
+    : record.executionMode === "interactive" || record.executionMode === "auto" || record.executionMode === "auto-run" || record.executionMode === "loop"
       ? record.executionMode
-      : (issues.push("session.executionMode must be interactive, auto, or auto-run"), undefined);
+      : (issues.push("session.executionMode must be interactive, auto, auto-run, or loop"), undefined);
   const telemetry = parseTelemetry(record.telemetry, "session.telemetry", issues);
   let chromeEnabled: true | undefined;
   if (record.chromeEnabled !== undefined) {
@@ -760,7 +760,7 @@ function parseReopenable(value: unknown): ReopenableSession | undefined {
   return {
     platform,
     sessionId,
-    ...(value.executionMode === "interactive" || value.executionMode === "auto" || value.executionMode === "auto-run" ? { executionMode: value.executionMode } : {}),
+    ...(value.executionMode === "interactive" || value.executionMode === "auto" || value.executionMode === "auto-run" || value.executionMode === "loop" ? { executionMode: value.executionMode } : {}),
     ...(issueNumbers === undefined ? {} : { issueNumbers }),
     ...(value.chromeEnabled === true ? { chromeEnabled: true as const } : {}),
     ...(typeof value.cwd === "string" && value.cwd.trim().length > 0 ? { cwd: value.cwd } : {}),

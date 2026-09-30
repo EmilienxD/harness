@@ -1,0 +1,1 @@
+{"hooks":{"UserPromptSubmit":[{"hooks":[{"type":"command","command":"${PYTHON}","args":["${HOOKS_DIR}/cleanup_git_hook.py","--claude"],"timeout":600}]}]}}

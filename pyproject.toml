@@ -24,6 +24,7 @@ harness = "harness_cli.cli:main"
 dev = [
     "pytest>=8.0",
     "PyYAML>=6.0,<7.0",
+    "tomlkit>=0.13,<1.0",
 ]
 
 [tool.hatch.build.targets.wheel]

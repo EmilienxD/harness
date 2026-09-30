@@ -656,8 +656,10 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
       createTerminalRoutes(terminals),
       createCommandRoutes(commandTerminals),
       createDelegationRoutes({ launch: async (request) => {
-        const configured = await launchFile.getDelegationFor(request.provider, request.task);
-        const returnUri = request.executionMode === "interactive" && request.harnessSessionId !== undefined
+        const configured = request.executionMode === "loop"
+          ? await launchFile.getDelegationForWorktree(request.provider, request.task, request.cwd)
+          : await launchFile.getDelegationFor(request.provider, request.task);
+        const returnUri = request.executionMode !== "auto" && request.harnessSessionId !== undefined
           ? await parentTerminalUri(request.harnessSessionId)
           : undefined;
         return coordinator.launchManual({
@@ -673,6 +675,7 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
           description: request.description,
           isolation: { cwd: request.cwd, protectedPaths: [], writableRoots: [] },
           executionMode: request.executionMode,
+          ...(request.difficulty === undefined ? {} : { difficulty: request.difficulty }),
           configuration: configured,
         }, request.executionMode);
       }, resume: async (request) => {
@@ -684,7 +687,7 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
           ? await parentTerminalUri(request.harnessSessionId)
           : undefined;
         const lockPath = wrapperLayout.lockPathFor(binding.agentId as AgentId);
-        if (currentConfiguration.interactiveResumeMode === "reuse-terminal" && lockMarkerLive(lockPath)) {
+        if ((request.executionMode === "loop" || currentConfiguration.interactiveResumeMode === "reuse-terminal") && lockMarkerLive(lockPath)) {
           const reused = await resumeInOpenTerminal(request, binding, saved, terminals, async (terminalId) => {
             if (!request.executionId || !binding.harnessPython || !binding.harnessRuntimePath || !binding.harnessStateDirectory) throw new Error("Existing terminal's Harness runtime identity is unavailable; resume refused");
             await promisify(execFile)(binding.harnessPython, ["-m", "subagents_runtime.terminal_resume", request.harnessSessionId as string, request.executionId, binding.agentId, terminalId, binding.sessionId], {
@@ -713,7 +716,18 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
           }, binding.executionMode);
         }
         if (lockMarkerLive(lockPath)) throw new Error("Delegated execution is running or uncertain; resume refused");
-        return coordinator.reopen({ platform: binding.provider, agentId: binding.agentId as AgentId, type: binding.type, delegationTask: binding.task, sessionId: binding.sessionId as SessionId, executionMode: binding.executionMode, cwd: binding.cwd, prompt: request.prompt, resultDelivery: saved?.resultDelivery ?? { mode:"none" }, harnessSessionId: request.harnessSessionId, ...(request.executionId === undefined ? {} : { executionId: request.executionId }), ...(returnUri === undefined ? {} : { parentTerminalUri: returnUri }), ...(request.harnessStateDirectory === undefined ? {} : { harnessStateDirectory: request.harnessStateDirectory }), ...(request.harnessRuntimePath === undefined ? {} : { harnessRuntimePath: request.harnessRuntimePath }), requestId: request.requestId });
+        return coordinator.reopen({
+          platform: binding.provider, agentId: binding.agentId as AgentId, type: binding.type,
+          delegationTask: binding.task, sessionId: binding.sessionId as SessionId,
+          executionMode: binding.executionMode, cwd: binding.cwd, prompt: request.prompt,
+          resultDelivery: saved?.resultDelivery ?? { mode: "none" },
+          harnessSessionId: request.harnessSessionId, requestId: request.requestId,
+          ...(request.difficulty === undefined ? {} : { difficulty: request.difficulty }),
+          ...(request.executionId === undefined ? {} : { executionId: request.executionId }),
+          ...(returnUri === undefined ? {} : { parentTerminalUri: returnUri }),
+          ...(request.harnessStateDirectory === undefined ? {} : { harnessStateDirectory: request.harnessStateDirectory }),
+          ...(request.harnessRuntimePath === undefined ? {} : { harnessRuntimePath: request.harnessRuntimePath }),
+        });
       } }, {
         workspaceRoot,
         stateDirectory: delegationStateDirectory,

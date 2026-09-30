@@ -1,0 +1,18 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "harness-issue-context"
+version = "1.0.0"
+description = "Complete GitHub issue context and eligible delivery selection"
+requires-python = ">=3.11"
+
+[project.scripts]
+issue-context = "issue_graph:main"
+
+[tool.hatch.build.targets.wheel]
+only-include = ["issue_graph.py", "issue_readers_hook.py"]
+
+[tool.hatch.build.targets.sdist]
+include = ["issue_graph.py", "issue_readers_hook.py", "pyproject.toml"]
