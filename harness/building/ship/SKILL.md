@@ -15,7 +15,7 @@ Keep each issue's working files in its **run directory**, `~/.harness/ship/<owne
 
 ## Steps
 
-1. **Configure.** From project instructions, read the target branch, merge method (default squash), test folders, and worktree command; ask the user for the target when none is stated. Loop limits come from the first of `<repo>/.harness/config.json` and `~/.harness/config.json`: `loop.maxFeedback` (default 2 per implementer), `loop.maxImplementers` (2 per issue), `loop.freshContextPercent` (65), and `session.stopWaitHours`.
+1. **Configure.** From project instructions, read the target branch, merge method (default squash), test folders, and worktree command; ask the user for the target when none is stated. Loop limits come from the first of `<repo>/.harness/config.json` and `~/.harness/config.json`: `loop.maxFeedback` (default 3 per implementer), `loop.maxImplementers` (2 per issue), `loop.freshContextPercent` (65), and `session.stopWaitHours`.
 2. **Select.**
    - No argument: `issue-context --select` returns the oldest eligible `[AI]-triaged` issue. Exit 1 with `null` means none is eligible: report that and stop. Exit 2 is a lookup error.
    - Issue numbers or URLs: take them as given, triaged or not. For a parent, `issue-context <n> --leaves` lists its open leaves in dependency order; deliver one loop and one PR per leaf.

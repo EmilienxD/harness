@@ -180,7 +180,7 @@ def decision(unit, child, question):
 
 def loop_limits():
     config = json.loads((repo / ".harness" / "config.json").read_text(encoding="utf-8")).get("loop", {})
-    return config.get("maxFeedback", 2), config.get("maxImplementers", 2)
+    return config.get("maxFeedback", 3), config.get("maxImplementers", 2)
 
 
 def resume(child, info, extra=""):

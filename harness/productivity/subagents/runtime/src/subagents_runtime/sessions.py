@@ -38,7 +38,7 @@ def loop_configuration(config: dict[str, Any]) -> dict[str, int | float]:
     value = config.get("loop", {})
     if not isinstance(value, dict):
         raise SessionError("loop must be a JSON object")
-    limits = {"maxFeedback": 2, "maxImplementers": 2, "freshContextPercent": 65}
+    limits = {"maxFeedback": 3, "maxImplementers": 2, "freshContextPercent": 65}
     for key, default in limits.items():
         selected = value.get(key, default)
         if key == "freshContextPercent":

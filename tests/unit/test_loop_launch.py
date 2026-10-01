@@ -16,7 +16,7 @@ from subagents_runtime.cli import main
 
 def test_loop_defaults_and_difficulty_routing(tmp_path):
     assert sessions.loop_configuration({"version": 1}) == {
-        "maxFeedback": 2, "maxImplementers": 2, "freshContextPercent": 65,
+        "maxFeedback": 3, "maxImplementers": 2, "freshContextPercent": 65,
     }
     config = {"version": 1, "providers": {
         "claude": {"delegations": {"loop": {"model": "by-difficulty"}}},

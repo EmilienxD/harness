@@ -1,4 +1,6 @@
 """Catalogue installation seams for delivery packages."""
+import json
+
 import pytest
 from harness_cli.manifest import discover
 from harness_cli.installer import CatalogueInstaller, Target
@@ -25,6 +27,11 @@ def test_ship_installs_workflow_runtime_hooks_and_dependencies(tmp_path, monkeyp
     assert target.destination_path("skills", "ship/agents/openai.yaml").is_file() is (provider == "chatgpt")
     assert target.destination_path("skills", "test-workflows/SKILL.md").is_file()
     assert {"harness-test-workflows", "harness-subagents-runtime", "harness-issue-context", "harness-ship-contract"} <= {action.data.get("package") for action in actions}
+    if provider == "claude":
+        # Each implementer report continues the Lead's turn through its Stop hook.
+        assert int(json.loads(target.settings_path.read_text(encoding="utf-8"))["env"]["CLAUDE_CODE_STOP_HOOK_BLOCK_CAP"]) > 8
     installer.reconcile(set())
     assert not target.destination_path("hooks", "ship_hook.py").exists()
     assert not target.destination_path("skills", "ship/SKILL.md").exists()
+    if provider == "claude" and target.settings_path.is_file():
+        assert "CLAUDE_CODE_STOP_HOOK_BLOCK_CAP" not in json.loads(target.settings_path.read_text(encoding="utf-8")).get("env", {})
