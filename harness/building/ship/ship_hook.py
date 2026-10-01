@@ -110,9 +110,34 @@ def protected_paths(root: Path) -> list[Path]:
     return paths
 
 
-def protected(path: Path, boundaries: list[Path]) -> bool:
+SEPARATORS = {";", "&&", "||", "|", "&"}
+# Pipeline stages that only read or print; git and gh were already checked as read-only.
+READERS = {"cat", "type", "get-content", "ls", "dir", "get-childitem", "rg", "grep", "findstr", "select-string",
+           "head", "tail", "wc", "sort", "uniq", "select-object", "measure-object", "echo", "pwd", "git", "gh"}
+# Commands that act on whole trees, so naming an ancestor reaches a protected path.
+TREE_MUTATORS = {"rm", "rmdir", "rd", "del", "erase", "mv", "move", "ren", "rename", "cp", "copy", "xcopy",
+                 "robocopy", "remove-item", "ri", "move-item", "mi", "rename-item", "rni", "copy-item", "cpi"}
+
+
+def protected(path: Path, boundaries: list[Path], *, tree: bool = False) -> bool:
     resolved = path.resolve()
-    return any(resolved == boundary or resolved.is_relative_to(boundary) or boundary.is_relative_to(resolved) for boundary in boundaries)
+    return any(resolved == boundary or resolved.is_relative_to(boundary) or (tree and boundary.is_relative_to(resolved))
+               for boundary in boundaries)
+
+
+def segments(words: list[str]) -> list[list[str]]:
+    result = [[]]
+    for word in words:
+        if word in SEPARATORS:
+            result.append([])
+        else:
+            result[-1].append(word)
+    return [segment for segment in result if segment]
+
+
+def mentions(text: str, path: str) -> bool:
+    """Match a whole path, so `.gitignore`, `b.git`, and `project-0` do not match `.git` or `project`."""
+    return re.search(r"(?<![\w.\-])" + re.escape(path) + r"(?![\w.\-])", text) is not None
 
 
 def check(payload: dict) -> str | None:
@@ -163,19 +188,24 @@ def check(payload: dict) -> str | None:
                 if target.startswith("-") or any(c in target for c in "$`%*"):
                     return "Use an explicit working directory so checkout boundaries can be checked."
                 cwd = (cwd / target).resolve()
-        read_commands = {"cat", "type", "get-content", "ls", "dir", "get-childitem", "rg", "grep", "head", "tail", "pwd", "git", "gh"}
-        has_write = any(w in {">", ">>", "2>"} for w in words)
-        simple_read = bool(words) and words[0].lower() in read_commands and not has_write and not any(w in {";", "&&", "|", "||"} for w in words)
-        if not simple_read:
-            candidates.extend(w for w in words if w and not w.startswith("-") and w not in {";", "&&", "|", "||", ">", ">>"})
-            # Embedded scripts and redirections may contain a protected literal
-            # without it being a standalone shell argument.
-            normalized = command.replace("\\", "/").casefold()
-            for boundary in boundaries:
-                if boundary.as_posix().casefold() in normalized:
-                    return "The Lead owns workflow files and other checkouts. Write implementation and evidence in permitted paths."
-                if boundary.is_relative_to(root) and boundary.relative_to(root).as_posix().casefold() in normalized:
-                    return "The Lead owns workflow files and other checkouts. Write implementation and evidence in permitted paths."
+        stages = segments(words)
+        redirects = any(">" in word and set(word) <= set(";&|<>()") for word in words)
+        if not redirects and all(stage[0].lower() in READERS for stage in stages):
+            return None
+        tree_candidates = []
+        for stage in stages:
+            arguments = [w for w in stage if w and not w.startswith("-") and not set(w) <= set(";&|<>()")]
+            (tree_candidates if stage[0].lower() in TREE_MUTATORS else candidates).extend(arguments)
+        if any(protected(cwd / candidate, boundaries, tree=True) for candidate in tree_candidates):
+            return "The Lead owns workflow files and other checkouts. Write implementation and evidence in permitted paths."
+        # Embedded scripts and redirections may contain a protected literal
+        # without it being a standalone shell argument.
+        normalized = command.replace("\\", "/").casefold()
+        for boundary in boundaries:
+            if mentions(normalized, boundary.as_posix().casefold()):
+                return "The Lead owns workflow files and other checkouts. Write implementation and evidence in permitted paths."
+            if boundary.is_relative_to(root) and mentions(normalized, boundary.relative_to(root).as_posix().casefold()):
+                return "The Lead owns workflow files and other checkouts. Write implementation and evidence in permitted paths."
     if any(protected(cwd / candidate, boundaries) for candidate in candidates):
         return "The Lead owns workflow files and other checkouts. Write implementation and evidence in permitted paths."
     return None

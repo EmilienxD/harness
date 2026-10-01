@@ -10,15 +10,19 @@ import pytest
 SCRIPT = Path(__file__).resolve().parents[2] / "harness/building/ship/ship_hook.py"
 
 
-@pytest.fixture
-def checkout(tmp_path):
-    root = tmp_path / "main"
+def make_checkout(tmp_path, main="main", work="work"):
+    root = tmp_path / main
     root.mkdir()
     for args in [("init",), ("config", "user.name", "Test"), ("config", "user.email", "test@example.invalid"), ("commit", "--allow-empty", "-m", "initial")]:
         subprocess.run(["git", "-C", str(root), *args], check=True, capture_output=True)
-    worktree = tmp_path / "work"
+    worktree = tmp_path / work
     subprocess.run(["git", "-C", str(root), "worktree", "add", "-b", "feature", str(worktree)], check=True, capture_output=True)
     return root, worktree
+
+
+@pytest.fixture
+def checkout(tmp_path):
+    return make_checkout(tmp_path)
 
 
 def decision(checkout, tool, data, loop=True):
@@ -83,6 +87,29 @@ def test_custom_workflow_and_parent_directory_mutations_are_protected(checkout):
     assert decision(checkout, "Write", {"file_path": str(folder / "flow.md")}) == "deny"
     assert decision(checkout, "Bash", {"command": 'rm -rf tests'}) == "deny"
     assert decision(checkout, "Bash", {"command": f'cat "{root / "app.py"}"'}) == "allow"
+
+
+@pytest.mark.parametrize("command", [
+    "python -m pytest tests", "uv run pytest .", "npm install git+https://github.com/a/b.git",
+    "echo foo >> .gitignore", "ls tests/workflow | head", "cat tests/workflow/flow.md | grep Steps",
+])
+def test_commands_that_only_mention_protected_ancestors_or_lookalikes_are_allowed(checkout, command):
+    assert decision(checkout, "Bash", {"command": command}) == "allow"
+
+
+def test_own_sibling_worktree_is_not_mistaken_for_the_main_checkout(tmp_path):
+    root, worktree = checkout = make_checkout(tmp_path, "project", "project-0")
+    assert decision(checkout, "Bash", {"command": f'cd "{worktree}" && uv run pytest'}) == "allow"
+    assert decision(checkout, "Bash", {"command": f'echo data > "{worktree / "src" / "app.py"}"'}) == "allow"
+    assert decision(checkout, "Bash", {"command": f'echo data > "{root / "app.py"}"'}) == "deny"
+
+
+@pytest.mark.parametrize("command", [
+    "mv tests elsewhere", "cp -r fixtures/. tests", "Remove-Item -Recurse tests",
+    "ls tests/workflow | xargs rm", "echo x > ./tests/workflow/flow.md",
+])
+def test_recursive_mutations_and_piped_writes_to_workflows_are_denied(checkout, command):
+    assert decision(checkout, "Bash", {"command": command}) == "deny"
 
 
 def test_embedded_relative_workflow_writes_and_renames_are_denied(checkout):
