@@ -119,10 +119,17 @@ TREE_MUTATORS = {"rm", "rmdir", "rd", "del", "erase", "mv", "move", "ren", "rena
                  "robocopy", "remove-item", "ri", "move-item", "mi", "rename-item", "rni", "copy-item", "cpi"}
 
 
-def protected(path: Path, boundaries: list[Path], *, tree: bool = False) -> bool:
+def protected(path: Path, boundaries: list[Path], *, tree: bool = False) -> Path | None:
     resolved = path.resolve()
-    return any(resolved == boundary or resolved.is_relative_to(boundary) or (tree and boundary.is_relative_to(resolved))
-               for boundary in boundaries)
+    return next((boundary for boundary in boundaries
+                 if resolved == boundary or resolved.is_relative_to(boundary) or (tree and boundary.is_relative_to(resolved))), None)
+
+
+def denial(boundary: Path, root: Path) -> str:
+    owner = ("another checkout of this repository" if not boundary.is_relative_to(root)
+             else "Git metadata" if boundary == root / ".git" else "the test workflows")
+    return (f"`{boundary}` belongs to {owner}, which the Lead owns. Keep implementation in your worktree "
+            "and evidence outside the repository; ask for this change in your report.")
 
 
 def segments(words: list[str]) -> list[list[str]]:
@@ -196,18 +203,19 @@ def check(payload: dict) -> str | None:
         for stage in stages:
             arguments = [w for w in stage if w and not w.startswith("-") and not set(w) <= set(";&|<>()")]
             (tree_candidates if stage[0].lower() in TREE_MUTATORS else candidates).extend(arguments)
-        if any(protected(cwd / candidate, boundaries, tree=True) for candidate in tree_candidates):
-            return "The Lead owns workflow files and other checkouts. Write implementation and evidence in permitted paths."
+        for candidate in tree_candidates:
+            if boundary := protected(cwd / candidate, boundaries, tree=True):
+                return denial(boundary, root)
         # Embedded scripts and redirections may contain a protected literal
         # without it being a standalone shell argument.
         normalized = command.replace("\\", "/").casefold()
         for boundary in boundaries:
-            if mentions(normalized, boundary.as_posix().casefold()):
-                return "The Lead owns workflow files and other checkouts. Write implementation and evidence in permitted paths."
-            if boundary.is_relative_to(root) and mentions(normalized, boundary.relative_to(root).as_posix().casefold()):
-                return "The Lead owns workflow files and other checkouts. Write implementation and evidence in permitted paths."
-    if any(protected(cwd / candidate, boundaries) for candidate in candidates):
-        return "The Lead owns workflow files and other checkouts. Write implementation and evidence in permitted paths."
+            if mentions(normalized, boundary.as_posix().casefold()) or (
+                    boundary.is_relative_to(root) and mentions(normalized, boundary.relative_to(root).as_posix().casefold())):
+                return denial(boundary, root)
+    for candidate in candidates:
+        if boundary := protected(cwd / candidate, boundaries):
+            return denial(boundary, root)
     return None
 
 

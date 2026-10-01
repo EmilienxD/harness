@@ -135,6 +135,36 @@ def test_report_usage_and_steering_are_delivered_and_persisted(tmp_path, monkeyp
         assert result.result(timeout=5) is None
 
 
+def delivered_text(output):
+    return output.get("reason") or output["hookSpecificOutput"]["additionalContext"]
+
+
+@pytest.mark.parametrize("provider", ["claude", "chatgpt"])
+def test_lead_receives_report_verbatim_with_its_wait_token(tmp_path, monkeypatch, provider):
+    child = configured(tmp_path, monkeypatch, provider)
+    report = '| Test | Result |\n| --- | --- |\n| "quoted" \\ path | pass |'
+    with ThreadPoolExecutor() as pool:
+        result = pool.submit(event, tmp_path, provider, child, "Stop", last_assistant_message=report)
+        token = waiting(child)
+        try:
+            text = delivered_text(event(tmp_path, provider, "lead", "Stop"))
+        finally:
+            loop.respond(child, token)
+        assert result.result(timeout=5) is None
+    assert report in text
+    assert token in text
+
+
+@pytest.mark.parametrize("provider", ["claude", "chatgpt"])
+def test_ship_lead_context_carries_its_session_and_explorer_inbox(tmp_path, monkeypatch, provider):
+    configured(tmp_path, monkeypatch, provider)
+    inbox = str(enable_delegation("lead", "ship").inbox)
+    invocation = event(tmp_path, provider, "lead", "UserPromptSubmit", prompt="/ship 7" if provider == "claude" else "$ship 7")
+    compacted = event(tmp_path, provider, "lead", "SessionStart", source="compact")
+    for output in (invocation, compacted):
+        assert "lead" in delivered_text(output) and inbox in delivered_text(output)
+
+
 @pytest.mark.parametrize("side", ["lead", "implementer"])
 @pytest.mark.parametrize("provider", ["claude", "chatgpt"])
 def test_wait_limit_releases_only_after_implementer_stops(tmp_path, monkeypatch, provider, side):

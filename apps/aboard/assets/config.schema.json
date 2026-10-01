@@ -19,7 +19,7 @@
     "loop": {
       "type": "object",
       "properties": {
-        "maxFeedback": { "type": "integer", "minimum": 0, "default": 3 },
+        "maxFeedback": { "type": "integer", "minimum": 0, "default": 2 },
         "maxImplementers": { "type": "integer", "minimum": 1, "default": 2 },
         "freshContextPercent": { "type": "number", "minimum": 0, "maximum": 100, "default": 65 }
       }

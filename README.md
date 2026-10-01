@@ -190,7 +190,7 @@ patterns = ['''(curl|wget).*\|\s*(ba|z)?sh''']
 
 Run `/ship` in Claude Code or `$ship` in ChatGPT. With no argument it selects the oldest open `[AI]-triaged` issue without open blockers or open sub-issues, skipping claimed issues and those needing a decision or help. Pass issue numbers explicitly to direct parallel sessions. A parent expands to leaf issues in dependency order, with one loop and PR per leaf. After each delivery you choose whether to continue; an explicit instruction to process the whole queue also works. Pass a PR URL to pick up review comments on its existing branch/worktree.
 
-The Lead reads full GitHub context through `issue-context`, creates a worktree only through the project's initialized-worktree script, and defines success before implementation. Missing or failing scripts stop delivery with a suggestion to run `setup-git-worktree-maker`. Project instructions supply the target branch (the Lead asks if absent), merge method (squash by default), and test locations (defaults: `tests/unit/` and `tests/workflow/`). The first branch commit contains deliberately failing unit stubs and workflow criteria only. Implementers fill exactly those stubs; `ship-stubs check` provides the structural Python contract check, while other languages need their native discovery/diff check.
+The Lead reads full GitHub context through `issue-context`, creates a worktree only through the project's initialized-worktree script, and defines success before implementation. Missing or failing scripts stop delivery with a suggestion to run `setup-git-worktree-maker`. Project instructions supply the target branch (the Lead asks if absent), merge method (squash by default), and test locations (defaults: `tests/unit/` and `tests/workflow/`). The first branch commit contains deliberately failing unit stubs and workflow criteria only. Implementers fill exactly those stubs; `ship-stubs check` provides the structural Python contract check, while other languages need their native discovery/diff check. Each issue's run state (criteria anchor, implementer sessions, prompts, reports, and evidence) lives in `~/.harness/ship/<owner>-<repo>/issue-<n>/`, which `/ship <PR>` resumes from.
 
 Implementers run in visible terminals through initialized Aboard when available or the standalone terminal launcher. Every successful Stop delivers a report automatically, including context usage when measurable, and waits for exact-token Lead feedback or release. Feedback keeps the same conversation. The Lead accepts a report only when every required test and workflow passes with evidence, without rerunning verification. It replaces an implementer when context or feedback limits, repeated failures, or an unconvincing report warrant it. A fresh implementer receives the original prompt, diff, last report, and recorded problems. Only one implementer may be active per worktree. The optional explorer also uses the subagents runtime.
 
@@ -218,7 +218,7 @@ Sparse `.harness/config.json` version 1 settings:
     "claude": { "delegations": { "loop": { "model": "by-difficulty" } } },
     "chatgpt": { "delegations": { "loop": { "model": "by-difficulty" } } }
   },
-  "loop": { "maxFeedback": 3, "maxImplementers": 2, "freshContextPercent": 65 },
+  "loop": { "maxFeedback": 2, "maxImplementers": 2, "freshContextPercent": 65 },
   "session": { "stopWaitHours": 24 }
 }
 ```

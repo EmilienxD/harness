@@ -16,6 +16,7 @@ from subagents_runtime.delegation import (
     claim_parent_delivery,
     clear_reply_authorization,
     enable_delegation,
+    lead_instructions,
     observe_parent_event,
     process_inbox,
     reconcile_inbox,
@@ -44,6 +45,14 @@ def provider_from_argv(argv: list[str]) -> str | None:
 
 def _context(event: str, text: str) -> dict[str, Any]:
     return {"hookSpecificOutput": {"hookEventName": event, "additionalContext": text}}
+
+
+def _skill_instructions(session_id: str, skill: str) -> str | None:
+    inbox = enable_delegation(session_id, skill).inbox
+    if skill != "ship":
+        return claim_instructions(session_id, lead=False)
+    # Every /ship invocation restates the Lead identity, even when already injected.
+    return claim_instructions(session_id, lead=True) or lead_instructions(session_id, inbox)
 
 
 def _strings(value: Any):
@@ -236,8 +245,7 @@ def handle(
                     event,
                     context if delivery is None else f"{delivery.text}\n\n{context}",
                 )
-            enable_delegation(session_id, skill)
-            instructions = claim_instructions(session_id)
+            instructions = _skill_instructions(session_id, skill)
             text = "\n\n".join(
                 item
                 for item in (
@@ -246,8 +254,6 @@ def handle(
                 )
                 if item
             )
-            if skill == "ship":
-                text += f"\n\nShip Lead runtime session: {session_id}. Pass --parent {session_id} to harness loop launch when HARNESS_SESSION_ID is unset."
             return _context(event, text) if text else None
         instructions = claim_instructions(session_id)
         text = "\n\n".join(
@@ -279,10 +285,7 @@ def handle(
             if skill == "reply-to-agent":
                 arm_reply(session_id, execution_id)
             else:
-                enable_delegation(session_id, skill)
-                instructions = claim_instructions(session_id)
-                if skill == "ship":
-                    instructions = (instructions or "") + f"\n\nShip Lead runtime session: {session_id}. Pass --parent {session_id} to harness loop launch when HARNESS_SESSION_ID is unset."
+                instructions = _skill_instructions(session_id, skill)
                 if instructions:
                     return _context(event, instructions)
         processed = []

@@ -204,7 +204,7 @@ def hook(payload: dict, provider: str) -> dict | None:
     if affected:
         loop = os.environ.get("HARNESS_EXECUTION_MODE") == "loop"
         message = ("Run these test workflows and report each result and evidence path to the Lead: " if loop else
-                   "Run these test workflows and stamp passing results with `test-workflows confirm <workflow>`, or explain why you cannot confirm: ") + ", ".join(affected)
+                   "Run these test workflows and confirm passing ones with `test-workflows confirm <workflow>`, or explain why one stays unconfirmed: ") + ", ".join(affected)
         # Codex rejects hook output containing any field outside its schema.
         if event == "Stop":
             output = {"decision": "block", "reason": message}

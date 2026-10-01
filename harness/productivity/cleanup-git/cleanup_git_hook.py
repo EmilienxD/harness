@@ -13,6 +13,9 @@ import sys
 import tomllib
 
 
+MAX_CHANGES = 50
+
+
 class FactError(RuntimeError):
     pass
 
@@ -99,6 +102,10 @@ def collect(cwd: Path, target: str | None = None) -> dict:
                 except OSError:
                     pass  # Deleted files have no remaining mtime.
                 record["changes"].append(change)
+            if len(record["changes"]) > MAX_CHANGES:
+                # Keep the injected inventory bounded; the agent can list the rest with git status.
+                record["changes_omitted"] = len(record["changes"]) - MAX_CHANGES
+                del record["changes"][MAX_CHANGES:]
             paths = attempt("git", "ls-files", "--cached", "--others", "--exclude-standard", "-z", directory=path)
             latest = None
             for name in set((paths or "").split("\0")) - {""}:

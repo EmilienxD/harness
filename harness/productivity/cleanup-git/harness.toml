@@ -1,5 +1,5 @@
 name = "cleanup-git"
-version = "1.0.0"
+version = "1.0.1"
 description = "Explain every local branch and worktree before confirming cleanup"
 requires = ["git", "gh"]
 

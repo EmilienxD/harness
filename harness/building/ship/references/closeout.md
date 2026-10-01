@@ -1,9 +1,33 @@
-# Deliver accepted work
+# Close out
 
-1. After an all-pass report, fetch and merge the latest instructed target into the branch **once per acceptance**. The Lead runs all Git commands. Record the fetched SHA and whether the merge brought changes or conflicts. If there are changes, send one confirming round requiring the affected tests and all required workflows again. For conflicts, tell the implementer to use `resolving-merge-conflicts` for file edits while you run merge/add/continue commands. Read that skill's instructions and translate any Git mutation steps into Lead actions; guards stay enabled. This confirming round does not consume `loop.maxFeedback`. Require an all-pass inventory again. Do not repeatedly synchronize if the target moves later; let GitHub report subsequent conflicts on the PR.
-2. Confirm only workflows reported passing against the final branch content: `test-workflows --root <worktree> confirm <workflow>`. Then run `test-workflows --root <worktree> status`. Its JSON states and `changed_files` explain stale or broken coverage; exit 2 is an error, not a pass. Compare coverage to the full target-to-work diff, including untracked files, renames, and deletions. Any stale workflow touched by that diff, or touched workflow with a broken/invalid mapping, gets feedback and re-reporting before a PR. Inventory newly discovered affected workflows too. Unrelated pre-existing stale workflows should be disclosed without silently stamping them.
-3. Check the stub contract against the saved first commit through the diff. For Python, run `ship-stubs check --root <worktree> --base <base-sha> --anchor <criteria-sha>`; supply repeated `--unit-directory` and `--workflow-directory` flags for custom locations. It checks the direct-parent anchor, criteria-only paths, all tracked/untracked Python test declarations, deliberate failing anchored bodies, and implemented tests retaining names/signatures/decorators/docstrings. Exit 0 passes, 1 reports contract failures as JSON, and 2 is a check error. Commit the target sync merge before checking: tests arriving unchanged through a committed merge count as existing tests, not implementer additions. This helper validates Python declarations; for other languages, use a language-native syntax/collection inventory and diff against the anchor. In mixed repositories, check every language; Python success cannot validate another language. Check surrounding module-level skip/parameterization and runner configuration too, since changing collection can weaken unchanged function declarations. Every anchored test retains its file, qualified name, parameters/decorators and docstring intent and now has an implemented body. Existing tests remain intact; no tests are added, removed, renamed, duplicated, skipped, or weakened beyond filling the authorized bodies. Check all changed and new files for extra test declarations, not only the stub directory. Helper code needed by the declared tests is permissible; another test case is not. Feed violations back. A legitimate criterion change belongs to the Lead and must be made explicit to the user rather than quietly rewriting the anchor.
-4. Inspect the complete staged file list, keeping runtime notes and evidence outside the repository. Commit and push the branch. Use the project target and merge method already resolved. Write the PR body to a UTF-8 file and pass it with `gh pr create --body-file <file>` (or `gh pr edit --body-file` for a resumed PR). Explain what landed, why, how, staging test steps, and useful new-tool suggestions (state none when there are none). Reference the issue using **`Refs #n`**. Ensure title, body, and new commit messages contain no automatic issue-closing directives, including copied source descriptions; check before merge. The issue stays open for staging.
-5. Post a short issue comment linking the PR and stating the outcome. With `[AI]-auto-merge`, merge using the instructed project method, squash by default, once GitHub permits it; if checks or conflicts prevent merge, preserve the PR and resolve through the loop or decision path. All other PRs remain open. Neither outcome removes `[AI]-in-progress` or closes the issue. Release the accepted implementer using its evaluated live token. If it was taken over before closeout, discard acceptance and await the next report before mutations that would publish stale work.
+Run these in order after an all-pass report; the implementer keeps waiting until step 5.
 
-At decision-needed, exhausted-cap, or wait-expiry failure, preserve implementation in a draft PR where there is a publishable diff. Include the failing criteria, report/evidence references, and a concrete question. Add `[AI]-needs-decision` on top of `[AI]-in-progress` and comment with the draft link. Report API/empty-diff failures honestly, retain the worktree, and give the user the exact recovery location. Final output names the issue, PR/outcome, and any decision required; it does not call staging validated.
+1. **Sync once.** Fetch and merge the latest target into the branch, and commit the merge. When it brings changes, send one confirming round: the implementer resolves conflicts with `resolving-merge-conflicts` while you run the Git commands, then reruns the affected tests and every required workflow. Judge that report as usual; this round is outside `loop.maxFeedback`. Later target moves surface as PR conflicts.
+2. **Stub contract.** Run `ship-stubs check --root <worktree> --base <base-sha> --anchor <anchor-sha>`, adding `--unit-directory` and `--workflow-directory` for custom folders. Exit 0 passes, 1 lists violations, 2 is an error. It reads Python; for other languages, compare each test inventory with the anchor through the language's own collection. The contract: every anchored test keeps its file, name, signature, decorators, and docstring and now has a real body; existing tests stay intact; the set of tests, skips, and collection settings is unchanged. Send violations as feedback; a change to the criteria themselves goes to the user.
+3. **Workflows.** Confirm each workflow the report shows passing with `test-workflows --root <worktree> confirm <workflow>`, then run `test-workflows --root <worktree> status`. A stale or broken workflow that covers files in the target-to-branch diff goes back as feedback. Disclose unrelated stale workflows in the PR.
+4. **Publish.** Review the staged file list, commit, push, and open the PR against the target with `gh pr create --body-file <run>/pr-body.md`:
+
+   ```markdown
+   ## What landed
+   ## Why
+   ## How
+   ## Test on staging
+   <numbered steps>
+   ## Suggested tools
+   <tools that would have helped, or "None">
+
+   Refs #<n>
+   ```
+
+   The issue stays open, so the title, body, and commit messages reference it with `Refs #<n>` only, never `Closes`, `Fixes`, or `Resolves`.
+5. **Outcome.** Comment on the issue with the PR link and outcome. With `[AI]-auto-merge`, merge with the project's method once GitHub allows it; a blocked merge goes back through the loop or the failure path. Release the implementer with its current token.
+
+## Failure
+
+On a needs-decision blocker, an exhausted cap, or a wait-expired notice:
+
+1. Check with `harness loop lookup` that the implementer is inactive; a working implementer keeps the worktree until its next report or exit.
+2. Commit the work and open a draft PR with the body above plus the failing criteria and evidence paths.
+3. Add `[AI]-needs-decision` and comment on the issue with the draft link and one precise question.
+
+When GitHub or an empty diff prevents the draft, report the exact error with the worktree and run directory paths.

@@ -1,24 +1,29 @@
-# Report decisions and runtime control
+# Judge reports
 
-Apply these rules to each successful Stop. Read every required test/workflow row, result, and evidence path. The report is the verification evidence: do not rerun checks or independently inspect screenshots/logs to re-verify implementation. The separate stub-contract diff check and workflow hash status remain Lead obligations.
+A report is the implementer's verification: judge it as written, without rerunning its checks. The stub contract and workflow status in closeout stay yours.
 
-- **Accept:** every stub and every required workflow has an explicit passing result and evidence path; there are no omitted checks, unresolved blockers, or contradictory claims. A bare “all tests pass” does not satisfy the inventory.
-- **Needs decision:** a blocker requiring the user's choice ends with `[AI]-needs-decision`, a draft PR preserving the work, and an issue comment containing the precise question and PR link. Create a missing label before applying it.
-- **Related blocker with a known, simple fix:** send specific feedback within the same issue.
-- **Unrelated blocker:** create a `[AI]-help-wanted` issue describing the prerequisite and link it as a real GitHub “blocked by” relation to the current issue. `issue-context` returns node IDs; use GraphQL `addBlockedBy(input:{issueId:<original-id>,blockingIssueId:<prerequisite-id>})` with variables, or the equivalent issue-dependencies REST API. A Markdown mention alone is insufficient. Keep the current worktree. With `[AI]-auto-merge`, release the current implementer, deliver the blocker first through the same loop in this session, then sync and resume the original. Use the original auto-merge decision for the prerequisite and label it explicitly. Otherwise end the original with `[AI]-needs-decision`. Preserve dependency cycles or ambiguous fixes for the user's decision rather than recursively looping forever.
-- **Fresh implementer:** context is at or above `loop.freshContextPercent` unless the remaining fix is small, specific, and localized; or the report repeats its previous failures; or it is vague, contradictory, off-scope, or lacks claimed evidence; or this implementer's `loop.maxFeedback` budget is exhausted. Explain which condition triggered replacement.
-- **Otherwise:** send concrete feedback that identifies each failing criterion, expected behavior, and the next report's required evidence. Count one feedback round per response that starts more work.
-- **Implementer cap:** when replacement would exceed `loop.maxImplementers`, end with a draft PR and `[AI]-needs-decision`. Count all replacements in this issue loop, including resumed work; a new conversation is not a budget reset.
-- **Unknown context:** a missing percentage, missing window, or measurement error skips only the context rule. The other rules still apply. Measurements are last-request usage, reset after compaction; use the runtime percentage rather than recomputing it. Unvalidated Claude model windows remain unknown.
+Take the first rule that applies:
 
-## Feedback, replacement, and intervention
+- **Takeover or expiry.** A takeover notice, or feedback rejected as stale or taken over, voids your verdict: wait for the next report. A wait-expired notice ends the loop through [the failure path](closeout.md#failure).
+- **Accept** when every stub test and every required workflow shows an explicit pass and an evidence path, with no open blocker or contradiction. Keep the implementer waiting and go to [closeout](closeout.md).
+- **Needs decision** when a blocker requires the user's choice: failure path.
+- **Related blocker** with a known, simple fix: feedback.
+- **Unrelated blocker.** Create an `[AI]-help-wanted` issue for the prerequisite and link it as blocking the current issue with `gh api graphql` and `addBlockedBy(input:{issueId:<current node ID>,blockingIssueId:<new node ID>})`; `issue-context` returns node IDs. With `[AI]-auto-merge`, release the implementer, deliver the prerequisite through its own loop under the same auto-merge decision (label it), then sync the original branch and resume. Otherwise take the failure path. Dependency cycles and ambiguous fixes go to the user.
+- **Fresh implementer** when context usage is at or above `loop.freshContextPercent` (unless the remaining fix is small and localized), the report repeats the previous failures, the report is vague, contradictory, off-scope, or claims results without evidence, or this implementer's `loop.maxFeedback` is spent. When that would exceed `loop.maxImplementers`, take the failure path instead.
+- **Feedback** otherwise: name each failing criterion, the expected behavior, and the evidence the next report must show.
 
-Use `harness loop lookup <session>` when deciding a resume or resolving session state. It returns `context_usage`, `last_report`, and `wait`. Feedback uses `harness loop feedback <session> --wait-token <evaluated-token> --file <feedback-file>`; release uses `harness loop release <session> --wait-token <evaluated-token>`. A current wait is required. Feedback continues the same provider session; release leaves its visible terminal idle for takeover.
+Unknown context usage skips only the context rule. The runtime's percentage is the last request's usage and resets after compaction; use it as given.
 
-Before fresh launch, release the previous implementer. Allow only one active implementer in a worktree. Give the fresh session the original prompt, current branch diff (including uncommitted and untracked implementation), last report, and a cumulative problems file, all referenced by external paths. It reviews and fixes rather than starting over. Scrub orchestration metadata from those inputs too.
+## Commands
 
-An interrupt pauses, not fails, the loop. Human steering on either side changes the next required report; account for the returned user messages before judging. Esc during the implementer's waiting Stop kills that wait and counts as takeover. If feedback/release is rejected because the evaluated wait is dead or its token changed, discard the verdict: never substitute a newly fetched token to send old feedback. Wait for the next successful Stop, then judge its report afresh. A working implementer interrupted mid-turn resumes at its next successful Stop. A Lead interrupted during its wait receives the retained report at its next prompt; the implementer keeps waiting.
+- Feedback: `harness loop feedback <session> --wait-token <token> --file <run>/feedback-<n>.md`, with the token of the report you judged. Count each round in `run.json`.
+- Release: `harness loop release <session> --wait-token <token>`. The terminal stays open for the user.
+- State: `harness loop lookup <session>` returns `active`, `wait`, `context_usage`, and `last_report`.
 
-Both waits use `session.stopWaitHours` (the runtime supports up to its installed 24-hour hook budget). A `wait-expired` notification ends this loop with a draft PR, `[AI]-needs-decision`, and a precise issue comment; do not relaunch indefinitely. If the implementer is still working, its worktree remains reserved until it reaches Stop or its process exit is confirmed. Use `harness loop lookup` to check that it is inactive before publishing its diff or launching a replacement. If GitHub or an absent branch diff prevents a draft, report the exact failure and saved worktree/state paths instead of claiming a PR exists.
+## Fresh implementer
 
-For every transition, update external counters and the problems file. The single target-sync confirming round is excluded from `maxFeedback`; it never grants another implementer beyond `maxImplementers`.
+Append the report's problems to `problems.md`, save the report as `report-<n>.md`, release the current implementer, and confirm with `lookup` that it is inactive. Launch the next one with the fresh section of [the prompt template](implementer-prompt.md); one implementer is active per worktree.
+
+## User intervention
+
+User messages to either agent arrive with the next report; account for them in the verdict. An interrupt pauses the loop: a working implementer continues to its next report, and an interrupted Lead finds the pending report at its next prompt. Esc on a waiting implementer is a takeover.

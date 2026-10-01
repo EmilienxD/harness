@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import os
 import re
 import time
@@ -790,10 +791,25 @@ def observe_parent_event(parent_session_id: str, event: str) -> None:
         connection.commit()
 
 
-def claim_instructions(session_id: str, *, compact: bool = False) -> str | None:
+def lead_instructions(session_id: str, inbox: str | Path) -> str:
+    """The /ship Lead drives implementers through `harness loop`; the inbox only serves its explorer."""
+    return (
+        f"Ship Lead runtime session: {session_id}. Pass --parent {session_id} to "
+        f"harness loop launch when HARNESS_SESSION_ID is unset.\nExplorer inbox: {inbox}\n"
+    )
+
+
+def claim_instructions(
+    session_id: str, *, compact: bool = False, lead: bool | None = None
+) -> str | None:
     sessions = _sessions_module()
     with sessions._connect() as connection:
         connection.execute("BEGIN IMMEDIATE")
+        if lead is None:
+            lead = connection.execute(
+                "SELECT 1 FROM requests WHERE parent_session_id=? AND task='loop' LIMIT 1",
+                (session_id,),
+            ).fetchone() is not None
         row = connection.execute(
             "SELECT inbox,context_epoch,injected_epoch,claim_sequence,acknowledgement_sequence FROM session_delegation WHERE parent_session_id=?",
             (session_id,),
@@ -816,6 +832,8 @@ def claim_instructions(session_id: str, *, compact: bool = False) -> str | None:
                 "UPDATE session_delegation SET injected_epoch=?,claim_sequence=?,acknowledgement_sequence=NULL WHERE parent_session_id=?",
                 (epoch, sequence, session_id),
             )
+    if lead:
+        return lead_instructions(session_id, inbox)
     document = (Path(__file__).parent / "resources" / "COMMON.md").read_text(
         encoding="utf-8"
     )
@@ -836,11 +854,21 @@ def _delegation_status(connection, parent_session_id: str) -> str:
     )
     running = int(active.get("auto", 0))
     owed = int(active.get("interactive", 0))
+    implementing = int(active.get("loop", 0))
+    awaiting_verdict = int(
+        connection.execute(
+            "SELECT count(*) FROM loop_waits w JOIN sessions s ON s.id = w.session_id "
+            "WHERE s.parent_session_id = ? AND w.state = 'waiting'",
+            (parent_session_id,),
+        ).fetchone()[0]
+    )
+    # Loop implementers continue only through `harness loop`, never inbox resume.
     idle = int(
         connection.execute(
             """
             SELECT count(*) FROM sessions s WHERE s.parent_session_id = ?
               AND s.provider_session_id IS NOT NULL
+              AND NOT EXISTS (SELECT 1 FROM loop_sessions l WHERE l.session_id = s.id)
               AND NOT EXISTS (
                 SELECT 1 FROM requests r WHERE r.child_session_id = s.id
                   AND r.state IN ('launching','pending','uncertain')
@@ -857,6 +885,16 @@ def _delegation_status(connection, parent_session_id: str) -> str:
             f"{running} auto {_plural(running, 'agent is', 'agents are')} still running"
         )
 
+    if implementing:
+        parts.append(
+            f"{implementing} loop {_plural(implementing, 'implementer is', 'implementers are')} still working"
+        )
+
+    if awaiting_verdict:
+        parts.append(
+            f"{awaiting_verdict} loop {_plural(awaiting_verdict, 'implementer awaits', 'implementers await')} your verdict"
+        )
+
     if owed:
         parts.append(
             f"{owed} interactive {_plural(owed, 'agent', 'agents')} still "
@@ -871,14 +909,52 @@ def _delegation_status(connection, parent_session_id: str) -> str:
     return ", ".join(parts) + "." if parts else ""
 
 
+def _format_loop_event(identifier: str, reply: str) -> str | None:
+    """Render runtime loop events as prose with the implementer's report kept verbatim."""
+    try:
+        event = json.loads(reply)
+    except ValueError:
+        return None
+    kind = event.get("event") if isinstance(event, dict) else None
+    if kind not in {"report", "takeover", "wait-expired"}:
+        return None
+    if kind == "takeover":
+        return (
+            f"{identifier} was taken over by the user ({event.get('reason')}). "
+            "Discard any verdict on its previous report and wait for its next report."
+        )
+    if kind == "wait-expired":
+        return (
+            f"{identifier}'s wait expired. End this loop with [AI]-needs-decision, "
+            "a draft PR, and a precise issue comment."
+        )
+    usage = event.get("context_usage") or {}
+    percentage, window = usage.get("used_percentage"), usage.get("context_window")
+    context = f"{percentage:.0f}% of {window:,} tokens" if percentage is not None and window else "unknown"
+    lines = [f"{identifier} implementer report. Wait token: {event.get('wait_token')}. Context: {context}."]
+    steering = event.get("user_messages") or []
+    if steering:
+        lines.append("User messages since the previous report:")
+        lines.extend(
+            f"- to {'the implementer' if item.get('source') == event.get('session_id') else 'you'}: {item.get('message')}"
+            for item in steering
+        )
+    lines.append(f"<report>\n{event.get('report')}\n</report>")
+    return "\n".join(lines)
+
+
 def _format_results(rows, status: str) -> str:
     messages: list[str] = []
     for row in rows:
         _request_id, number, state, reply, reason, _delivery_id = row[:6]
+        mode = row[7] if len(row) > 7 else None
         identifier = (
             f"agent-{number}" if number is not None else f"Request {_request_id}"
         )
-        if state == "succeeded":
+        loop_event = _format_loop_event(identifier, reply) if state == "succeeded" and mode == "loop" and reply else None
+        if loop_event:
+            messages.append(loop_event)
+        elif state == "succeeded":
             messages.append(f"{identifier} finished. Agent replied:\n<reply>\n{reply}\n</reply>")
         elif state == "cancelled":
             messages.append(
@@ -898,7 +974,7 @@ def claim_parent_delivery(parent_session_id: str, event: str) -> ParentDelivery 
         state_filter = "AND state IN ('succeeded', 'failed', 'cancelled')"
         rows = connection.execute(
             f"""
-            SELECT id, agent_number, state, reply, reason, delivery_id, claim_sequence
+            SELECT id, agent_number, state, reply, reason, delivery_id, claim_sequence, mode
             FROM requests WHERE parent_session_id = ? {state_filter}
               AND acknowledgement_sequence IS NULL
             ORDER BY agent_number

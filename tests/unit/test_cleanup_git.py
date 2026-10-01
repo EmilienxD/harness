@@ -79,3 +79,22 @@ def test_cleanup_invocation_collects_every_branch_and_worktree_without_mutating(
     assert git(dirty, "status", "--porcelain") == "M source.txt\n?? untracked.txt"
     assert module.handle({"hook_event_name": "Stop", "prompt": "/cleanup-git", "cwd": str(root)}) is None
     assert module.handle({"prompt": "Please explain cleanup-git", "cwd": str(root)}) is None
+
+
+def test_large_untracked_inventories_stay_bounded_with_an_omitted_count(tmp_path, monkeypatch):
+    root = tmp_path / "repo"
+    root.mkdir()
+    git(root, "init", "-b", "main")
+    git(root, "-c", "user.name=F", "-c", "user.email=f@example.invalid", "commit", "--allow-empty", "-m", "base")
+    for index in range(80):
+        (root / f"generated-{index}.txt").write_text("x\n")
+    spec = importlib.util.spec_from_file_location("cleanup_hook", HOOK)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    real_run = module.subprocess.run
+    monkeypatch.setattr(module.subprocess, "run", lambda args, **kwargs: real_run(args, **kwargs) if args[0] != "gh"
+                        else subprocess.CompletedProcess(args, 1, "", "offline"))
+    output = module.handle({"hook_event_name": "UserPromptSubmit", "prompt": "/cleanup-git", "cwd": str(root)})
+    worktree = json.loads(output["hookSpecificOutput"]["additionalContext"])["worktrees"][0]
+    assert len(worktree["changes"]) + worktree["changes_omitted"] == 80
+    assert len(worktree["changes"]) < 80
