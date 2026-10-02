@@ -446,6 +446,7 @@ kbd {
   position: static;
 }
 /* Top badges share one look; only their icon carries color. Centered on the 30px toggle beside them. */
+.session-id-badge,
 .aboard-badge,
 .save-badge__pill {
   display: inline-flex;
@@ -458,6 +459,50 @@ kbd {
   font: 700 11px/1 var(--font-head);
   letter-spacing: 0.03em;
   white-space: nowrap;
+}
+.content__badges {
+  position: absolute;
+  top: 14px;
+  left: 16px;
+  right: 16px;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 30px;
+}
+.content__badges .rail-toggle,
+.content__badges .aboard-badge,
+.content__badges .save-badge {
+  position: static;
+  transform: none;
+}
+.session-id-badge {
+  min-width: 0;
+  gap: 7px;
+  padding: 0 12px;
+  cursor: pointer;
+}
+.session-id-badge svg {
+  flex: none;
+}
+.session-id-badge__value {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.session-id-badge:hover {
+  background: var(--paper-2);
+}
+.session-id-badge:focus-visible {
+  outline: none;
+  box-shadow: var(--focus);
+}
+.content__badges .aboard-badge {
+  margin-left: auto;
+  flex: none;
+}
+.content__badges .save-badge {
+  flex: none;
 }
 .aboard-badge {
   position: absolute;
@@ -586,7 +631,7 @@ kbd {
   max-width: 1120px;
   min-height: 100%;
   margin: 0 auto;
-  padding: 26px 24px 58px;
+  padding: 52px 24px 58px;
 }
 .banner {
   display: flex;

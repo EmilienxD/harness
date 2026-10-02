@@ -146,6 +146,29 @@ function ProviderTag({ provider }: { provider: string }) {
   );
 }
 
+function SessionIdBadge({ sessionId, onError }: { sessionId: string; onError: (message: string) => void }) {
+  const [copied, confirmCopy] = useConfirmation();
+  return (
+    <button
+      type="button"
+      className="session-id-badge"
+      title={`Copy session ID: ${sessionId}`}
+      aria-label={`Copy session ID: ${sessionId}`}
+      onClick={() => {
+        void copyText(sessionId)
+          .then(confirmCopy)
+          .catch((cause: Error) => onError(cause.message));
+      }}
+    >
+      {copied ? <Check size={13} aria-hidden="true" /> : <CopyIcon size={13} />}
+      <span className="session-id-badge__value">{sessionId}</span>
+      <span className="visually-hidden" role="status">
+        {copied ? "Session ID copied" : ""}
+      </span>
+    </button>
+  );
+}
+
 /** A labelled icon stands alone for its provider; an unlabelled one decorates a title that already names it. */
 function ProviderIcon({ provider, labelled = false }: { provider: string; labelled?: boolean }) {
   const known = PROVIDERS[provider];
@@ -656,47 +679,56 @@ function GrillBoard() {
         </aside>
         <button className="scrim" aria-label="Close sessions" onClick={() => setRailOpen(false)} />
         <div className="content">
-          {!railOpen && (
-            <button
-              className="icon-button rail-toggle"
-              aria-label="Show sessions"
-              aria-keyshortcuts={shortcuts.aria("toggleSessions")}
-              aria-expanded={false}
-              title={shortcuts.title("Show sessions", "toggleSessions")}
-              onClick={() => setRailOpen(true)}
-            >
-              <PanelLeft size={17} />
-            </button>
-          )}
-          {detail && (
-            <span
-              className={`aboard-badge ${online ? "is-online" : ""}`}
-              role="status"
-              title={
-                online
-                  ? `Aboard online in ${detail.aboard?.workspace_path ?? detail.aboard?.workspace_name ?? "an unknown project"}`
-                  : "Aboard offline"
-              }
-            >
-              <span className="aboard-badge__dot" aria-hidden="true" />
-              Aboard
-              <span className="visually-hidden">{online ? "online" : "offline"}</span>
-            </span>
-          )}
-          <div className="save-badge" role="status">
-            {saveState && (
-              <span key={saveState} className={`save-badge__pill is-${saveState}`}>
-                {saveState === "saving" ? (
-                  <>
-                    <LoaderCircle className="spin" size={13} /> Saving…
-                  </>
-                ) : (
-                  <>
-                    <Check size={13} /> Saved
-                  </>
-                )}
+          <div className="content__badges">
+            {!railOpen && (
+              <button
+                className="icon-button rail-toggle"
+                aria-label="Show sessions"
+                aria-keyshortcuts={shortcuts.aria("toggleSessions")}
+                aria-expanded={false}
+                title={shortcuts.title("Show sessions", "toggleSessions")}
+                onClick={() => setRailOpen(true)}
+              >
+                <PanelLeft size={17} />
+              </button>
+            )}
+            {detail && !switching && (
+              <SessionIdBadge
+                key={detail.session.provider_session_id}
+                sessionId={detail.session.provider_session_id}
+                onError={setError}
+              />
+            )}
+            {detail && (
+              <span
+                className={`aboard-badge ${online ? "is-online" : ""}`}
+                role="status"
+                title={
+                  online
+                    ? `Aboard online in ${detail.aboard?.workspace_path ?? detail.aboard?.workspace_name ?? "an unknown project"}`
+                    : "Aboard offline"
+                }
+              >
+                <span className="aboard-badge__dot" aria-hidden="true" />
+                Aboard
+                <span className="visually-hidden">{online ? "online" : "offline"}</span>
               </span>
             )}
+            <div className="save-badge" role="status">
+              {saveState && (
+                <span key={saveState} className={`save-badge__pill is-${saveState}`}>
+                  {saveState === "saving" ? (
+                    <>
+                      <LoaderCircle className="spin" size={13} /> Saving…
+                    </>
+                  ) : (
+                    <>
+                      <Check size={13} /> Saved
+                    </>
+                  )}
+                </span>
+              )}
+            </div>
           </div>
           <main ref={page} className={railOpen ? "page" : "page is-rail-closed"}>
             <div className="page__inner">
