@@ -428,6 +428,7 @@ kbd {
 }
 
 .content {
+  container-type: inline-size;
   position: relative;
   flex: 1 1 auto;
   min-width: 0;
@@ -472,13 +473,13 @@ kbd {
   min-height: 30px;
 }
 .content__badges .rail-toggle,
-.content__badges .aboard-badge,
-.content__badges .save-badge {
+.content__badges .aboard-badge {
   position: static;
   transform: none;
 }
 .session-id-badge {
   min-width: 0;
+  max-width: calc(50% - 110px);
   gap: 7px;
   padding: 0 12px;
   cursor: pointer;
@@ -500,9 +501,26 @@ kbd {
 .content__badges .aboard-badge {
   margin-left: auto;
   flex: none;
+  order: 3;
 }
 .content__badges .save-badge {
+  top: 1px;
   flex: none;
+  order: 2;
+}
+@container (max-width: 640px) {
+  .session-id-badge {
+    max-width: 120px;
+    flex: 0 1 auto;
+  }
+  .content__badges .save-badge {
+    position: static;
+    transform: none;
+    margin-left: auto;
+  }
+  .content__badges .aboard-badge {
+    margin-left: 0;
+  }
 }
 .aboard-badge {
   position: absolute;
