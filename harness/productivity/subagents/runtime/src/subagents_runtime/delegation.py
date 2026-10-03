@@ -957,8 +957,11 @@ def _format_results(rows, status: str) -> str:
         elif state == "succeeded":
             messages.append(f"{identifier} finished. Agent replied:\n<reply>\n{reply}\n</reply>")
         elif state == "cancelled":
+            detail = f" Reason: {reason}." if reason and reason != "other" else ""
             messages.append(
-                f"{identifier} was cancelled" + (f": {reason}." if reason else ".")
+                f"{identifier}'s session ended before a reply was sent to the parent."
+                f"{detail} Its work may have completed. Ask the user to provide the "
+                "child's reply, or offer to resume the child so it can send its result."
             )
         else:
             messages.append(f"{identifier} failed: {reason or 'unknown failure'}.")
