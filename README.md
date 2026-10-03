@@ -65,6 +65,8 @@ Claude Code invokes a skill as `/skill-name`; ChatGPT uses `$skill-name`. The ex
 
 - **`audit`**: Performs a read-only general, security, architecture, quality, performance, reliability, testing, dependency, or privacy audit of a codebase or selected path. Findings include file-and-line evidence, severity, confidence, remediation difficulty, and a recommended order of work; larger scopes can be partitioned across explorer agents.
 
+- **`flush-out-useless-tests`**: Runs scoped tests first and audits only passing tests for useless assertions, duplicates, and weak contracts. Inspects up to 35 test files unless you request more, with no per-test limit. Reports scope and recommendations for approval before cleanup, then verifies the remaining audited tests and gives a brief summary. Use `/flush-out-useless-tests [path or module]` in Claude Code or `$flush-out-useless-tests [path or module]` in ChatGPT.
+
 - **`breakdown-help-wanted-issue`**: Explores a request against the codebase and helps you agree on what to build, with questions and concrete recommendations. With no argument, it fetches the oldest open `[AI]-help-wanted` GitHub issue.
 
 - **`grill-me-in-cloud`**: Stress-tests a plan through branching rounds on a persistent hosted board. The hook supplies fresh round and asset paths outside the project, uploads local explanation images, publishes without waiting for answers, and returns the session URL. Drafts survive refreshes; only queued answers enter the deterministic prompt. Copy that prompt into any provider session, or let Aboard submit it into the exact session's open terminal; the send completes only once the provider confirms it received the prompt.

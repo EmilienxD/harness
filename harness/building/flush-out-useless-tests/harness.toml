@@ -1,0 +1,21 @@
+name = "flush-out-useless-tests"
+version = "1.0.1"
+description = "Audits passing tests in up to 35 test files and proposes cleanup for approval"
+docs = "https://github.com/EmilienxD/harness/blob/main/harness/building/flush-out-useless-tests/SKILL.md"
+
+[platforms.claude]
+status = "supported"
+
+[platforms.chatgpt]
+status = "supported"
+
+[[files]]
+src = "SKILL.md"
+dest = "flush-out-useless-tests/SKILL.md"
+root = "skills"
+
+[[files]]
+src = "chatgpt/openai.yaml"
+dest = "flush-out-useless-tests/agents/openai.yaml"
+root = "skills"
+platforms = ["chatgpt"]

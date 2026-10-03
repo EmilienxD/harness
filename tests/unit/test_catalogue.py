@@ -1371,7 +1371,7 @@ def test_every_catalogue_manifest_loads():
             "read-all-adrs", "websearch", "writing-adrs",
         },
         "engineering": {"commit", "resolving-merge-conflicts", "setup-git-worktree-maker"},
-        "building": {"issue-readers", "issue-writers", "ship", "tdd", "test-workflows"},
+        "building": {"flush-out-useless-tests", "issue-readers", "issue-writers", "ship", "tdd", "test-workflows"},
         "shipping": {"setup-help"},
         "productivity": {
             "agent-launcher", "caveman", "cleanup-git", "setup-command-aliases", "handoff", "handoff-grilling", "mid-prompt-skills", "decisions", "report-gotchas", "subagents", "next-decision",
