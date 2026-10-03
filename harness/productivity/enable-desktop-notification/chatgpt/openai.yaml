@@ -1,0 +1,7 @@
+interface:
+  display_name: "Enable desktop notification"
+  short_description: "Notify when this session finishes a turn"
+  default_prompt: "Use /enable-desktop-notification to enable notifications for this session. Add --disable to turn them off."
+
+policy:
+  allow_implicit_invocation: false
