@@ -14,7 +14,7 @@ The agent frames one question and chooses a logic or UI prototype. It builds the
 
 ## Files and prerequisites
 
-Both providers are supported. The prototype lives in its own folder inside a dedicated repository workspace. The agent follows project scratch conventions or creates a top-level folder such as `prototypes/`; a `.gitignore` inside the workspace contains `*` so its contents stay out of version control. Dependencies and artifacts stay there, leaving project source files unchanged.
+Both providers are supported. The agent follows user or project prototype instructions. Otherwise, it checks for uncommitted work and pauses for you to clean the working tree if needed. With a clean tree, it creates and switches to a new `proto/<prototype-name>` branch, choosing a descriptive name, then develops, commits, and pushes the prototype there.
 
 ## Example
 

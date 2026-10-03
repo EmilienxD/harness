@@ -1,6 +1,6 @@
 ---
 name: prototype
-description: Build a disposable prototype in a dedicated prototype folder to answer a design question. Use when implementation evidence is needed before choosing a design.
+description: Build a disposable prototype to answer a design question. Use when the user asks for a prototype, draft or preview.
 argument-hint: "[design question]"
 license: MIT
 metadata:
@@ -25,22 +25,19 @@ If the question is ambiguous, ask the user when they are available. Otherwise,
 infer the shape from the surrounding work and show the assumption in the
 prototype.
 
-## Choose the prototype workspace
+## Set up the prototype
 
-Put the prototype in a **prototype workspace**: a dedicated folder inside the
-current repository. Use a location supplied by the user; otherwise follow the
-project's conventions for prototypes or scratch work (check `AGENTS.md`,
-`CLAUDE.md`, contributor docs, and existing folders). If the project specifies
-nothing, create a new top-level folder whose name clearly marks it as
-prototype work, such as `prototypes/` or `scratch/`, choosing a name that does
-not already exist. Put each prototype in its own `<prototype-name>/` subfolder.
+Follow the user's or project's prototype instructions (check `AGENTS.md`,
+`CLAUDE.md`, and contributor docs). Otherwise, use this branch workflow:
 
-When you create the workspace folder, add a `.gitignore` inside it containing
-`*` so its contents stay out of version control.
+Check `git status --short` before starting. If there are staged, unstaged, or
+untracked changes, stop and ask the user to make the working tree clean before
+you proceed. Once it is clean, choose a descriptive prototype name and create
+and switch to a new `proto/<prototype-name>` branch. Develop the prototype on
+that branch, make sur your prototype edits are not gitignored. Report any inconsistency/contradiction between this rule, the project rules and architecture and the user's request.
 
 Inspect the repository for domain language, behavior, dimensions, and visual
-conventions. Keep every prototype artifact and dependency in the prototype
-workspace, leaving the repository's source files unchanged.
+conventions.
 
 ## Prototype loop
 
@@ -58,6 +55,6 @@ not tests, production hardening, reusable abstractions, or unrelated cleanup.
 
 ## Handoff
 
-Lead with the answer. Give the prototype's path and exact open/run instruction,
+Lead with the answer. Give the prototype's location and exact open/run instruction,
 then state the evidence, limitations, and decision it supports. Keep claims
 within what the prototype actually exercised.
