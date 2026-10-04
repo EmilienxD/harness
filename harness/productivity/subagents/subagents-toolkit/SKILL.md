@@ -1,6 +1,6 @@
 ---
 name: subagents-toolkit
-description: Manage subagents when the user explicitly requests delegation. Use when the user asks to invoke, run, launch, delegate to Codex/Chatgpt/Claude agents/subagents.
+description: Manage subagents when the user explicitly requests delegation. Use when the user asks to invoke, run, launch, delegate to Codex/ChatGPT/Claude agents/subagents.
 license: MIT
 metadata:
   author: EMB
@@ -10,75 +10,64 @@ metadata:
 
 A subagent is an agent whose parent is you.
 
-Use the conversation inbox supplied by the runtime hook for every subagent launch and continuation, including after this conversation is resumed. If the hook has not supplied an inbox, stop and notify the user. Launch subagents only when the user explicitly requests it. Use this workflow when the user wants to run subagents, delegate work, or resume subagents.
+Use the conversation inbox supplied by the runtime hook for every subagent launch and continuation, including after this conversation is resumed. If the hook has not supplied an inbox, stop and notify the user. Launch subagents only when the user explicitly requests it. This method is now the default method for running subagents; always use it when the user wants to "run subagents", "delegate the work to", or "resume subagents".
 
-Write one Markdown file directly in the supplied inbox for each subagent using a structured file-writing tool such as Write or apply_patch. When the user requests multiple subagents, write their separate request files in parallel; each file launches independently, so never combine multiple subagents in one file. The runtime launches each subagent after the file write. You will be notified when it completes. Do other work that does not depend on its result, then end your turn to wait for the next completion. Do not poll or sleep to check progress.
-
-## Tasks
-
-This registry selects the launcher, child skill, allowed modes, and default mode. The hook and runtime read this same block. Each named task invokes its child skill in the new conversation; `general` and `explore` retain their built-in workflows without a child skill. To register a role, add its task entry here and install both skills for each provider you use.
-
-```yaml subagent-tasks
-general:
-  launcher: work-with-agent
-  skill: null
-  modes: [auto, interactive]
-  default-mode: interactive
-explore:
-  launcher: explore-with-agent
-  skill: null
-  modes: [auto]
-  default-mode: auto
-prototype:
-  launcher: prototype-with-agent
-  skill: prototype
-  modes: [interactive]
-  default-mode: interactive
-websearch:
-  launcher: websearch-with-agent
-  skill: websearch
-  modes: [auto, interactive]
-  default-mode: auto
-brainstorm:
-  launcher: brainstorm-with-agent
-  skill: grill-me
-  modes: [interactive]
-  default-mode: interactive
-address:
-  launcher: address-with-agent
-  skill: address-this
-  modes: [auto, interactive]
-  default-mode: auto
-review:
-  launcher: review-with-agent
-  skill: review-this
-  modes: [auto, interactive]
-  default-mode: auto
-```
-
-## Launch
+Write one Markdown file directly in the supplied inbox for each subagent. When the user requests multiple subagents, write their separate request files in parallel; each file launches independently, so never combine multiple subagents in one file. Writing to this inbox will automatically launch the subagent. You will be notified when it completes — do not poll; never sleep, poll, proactively check progress, or run a command to do so. Do other work that doesn't depend on the subagent's result. End your turn to wait for the result of whichever subagent finishes first.
 
 Launch frontmatter schema (`|` separates enum values):
 
 ```markdown
 ---
-task: <registered task>    # Required. Selects a task from the registry above.
-mode: auto|interactive    # Required. Make the subagent spawn in a headless or visible terminal.
+task: <registered task>    # Required. Selects a built-in or custom task (see below).
+mode: auto|interactive    # Required. Spawn the subagent in a headless or visible terminal.
 provider: claude|chatgpt|codex    # Optional. Defaults to this conversation's provider. `codex` is an alias of chatgpt.
 ---
 
 <prompt for the new subagent>
 ```
 
+Below is the built-in list of tasks, allowed modes, and default mode:
+
+```yaml
+general:
+  launcher: work-with-agent
+  modes: [auto, interactive]
+  default-mode: interactive
+explore:
+  launcher: explore-with-agent
+  modes: [auto]
+  default-mode: auto
+prototype:
+  launcher: prototype-with-agent
+  modes: [interactive]
+  default-mode: interactive
+websearch:
+  launcher: websearch-with-agent
+  modes: [auto, interactive]
+  default-mode: auto
+brainstorm:
+  launcher: brainstorm-with-agent
+  modes: [interactive]
+  default-mode: interactive
+address:
+  launcher: address-with-agent
+  modes: [auto, interactive]
+  default-mode: auto
+review:
+  launcher: review-with-agent
+  modes: [auto, interactive]
+  default-mode: auto
+```
+
 Use `auto` when the subagent should work independently and report back. Use `interactive` when the user wants to work with the subagent directly in its visible session. Choose a mode allowed by the registered task, using its default when the user has not selected a mode.
 
-Determine the task from the user's request and the preceding conversation. When the invocation supplies no new task, use the subject already under discussion and any description supplied as an argument. If neither establishes a clear task, defaults to `general` in `interactive` mode.
+Determine the task from the user's request and the preceding conversation. When the invocation supplies no new task, use the subject already under discussion and any description supplied as an argument. If no built-in task is suitable, read `.harness/subagent-tasks.yaml` and `~/.harness/subagent-tasks.yaml` to discover the user's custom tasks. Disregard the `skill` entry; it doesn't affect the inbox system. If these registries are empty or if nothing still fits the task, fall back to the `general` task. The general task should be used only as a fallback or if the user explicitly asks for it.
 
-Each new subagent starts with a fresh conversation and knows only project memory files such as `AGENTS.md` and `CLAUDE.md`. Give it a self-contained prompt that explains why, what, where, and how, including constraints and completion criteria, without repeating general project information it can read there.
+Each new subagent starts with a fresh conversation and knows only the project and user memory files such as `AGENTS.md`/`CLAUDE.md`. Give it a self-contained prompt that explains why, what, where, and how, including constraints and completion criteria, without repeating general project information it can read there.
 
 Reference files as `@absolute/or/relative/to/the/project/root/path`. Prefixing a path with `@` loads the file directly into the subagent's context, saving tool calls, time, and tokens. Refer to line numbers in plain text (e.g., lines 14-45). Do not append them to the file path (e.g., @src/core.py:25); that format is not supported. If relevant code is not saved in the project, include the necessary parts as small snippets.
 
-Personality change:
+Perspective change:
 - For interactive agents, "I" is the user, not you; never write: "The user wants to ...".
 - For auto agents, "I" is you; the parent agent.
 
@@ -115,4 +104,4 @@ resume: agent-3
 Continue with this next task.
 ```
 
-Give each new request a fresh filename, tracking the names you have already used in this inbox. The filename does not select the task, mode, or provider.
+Any new request needs a fresh filename; do not waste time listing existing files; you are the only writer of this inbox, so you already know which filename is already taken (you created them earlier). The filename has no impact.

@@ -15,3 +15,5 @@ class ToolkitBuildHook(BuildHookInterface):
         if self.target_name == "sdist":
             destination = "src/" + destination
         build_data["force_include"][str(source)] = destination
+        registry = source.with_name("builtin-tasks.yaml")
+        build_data["force_include"][str(registry)] = Path(destination).with_name("builtin-tasks.yaml").as_posix()

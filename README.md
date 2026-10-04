@@ -124,7 +124,7 @@ Launch settings come from `.harness/config.json`, then the user-level file, then
 A role is a named task with two skills: a user-invoked `<role>-with-agent` launcher and a child skill containing the actual workflow. For example, `security-with-agent` launches task `security`, which invokes `security-audit` in the child conversation. The parent supplies the audit scope; the child skill supplies how to perform it.
 
 1. Install `subagents` in the project. For Claude, skills live under `.claude/skills/`; for ChatGPT/Codex, use `.agents/skills/`. The examples below use `<skills>` for that directory. If you delegate across providers, install the child skill for the selected provider too.
-2. Edit `<skills>/subagents-toolkit/SKILL.md`. Add this entry inside its existing `yaml subagent-tasks` block, alongside the shipped tasks:
+2. Create `.harness/subagent-tasks.yaml` in the project and add the custom task below. For personal roles, use `~/.harness/subagent-tasks.yaml` (`HARNESS_STATE_DIR` overrides `~/.harness`). These optional files contain only custom roles; the installed toolkit supplies the shipped defaults.
 
    ```yaml
    security:
@@ -134,7 +134,7 @@ A role is a named task with two skills: a user-invoked `<role>-with-agent` launc
      default-mode: auto
    ```
 
-   Task and skill names use lowercase letters, digits, and hyphens. Each launcher is unique and ends with `-with-agent`; each new task requires a child skill. `default-mode` must appear in `modes`. `loop` and `/ship` remain internal to the implementation loop.
+   Task and skill names use lowercase letters, digits, and hyphens. Each launcher is unique and ends with `-with-agent`; each new task requires a child skill. `default-mode` must appear in `modes`. Builtin task names and launchers are reserved; `loop` and `ship` remain internal to the implementation loop. An empty custom registry is `{}`.
 
 3. Create `<skills>/security-with-agent/SKILL.md`:
 
@@ -179,9 +179,9 @@ A role is a named task with two skills: a user-invoked `<role>-with-agent` launc
 
 5. Invoke `/security-with-agent <scope>` in Claude or `$security-with-agent <scope>` in ChatGPT/Codex. The hook reads the registry, enables the inbox, and accepts `task: security`; the runtime invokes `/security-audit` or `$security-audit` in the child. A missing child skill fails before launch. If your provider has not picked up newly added skills, restart its session.
 
-The runtime reads the nearest project toolkit from the conversation's saved directory up to the repository root, then the provider's personal toolkit, then the bundled defaults. A project toolkit is a complete registry, so retain the shipped entries when adding roles. Registry edits take effect on the next invocation; reload the toolkit if the parent already has an older copy in context. Resuming a child preserves its existing task, mode, provider, and workflow even if the registry subsequently changes.
+The toolkit shows the builtin tasks and modes; its managed `builtin-tasks.yaml` companion supplies the full runtime definitions, including child skills. Before falling back to `general`, or when the user names a custom task, the agent reads the custom registries. The hook and runtime combine the same custom definitions with the builtin tasks. They use the nearest `.harness/subagent-tasks.yaml` from the conversation's saved directory upward through the repository root, plus the personal registry. The hook supplies their resolved paths and the structured-write requirement for inbox requests. A project entry replaces the complete personal definition for that custom task; other personal roles remain available. Custom registries are shared across providers. Missing files mean no custom roles; malformed files fail with an error. Registry edits take effect on the next invocation. Resuming a child preserves its existing task, mode, provider, and workflow even if the registry subsequently changes.
 
-Custom roles use Harness's native background or visible-terminal launch path. Aboard continues to handle its shipped tasks; its bridge currently accepts a fixed task list. Keep project-owned skill pairs in version control and retain your customized toolkit when upgrading; Harness reports edits rather than overwriting them automatically.
+Custom roles use Harness's native background or visible-terminal launch path. Aboard continues to handle its shipped tasks; its bridge currently accepts a fixed task list. Keep the project registry and skill pairs in version control. The installer manages the toolkit and leaves custom registries and user-created skill pairs untouched during upgrades and removal. If you previously added roles to the installed toolkit, move those entries into the custom registry and restore the original installed toolkit before upgrading; existing edits still trigger the installer's modified-file protection.
 
 ### Model-invoked skills
 
@@ -378,6 +378,8 @@ use the GitHub commits pinned in the manifests. `--no-cache` rebuilds the instal
 from the current checkout; local runtime installations also bypass the build cache.
 Host tools are installed for your user even when the selected scope is Project.
 Aboard still uses its published VSIX; see its README for extension development.
+The custom subagent registry requires `--local` until a release refreshes the
+`subagents` runtime Git pin to include this loader.
 
 The `/ship` additions require this local installation until a release updates the
 runtime Git pins and publishes the corresponding Aboard VSIX. The existing remote

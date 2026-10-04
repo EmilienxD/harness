@@ -9,7 +9,7 @@
     "task": {
       "type": "string",
       "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$",
-      "description": "A task registered in subagents-toolkit, or the internal loop task. The runtime validates registry membership and allowed modes."
+      "description": "A builtin task from subagents-toolkit, a custom task from subagent-tasks.yaml, or the internal loop task. The runtime validates registry membership and allowed modes."
     },
     "provider": {
       "description": "Defaults to the parent session's provider when omitted. 'codex' is an alias of 'chatgpt' and is normalized to it.",

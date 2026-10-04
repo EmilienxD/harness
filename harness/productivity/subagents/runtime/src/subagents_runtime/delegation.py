@@ -821,10 +821,19 @@ def claim_instructions(
                 "UPDATE session_delegation SET injected_epoch=?,claim_sequence=?,acknowledgement_sequence=NULL WHERE parent_session_id=?",
                 (epoch, sequence, session_id),
             )
+        cwd = Path(connection.execute("SELECT cwd FROM sessions WHERE id=?", (session_id,)).fetchone()[0])
     if lead:
         return lead_instructions(session_id, inbox)
+    from subagents_runtime.roles import custom_registry_paths
+
+    personal_registry, project_registry = custom_registry_paths(cwd)
     return (
         f"Conversation inbox: {inbox}\n"
+        "Write inbox requests with a structured file-writing tool such as Write or apply_patch; "
+        "the write event launches the request automatically.\n"
+        f"Custom task registries: project {project_registry}; personal {personal_registry}. "
+        "Project entries replace personal definitions by task name. "
+        "Missing files mean no custom tasks; report malformed registries instead of falling back.\n"
         "Invoke the subagents-toolkit skill before launching or continuing a subagent "
         "if its instructions are not already in the current context.\n"
     )

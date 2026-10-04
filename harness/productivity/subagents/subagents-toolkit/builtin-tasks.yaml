@@ -1,0 +1,35 @@
+general:
+  launcher: work-with-agent
+  skill: null
+  modes: [auto, interactive]
+  default-mode: interactive
+explore:
+  launcher: explore-with-agent
+  skill: null
+  modes: [auto]
+  default-mode: auto
+prototype:
+  launcher: prototype-with-agent
+  skill: prototype
+  modes: [interactive]
+  default-mode: interactive
+websearch:
+  launcher: websearch-with-agent
+  skill: websearch
+  modes: [auto, interactive]
+  default-mode: auto
+brainstorm:
+  launcher: brainstorm-with-agent
+  skill: grill-me
+  modes: [interactive]
+  default-mode: interactive
+address:
+  launcher: address-with-agent
+  skill: address-this
+  modes: [auto, interactive]
+  default-mode: auto
+review:
+  launcher: review-with-agent
+  skill: review-this
+  modes: [auto, interactive]
+  default-mode: auto
