@@ -1,10 +1,18 @@
-# Multi Provider Subagent System Guideline
+---
+name: subagents-toolkit
+description: Manage subagents when the user explicitly requests delegation. Use when the user asks to invoke, run, launch, delegate to Codex/Chatgpt/Claude agents/subagents.
+license: MIT
+metadata:
+  author: EMB
+---
+
+# Subagents toolkit
 
 A subagent is an agent whose parent is you.
 
-Use the inbox supplied below for every subagent launch and continuation, including after this conversation is resumed. Launch subagents only when the user explicitly requests it. This method becomes the default method to run subagents; always use it when the user wants to "run subagents", "Delegate the work to", "resume subagents".
+Use the conversation inbox supplied by the runtime hook for every subagent launch and continuation, including after this conversation is resumed. If the hook has not supplied an inbox, stop and notify the user. Launch subagents only when the user explicitly requests it. Use this workflow when the user wants to run subagents, delegate work, or resume subagents.
 
-Write one Markdown file directly in the supplied inbox for each subagent. When the user requests multiple subagents, write their separate request files in parallel; each file launches independently, so never combine multiple subagents in one file. Writing to this inbox will automatically launch the subagent. You will be notified when it completes — do not poll; never sleep, poll, proactively check progress, or run a command to do so. Do other work that doesn't depend on the subagent's result. End your turn to wait the result of the subagent who finish the first.
+Write one Markdown file directly in the supplied inbox for each subagent using a structured file-writing tool such as Write or apply_patch. When the user requests multiple subagents, write their separate request files in parallel; each file launches independently, so never combine multiple subagents in one file. The runtime launches each subagent after the file write. You will be notified when it completes. Do other work that does not depend on its result, then end your turn to wait for the next completion. Do not poll or sleep to check progress.
 
 Launch frontmatter schema (`|` separates enum values):
 
@@ -63,4 +71,4 @@ resume: agent-3
 Continue with this next task.
 ```
 
-Any new request needs a fresh filename; do not waste time listing existing files, you are the only writter of this inbox, so you already know which filename is already taken (you created them earlier). The filename has no effect on anything.
+Give each new request a fresh filename, tracking the names you have already used in this inbox. The filename does not select the task, mode, or provider.

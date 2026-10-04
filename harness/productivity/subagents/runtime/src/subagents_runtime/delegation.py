@@ -802,6 +802,7 @@ def lead_instructions(session_id: str, inbox: str | Path) -> str:
 def claim_instructions(
     session_id: str, *, compact: bool = False, lead: bool | None = None
 ) -> str | None:
+    """Replay runtime context until acknowledged, refreshing it after compaction."""
     sessions = _sessions_module()
     with sessions._connect() as connection:
         connection.execute("BEGIN IMMEDIATE")
@@ -834,10 +835,11 @@ def claim_instructions(
             )
     if lead:
         return lead_instructions(session_id, inbox)
-    document = (Path(__file__).parent / "resources" / "COMMON.md").read_text(
-        encoding="utf-8"
+    return (
+        f"Conversation inbox: {inbox}\n"
+        "Invoke the subagents-toolkit skill before launching or continuing a subagent "
+        "if its instructions are not already in the current context.\n"
     )
-    return document + f"\n\nConversation inbox: {inbox}\n"
 
 
 def _plural(total: int, singular: str, plural: str) -> str:

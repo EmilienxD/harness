@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import pytest
+import yaml
+
 from harness_cli.manifest import SupportStatus, discover
 from harness_cli.installer import CatalogueInstaller, Target
 from harness_cli.receipts import ReceiptStore
@@ -29,7 +32,7 @@ def test_subagents_bundle_depends_on_the_standalone_companion_skills() -> None:
     assert names(tools["subagents"]) == {"prototype", "websearch", "grill-me", "issue-readers"}
 
 
-def test_every_chatgpt_delegation_skill_is_user_only() -> None:
+def test_launch_resume_and_reply_skills_remain_user_only() -> None:
     destinations = {
         entry.dest: entry.source
         for entry in discover()["subagents"].expand("chatgpt")
@@ -37,10 +40,29 @@ def test_every_chatgpt_delegation_skill_is_user_only() -> None:
     for name in (
         "work-with-agent", "explore-with-agent", "prototype-with-agent",
         "websearch-with-agent", "brainstorm-with-agent",
-        "address-with-agent", "review-with-agent", "reply-to-agent",
+        "address-with-agent", "review-with-agent", "reply-to-agent", "resume-agent",
     ):
+        skill = destinations[f"{name}/SKILL.md"]
+        _opening, frontmatter, _body = skill.read_text(encoding="utf-8").split("---", 2)
+        assert yaml.safe_load(frontmatter)["disable-model-invocation"] is True
         metadata = destinations[f"{name}/agents/openai.yaml"]
-        assert "allow_implicit_invocation: false" in metadata.read_text(encoding="utf-8")
+        assert yaml.safe_load(metadata.read_text(encoding="utf-8"))["policy"]["allow_implicit_invocation"] is False
+
+
+@pytest.mark.parametrize("provider", ["claude", "chatgpt"])
+def test_shared_subagents_skill_is_model_invocable(provider) -> None:
+    destinations = {
+        entry.dest: entry.source
+        for entry in discover()["subagents"].expand(provider)
+    }
+    source = destinations["subagents-toolkit/SKILL.md"]
+    _opening, frontmatter, _body = source.read_text(encoding="utf-8").split("---", 2)
+    metadata = yaml.safe_load(frontmatter)
+    assert metadata["name"] == "subagents-toolkit"
+    assert metadata.get("disable-model-invocation", False) is False
+    if provider == "chatgpt":
+        interface = destinations["subagents-toolkit/agents/openai.yaml"]
+        assert yaml.safe_load(interface.read_text(encoding="utf-8"))["policy"]["allow_implicit_invocation"] is True
 
 
 def test_address_launcher_includes_model_instructions() -> None:
@@ -81,9 +103,10 @@ def test_subagents_hooks_invoke_the_installed_runtime_for_both_provider_schemas(
         assert "matcher" not in hooks["PostToolUse"][0]
 
 
-def test_subagents_install_and_removal_cover_the_complete_workflow(tmp_path, monkeypatch) -> None:
+@pytest.mark.parametrize("provider", ["claude", "chatgpt"])
+def test_subagents_install_and_removal_cover_the_complete_workflow(tmp_path, monkeypatch, provider) -> None:
     tools = discover()
-    target = Target.for_project(tmp_path / "project", "chatgpt")
+    target = Target.for_project(tmp_path / "project", provider)
     store = ReceiptStore.load(tmp_path / "receipts.json")
     installer = CatalogueInstaller(tools, target, store)
     monkeypatch.setattr("harness_cli.installer.prepare_host_action", lambda action: PreparedAction(action))
@@ -92,6 +115,9 @@ def test_subagents_install_and_removal_cover_the_complete_workflow(tmp_path, mon
     monkeypatch.setattr("harness_cli.installer.uninstall_host_action", lambda _action: None)
 
     installer.reconcile({"subagents"})
+    assert target.destination_path("skills", "subagents-toolkit/SKILL.md").exists()
+    metadata = target.destination_path("skills", "subagents-toolkit/agents/openai.yaml")
+    assert metadata.exists() == (provider == "chatgpt")
     assert target.destination_path("skills", "work-with-agent/SKILL.md").exists()
     assert target.destination_path("skills", "prototype-with-agent/SKILL.md").exists()
     assert target.destination_path("skills", "address-with-agent/SKILL.md").exists()
@@ -107,6 +133,8 @@ def test_subagents_install_and_removal_cover_the_complete_workflow(tmp_path, mon
     assert not target.gitignore_path.exists() or ".harness/runtime/" not in target.gitignore_path.read_text(encoding="utf-8")
 
     installer.reconcile(set())
+    assert not target.destination_path("skills", "subagents-toolkit/SKILL.md").exists()
+    assert not metadata.exists()
     assert not target.destination_path("skills", "prototype-with-agent/SKILL.md").exists()
     assert not target.destination_path("skills", "address-with-agent/SKILL.md").exists()
     assert not target.destination_path("skills", "review-with-agent/SKILL.md").exists()

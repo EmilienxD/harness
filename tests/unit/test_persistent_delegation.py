@@ -118,8 +118,9 @@ def test_saved_conversation_has_one_persistent_inbox_for_all_tasks(
     assert not list(first.inbox.iterdir())
 
 
-def test_instruction_delivery_is_replayed_then_acknowledged_and_compaction_starts_epoch(
-    tmp_path, monkeypatch
+@pytest.mark.parametrize("provider", ["claude", "chatgpt"])
+def test_runtime_context_is_replayed_then_acknowledged_and_compaction_starts_epoch(
+    tmp_path, monkeypatch, provider
 ):
     monkeypatch.setenv("HARNESS_STATE_DIR", str(tmp_path / "state"))
     monkeypatch.delenv("HARNESS_SESSION_ID", raising=False)
@@ -127,22 +128,56 @@ def test_instruction_delivery_is_replayed_then_acknowledged_and_compaction_start
         "session_id": "parent",
         "cwd": str(tmp_path),
         "hook_event_name": "UserPromptSubmit",
-        "prompt": "/work-with-agent do work",
+        "prompt": ("/" if provider == "claude" else "$") + "work-with-agent do work",
     }
-    assert handle(payload) is not None
-    assert handle({**payload, "prompt": "Continue the work."}) is not None
+    assert handle(payload, provider) is not None
+    assert handle({**payload, "prompt": "Continue the work."}, provider) is not None
     # A different observed event proves the previous injection reached the conversation.
-    handle({**payload, "hook_event_name": "PreToolUse"})
-    assert handle(payload) is None
+    handle({**payload, "hook_event_name": "PreToolUse"}, provider)
+    assert handle(payload, provider) is None
     compacted = handle(
-        {**payload, "hook_event_name": "SessionStart", "source": "compact"}
+        {**payload, "hook_event_name": "SessionStart", "source": "compact"}, provider
     )
     assert compacted is not None
-    handle({**payload, "hook_event_name": "PreToolUse"})
+    with sessions._connect() as connection:
+        assert connection.execute(
+            "SELECT context_epoch, injected_epoch FROM session_delegation WHERE parent_session_id='parent'"
+        ).fetchone() == (1, 1)
+    handle({**payload, "hook_event_name": "PreToolUse"}, provider)
     assert (
-        handle({**payload, "hook_event_name": "SessionStart", "source": "resume"})
+        handle({**payload, "hook_event_name": "SessionStart", "source": "resume"}, provider)
         is None
     )
+
+
+@pytest.mark.parametrize("compact", [False, True])
+def test_runtime_context_delivery_does_not_load_instruction_documents(tmp_path, monkeypatch, compact):
+    from pathlib import Path
+    from subagents_runtime.delegation import claim_instructions
+
+    monkeypatch.setenv("HARNESS_STATE_DIR", str(tmp_path / "state"))
+    sessions.register_observed("parent", tmp_path, "claude")
+    inbox = enable_delegation("parent", "work-with-agent").inbox
+
+    def unexpected_read(*_args, **_kwargs):
+        pytest.fail("Runtime context delivery must not load instruction documents")
+
+    monkeypatch.setattr(Path, "read_text", unexpected_read)
+    assert claim_instructions("parent", compact=compact) is not None
+    assert inbox.is_dir()
+
+
+def test_loading_shared_skill_does_not_enable_delegation(tmp_path, monkeypatch):
+    monkeypatch.setenv("HARNESS_STATE_DIR", str(tmp_path / "state"))
+    monkeypatch.delenv("HARNESS_SESSION_ID", raising=False)
+    assert handle({
+        "session_id": "parent", "cwd": str(tmp_path),
+        "hook_event_name": "PostToolUse", "tool_name": "Skill",
+        "tool_input": {"skill": "subagents-toolkit"}, "tool_response": {"success": True},
+    }, "claude") is None
+    with sessions._connect() as connection:
+        assert connection.execute("SELECT count(*) FROM session_delegation").fetchone()[0] == 0
+        assert connection.execute("SELECT count(*) FROM requests").fetchone()[0] == 0
 
 
 @pytest.mark.parametrize("provider", ["claude", "chatgpt"])
