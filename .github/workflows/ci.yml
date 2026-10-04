@@ -4,19 +4,43 @@ on:
   pull_request:
   push:
     branches: [main, dev]
+  workflow_dispatch:
+  schedule:
+    - cron: "0 7 * * 1" # Weekly full Python compatibility matrix.
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 permissions:
   contents: read
 
 jobs:
+  changes:
+    name: Select checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      python: ${{ steps.select.outputs.python }}
+      distribution: ${{ steps.select.outputs.distribution }}
+      shared_e2e: ${{ steps.select.outputs.shared_e2e }}
+      python_matrix: ${{ steps.select.outputs.python_matrix }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - id: select
+        run: python scripts/ci_changes.py
+
   python:
     name: Python ${{ matrix.python }} / ${{ matrix.os }}
+    needs: changes
+    if: needs.changes.outputs.python == 'true'
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
     strategy:
       fail-fast: false
-      matrix:
-        os: [ubuntu-latest, windows-latest]
-        python: ["3.11", "3.13"]
+      matrix: ${{ fromJSON(needs.changes.outputs.python_matrix) }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -30,7 +54,10 @@ jobs:
 
   distribution:
     name: Python distribution
+    needs: changes
+    if: needs.changes.outputs.distribution == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -56,7 +83,10 @@ jobs:
 
   shared-e2e:
     name: Shared E2E / ${{ matrix.os }}
+    needs: changes
+    if: needs.changes.outputs.shared_e2e == 'true'
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
     strategy:
       fail-fast: false
       matrix:
@@ -79,3 +109,25 @@ jobs:
       - run: npm ci
       - run: npm run check
       - run: npm test
+
+  result:
+    name: Harness CI result
+    needs: [changes, python, distribution, shared-e2e]
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Check selected jobs passed
+        env:
+          RESULTS: ${{ toJSON(needs) }}
+        run: |
+          python - <<'PY'
+          import json
+          import os
+
+          jobs = json.loads(os.environ["RESULTS"])
+          failed = [name for name, job in jobs.items() if job["result"] not in {"success", "skipped"}]
+          if jobs["changes"]["result"] != "success" or failed:
+              raise SystemExit("CI did not pass: " + ", ".join(failed or ["changes"]))
+          print("All selected checks passed.")
+          PY

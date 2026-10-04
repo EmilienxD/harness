@@ -11,9 +11,14 @@ on:
       - "apps/aboard/**"
       - ".github/workflows/aboard-ci.yml"
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
   check:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     defaults:
       run:
         working-directory: apps/aboard
