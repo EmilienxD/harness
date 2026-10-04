@@ -9,7 +9,7 @@ import re
 import time
 import uuid
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 import yaml
@@ -256,6 +256,12 @@ def _load_inbox(session_id: str) -> DelegationInbox:
 def _finish_launch(request, request_id, execution_id, child_id, number, cwd, path, launch):
     from subagents_runtime import processes
     sessions = _sessions_module()
+    if request.provider == "chatgpt":
+        from subagents_runtime.prompt_paths import normalize_file_references
+
+        # Hash and retain the original inbox body; adapt only the launch copy,
+        # after continuations have recovered their child's provider and cwd.
+        request = replace(request, prompt=normalize_file_references(request.prompt, cwd))
     launched_id = launch(request, request_id, number, cwd)
     with sessions._connect() as connection:
         if launched_id != child_id:
