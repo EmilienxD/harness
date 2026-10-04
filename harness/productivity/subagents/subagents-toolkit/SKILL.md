@@ -14,11 +14,55 @@ Use the conversation inbox supplied by the runtime hook for every subagent launc
 
 Write one Markdown file directly in the supplied inbox for each subagent using a structured file-writing tool such as Write or apply_patch. When the user requests multiple subagents, write their separate request files in parallel; each file launches independently, so never combine multiple subagents in one file. The runtime launches each subagent after the file write. You will be notified when it completes. Do other work that does not depend on its result, then end your turn to wait for the next completion. Do not poll or sleep to check progress.
 
+## Tasks
+
+This registry selects the launcher, child skill, allowed modes, and default mode. The hook and runtime read this same block. Each named task invokes its child skill in the new conversation; `general` and `explore` retain their built-in workflows without a child skill. To register a role, add its task entry here and install both skills for each provider you use.
+
+```yaml subagent-tasks
+general:
+  launcher: work-with-agent
+  skill: null
+  modes: [auto, interactive]
+  default-mode: interactive
+explore:
+  launcher: explore-with-agent
+  skill: null
+  modes: [auto]
+  default-mode: auto
+prototype:
+  launcher: prototype-with-agent
+  skill: prototype
+  modes: [interactive]
+  default-mode: interactive
+websearch:
+  launcher: websearch-with-agent
+  skill: websearch
+  modes: [auto, interactive]
+  default-mode: auto
+brainstorm:
+  launcher: brainstorm-with-agent
+  skill: grill-me
+  modes: [interactive]
+  default-mode: interactive
+address:
+  launcher: address-with-agent
+  skill: address-this
+  modes: [auto, interactive]
+  default-mode: auto
+review:
+  launcher: review-with-agent
+  skill: review-this
+  modes: [auto, interactive]
+  default-mode: auto
+```
+
+## Launch
+
 Launch frontmatter schema (`|` separates enum values):
 
 ```markdown
 ---
-task: general|explore|prototype|websearch|brainstorm|address|review    # Required. Selects the agent workflow.
+task: <registered task>    # Required. Selects a task from the registry above.
 mode: auto|interactive    # Required. Make the subagent spawn in a headless or visible terminal.
 provider: claude|chatgpt|codex    # Optional. Defaults to this conversation's provider. `codex` is an alias of chatgpt.
 ---
@@ -26,7 +70,7 @@ provider: claude|chatgpt|codex    # Optional. Defaults to this conversation's pr
 <prompt for the new subagent>
 ```
 
-Use `auto` when the subagent should work independently and report back. Use `interactive` when the user wants to work with the subagent directly in its visible session. Default to `auto` when the user does not request direct interaction. Every task supports both modes except `explore` (auto only), `brainstorm` (interactive only) and `prototype` (interactive only)
+Use `auto` when the subagent should work independently and report back. Use `interactive` when the user wants to work with the subagent directly in its visible session. Choose a mode allowed by the registered task, using its default when the user has not selected a mode.
 
 Determine the task from the user's request and the preceding conversation. When the invocation supplies no new task, use the subject already under discussion and any description supplied as an argument. If neither establishes a clear task, defaults to `general` in `interactive` mode.
 

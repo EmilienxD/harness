@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "harness-subagents-runtime"
-version = "2.4.1"
+version = "2.5.0"
 description = "Persistent delegation and execution runtime for Harness"
 requires-python = ">=3.11"
 license = { text = "MIT" }
@@ -16,3 +16,5 @@ harness-subagents-hook = "subagents_runtime.hooks:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/subagents_runtime"]
+
+[tool.hatch.build.hooks.custom]

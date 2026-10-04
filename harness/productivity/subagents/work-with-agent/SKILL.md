@@ -14,7 +14,7 @@ Invoke the `subagents-toolkit` skill if its instructions are not already in the 
 
 Request parameters:
 - task: general
-- mode: interactive or auto (default auto)
+- mode: interactive or auto (default interactive)
 - provider (Optional): claude, chatgpt, or codex (alias of chatgpt)
 
 Give the child a bounded task and the relevant project context.

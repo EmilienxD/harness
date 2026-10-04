@@ -489,6 +489,7 @@ def provider_arguments(
 
 def launch_delegated(request, request_id: str, agent_number: int, cwd: Path) -> str:
     from subagents_runtime import processes
+    from subagents_runtime.roles import find_skill
 
     with _connect() as connection:
         row = connection.execute(
@@ -500,6 +501,9 @@ def launch_delegated(request, request_id: str, agent_number: int, cwd: Path) -> 
             "Delegated launch requires a persisted execution reservation"
         )
     child_id, execution_id, conversation, fork_of = row
+    skill = getattr(request, "child_skill", None)
+    if not request.resume and skill and find_skill(cwd, request.provider, skill) is None:
+        raise SessionError(f"Child skill {skill!r} is unavailable for {request.provider} in {cwd}; install it before launching task {request.task!r}")
     environment = os.environ.copy()
     environment.update(
         {
@@ -569,13 +573,6 @@ def launch_delegated(request, request_id: str, agent_number: int, cwd: Path) -> 
             visible=request.mode in {"interactive", "loop"},
         )
         return child_id
-    skill = {
-        "prototype": "prototype",
-        "websearch": "websearch",
-        "brainstorm": "grill-me",
-        "address": "address-this",
-        "review": "review-this",
-    }.get(request.task)
     continuing = bool(request.resume)
     prompt = (
         request.prompt
@@ -715,6 +712,24 @@ def _aboard_error(exc: urllib.error.HTTPError) -> tuple[str | None, str]:
 
 
 def _launch_through_aboard(request, request_id: str, cwd: Path) -> str | None:
+    from subagents_runtime.roles import builtin_toolkit, read_task_policies
+
+    # Aboard's bridge currently accepts only the shipped tasks and child skills.
+    # Project roles use the native adapter with their named task and provider profile.
+    bridge_contract = json.loads(
+        (Path(__file__).parent / "schemas" / "aboard-delegation.schema.json").read_text(encoding="utf-8")
+    )
+    if request.task not in bridge_contract["properties"]["task"]["enum"]:
+        return None
+    builtin = next((policy for policy in read_task_policies(builtin_toolkit()).values()
+                    if policy.task == request.task), None)
+    if request.task != "loop" and (
+        builtin is None or (
+            not getattr(request, "resume", None)
+            and getattr(request, "child_skill", builtin.skill) != builtin.skill
+        )
+    ):
+        return None
     def discover():
         return (_discover_delegation_endpoint(cwd, include_worktrees=True)
                 if request.mode == "loop" else _discover_delegation_endpoint(cwd))

@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from subagents_runtime import sessions
+from subagents_runtime.roles import load_task_policies
 from subagents_runtime.delegation import (
     arm_reply,
     claim_instructions,
@@ -24,12 +25,13 @@ from subagents_runtime.delegation import (
     wait_parent_delivery,
 )
 
-SKILL_NAME = r"((?:work|explore|prototype|websearch|brainstorm|address|review)-with-agent|reply-to-agent|resume-agent|ship)"
+SKILL_NAME = r"([a-z][a-z0-9-]*-with-agent|reply-to-agent|resume-agent|ship)"
 SHIP_INVOCATION = re.compile(r"(?<!\S)(?:[/$]ship|\[\$ship\]\([^\r\n]+\))(?=\s|$)")
 INVOCATIONS = {
     "claude": re.compile(rf"(?<!\S)/{SKILL_NAME}(?=\s|$)"),
     "chatgpt": re.compile(rf"(?<!\S)\${SKILL_NAME}(?=\s|$)"),
 }
+LINKED_INVOCATION = re.compile(r"\[\$([a-z][a-z0-9-]*-with-agent|reply-to-agent|resume-agent|ship)\]\([^\r\n]+?\)")
 STRUCTURED_WRITE_TOOLS = {"Write", "Edit", "MultiEdit", "apply_patch", "ApplyPatch"}
 
 
@@ -53,6 +55,28 @@ def _skill_instructions(session_id: str, skill: str) -> str | None:
         return claim_instructions(session_id, lead=False)
     # Every /ship invocation restates the Lead identity, even when already injected.
     return claim_instructions(session_id, lead=True) or lead_instructions(session_id, inbox)
+
+
+def _registered_skill(skill: str, cwd: Path, provider: str) -> bool:
+    if skill in {"ship", "reply-to-agent", "resume-agent"}:
+        return True
+    return skill.endswith("-with-agent") and skill in load_task_policies(cwd, provider)
+
+
+def _role_directory(session_id: str) -> Path:
+    with sessions._connect() as connection:
+        return Path(connection.execute("SELECT cwd FROM sessions WHERE id=?", (session_id,)).fetchone()[0])
+
+
+def _invoked_skill(prompt: str, cwd: Path, provider: str) -> str | None:
+    patterns = [INVOCATIONS[provider]]
+    if provider == "chatgpt":
+        patterns.append(LINKED_INVOCATION)
+    for pattern in patterns:
+        for match in pattern.finditer(prompt):
+            if _registered_skill(match.group(1), cwd, provider):
+                return match.group(1)
+    return "ship" if SHIP_INVOCATION.search(prompt) else None
 
 
 def _strings(value: Any):
@@ -232,10 +256,8 @@ def handle(
         clear_reply_authorization(session_id)
         delivery = claim_parent_delivery(session_id, event)
         prompt = payload.get("prompt")
-        pattern = INVOCATIONS[selected_provider]
-        match = pattern.search(prompt) if isinstance(prompt, str) else None
-        if match or (isinstance(prompt, str) and SHIP_INVOCATION.search(prompt)):
-            skill = match.group(1) if match else "ship"
+        skill = _invoked_skill(prompt, _role_directory(session_id), selected_provider) if isinstance(prompt, str) else None
+        if skill:
             if skill == "reply-to-agent":
                 arm_reply(session_id, execution_id)
                 context = (
@@ -281,6 +303,7 @@ def handle(
             payload.get("tool_name") == "Skill"
             and isinstance(skill, str)
             and re.fullmatch(SKILL_NAME, skill)
+            and _registered_skill(skill, _role_directory(session_id), selected_provider)
         ):
             if skill == "reply-to-agent":
                 arm_reply(session_id, execution_id)

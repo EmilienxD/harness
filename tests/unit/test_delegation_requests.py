@@ -7,16 +7,15 @@ from pathlib import Path
 import pytest
 
 from subagents_runtime.delegation import (
-    TASK_POLICIES,
     PROVIDERS,
     PROVIDER_ALIASES,
-    TaskPolicy,
     RequestFileError,
     enable_delegation,
     process_inbox,
     parse_request_file,
 )
 from subagents_runtime import sessions
+from subagents_runtime.roles import TaskPolicy, load_task_policies
 
 
 FIXTURES = Path(__file__).parent / "fixtures" / "delegation_requests"
@@ -50,13 +49,14 @@ def test_published_schemas_describe_the_implemented_contracts() -> None:
     schemas = Path(sessions.__file__).parent / "schemas"
     request = json.loads((schemas / "delegation-request.schema.json").read_text(encoding="utf-8"))
     aboard = json.loads((schemas / "aboard-delegation.schema.json").read_text(encoding="utf-8"))
-    tasks = {policy.task for policy in TASK_POLICIES.values()}
-    modes = {mode for policy in TASK_POLICIES.values() for mode in policy.modes}
+    policies = load_task_policies(Path.cwd(), "claude")
+    tasks = {policy.task for policy in policies.values()}
+    modes = {mode for policy in policies.values() for mode in policy.modes}
 
     # The prompt is the Markdown body, so it is never a frontmatter key.
     assert set(request["properties"]) == {"task", "provider", "mode", "resume", "cwd", "difficulty", "prompt-file"}
     assert request["oneOf"][0]["required"] == ["task", "mode"]
-    assert set(request["properties"]["task"]["enum"]) == tasks
+    assert request["properties"]["task"]["type"] == "string"
     assert set(request["properties"]["mode"]["enum"]) == modes
     # Frontmatter accepts provider aliases; the wire schema stays canonical.
     assert set(request["properties"]["provider"]["enum"]) == set(PROVIDERS) | set(PROVIDER_ALIASES)
@@ -207,15 +207,15 @@ def test_ask_requires_a_live_grant(tmp_path: Path, monkeypatch: pytest.MonkeyPat
 
 
 def test_grant_policy_is_the_exact_authorization_table() -> None:
-    assert TASK_POLICIES == {
+    assert load_task_policies(Path.cwd(), "claude") == {
         "explore-with-agent": TaskPolicy("explore", frozenset({"auto"})),
-        "prototype-with-agent": TaskPolicy("prototype", frozenset({"interactive"})),
-        "websearch-with-agent": TaskPolicy("websearch", frozenset({"interactive", "auto"})),
-        "brainstorm-with-agent": TaskPolicy("brainstorm", frozenset({"interactive"})),
-        "address-with-agent": TaskPolicy("address", frozenset({"interactive", "auto"})),
-        "review-with-agent": TaskPolicy("review", frozenset({"interactive", "auto"})),
-        "work-with-agent": TaskPolicy("general", frozenset({"interactive", "auto"})),
-        "ship": TaskPolicy("loop", frozenset({"loop"})),
+        "prototype-with-agent": TaskPolicy("prototype", frozenset({"interactive"}), "prototype", "interactive"),
+        "websearch-with-agent": TaskPolicy("websearch", frozenset({"interactive", "auto"}), "websearch"),
+        "brainstorm-with-agent": TaskPolicy("brainstorm", frozenset({"interactive"}), "grill-me", "interactive"),
+        "address-with-agent": TaskPolicy("address", frozenset({"interactive", "auto"}), "address-this"),
+        "review-with-agent": TaskPolicy("review", frozenset({"interactive", "auto"}), "review-this"),
+        "work-with-agent": TaskPolicy("general", frozenset({"interactive", "auto"}), default_mode="interactive"),
+        "ship": TaskPolicy("loop", frozenset({"loop"}), default_mode="loop"),
     }
 
 

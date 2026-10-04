@@ -15,6 +15,7 @@ from pathlib import Path
 import yaml
 
 from subagents_runtime.storage import new_inbox
+from subagents_runtime.roles import RoleError, load_task_policies, task_policy
 
 PROVIDERS = frozenset({"claude", "chatgpt"})
 # Request frontmatter spells ChatGPT as "chatgpt" or "codex"; both normalize to
@@ -32,24 +33,6 @@ class RequestFileError(ValueError):
 
 
 @dataclass(frozen=True)
-class TaskPolicy:
-    task: str
-    modes: frozenset[str]
-
-
-TASK_POLICIES = {
-    "explore-with-agent": TaskPolicy("explore", frozenset({"auto"})),
-    "prototype-with-agent": TaskPolicy("prototype", frozenset({"interactive"})),
-    "websearch-with-agent": TaskPolicy("websearch", frozenset({"interactive", "auto"})),
-    "brainstorm-with-agent": TaskPolicy("brainstorm", frozenset({"interactive"})),
-    "address-with-agent": TaskPolicy("address", frozenset({"interactive", "auto"})),
-    "review-with-agent": TaskPolicy("review", frozenset({"interactive", "auto"})),
-    "work-with-agent": TaskPolicy("general", frozenset({"interactive", "auto"})),
-    "ship": TaskPolicy("loop", frozenset({"loop"})),
-}
-
-
-@dataclass(frozen=True)
 class DelegationRequest:
     path: Path
     task: str
@@ -60,6 +43,7 @@ class DelegationRequest:
     cwd: Path | None = None
     difficulty: str | None = None
     prompt_path: Path | None = None
+    child_skill: str | None = None
 
 
 @dataclass(frozen=True)
@@ -115,6 +99,7 @@ def parse_request_file(
     *,
     parent_provider: str,
     claimed: bool = False,
+    cwd: Path | None = None,
 ) -> DelegationRequest:
     canonical_path, _ = _canonical_direct_child(path, inbox)
     if canonical_path.suffix.lower() != ".md" and not (
@@ -168,12 +153,13 @@ def parse_request_file(
     task = metadata["task"].strip()
     mode = metadata["mode"].strip()
     provider = normalize_provider(metadata.get("provider", parent_provider).strip())
-    task_policy = next(
-        (item for item in TASK_POLICIES.values() if item.task == task), None
-    )
-    if task_policy is None:
+    try:
+        policy = task_policy(task, cwd or Path.cwd(), parent_provider)
+    except RoleError as exc:
+        raise RequestFileError(str(exc)) from exc
+    if policy is None:
         raise RequestFileError(f"unsupported task {task!r}")
-    if mode not in task_policy.modes:
+    if mode not in policy.modes:
         raise RequestFileError(f"unsupported mode {mode!r} for task {task!r}")
     if provider not in PROVIDERS:
         raise RequestFileError(f"unsupported provider {provider!r}")
@@ -202,6 +188,7 @@ def parse_request_file(
         cwd=Path(metadata["cwd"]).resolve() if task == "loop" else None,
         difficulty=metadata.get("difficulty"),
         prompt_path=Path(metadata["prompt-file"]).resolve() if task == "loop" else None,
+        child_skill=policy.skill,
     )
 
 
@@ -218,8 +205,6 @@ def enable_delegation(
 ) -> DelegationInbox:
     """Enable the saved conversation's inbox; subsequent invocations reuse it."""
     sessions = _sessions_module()
-    if skill not in TASK_POLICIES and skill != "resume-agent":
-        raise sessions.SessionError(f"unknown delegation skill {skill!r}")
     with sessions._connect() as connection:
         row = connection.execute(
             "SELECT provider,cwd FROM sessions WHERE id=?", (parent_session_id,)
@@ -228,6 +213,13 @@ def enable_delegation(
             raise sessions.SessionError(
                 "the current Harness parent session is not registered"
             )
+        if skill not in {"resume-agent", "ship"}:
+            try:
+                policies = load_task_policies(original_cwd or Path(row[1]), row[0])
+            except RoleError as exc:
+                raise sessions.SessionError(str(exc)) from exc
+            if skill not in policies:
+                raise sessions.SessionError(f"unknown delegation skill {skill!r}")
         select = "SELECT inbox FROM session_delegation WHERE parent_session_id=?"
         existing = connection.execute(select, (parent_session_id,)).fetchone()
         if existing is None:
@@ -443,7 +435,7 @@ def reconcile_inbox(session_id: str, *, launch: Callable | None = None) -> list[
     for claimed_path, request_id, execution_id, child_id, persisted in retries:
         path = claimed_path.with_name(claimed_path.name[:-8])
         try:
-            request = parse_request_file(claimed_path, delegation.inbox, parent_provider=delegation.provider, claimed=True)
+            request = parse_request_file(claimed_path, delegation.inbox, parent_provider=delegation.provider, claimed=True, cwd=delegation.original_cwd)
             task, provider, mode, prompt_hash, cwd, number, kind = persisted
             if hashlib.sha256(request.prompt.encode()).hexdigest() != prompt_hash or bool(request.resume) != (kind == "resume"):
                 raise RequestFileError("Claimed request content changed after reservation")
@@ -510,7 +502,8 @@ def process_inbox(
         claimed = path.with_name(path.name + ".running")
         try:
             request = parse_request_file(
-                path, delegation.inbox, parent_provider=delegation.provider
+                path, delegation.inbox, parent_provider=delegation.provider,
+                cwd=delegation.original_cwd,
             )
             if claimed.exists():
                 continue
@@ -574,13 +567,8 @@ def process_inbox(
                         "SELECT task FROM requests WHERE child_session_id=? ORDER BY created_at LIMIT 1",
                         (child_id,),
                     ).fetchone()
-                    policy = next(
-                        (item for item in TASK_POLICIES.values() if item.task == original[0]), None
-                    )
-                    if policy is None or row[1] not in policy.modes:
-                        raise RequestFileError(
-                            f"unsupported mode {row[1]!r} for task {original[0]!r}"
-                        )
+                    # Continuations keep the workflow already in the transcript,
+                    # even if its project registry has since changed or been removed.
                     if fork:
                         fork_of = row[4] if row[1] != "loop" else None
                         _supersede_child(connection, child_id)
