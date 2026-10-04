@@ -57,7 +57,7 @@ Claude Code invokes a skill as `/skill-name`; ChatGPT uses `$skill-name`. The ex
 
 - **`ship`**: Leads one GitHub issue from selection through a guarded implementation loop to an open or merged PR. `/ship` selects the oldest actionable triaged issue; explicit issue numbers bypass triage, parents expand to dependency-ordered leaf loops, and a PR URL resumes review work. Installs `subagents`, `test-workflows`, `issue-readers`, and `resolving-merge-conflicts`.
 
-- **`cleanup-git`**: Inventories every local branch and worktree, including PR state, target/upstream divergence, dirty and untracked files, commit/file activity, claimed issues, and missing Codex trust paths. The agent explains unprocessed changes and proposes actions; deletion, pruning, relabelling, and configuration removal require your explicit confirmation. Optional `--target <branch>` overrides the initial comparison target.
+- **`cleanup-git`**: Automatically inventories every local branch and worktree with a bundled read-only script that runs without arguments from the current directory. Supplies a titled **Git cleanup inventory** in compact TOON tables. Checks merge ancestry, protected branches, local and ignored files, locks, submodules, and ongoing Git operations; includes GitHub facts when `gh` is available. The skill contains the cleanup rules and proposes named actions for approval before deletion or worktree removal.
 
 - **`resolving-merge-conflicts`**: Resolves an in-progress Git merge or rebase by tracing the intent behind each side, preserving both where possible, running the repository's checks, and finishing the operation. It never aborts the merge or invents unrelated behavior.
 

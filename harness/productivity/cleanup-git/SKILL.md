@@ -1,18 +1,44 @@
 ---
 name: cleanup-git
-description: Explain local branches and worktrees, then confirm cleanup with you.
+description: Inspect merged local branches and worktrees, then approve cleanup.
 disable-model-invocation: true
-argument-hint: "[--target <branch>]"
 ---
 
 # Cleanup Git
 
-1. Read the invocation hook's inventory. Account for **every local branch and worktree**, including detached, locked, missing, and dirty checkouts. Resolve the target from project instructions; `--target` is an explicit override. The hook's remote-default or main/master fallback is a starting point to verify. Complete missing or failed facts with read-only Git and GitHub commands. Local remote refs may be stale: explain that limitation or request a fetch before using them as deletion evidence.
+The `cleanup_git_hook.py` script hook should have supplied a **Git cleanup inventory**, describing every local branch and worktree. If absent or failed, fallback to read-only git/gh commands. Use the supplied `inventory_command` in `inventory_cwd` to refresh it. The hook is a shortcut that batches common checks such as `rev-parse`/`symbolic-ref` (repository and target), `for-each-ref` (branches, tips, upstreams), `worktree list --porcelain` (registrations and locks), `status --porcelain`/`ls-files --stage` (local/ignored files and submodules), `show`/`rev-list`/`merge-base --is-ancestor` (dates, divergence, merge evidence), and `config --get-regexp` (deletion protections); additional git/gh commands may be necessary depending on the situation.
 
-2. Classify each case from its PR state, target and upstream divergence, uncommitted and untracked files, last commit, and latest non-ignored file modification. Inspect unique commits and diffs to explain where unprocessed work came from and what remains useful. A merged PR alone does not establish that later branch changes were processed. Squash merges may retain unique commit identities; inspect their content. Judge activity in context with **no fixed age threshold**. Treat unknown PR state and missing paths as uncertainty to investigate.
+## Process
 
-3. Present a compact inventory with each branch/worktree, supporting facts, unprocessed changes, and a concrete proposed action. Offer to clear `[AI]-in-progress` on issues you judge abandoned, with the issue and reasoning named. List missing Codex project trust entries; establish that each is a deleted worktree of this repository before proposing configuration changes. Paths from other repositories remain outside this cleanup. Preserve active, dirty, detached, or unexplained work in the proposal unless the user specifically chooses to discard it.
+### 1. Scan
+- Find any existing project rules regarding git/github cleanup, worktree lifecycle, etc.
+- Perform a complete Git and Github scan.
+- Identify the **project protected branches** that should not be affected by the cleanup. The hook uses this non-exhaustive list: main, master, develop, development, dev, staging, stage, production, prod, release, releases, stable, current, trunk, integration, int, preprod, pre-production, preproduction.
+- Apply every matching rule below (user and project rules that conflict with these take precedence.):
 
-4. **Ask for explicit confirmation of the named actions.** Delete, prune, relabel, and remove configuration only after the user confirms the specific proposal. A request to inspect or run this skill is not approval to delete. Keep analysis read-only until confirmation; do not run a blanket prune or delete command as part of gathering facts.
+| State | Action |
+| --- | --- |
+| Current branch tip is an ancestor of the selected target; no protection or worktree applies | Propose branch deletion. |
+| Commits remain outside the target | Preserve and explain the remaining work. |
+| Squash/rebase merge or cherry-picked changes | Inspect content and PR evidence; preserve unless the user approves the specific rewritten-history case. |
+| Merged PR followed by local commits | Preserve the later work. |
+| Open PR, including a draft | Preserve. |
+| Closed PR or deleted remote branch | Require independent merge evidence. |
+| No upstream or PR | Use target ancestry; neither is required. |
+| Default, target, main/master, develop/development, release/*, project-protected branch, or branch.deleteMerged=false | Preserve. |
+| Another local branch tracks this branch | Preserve and report the dependency. |
+| Branch checked out in a worktree | Preserve by default. Propose linked-worktree removal separately only when merged, inactive, and fully inspected. |
+| Current, main, bare, detached, or locked worktree | Preserve. |
+| Staged, unstaged, untracked, conflicted, or ignored files | Preserve; explain local files before any separately requested discard. |
+| Merge, rebase, am, cherry-pick, revert, sequencer, or bisect state | Preserve the affected worktree and branch. |
+| Worktree has submodules | Preserve; inspect submodule repositories separately if removal is requested. |
+| Missing, inaccessible, moved, or prunable worktree | Investigate registration and storage availability before proposing repair or specific stale-metadata cleanup. |
+| Shallow history, failed checks, invalid target, or unknown required PR state | Resolve the missing facts or preserve. |
+| Remote integration is required but remote refs were not refreshed | Fetch the selected target and refresh the inventory; preserve if verification is unavailable. |
+| Repository, tips, mappings, or file state changes | Reassess the affected action. |
 
-5. Execute only confirmed actions. Recheck the affected worktree's dirty files and branch tip immediately before removal; changed facts need an updated proposal and confirmation. Use Git's worktree removal before deleting its branch, and remove only the approved Codex project entries while preserving other settings. On Windows, verify absolute deletion paths against the named worktrees and use one shell for filesystem operations. Report completed actions, preserved work, and any failed actions. Finish when every confirmed action has an observed outcome.
+### 2. Report
+Present every branch/worktree with its proposed action and reason. Explain remaining work and unresolved facts. Propose worktree removal separately from branch deletion.
+
+### 3. Apply
+Obtain approval for the named cleanup actions unless the user already approved them specifically. Double check the live state; refresh affected facts immediately before each action. Proceed with the cleanup approved following the user decisions, user rules and project rules.

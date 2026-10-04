@@ -1,7 +1,7 @@
 name = "cleanup-git"
-version = "1.0.1"
+version = "1.1.3"
 description = "Explain every local branch and worktree before confirming cleanup"
-requires = ["git", "gh"]
+requires = ["git"]
 
 [platforms.claude]
 status = "supported"
@@ -20,6 +20,18 @@ root = "skills"
 src = "cleanup_git_hook.py"
 dest = "cleanup_git_hook.py"
 root = "hooks"
+executable = true
+
+[[files]]
+src = "cleanup_git.py"
+dest = "cleanup_git.py"
+root = "hooks"
+executable = true
+
+[[files]]
+src = "cleanup_git.py"
+dest = "cleanup-git/cleanup_git.py"
+root = "skills"
 executable = true
 
 [[files]]
