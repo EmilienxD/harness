@@ -20,7 +20,7 @@ export function implementedTest(name: string, module: string): string {
   return `def test_${name}():\n    """The ${name} CLI prints the staging greeting."""\n    import subprocess, sys\n    assert subprocess.check_output([sys.executable, "${module}"], text=True).strip() == "Hello staging"\n`;
 }
 export function workflow(module: string): string {
-  return `---\ncovers: ["${module}"]\nverified_hash: ""\n---\n# Greeting\n## Preconditions\nPython is available.\n## Steps\nRun \`python ${module}\`.\n## Expected results\nThe command prints Hello staging and exits zero.\n## Evidence required\nCapture stdout outside the repository.\n`;
+  return `---\ncovers: ["${module}"]\nverified_hash: ""\n---\n# Greeting\n## Preconditions\n- The greeting application is available.\n## Steps\n- Request the staging greeting.\n## Acceptance Criteria\n- [ ] The greeting is Hello staging.\n- [ ] The request succeeds.\n## Potential Problems\n- A missing or incorrect greeting.\n- An unsuccessful request.\n`;
 }
 
 /** One unit of work per worktree: its criteria and the files an implementer fills. */

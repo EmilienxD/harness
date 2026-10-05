@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "harness-test-workflows"
-version = "1.0.2"
+version = "1.1.0"
 description = "Portable end-to-end workflow confirmation and agent hooks"
 requires-python = ">=3.11"
 

@@ -23,7 +23,7 @@ def project(tmp_path):
     (tmp_path / "src/app.py").write_bytes(b"print('ok')\n")
     workflow = tmp_path / "tests/workflow/app.md"
     workflow.parent.mkdir(parents=True)
-    workflow.write_text('---\ncovers: ["src/**/*.py"]\nverified_hash: null\n---\n\n## Preconditions\nReady.\n## Steps\nRun app.\n## Expected results\nOK.\n## Evidence required\nOutput.\n', encoding="utf-8")
+    workflow.write_text('---\ncovers: ["src/**/*.py"]\nverified_hash: null\n---\n\n## Preconditions\n- Ready.\n## Steps\n- Request a greeting.\n## Acceptance Criteria\n- [ ] The greeting is displayed.\n## Potential Problems\n- A missing greeting.\n', encoding="utf-8")
     git(tmp_path, "add", ".")
     git(tmp_path, "commit", "-m", "initial")
     return tmp_path
@@ -127,6 +127,23 @@ def test_status_detects_invalid_format_instead_of_crashing(project):
     code, output = cli(project, "status")
     assert code == 1
     assert output["workflows"][0]["state"] == "invalid"
+
+
+@pytest.mark.parametrize("section", ["Preconditions", "Steps", "Acceptance Criteria", "Potential Problems"])
+def test_missing_required_section_cannot_be_confirmed(project, section):
+    path = project / "tests/workflow/app.md"
+    path.write_text(path.read_text().replace(f"## {section}\n", ""), encoding="utf-8")
+    code, status = cli(project, "status")
+    assert code == 1
+    assert status["workflows"][0]["state"] == "invalid"
+    assert cli(project, "confirm", "tests/workflow/app.md")[0] == 2
+
+
+def test_confirmation_preserves_acceptance_criteria_and_problems(project):
+    path = project / "tests/workflow/app.md"
+    body = path.read_text().split("\n---\n", 1)[1]
+    assert cli(project, "confirm", "tests/workflow/app.md")[0] == 0
+    assert path.read_text().split("\n---\n", 1)[1] == body
 
 
 def test_reading_a_covered_file_does_not_emit_an_edit_notice(project):

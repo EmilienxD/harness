@@ -12,7 +12,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-SECTIONS = ("Preconditions", "Steps", "Expected results", "Evidence required")
+SECTIONS = ("Preconditions", "Steps", "Acceptance Criteria", "Potential Problems")
 
 
 def git(root: Path, *args: str) -> str:

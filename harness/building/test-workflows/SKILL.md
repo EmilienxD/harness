@@ -5,29 +5,63 @@ description: Define manual end-to-end checks and confirm workflows after their c
 
 # Test workflows
 
-Store one committed Markdown file per user-facing capability in the folder specified by project instructions, default `tests/workflow/`. Define success before implementation. Use repository-relative `covers` globs that include every file whose behavior the workflow proves.
+A test workflow is a repeatable end-to-end acceptance check for a user-facing capability. It describes the starting conditions, the actions a user takes, and the observable results that prove the capability works, as text. It helps developers and agents maintaining a product end to end, where static test files are limited. A single test workflow run is heavy; test workflows must cover important situations only and stay simple and maintainable.
 
-```markdown
+## Write a Test workflow
+
+Write a markdown file per user-facing capability in the folder specified by project instructions, default `workflow/` next to unit tests. Use repository-relative `covers` globs that include every source code file whose behavior the workflow proves.
+
+Use the template bellow:
+<test-workflow-template>
 ---
-covers: ["src/example/**/*.py"]
+covers: ["src/example/**/*.ts"]
 verified_hash: null
 ---
 
 ## Preconditions
-Required services, configuration, accounts, and initial data.
+
+Required services, configuration, accounts, and initial data as bullet points.
 
 ## Steps
-Ordered browser interactions or CLI commands with concrete inputs.
 
-## Expected results
-Observable results for each step, including error cases that matter.
+Sequential user actions as bullet points, each stating the intended operation. Don't reference code or name tools; this go stale really fast. Stay at the user's level.
 
-## Evidence required
-Screenshots, output logs, or other evidence that demonstrates the results.
+## Acceptance Criteria
+
+- [ ] Criterion 1
+- [ ] Criterion 2
+- [ ] Criterion 3
+
+## Potential Problems
+
+Known and potential problems (errors, bugs, breaking UI) to expect and eliminate, as bullet points.
+</test-workflow-template>
+
+Every headings are required. Make the scenario specific enough that another user or agent can repeat it and decide whether each result passes.
+
+## Run a workflow
+
+Establish the preconditions, follow the steps, verify every acceptance criterion, and check for the listed problems. Save evidence outside the repository. Confirm only a passing run; report failures or blockers with evidence paths.
+
+test-workflows help:
+
+```text
+Usage: test-workflows [--root <checkout>] [--directory <folder>] <command>
+
+Commands:
+  status              List workflow states and changed_files as JSON.
+  confirm <workflow>  Record a passing run; write verified_hash and verified_files. <workflow> is the Markdown path relative to the repository.
+
+Options:
+  --root <checkout>   Use another checkout (default: current checkout).
+  --directory <dir>   Limit status discovery (default: tracked/non-ignored Markdown).
+  --help              Show CLI help.
+
+States:
+  passed   Covered files match the recorded verification.
+  stale    Run the workflow again.
+  broken   Fix covers: no files matched.
+  invalid  Fix the workflow format.
+
+Exit codes: 0 success; status returns 1 for stale/broken/invalid; 2 command error.
 ```
-
-The four headings are required. Run the steps and keep evidence outside the repository. After every expected result passes, run `test-workflows confirm <workflow>` from the checkout; it writes `verified_hash` and the per-file `verified_files` map, which stay as generated. Then run `test-workflows status`: its JSON lists each workflow's state and changed covered files. Exit 0 means all pass, 1 means stale, broken mapping, or invalid format, and 2 is a command error. Fix a broken `covers` mapping before confirming.
-
-`status` finds workflows by their front matter in any tracked or non-ignored Markdown file; `--directory <folder>` narrows the search and `--root <checkout>` targets another checkout.
-
-Inside a `/ship` loop, the implementer runs and reports each workflow with its result and evidence paths; the Lead owns workflow edits and confirmation, and the runtime controls Stop feedback and release. Outside a loop, the agent that ran the workflow confirms it. The workflow Stop check blocks once per user turn outside loops: complete confirmation or explain precisely why it remains unconfirmed.

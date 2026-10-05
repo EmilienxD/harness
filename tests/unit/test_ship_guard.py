@@ -83,7 +83,7 @@ def test_custom_workflow_and_parent_directory_mutations_are_protected(checkout):
     root, worktree = checkout
     folder = worktree / "acceptance"
     folder.mkdir()
-    (folder / "flow.md").write_text('---\ncovers: ["src/**"]\nverified_hash: null\n---\n', encoding="utf-8")
+    (folder / "flow.md").write_text('---\ncovers: ["src/**"]\nverified_hash: null\n---\n## Preconditions\n- The application is ready.\n## Steps\n- Request a greeting.\n## Acceptance Criteria\n- [ ] A greeting is displayed.\n## Potential Problems\n- A missing greeting.\n', encoding="utf-8")
     assert decision(checkout, "Write", {"file_path": str(folder / "flow.md")}) == "deny"
     assert decision(checkout, "Bash", {"command": 'rm -rf tests'}) == "deny"
     assert decision(checkout, "Bash", {"command": f'cat "{root / "app.py"}"'}) == "allow"

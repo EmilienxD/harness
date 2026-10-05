@@ -303,13 +303,13 @@ covers: ["src/greeting/**/*.py"]
 verified_hash: null
 ---
 ## Preconditions
-Start the application with its development configuration.
+- The application is running with its development configuration.
 ## Steps
-Open the greeting page and submit a name.
-## Expected results
-The page displays the personalized greeting.
-## Evidence required
-Save a screenshot outside the repository.
+- Open the greeting page and submit a name.
+## Acceptance Criteria
+- [ ] The page displays the personalized greeting.
+## Potential Problems
+- An empty name produces a broken or misleading greeting.
 ```
 
 Run the workflow, then `test-workflows confirm <workflow>` to stamp its normalized covered-file hash and generated `verified_files` inventory. Preserve both fields. Hashes normalize line endings, so equivalent Windows and Unix checkouts agree. `test-workflows status` returns JSON with stale workflows and changed covered files, broken mappings whose globs match nothing, and malformed workflows. Exit codes are 0 for all passing, 1 for a stale/broken/invalid workflow, and 2 for a command error. Discovery follows the format in tracked/non-ignored Markdown; use `--directory <folder>` or `--root <checkout>` before the subcommand to narrow it.
