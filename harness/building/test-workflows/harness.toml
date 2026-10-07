@@ -23,4 +23,4 @@ platforms = ["chatgpt"]
 [[actions]]
 type = "uv-tool"
 package = "harness-test-workflows"
-source = "git+https://github.com/EmilienxD/harness@5c320e94ac77c1f038669d3ac5dea5f59cba125f#subdirectory=harness/building/test-workflows"
+source = "git+https://github.com/EmilienxD/harness@d0c2b77165a680cd86b7668daf20940e17826b3f#subdirectory=harness/building/test-workflows"
