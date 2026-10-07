@@ -7,7 +7,6 @@ export const PR_LEAD = "HARNESS_SHIP_PR_LEAD_E2E_2026";
 export const REPORT = "HARNESS_SHIP_REPORT";
 export const COMPLETE = "HARNESS_SHIP_COMPLETE_2026";
 export const STEP_OK = "HARNESS_SHIP_STEP_OK";
-export const WORKFLOW_NOTICE = "tests/workflow/greeting.md";
 export const SCENARIOS = ["feedback", "leaves", "decision-resume", "blocker-auto-merge", "fresh-cap"] as const;
 export type ShipScenario = (typeof SCENARIOS)[number];
 export const scenarioCatalogHash = createHash("sha256").update(`ship:v2:${SCENARIOS.join(",")}`).digest("hex");
@@ -20,7 +19,7 @@ export function implementedTest(name: string, module: string): string {
   return `def test_${name}():\n    """The ${name} CLI prints the staging greeting."""\n    import subprocess, sys\n    assert subprocess.check_output([sys.executable, "${module}"], text=True).strip() == "Hello staging"\n`;
 }
 export function workflow(module: string): string {
-  return `---\ncovers: ["${module}"]\nverified_hash: ""\n---\n# Greeting\n## Preconditions\n- The greeting application is available.\n## Steps\n- Request the staging greeting.\n## Acceptance Criteria\n- [ ] The greeting is Hello staging.\n- [ ] The request succeeds.\n## Potential Problems\n- A missing or incorrect greeting.\n- An unsuccessful request.\n`;
+  return `---\ncovers: ["${module}"]\n---\n# Greeting\n## Preconditions\n- The greeting application is available.\n## Steps\n- Request the staging greeting.\n## Acceptance Criteria\n- [ ] The greeting is Hello staging.\n- [ ] The request succeeds.\n## Potential Problems\n- A missing or incorrect greeting.\n- An unsuccessful request.\n`;
 }
 
 /** One unit of work per worktree: its criteria and the files an implementer fills. */
@@ -32,9 +31,9 @@ export function unit(key: string): Unit {
 export function testName(item: Unit): string { return item.test.split("/").at(-1)!.replace(/^test_|\.py$/gu, ""); }
 
 type Action =
-  | { readonly kind: "run"; readonly id: string; readonly command: string; readonly requires?: string }
-  | { readonly kind: "read"; readonly id: string; readonly path: string; readonly requires?: string }
-  | { readonly kind: "write"; readonly id: string; readonly path: string; readonly relative: string; readonly content: string; readonly previous?: string; readonly requires?: string };
+  | { readonly kind: "run"; readonly id: string; readonly command: string }
+  | { readonly kind: "read"; readonly id: string; readonly path: string }
+  | { readonly kind: "write"; readonly id: string; readonly path: string; readonly relative: string; readonly content: string; readonly previous?: string };
 interface Phase { readonly gate?: string; readonly actions: readonly Action[]; readonly report: string }
 type LeadItem = { readonly step: string } | { readonly wait: string };
 interface Plan { readonly leads: Readonly<Record<string, readonly LeadItem[]>>; readonly children: Readonly<Record<string, Phase[]>> }
@@ -48,9 +47,10 @@ export function plan(scenario: ShipScenario, root: string, python: string): Plan
   const driver = (args: string) => ({ step: args });
   const helper = (args: string) => `${py} ${r}/implementer.py ${args}`;
   const read = (id: string, path: string): Action => ({ kind: "read", id, path });
-  const implement = (child: string, item: Unit, tag: string, requires?: string): Action[] => [
+  const implement = (child: string, item: Unit, tag: string): Action[] => [
     { kind: "write", id: `${tag}-module`, path: `${r}/wt-${item.key}/${item.module}`, relative: item.module, content: IMPLEMENTATION },
-    { kind: "write", id: `${tag}-test`, path: `${r}/wt-${item.key}/${item.test}`, relative: item.test, content: implementedTest(testName(item), item.module), previous: stub(testName(item)), ...(requires ? { requires } : {}) },
+    { kind: "write", id: `${tag}-test`, path: `${r}/wt-${item.key}/${item.test}`, relative: item.test, content: implementedTest(testName(item), item.module), previous: stub(testName(item)) },
+    { kind: "run", id: `${tag}-status`, command: "test-workflows status" },
     { kind: "run", id: `${tag}-green`, command: helper(`test ${r}/evidence/${child}-green.txt ${item.test}`) },
     { kind: "run", id: `${tag}-workflow`, command: helper(`workflow ${r}/evidence/${child}-workflow.txt ${item.module}`) },
   ];
@@ -68,8 +68,7 @@ export function plan(scenario: ShipScenario, root: string, python: string): Plan
           driver(`feedback impl1 1 ${report("impl1", 1)}`), { wait: report("impl1", 2) }, driver(`closeout main impl1 ${report("impl1", 2)} open`)] },
         children: { impl1: [
           { actions: red("impl1", main, "r1"), report: failed("impl1", 1, "implementation absent") },
-          // The edit notice is the only way the workflow path reaches this child.
-          { gate: gate("impl1", 1), actions: implement("impl1", main, "r2", WORKFLOW_NOTICE), report: passed("impl1", 2) },
+          { gate: gate("impl1", 1), actions: implement("impl1", main, "r2"), report: passed("impl1", 2) },
         ] },
       };
     case "leaves": {
@@ -192,9 +191,8 @@ function next(history: History, scenario: ShipScenario, root: string, python: st
   for (const action of phase.actions) {
     const id = `ship-${child}-${action.id}`;
     if (action.kind === "run" ? settled(id) === "done" : written(id)) continue;
-    if (action.requires && !history.text.includes(action.requires)) throw new E2eProtocolError("$.history", `${provider} implementer never received ${action.requires}`, "ship");
     const state = action.kind === "run" ? settled(id) : "pending";
-    const checkpoint = `${child}-${action.id}${action.requires ? "-after-notice" : ""}`;
+    const checkpoint = `${child}-${action.id}`;
     return typeof state === "object" ? { checkpoint: `${checkpoint}-poll`, action, id, poll: state.poll } : { checkpoint, action, id };
   }
   return { checkpoint: `${child}-report-${current + 1}`, text: phase.report };

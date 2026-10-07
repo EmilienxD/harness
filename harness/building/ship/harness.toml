@@ -1,7 +1,7 @@
 name = "ship"
-version = "1.2.2"
+version = "1.2.4"
 description = "Agent-led issue delivery with guarded loop implementers"
-dependencies = ["subagents>=2.3.3,<3.0.0", "test-workflows>=1.1.0,<2.0.0", "issue-readers>=1.5.0,<2.0.0", "resolving-merge-conflicts"]
+dependencies = ["subagents>=2.3.3,<3.0.0", "test-workflows>=1.3.0,<2.0.0", "issue-readers>=1.5.0,<2.0.0", "resolving-merge-conflicts"]
 requires = ["git", "gh"]
 
 [platforms.claude]

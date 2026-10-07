@@ -105,6 +105,7 @@ def protected_paths(root: Path) -> list[Path]:
             text = path.read_text(encoding="utf-8-sig")
             if re.match(r"\A---\n(?:(?!---\n).)*?^covers:", text, re.S | re.M):
                 paths.append(path.resolve())
+                paths.append(path.with_suffix(".manifest.json").resolve())
                 if path.parent != root:
                     paths.append(path.parent.resolve())
     return paths

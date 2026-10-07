@@ -1,8 +1,0 @@
-{
-  "hooks": {
-    "SessionStart": [{"hooks": [{"type": "command", "command": "test-workflows", "args": ["hook", "--provider", "claude"]}]}],
-    "UserPromptSubmit": [{"hooks": [{"type": "command", "command": "test-workflows", "args": ["hook", "--provider", "claude"]}]}],
-    "PostToolUse": [{"hooks": [{"type": "command", "command": "test-workflows", "args": ["hook", "--provider", "claude"]}]}],
-    "Stop": [{"hooks": [{"type": "command", "command": "test-workflows", "args": ["hook", "--provider", "claude"]}]}]
-  }
-}

@@ -1,21 +1,20 @@
 ---
 name: test-workflows
-description: Define manual end-to-end checks and confirm workflows after their covered code changes. Use when creating feature acceptance criteria or responding to a stale-workflow hook notice.
+description: Define manual end-to-end checks and confirm workflows after their covered code changes. Use when creating feature acceptance criteria or checking whether covered code needs verification.
 ---
 
 # Test workflows
 
-A test workflow is a repeatable end-to-end acceptance check for a user-facing capability. It describes the starting conditions, the actions a user takes, and the observable results that prove the capability works, as text. It helps developers and agents maintaining a product end to end, where static test files are limited. A single test workflow run is heavy; test workflows must cover important situations only and stay simple and maintainable.
+A test workflow is a repeatable end-to-end acceptance check for a user-facing capability. It describes the starting conditions, the actions a user takes, and the observable results that prove the capability works, as text. It helps developers and agents maintaining a product end to end, where static test files are limited. A single test workflow run is heavy; test workflows must cover important situations only and stay simple and maintainable. The test-workflows CLI explained bellow allows running and maintaining them.
 
 ## Write a Test workflow
 
-Write a markdown file per user-facing capability in the folder specified by project instructions, default `workflow/` next to unit tests. Use repository-relative `covers` globs that include every source code file whose behavior the workflow proves.
+Write one Markdown file per user-facing capability in the folder specified by project instructions, default `tests/workflow/`. Use the test title as its filename. Set repository-relative `covers` globs in its front matter to include every source code file whose behavior the workflow proves. `<stem>.manifest.json` is auto-managed by the CLI, verifying covered file hashes.
 
-Use the template bellow:
+Use this Markdown template:
 <test-workflow-template>
 ---
-covers: ["src/example/**/*.ts"]
-verified_hash: null
+covers: ["src/example/**/*.ts","src/example/**/*.py"]
 ---
 
 ## Preconditions
@@ -41,6 +40,8 @@ Every headings are required. Make the scenario specific enough that another user
 
 ## Run a workflow
 
+Run `test-workflows status` explicitly when verifying covered changes, as you would run unit tests. Use the reported workflow states and changed files to choose the checks to run.
+
 Establish the preconditions, follow the steps, verify every acceptance criterion, and check for the listed problems. Save evidence outside the repository. Confirm only a passing run; report failures or blockers with evidence paths.
 
 test-workflows help:
@@ -50,11 +51,11 @@ Usage: test-workflows [--root <checkout>] [--directory <folder>] <command>
 
 Commands:
   status              List workflow states and changed_files as JSON.
-  confirm <workflow>  Record a passing run; write verified_hash and verified_files. <workflow> is the Markdown path relative to the repository.
+  confirm <workflow>  Record a passing run in <stem>.manifest.json. <workflow> is the Markdown path relative to the repository.
 
 Options:
   --root <checkout>   Use another checkout (default: current checkout).
-  --directory <dir>   Limit status discovery (default: tracked/non-ignored Markdown).
+  --directory <dir>   Limit status discovery (default: tracked/non-ignored Markdown with covers front matter).
   --help              Show CLI help.
 
 States:
@@ -65,3 +66,5 @@ States:
 
 Exit codes: 0 success; status returns 1 for stale/broken/invalid; 2 command error.
 ```
+
+Commit the Markdown and generated manifest after confirmation. Use the CLI to manage verification; reading or editing the manifest is unnecessary.

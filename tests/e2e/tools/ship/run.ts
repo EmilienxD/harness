@@ -203,7 +203,7 @@ export async function runShipJourney(platform: ShipPlatform, scenario: ShipScena
     if (scenario === "feedback") {
       await delivered("main", false);
       assert.equal(record.feedback.impl1, 1);
-      assert.ok(assertions.checkpoints.includes("impl1-r2-test-after-notice"), "test-workflows edit notice must reach the implementer");
+      assert.ok(assertions.checkpoints.includes("impl1-r2-status"), "implementer must explicitly check workflow status");
       const anchorFiles = (await exec("git", ["diff", "--name-only", record.base.main, record.anchor.main], { cwd: join(root, "wt-main"), windowsHide: true })).stdout.trim().split(/\r?\n/u).sort();
       assert.deepEqual(anchorFiles, [unit("main").test, unit("main").workflow].sort());
       assert.match(await readFile(join(root, "evidence", "anchor-main-red.txt"), "utf8"), /1 failed/u);

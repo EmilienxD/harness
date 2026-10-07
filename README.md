@@ -185,7 +185,7 @@ Custom roles use Harness's native background or visible-terminal launch path. Ab
 
 ### Model-invoked skills
 
-- **`test-workflows`**: Defines Markdown end-to-end checks, with covered-file hashes that tell agents when a capability needs verification again. Its CLI and hooks are described below.
+- **`test-workflows`**: Defines Markdown end-to-end checks, with covered-file hashes that tell agents when a capability needs verification again. Its CLI is described below.
 
 - **`tdd`**: Applies behavior-focused test-driven development in vertical red-green slices. It agrees on public test seams first, rejects implementation-coupled or tautological tests, and adds only enough implementation to satisfy one failing test at a time.
 
@@ -295,12 +295,11 @@ The `loop` profile accepts `model` and `effort`; omitted values inherit provider
 
 ## Test workflows
 
-Store one committed Markdown file per capability in the project's workflow folder, default `tests/workflow/`:
+Store one Markdown file per capability in the project's workflow folder, default `tests/workflow/`. Use the test title as its filename. Put the check and its coverage patterns in `tests/workflow/greeting.md`:
 
 ```markdown
 ---
 covers: ["src/greeting/**/*.py"]
-verified_hash: null
 ---
 ## Preconditions
 - The application is running with its development configuration.
@@ -312,9 +311,9 @@ verified_hash: null
 - An empty name produces a broken or misleading greeting.
 ```
 
-Run the workflow, then `test-workflows confirm <workflow>` to stamp its normalized covered-file hash and generated `verified_files` inventory. Preserve both fields. Hashes normalize line endings, so equivalent Windows and Unix checkouts agree. `test-workflows status` returns JSON with stale workflows and changed covered files, broken mappings whose globs match nothing, and malformed workflows. Exit codes are 0 for all passing, 1 for a stale/broken/invalid workflow, and 2 for a command error. Discovery follows the format in tracked/non-ignored Markdown; use `--directory <folder>` or `--root <checkout>` before the subcommand to narrow it.
+Run the workflow, then `test-workflows confirm tests/workflow/greeting.md` to automatically create or update the sibling `greeting.manifest.json` with the normalized covered-file hash and generated `verified_files` inventory. Commit both files. Agents write and read the Markdown, including its `covers` patterns; the CLI manages the manifest. A workflow without a manifest is unconfirmed (`stale`). Hashes normalize line endings, so equivalent Windows and Unix checkouts agree. `test-workflows status` returns JSON with stale workflows and changed covered files, broken mappings whose globs match nothing, and malformed workflows or manifests. Exit codes are 0 for all passing, 1 for a stale/broken/invalid workflow, and 2 for a command error. Discovery finds tracked/non-ignored Markdown with `covers` front matter; use `--directory <folder>` or `--root <checkout>` before the subcommand to narrow it.
 
-The edit hook notifies once per workflow per session. Outside loops, the Stop hook also detects covered changes made through shell tools and blocks once per user turn while an affected workflow is unconfirmed: run and confirm the workflow or explain why you cannot. Loop implementers run and report; only the Lead stamps their results, and the runtime controls Stop feedback and release.
+Run `test-workflows status` explicitly when verifying changes, as you would run unit tests, then run the affected checks and confirm passing ones. Loop implementers run and report; only the Lead stamps their results.
 
 ## Aboard
 
@@ -404,7 +403,7 @@ packages for both providers, then runs deterministic real Lead/implementer loops
 Claude Code and Codex against the private `EmilienxD/harness-e2e` fixture. The Lead's
 decisions are scripted; the CLIs, hooks, guards, runtime and GitHub effects are real.
 Scenarios: `feedback` (selection/claim, initialized worktree, failing criteria commit,
-feedback on warm context, workflow edit notice, stamping, stub contract, open `Refs #n`
+feedback on warm context, explicit workflow status, stamping, stub contract, open `Refs #n`
 PR), `leaves` (parent expansion in dependency order, one squash-merged PR per leaf),
 `decision-resume` (linked `[AI]-help-wanted` blocker, `[AI]-needs-decision` draft, then
 `/ship <PR>` resuming the same implementer from a new Lead conversation),
