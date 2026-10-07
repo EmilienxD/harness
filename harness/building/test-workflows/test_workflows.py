@@ -12,7 +12,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-SECTIONS = ("Preconditions", "Steps", "Acceptance Criteria", "Potential Problems")
+SECTIONS = ("Steps", "Acceptance Criteria")
 
 
 def git(root: Path, *args: str) -> str:
@@ -148,14 +148,72 @@ def confirm(root: Path, path: Path) -> dict:
     return inspect_workflow(root, path)
 
 
+def render_toon(result: dict) -> str:
+    """Encode the CLI's objects, string arrays and workflow lists as TOON 4.3."""
+    def quoted(value: str) -> str:
+        escapes = {"\\": "\\\\", '"': '\\"', "\n": "\\n", "\r": "\\r", "\t": "\\t"}
+        return '"' + "".join(escapes.get(c, f"\\u{ord(c):04x}" if ord(c) < 32 else c)
+                             for c in value) + '"'
+
+    def string(value: str) -> str:
+        if (not value or value != value.strip(" \t") or value in {"true", "false", "null"}
+                or value.startswith(("-", "#"))
+                or re.fullmatch(r"[+-]?[0-9]+(?:\.[0-9]+)?(?:e[+-]?[0-9]+)?", value, re.I)
+                or any(c in ':"\\[]{},' or ord(c) < 32 for c in value)):
+            return quoted(value)
+        return value
+
+    def fields(value: dict, depth: int) -> list[str]:
+        lines = []
+        prefix = "  " * depth
+        for name, item in value.items():
+            key = name if re.fullmatch(r"[A-Za-z_][A-Za-z0-9_.]*", name) else quoted(name)
+            if isinstance(item, dict):
+                lines.extend([f"{prefix}{key}:", *fields(item, depth + 1)])
+            elif isinstance(item, list):
+                if not item:
+                    lines.append(f"{prefix}{key}: []")
+                elif all(isinstance(entry, str) for entry in item):
+                    lines.append(f"{prefix}{key}[{len(item)}]: " + ",".join(string(entry) for entry in item))
+                else:
+                    lines.append(f"{prefix}{key}[{len(item)}]:")
+                    for entry in item:
+                        body = fields(entry, depth + 2)
+                        lines.extend([prefix + "  - " + body[0].lstrip(), *body[1:]])
+            else:
+                lines.append(f"{prefix}{key}: {string(item)}")
+        return lines
+
+    return "\n".join(fields(result, 0))
+
+
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(prog="test-workflows")
-    parser.add_argument("--root", type=Path, default=Path.cwd())
-    parser.add_argument("--directory", help="workflow folder from project instructions; format discovery is the default")
+    sys.stdout.reconfigure(encoding="utf-8", newline="\n")
+    parser = argparse.ArgumentParser(
+        prog="test-workflows",
+        description="Check workflow verification against covered files and record passing manual runs. Output is TOON by default.",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""States:
+  passed   Covered files match the recorded verification.
+  stale    Run the workflow again and confirm if it passes.
+  broken   Fix covers: no files matched.
+  invalid  Fix the workflow format or manifest.
+
+Exit codes:
+  0  Success; status reports every discovered workflow as passed.
+  1  Status found stale, broken, or invalid workflows.
+  2  Command error.""")
+    parser.add_argument("--root", type=Path, default=Path.cwd(), help="checkout location (default: current checkout)")
+    parser.add_argument("--directory", help="limit status discovery to a repository-relative folder (default: tracked/non-ignored Markdown with covers front matter)")
+    parser.add_argument("--json", action="store_true", help="output JSON instead of TOON")
     commands = parser.add_subparsers(dest="command", required=True)
-    commands.add_parser("status")
-    stamp = commands.add_parser("confirm")
-    stamp.add_argument("workflow", type=Path)
+    status = commands.add_parser("status", help="report workflow states and changed files",
+                                 description="Report workflow states and changed files. Output is TOON by default; use --json for JSON.")
+    stamp = commands.add_parser("confirm", help="record a passing manual run",
+                                description="After performing a workflow and verifying it passes, record covered file hashes in its manifest. Output is TOON by default.")
+    stamp.add_argument("workflow", type=Path, help="workflow Markdown path relative to the repository (absolute paths inside the checkout also accepted)")
+    for command in (status, stamp):
+        command.add_argument("--json", action="store_true", default=argparse.SUPPRESS, help="output JSON instead of TOON")
     args = parser.parse_args(argv)
     try:
         root = repository(args.root)
@@ -165,10 +223,11 @@ def main(argv: list[str] | None = None) -> int:
             result = confirm(root, args.workflow if args.workflow.is_absolute() else root / args.workflow)
         else:
             result = {"workflows": [inspect_workflow(root, p) for p in workflow_paths(root, args.directory)]}
-        print(json.dumps(result))
+        print(json.dumps(result, ensure_ascii=False) if args.json else render_toon(result))
         return int(args.command == "status" and any(w["state"] != "passed" for w in result["workflows"]))
     except (ValueError, OSError, SyntaxError) as error:
-        print(json.dumps({"error": str(error)}))
+        result = {"error": str(error)}
+        print(json.dumps(result, ensure_ascii=False) if args.json else render_toon(result))
         return 2
 
 

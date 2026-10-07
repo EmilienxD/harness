@@ -5,7 +5,7 @@ description: Define manual end-to-end checks and confirm workflows after their c
 
 # Test workflows
 
-A test workflow is a repeatable end-to-end acceptance check for a user-facing capability. It describes the starting conditions, the actions a user takes, and the observable results that prove the capability works, as text. It helps developers and agents maintaining a product end to end, where static test files are limited. A single test workflow run is heavy; test workflows must cover important situations only and stay simple and maintainable. The test-workflows CLI explained bellow allows running and maintaining them.
+A test workflow is a repeatable end-to-end acceptance check for a user-facing capability. It describes the starting conditions, the actions a user takes, and the observable results that prove the capability works, as text. It helps developers and agents maintaining a product end to end, where static test files are limited. A single test workflow run is heavy; test workflows must cover important situations only and stay simple and maintainable. The `test-workflows` CLI explained bellow allows running and maintaining them. This CLI is essential. Alert the user if it's not installed.
 
 ## Write a Test workflow
 
@@ -19,24 +19,25 @@ covers: ["src/example/**/*.ts","src/example/**/*.py"]
 
 ## Preconditions
 
-Required services, configuration, accounts, and initial data as bullet points.
+Required services, configuration, accounts, and initial data.
 
 ## Steps
 
-Sequential user actions as bullet points, each stating the intended operation. Don't reference code or name tools; this go stale really fast. Stay at the user's level.
+Sequential user actions, each stating the intended operation. Don't reference code or name tools; this go stale really fast. Stay at the user's level.
 
 ## Acceptance Criteria
 
-- [ ] Criterion 1
-- [ ] Criterion 2
-- [ ] Criterion 3
+- Criterion 1
+- Criterion 2
+- Criterion 3
 
 ## Potential Problems
 
 Known and potential problems (errors, bugs, breaking UI) to expect and eliminate, as bullet points.
+
 </test-workflow-template>
 
-Every headings are required. Make the scenario specific enough that another user or agent can repeat it and decide whether each result passes.
+Steps and Acceptance Criteria headings and sections are required. Preconditions and Potential Problems are optional. Make the scenario specific enough that another user or agent can repeat it and decide whether each result passes.
 
 ## Run a workflow
 
@@ -44,27 +45,21 @@ Run `test-workflows status` explicitly when verifying covered changes, as you wo
 
 Establish the preconditions, follow the steps, verify every acceptance criterion, and check for the listed problems. Save evidence outside the repository. Confirm only a passing run; report failures or blockers with evidence paths.
 
-test-workflows help:
+```bash
+# Look up commands and options.
+test-workflows --help
 
-```text
-Usage: test-workflows [--root <checkout>] [--directory <folder>] <command>
+# List workflow states and changed files in the current checkout.
+test-workflows status
 
-Commands:
-  status              List workflow states and changed_files as JSON.
-  confirm <workflow>  Record a passing run in <stem>.manifest.json. <workflow> is the Markdown path relative to the repository.
+# Check workflows in the folder specified by project instructions.
+test-workflows --directory tests/workflow status
 
-Options:
-  --root <checkout>   Use another checkout (default: current checkout).
-  --directory <dir>   Limit status discovery (default: tracked/non-ignored Markdown with covers front matter).
-  --help              Show CLI help.
+# Check workflows in another checkout.
+test-workflows --root /path/to/checkout status
 
-States:
-  passed   Covered files match the recorded verification.
-  stale    Run the workflow again.
-  broken   Fix covers: no files matched.
-  invalid  Fix the workflow format.
-
-Exit codes: 0 success; status returns 1 for stale/broken/invalid; 2 command error.
+# Record a passing run using the workflow's repository-relative Markdown path.
+test-workflows confirm "tests/workflow/example-capability.md"
 ```
 
-Commit the Markdown and generated manifest after confirmation. Use the CLI to manage verification; reading or editing the manifest is unnecessary.
+Use the CLI to manage verification; reading or editing the manifest is a bad practice.

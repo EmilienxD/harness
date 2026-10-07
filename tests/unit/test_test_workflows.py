@@ -1,6 +1,7 @@
 """Workflow status and confirmation through their installed CLI seam."""
 import json
 import os
+import runpy
 import subprocess
 import sys
 from pathlib import Path
@@ -29,12 +30,66 @@ def project(tmp_path):
     return tmp_path
 
 
-def cli(project, *args, env=None):
-    result = subprocess.run([sys.executable, str(SCRIPT), *args], cwd=project,
+def cli(project, *args, env=None, json_output=True):
+    result = subprocess.run([sys.executable, str(SCRIPT), *(["--json"] if json_output else []), *args], cwd=project,
                             env={**os.environ, "HARNESS_EXECUTION_MODE": "", **(env or {})},
-                            capture_output=True, text=True)
+                            capture_output=True, text=True, encoding="utf-8")
     assert result.stderr == "", result.stderr
+    if not json_output:
+        return result.returncode, result.stdout
     return result.returncode, json.loads(result.stdout) if result.stdout.strip() else None
+
+
+def test_default_toon_status_and_confirmation_preserve_output_fields(project):
+    code, output = cli(project, "status", json_output=False)
+    record = cli(project, "status")[1]["workflows"][0]
+    assert code == 1
+    assert output == (
+        "workflows[1]:\n"
+        "  - workflow: tests/workflow/app.md\n"
+        "    state: stale\n"
+        f"    current_hash: {record['current_hash']}\n"
+        "    files:\n"
+        f"      \"src/app.py\": {record['files']['src/app.py']}\n"
+        "    covers[1]: src/**/*.py\n"
+        "    changed_files[1]: src/app.py\n"
+    )
+    code, output = cli(project, "confirm", "tests/workflow/app.md", json_output=False)
+    assert code == 0
+    assert output == (
+        "workflow: tests/workflow/app.md\n"
+        "state: passed\n"
+        f"current_hash: {record['current_hash']}\n"
+        "files:\n"
+        f"  \"src/app.py\": {record['files']['src/app.py']}\n"
+        "covers[1]: src/**/*.py\n"
+        "changed_files: []\n"
+    )
+    assert cli(project, "status", json_output=False)[0] == 0
+    assert json.loads(cli(project, "status", "--json", json_output=False)[1]) == cli(project, "status")[1]
+    assert json.loads(cli(project, "confirm", "tests/workflow/app.md", "--json", json_output=False)[1])["state"] == "passed"
+
+
+def test_empty_discovery_and_command_errors_use_selected_format(project):
+    (project / "tests/workflow/app.md").unlink()
+    assert cli(project, "status", json_output=False) == (0, "workflows: []\n")
+    for json_output in (True, False):
+        code, output = cli(project, "confirm", "missing.md", json_output=json_output)
+        assert code == 2
+        if json_output:
+            assert "missing.md" in output["error"]
+        else:
+            assert output.startswith('error: "')
+            assert "missing.md" in output
+
+
+def test_toon_quotes_ambiguous_values_and_preserves_unicode_and_controls():
+    render = runpy.run_path(str(SCRIPT))["render_toon"]
+    assert render({"changed_files": ["caf\u00e9.txt", "a,b.txt", "true", "05", "-file", "#file", "a[b]", 'a"b',
+                                    "a\\b\n\t\r\b\f", ""], "a:b": "false"}) == (
+        'changed_files[10]: caf\u00e9.txt,"a,b.txt","true","05","-file","#file","a[b]","a\\"b",'
+        '"a\\\\b\\n\\t\\r\\u0008\\u000c",""\n"a:b": "false"'
+    )
 
 
 def test_confirm_and_status_track_changed_files_and_normalize_line_endings(project):
@@ -77,7 +132,7 @@ def test_status_detects_invalid_format_instead_of_crashing(project):
     assert output["workflows"][0]["state"] == "invalid"
 
 
-@pytest.mark.parametrize("section", ["Preconditions", "Steps", "Acceptance Criteria", "Potential Problems"])
+@pytest.mark.parametrize("section", ["Steps", "Acceptance Criteria"])
 def test_missing_required_section_cannot_be_confirmed(project, section):
     path = project / "tests/workflow/app.md"
     path.write_text(path.read_text().replace(f"## {section}\n", ""), encoding="utf-8")
@@ -87,8 +142,14 @@ def test_missing_required_section_cannot_be_confirmed(project, section):
     assert cli(project, "confirm", "tests/workflow/app.md")[0] == 2
 
 
-def test_confirmation_preserves_acceptance_criteria_and_problems(project):
+@pytest.mark.parametrize("include_problems", [True, False])
+@pytest.mark.parametrize("include_preconditions", [True, False])
+def test_confirmation_preserves_workflow_with_optional_sections(project, include_problems, include_preconditions):
     path = project / "tests/workflow/app.md"
+    if not include_preconditions:
+        path.write_text(path.read_text().replace("## Preconditions\n- Ready.\n", ""), encoding="utf-8")
+    if not include_problems:
+        path.write_text(path.read_text().split("## Potential Problems\n")[0], encoding="utf-8")
     body = path.read_bytes()
     assert not path.with_suffix(".manifest.json").exists()
     assert cli(project, "status")[1]["workflows"][0]["state"] == "stale"
