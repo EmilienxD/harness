@@ -1,11 +1,9 @@
 ---
 name: test-workflows
-description: Define manual end-to-end checks and confirm workflows after their covered code changes. Use when creating feature acceptance criteria or checking whether covered code needs verification.
+description: Create or run test workflows. A test workflow is a repeatable end-to-end acceptance check for a user-facing capability. It describes the starting conditions, the actions a user takes, and the observable results that prove the capability works, as Markdown. It helps maintaining a product where static test files are limited. Use when defining or veryfing feature acceptance criteria.
 ---
 
-# Test workflows
-
-A test workflow is a repeatable end-to-end acceptance check for a user-facing capability. It describes the starting conditions, the actions a user takes, and the observable results that prove the capability works, as text. It helps developers and agents maintaining a product end to end, where static test files are limited. A single test workflow run is heavy; test workflows must cover important situations only and stay simple and maintainable. The `test-workflows` CLI explained bellow allows running and maintaining them. This CLI is essential. Alert the user if it's not installed.
+A single test workflow run is heavy by definition; test workflows must cover important situations only and stay simple and maintainable. The `test-workflows` CLI explained bellow allows running and maintaining them. This CLI is essential. Alert the user if it's not installed.
 
 ## Write a Test workflow
 
