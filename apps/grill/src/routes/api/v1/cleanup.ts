@@ -47,6 +47,7 @@ async function cleanup(request: Request): Promise<Response> {
   const { data: expiredSessions } = await supabaseAdmin
     .from("grill_sessions")
     .select("id,provider,provider_session_id")
+    .not("finished_at", "is", null)
     .lt("expires_at", nowIso);
   let removed = 0;
   for (const session of expiredSessions ?? []) {

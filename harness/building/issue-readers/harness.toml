@@ -1,5 +1,5 @@
 name = "issue-readers"
-version = "1.4.0"
+version = "1.5.0"
 description = "Prepare issue and commit context for address and review workers"
 requires = ["git", "gh"]
 docs = "https://github.com/EmilienxD/harness/blob/main/README.md#user-invoked-skills"
@@ -29,6 +29,11 @@ src = "issue_readers_hook.py"
 dest = "issue_readers_hook.py"
 root = "hooks"
 executable = true
+
+[[files]]
+src = "issue_graph.py"
+dest = "issue_graph.py"
+root = "hooks"
 
 [[files]]
 src = "chatgpt/agents/address-this.yaml"

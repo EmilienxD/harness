@@ -6,12 +6,12 @@ The board is designed for one person. It uses a shared four-digit access code in
 
 ## What the board does
 
-- Lists recent Claude Code and Codex sessions in one responsive interface.
+- Lists Claude Code and Codex sessions in active and finished sections of one responsive interface.
 - Preserves earlier rounds as read-only history.
 - Shows one question at a time, including the agent's explanation, recommendation, and optional interactive content.
 - Accepts an option, a note, or a custom answer. Every edit saves automatically and is included in the prompt.
 - Produces a read-only prompt that can be copied or sent through Aboard when that session is waiting for input.
-- Retains active sessions for 30 days after their latest meaningful activity and removes expired data and stored images through a daily cleanup job.
+- Keeps unfinished sessions indefinitely. Finishing a session moves it to the archive and starts a 30-day period before the daily cleanup removes its data and stored images. Finished sessions can be restored during that period, and a newly published round restores its session automatically.
 
 ## Personal deployment
 
@@ -77,6 +77,11 @@ cd apps/grill
 npm ci
 npm run dev
 ```
+
+For a local Supabase stack, run `npx supabase start` from `apps/grill` and set
+`SUPABASE_URL=http://127.0.0.1:55421` in your local environment file. Get the
+local secret key from `npx supabase status`. Grill reserves ports 55420–55429 in
+`supabase/config.toml`, leaving Supabase's default ports available to other projects.
 
 Useful checks are:
 

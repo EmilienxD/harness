@@ -16,7 +16,7 @@ def prepare_terminal_resume(session_id: str, execution_id: str, agent_id: str,
             "SELECT e.state,e.input_execution_id,s.execution_mode FROM executions e JOIN sessions s ON s.id=e.session_id WHERE e.id=? AND e.session_id=? AND e.backend='aboard'",
             (execution_id, session_id),
         ).fetchone()
-        if not current or current[2] != "interactive":
+        if not current or current[2] not in {"interactive", "loop"}:
             raise SessionError("Terminal continuation identity or mode does not match")
         if current[0] == "running" and current[1]:
             return

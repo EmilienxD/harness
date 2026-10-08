@@ -16,6 +16,14 @@
       "type": "object",
       "properties": { "stopWaitHours": { "type": "number", "minimum": 0 } }
     },
+    "loop": {
+      "type": "object",
+      "properties": {
+        "maxFeedback": { "type": "integer", "minimum": 0, "default": 3 },
+        "maxImplementers": { "type": "integer", "minimum": 1, "default": 2 },
+        "freshContextPercent": { "type": "number", "minimum": 0, "maximum": 100, "default": 65 }
+      }
+    },
     "providers": {
       "type": "object",
       "properties": {
@@ -88,28 +96,65 @@
         "subagents": { "enum": ["allowed", "denied"] }
       }
     },
+    "claudeDelegationProfile": {
+      "type": "object",
+      "properties": {
+        "command": {"$ref": "#/$defs/command"},
+        "model": {"enum": ["inherit", "haiku", "sonnet", "opus", "by-difficulty"]},
+        "effort": {"enum": ["inherit", "low", "medium", "high", "xhigh", "max"]},
+        "deniedTools": {"type": "array", "items": {"type": "string", "minLength": 1}, "uniqueItems": true}
+      }
+    },
+    "claudeDelegationExploreProfile": {
+      "type": "object",
+      "description": "Defaults to Haiku with low effort.",
+      "properties": {
+        "command": {"$ref": "#/$defs/command"},
+        "model": {"enum": ["inherit", "haiku", "sonnet", "opus", "by-difficulty"], "default": "haiku"},
+        "effort": {"enum": ["inherit", "low", "medium", "high", "xhigh", "max"], "default": "low"}
+      }
+    },
+    "chatgptDelegationProfile": {
+      "type": "object",
+      "properties": {
+        "command": {"$ref": "#/$defs/command"},
+        "model": {"type": "string", "minLength": 1, "not": {"enum": ["haiku", "sonnet", "opus"]}},
+        "effort": {"enum": ["inherit", "minimal", "low", "medium", "high", "xhigh"]}
+      }
+    },
+    "chatgptDelegationExploreProfile": {
+      "type": "object",
+      "description": "Defaults to GPT-5.6 Luna with low effort.",
+      "properties": {
+        "command": {"$ref": "#/$defs/command"},
+        "model": {"type": "string", "minLength": 1, "not": {"enum": ["haiku", "sonnet", "opus"]}, "default": "gpt-5.6-luna"},
+        "effort": {"enum": ["inherit", "minimal", "low", "medium", "high", "xhigh"], "default": "low"}
+      }
+    },
     "claudeDelegations": {
       "type": "object",
       "properties": {
-        "explore": { "$ref": "#/$defs/claudeExploreProfile" },
-        "prototype": { "$ref": "#/$defs/claudeProfile" },
-        "websearch": { "$ref": "#/$defs/claudeProfile" },
-        "brainstorm": { "$ref": "#/$defs/claudeProfile" },
-        "address": { "$ref": "#/$defs/claudeProfile" },
-        "review": { "$ref": "#/$defs/claudeProfile" },
-        "general": { "$ref": "#/$defs/claudeProfile" }
+        "explore": { "$ref": "#/$defs/claudeDelegationExploreProfile" },
+        "prototype": { "$ref": "#/$defs/claudeDelegationProfile" },
+        "websearch": { "$ref": "#/$defs/claudeDelegationProfile" },
+        "brainstorm": { "$ref": "#/$defs/claudeDelegationProfile" },
+        "address": { "$ref": "#/$defs/claudeDelegationProfile" },
+        "review": { "$ref": "#/$defs/claudeDelegationProfile" },
+        "general": { "$ref": "#/$defs/claudeDelegationProfile" },
+        "loop": { "$ref": "#/$defs/claudeDelegationProfile" }
       }
     },
     "chatgptDelegations": {
       "type": "object",
       "properties": {
-        "explore": { "$ref": "#/$defs/chatgptExploreProfile" },
-        "prototype": { "$ref": "#/$defs/chatgptProfile" },
-        "websearch": { "$ref": "#/$defs/chatgptProfile" },
-        "brainstorm": { "$ref": "#/$defs/chatgptProfile" },
-        "address": { "$ref": "#/$defs/chatgptProfile" },
-        "review": { "$ref": "#/$defs/chatgptProfile" },
-        "general": { "$ref": "#/$defs/chatgptProfile" }
+        "explore": { "$ref": "#/$defs/chatgptDelegationExploreProfile" },
+        "prototype": { "$ref": "#/$defs/chatgptDelegationProfile" },
+        "websearch": { "$ref": "#/$defs/chatgptDelegationProfile" },
+        "brainstorm": { "$ref": "#/$defs/chatgptDelegationProfile" },
+        "address": { "$ref": "#/$defs/chatgptDelegationProfile" },
+        "review": { "$ref": "#/$defs/chatgptDelegationProfile" },
+        "general": { "$ref": "#/$defs/chatgptDelegationProfile" },
+        "loop": { "$ref": "#/$defs/chatgptDelegationProfile" }
       }
     },
     "claudeProvider": {

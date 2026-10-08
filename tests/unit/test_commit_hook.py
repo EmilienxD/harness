@@ -23,11 +23,11 @@ import pytest
 
 HOOK = (
     Path(__file__).resolve().parents[2]
-    / "harness" / "engineering" / "commit" / "commit_core.py"
+    / "harness" / "engineering" / "commit" / "commit_hook.py"
 )
 sys.path.insert(0, str(HOOK.parent))
-import commit_core as hook  # noqa: E402
 import commit_hook as claude_adapter  # noqa: E402
+hook = claude_adapter
 
 claude_adapter.set_provider("claude")
 

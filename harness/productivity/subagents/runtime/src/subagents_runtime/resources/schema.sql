@@ -45,3 +45,19 @@ CREATE TABLE reply_authorizations (
 CREATE TABLE inbox_migrations (
  source TEXT PRIMARY KEY, destination TEXT, reconciled_at TEXT
 );
+CREATE TABLE loop_sessions (
+ session_id TEXT PRIMARY KEY REFERENCES sessions(id), worktree_key TEXT NOT NULL,
+ prompt_path TEXT NOT NULL, difficulty TEXT,
+ active INTEGER NOT NULL DEFAULT 1 CHECK(active IN (0,1)),
+ context_usage TEXT, released_at TEXT
+);
+CREATE UNIQUE INDEX loop_worktree_active ON loop_sessions(worktree_key) WHERE active=1;
+CREATE TABLE loop_waits (
+ session_id TEXT PRIMARY KEY REFERENCES loop_sessions(session_id), token TEXT NOT NULL,
+ state TEXT NOT NULL, pid INTEGER NOT NULL, birth TEXT, heartbeat REAL NOT NULL,
+ deadline REAL NOT NULL, feedback TEXT
+);
+CREATE TABLE loop_messages (
+ id INTEGER PRIMARY KEY, session_id TEXT NOT NULL REFERENCES loop_sessions(session_id),
+ source TEXT NOT NULL, message TEXT NOT NULL
+);

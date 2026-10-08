@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import argparse
+import json
 import os
+from pathlib import Path
 import sys
 
 from subagents_runtime import __version__
@@ -62,6 +64,37 @@ def cmd_watch(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_loop_launch(args: argparse.Namespace) -> int:
+    from subagents_runtime.loop import launch
+    parent = args.parent or os.environ.get("HARNESS_SESSION_ID")
+    if not parent:
+        raise SessionError("loop launch requires a registered Lead session (--parent or HARNESS_SESSION_ID)")
+    print(json.dumps(launch(parent, Path(args.cwd), Path(args.prompt_file), difficulty=args.difficulty)))
+    return 0
+
+
+def cmd_loop_lookup(args: argparse.Namespace) -> int:
+    from subagents_runtime.loop import lookup
+    print(json.dumps(lookup(args.session_id)))
+    return 0
+
+
+def cmd_loop_respond(args: argparse.Namespace) -> int:
+    from subagents_runtime.loop import respond, resume
+    feedback = None
+    if args.loop_command in {"feedback", "resume"}:
+        try:
+            feedback = Path(args.file).read_text(encoding="utf-8")
+        except OSError as exc:
+            raise SessionError(f"cannot read feedback file: {exc}") from exc
+        if not feedback.strip():
+            raise SessionError("feedback file must be nonempty")
+    result = (resume(args.session_id, feedback) if args.loop_command == "resume"
+              else respond(args.session_id, args.wait_token, feedback=feedback))
+    print(json.dumps(result))
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="harness",
@@ -96,6 +129,25 @@ def build_parser() -> argparse.ArgumentParser:
     watch_parser.add_argument("session_id", nargs="?", help="child session ID or agent-i inside its parent; omit when one background session is active here")
     watch_parser.add_argument("--once", action="store_true", help="show recorded progress and exit")
     watch_parser.set_defaults(func=cmd_watch)
+    loop_parser = commands.add_parser("loop", help="launch and inspect a visible loop implementer")
+    loop_commands = loop_parser.add_subparsers(dest="loop_command", required=True)
+    loop_launch = loop_commands.add_parser("launch")
+    loop_launch.add_argument("--parent", help="registered Lead session; defaults to HARNESS_SESSION_ID")
+    loop_launch.add_argument("--cwd", required=True, help="initialized worktree directory")
+    loop_launch.add_argument("--prompt-file", required=True)
+    loop_launch.add_argument("--difficulty", choices=("routine", "basic", "advanced", "expert"))
+    loop_launch.set_defaults(func=cmd_loop_launch)
+    loop_lookup = loop_commands.add_parser("lookup")
+    loop_lookup.add_argument("session_id")
+    loop_lookup.set_defaults(func=cmd_loop_lookup)
+    for command in ("feedback", "release", "resume"):
+        response = loop_commands.add_parser(command)
+        response.add_argument("session_id")
+        if command != "resume":
+            response.add_argument("--wait-token", required=True)
+        if command != "release":
+            response.add_argument("--file", required=True)
+        response.set_defaults(func=cmd_loop_respond)
     return parser
 
 

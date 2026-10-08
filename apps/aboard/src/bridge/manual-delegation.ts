@@ -7,6 +7,10 @@ import { createHash } from "node:crypto";
 import { mkdir, open, readFile, readdir, rename, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { protocolError, type BridgeRequestHandler } from "./protocol.js";
+import { ISSUE_DIFFICULTIES, type IssueDifficulty } from "../shared/labels.js";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
+import { realpath } from "node:fs/promises";
 
 const TASKS = {
   explore: { type: "explore", modes: ["auto"] },
@@ -16,6 +20,7 @@ const TASKS = {
   address: { type: "general", modes: ["interactive", "auto"] },
   review: { type: "general", modes: ["interactive", "auto"] },
   general: { type: "general", modes: ["interactive", "auto"] },
+  loop: { type: "general", modes: ["loop"] },
 } as const;
 const SKILLS: Readonly<Record<string, string>> = {
   prototype: "prototype",
@@ -27,12 +32,14 @@ const SKILLS: Readonly<Record<string, string>> = {
 const DESCRIPTIONS: Readonly<Record<string, string>> = {
   address: "Address",
   review: "Review",
+  loop: "Implementer",
 };
 const SKILL_INVOCATION = /^[/\$][A-Za-z0-9_-]+(?:\s|$)/u;
 
 /** A claim whose launch never reported an outcome: callers must verify, not retry. */
 class StartupUncertain extends Error {}
 export interface ManualDelegationLaunch {
+  readonly difficulty?: IssueDifficulty;
   readonly forkSessionId?: string;
   readonly harnessPython?: string;
   readonly harnessStateDirectory?: string;
@@ -70,7 +77,7 @@ export interface DelegationBinding {
   readonly type: AgentType;
   readonly task: DelegationTask;
   readonly provider: AgentPlatformId;
-  readonly executionMode: "interactive" | "auto";
+  readonly executionMode: "interactive" | "auto" | "loop";
   readonly cwd: string;
   readonly description: string;
   readonly parentSessionId?: string;
@@ -84,7 +91,7 @@ export async function resumeInOpenTerminal(
   terminals: TerminalController,
   prepare: (terminalId: TerminalId) => Promise<void>,
 ): Promise<{ readonly agentId: string; readonly sessionId: string; readonly terminalId: string } | undefined> {
-  if (request.executionMode !== "interactive" || binding.executionMode !== "interactive" || saved?.executionMode !== "interactive") return undefined;
+  if ((request.executionMode !== "interactive" && request.executionMode !== "loop") || binding.executionMode !== request.executionMode || saved?.executionMode !== request.executionMode) return undefined;
   if (saved.platform !== binding.provider || saved.sessionBinding !== "bound" || saved.sessionId !== binding.sessionId || saved.identity.agentId !== binding.agentId) return undefined;
   if (saved.lifecycle.status !== "running" && saved.lifecycle.status !== "awaiting-user") return undefined;
   const terminalId = terminals.liveTerminalForAgent(saved.identity.agentId);
@@ -145,12 +152,13 @@ function parse(body: unknown): ManualDelegationLaunch | undefined {
   if (identities.some((key) => value[key] !== undefined && (typeof value[key] !== "string" || (value[key] as string).trim().length === 0))) return undefined;
   if ((value.resumeAgentId === undefined) !== (value.resumeSessionId === undefined)) return undefined;
   if (value.forkSessionId !== undefined && value.forkSessionId !== value.resumeSessionId) return undefined;
-  if (Object.keys(value).some((key) => !["requestId", "task", "provider", "mode", "prompt", "cwd", ...identities].includes(key))) return undefined;
+  if (Object.keys(value).some((key) => !["requestId", "task", "provider", "mode", "prompt", "cwd", "difficulty", ...identities].includes(key))) return undefined;
+  if (value.difficulty !== undefined && !ISSUE_DIFFICULTIES.includes(value.difficulty as IssueDifficulty)) return undefined;
   if (typeof value.requestId !== "string" || value.requestId.trim().length === 0) return undefined;
   if (typeof value.task !== "string" || !(value.task in TASKS)) return undefined;
   const task = TASKS[value.task as keyof typeof TASKS];
   if (value.provider !== "claude" && value.provider !== "chatgpt") return undefined;
-  if (value.mode !== "interactive" && value.mode !== "auto") return undefined;
+  if (value.mode !== "interactive" && value.mode !== "auto" && value.mode !== "loop") return undefined;
   if (!(task.modes as readonly string[]).includes(value.mode)) return undefined;
   if (typeof value.prompt !== "string" || value.prompt.trim().length === 0) return undefined;
   if (value.resumeAgentId === undefined && SKILL_INVOCATION.test(value.prompt.trim())) return undefined;
@@ -163,6 +171,7 @@ function parse(body: unknown): ManualDelegationLaunch | undefined {
     task: value.task as DelegationTask,
     provider: value.provider,
     executionMode: value.mode,
+    ...(value.difficulty === undefined ? {} : { difficulty: value.difficulty as IssueDifficulty }),
     prompt: value.prompt,
     ...(skill === undefined ? {} : { skill }),
     cwd: value.cwd,
@@ -173,6 +182,20 @@ function parse(body: unknown): ManualDelegationLaunch | undefined {
 function contains(root: string, candidate: string): boolean {
   const child = relative(resolve(root), resolve(candidate));
   return child === "" || (child !== ".." && !child.startsWith(`..${sep}`) && !isAbsolute(child));
+}
+
+async function registeredWorktree(root: string, candidate: string): Promise<boolean> {
+  try {
+    const canonical = await realpath(candidate);
+    const { stdout } = await promisify(execFile)("git", ["-C", root, "worktree", "list", "--porcelain", "-z"], { windowsHide: true, timeout: 10_000 });
+    for (const field of stdout.split("\0")) {
+      if (!field.startsWith("worktree ")) continue;
+      try {
+        if (relative(await realpath(field.slice(9)), canonical) === "") return true;
+      } catch { /* Removed worktrees do not grant launch access. */ }
+    }
+  } catch { /* No usable repository/worktree fact: retain the workspace fence. */ }
+  return false;
 }
 
 export function createDelegationRoutes(
@@ -195,6 +218,7 @@ export function createDelegationRoutes(
       request.authorizationScope === "delegation"
       && options.workspaceRoot !== undefined
       && !contains(options.workspaceRoot, parsed.cwd)
+      && !(parsed.executionMode === "loop" && await registeredWorktree(options.workspaceRoot, parsed.cwd))
     ) return protocolError(403, "forbidden", "The delegation credential cannot launch outside its workspace");
     const fingerprint = createHash("sha256").update(JSON.stringify(parsed)).digest("hex");
     const existing = launches.get(parsed.requestId);

@@ -138,6 +138,7 @@ export interface DelegationConfigurationSource {
   /** Resolves one explicit or session-owned provider without consulting the Auto Run default. */
   getFor(platform: AgentPlatformId, type: AgentType): Promise<ConfiguredLaunch>;
   getDelegationFor?(platform: AgentPlatformId, task: DelegationTask): Promise<ConfiguredLaunch>;
+  getDelegationForWorktree?(platform: AgentPlatformId, task: DelegationTask, cwd: string): Promise<ConfiguredLaunch>;
 }
 
 export interface DelegationPromptResolver {
@@ -240,8 +241,8 @@ export class DelegationCoordinator {
     return this.#launch(input, { mode: "none" }, origin, true, "interactive", origin === "auto-run" ? "auto-run" : "user");
   }
 
-  public async launchManual(input: DelegationLaunchInput, mode: "interactive" | "auto"): Promise<InteractiveLaunchHandles> {
-    return this.#launch(input, { mode: "none" }, "user", mode === "interactive", mode, "delegation");
+  public async launchManual(input: DelegationLaunchInput, mode: "interactive" | "auto" | "loop"): Promise<InteractiveLaunchHandles> {
+    return this.#launch(input, { mode: "none" }, "user", mode !== "auto", mode, "delegation");
   }
 
 
@@ -279,13 +280,15 @@ export class DelegationCoordinator {
     const saved = this.options.fleet.get(target.agentId);
     const executionMode = target.executionMode ?? saved?.executionMode ?? "interactive";
     if (executionMode !== "interactive" && !target.prompt?.trim()) throw new DelegationError("unresumable-session", "Background continuation requires a next message");
-    const configured = target.delegationTask === undefined || this.options.configurations.getDelegationFor === undefined
-      ? await this.options.configurations.getFor(target.platform, target.type)
-      : await this.options.configurations.getDelegationFor(target.platform, target.delegationTask);
-    const platform = this.#platform(target.platform);
     // Where the session ran is where its conversation is: a session that ran in
     // an auto-run's own checkout has no transcript under the workspace at all.
     const cwd = target.cwd ?? this.options.workspaceRoot;
+    const configured = executionMode === "loop" && this.options.configurations.getDelegationForWorktree !== undefined
+      ? await this.options.configurations.getDelegationForWorktree(target.platform, "loop", cwd)
+      : target.delegationTask === undefined || this.options.configurations.getDelegationFor === undefined
+        ? await this.options.configurations.getFor(target.platform, target.type)
+        : await this.options.configurations.getDelegationFor(target.platform, target.delegationTask);
+    const platform = this.#platform(target.platform);
     const attended = executionMode === "interactive";
     const writableRoots = target.autoRunRestricted === true && target.cwd !== undefined
       ? await (this.options.resolveWorktreeGitMetadataRoots ?? worktreeGitMetadataRoots)(target.cwd, this.options.workspaceRoot)

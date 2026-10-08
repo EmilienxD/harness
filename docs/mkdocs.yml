@@ -1,0 +1,84 @@
+site_name: Harness documentation
+site_description: User guides for installing and configuring Harness tools
+site_url: https://harness-docs-emb10.vercel.app/
+docs_dir: user
+site_dir: site
+theme:
+  name: material
+  logo: assets/harness_logo_white_transparent.png
+  favicon: assets/harness_logo_black_transparent.png
+  palette:
+    - scheme: slate
+      primary: custom
+      accent: custom
+      toggle:
+        icon: material/weather-sunny
+        name: Switch to light mode
+    - scheme: default
+      primary: custom
+      accent: custom
+      toggle:
+        icon: material/weather-night
+        name: Switch to dark mode
+  features:
+    - navigation.sections
+    - navigation.top
+    - search.suggest
+    - content.code.copy
+extra_css:
+  - assets/stylesheets/harness.css
+nav:
+  - Home: index.md
+  - Get started: getting-started.md
+  - Configuration: configuration.md
+  - Tools:
+      - Productivity:
+          - Overview: tools/productivity.md
+          - Agent launcher: tools/productivity/agent-launcher.md
+          - Caveman: tools/productivity/caveman.md
+          - Decisions: tools/productivity/decisions.md
+          - Handoff: tools/productivity/handoff.md
+          - Handoff grilling: tools/productivity/handoff-grilling.md
+          - Mid prompt skills: tools/productivity/mid-prompt-skills.md
+          - Next decision: tools/productivity/next-decision.md
+          - Report gotchas: tools/productivity/report-gotchas.md
+          - Setup command aliases: tools/productivity/setup-command-aliases.md
+          - Setup text replacements: tools/productivity/setup-text-replacements.md
+          - Stop overthinking: tools/productivity/stop-overthinking.md
+          - Subagents: tools/productivity/subagents.md
+          - TODO HITL: tools/productivity/todo-hitl.md
+          - Writing for agents: tools/productivity/writing-for-agents.md
+          - Zoom out: tools/productivity/zoom-out.md
+      - Guards:
+          - Overview: tools/guards-and-extensions.md
+          - Command guard: tools/guards/command-guard.md
+          - No new documents: tools/guards/no-new-documents.md
+          - On edit block: tools/guards/on-edit-block.md
+          - On edit reminder: tools/guards/on-edit-reminder.md
+          - On read reminder: tools/guards/on-read-reminder.md
+          - Prefer edit tool: tools/guards/prefer-edit-tool.md
+          - Prefer fewer comments: tools/guards/prefer-fewer-comments.md
+          - Prefer read tool: tools/guards/prefer-read-tool.md
+          - Redirect subagents: tools/guards/redirect-subagents.md
+          - Usage limit wait: tools/guards/usage-limit-wait.md
+      - Extensions:
+          - Aboard: tools/extensions/aboard.md
+          - Auto: tools/extensions/auto.md
+      - Workflows:
+          - Overview: tools/workflows.md
+          - Audit: tools/workflows/audit.md
+          - Breakdown help wanted issue: tools/workflows/breakdown-help-wanted-issue.md
+          - Commit: tools/workflows/commit.md
+          - Grill me: tools/workflows/grill-me.md
+          - Grill me in cloud: tools/workflows/grill-me-in-cloud.md
+          - Issue readers: tools/workflows/issue-readers.md
+          - Issue writers: tools/workflows/issue-writers.md
+          - Lavish: tools/workflows/lavish.md
+          - Prototype: tools/workflows/prototype.md
+          - Read all ADRs: tools/workflows/read-all-adrs.md
+          - Resolving merge conflicts: tools/workflows/resolving-merge-conflicts.md
+          - Setup git worktree maker: tools/workflows/setup-git-worktree-maker.md
+          - Setup help: tools/workflows/setup-help.md
+          - TDD: tools/workflows/tdd.md
+          - Websearch: tools/workflows/websearch.md
+          - Writing ADRs: tools/workflows/writing-adrs.md

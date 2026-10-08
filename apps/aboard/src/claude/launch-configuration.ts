@@ -20,7 +20,7 @@ const EXPLORE: Profile = { model: "haiku", effort: "low", deniedTools: [] };
 const WORKER: Profile = { model: BY_DIFFICULTY, effort: BY_DIFFICULTY, deniedTools: [] };
 const DEFAULT_DELEGATIONS: Readonly<Record<DelegationTask, Profile>> = {
   explore: EXPLORE, prototype: INHERIT, websearch: INHERIT, brainstorm: INHERIT,
-  address: INHERIT, review: INHERIT, general: INHERIT,
+  address: INHERIT, review: INHERIT, general: INHERIT, loop: INHERIT,
 };
 const DEFAULT_AUTO_RUN: Readonly<Record<AutoRunTask, Profile>> = { explore: EXPLORE, address: WORKER, review: WORKER };
 
@@ -35,15 +35,15 @@ function command(value: unknown, path: string): readonly string[] | undefined {
   return value;
 }
 
-function profile(value: unknown, fallback: Profile, path: string, options: { readonly byDifficulty?: boolean; readonly deniedTools?: boolean } = {}): { readonly value: Profile; readonly unknown: readonly string[] } {
+function profile(value: unknown, fallback: Profile, path: string, options: { readonly byDifficulty?: boolean; readonly delegation?: boolean; readonly deniedTools?: boolean } = {}): { readonly value: Profile; readonly unknown: readonly string[] } {
   const input = value === undefined ? {} : object(value, path);
   const selectedCommand = command(input.command, `${path}.command`) ?? fallback.command;
-  const modelAllowed = options.byDifficulty === true ? [BY_DIFFICULTY, ...MODELS] : ["inherit", ...MODELS];
+  const modelAllowed = options.byDifficulty === true ? [BY_DIFFICULTY, ...MODELS] : ["inherit", ...(options.delegation ? [BY_DIFFICULTY] : []), ...MODELS];
   const effortAllowed = options.byDifficulty === true ? [BY_DIFFICULTY, ...EFFORT_LEVELS] : ["inherit", ...EFFORT_LEVELS];
   const selectedModel = input.model ?? fallback.model;
-  const selectedEffort = input.effort ?? fallback.effort;
+  const selectedEffort = input.effort ?? (options.delegation && selectedModel === BY_DIFFICULTY ? BY_DIFFICULTY : fallback.effort);
   if (typeof selectedModel !== "string" || !modelAllowed.includes(selectedModel as never)) throw new LaunchFileError(`${path}.model is not valid for platform claude; expected one of ${modelAllowed.join(", ")}`);
-  if (typeof selectedEffort !== "string" || !effortAllowed.includes(selectedEffort as never)) throw new LaunchFileError(`${path}.effort is not valid for platform claude; expected one of ${effortAllowed.join(", ")}`);
+  if (typeof selectedEffort !== "string" || (!effortAllowed.includes(selectedEffort as never) && !(options.delegation && input.effort === undefined && selectedEffort === BY_DIFFICULTY))) throw new LaunchFileError(`${path}.effort is not valid for platform claude; expected one of ${effortAllowed.join(", ")}`);
   if (options.deniedTools === false && input.deniedTools !== undefined) throw new LaunchFileError(`${path}.deniedTools is not supported for platform claude`);
   const deniedTools = input.deniedTools ?? fallback.deniedTools;
   if (!Array.isArray(deniedTools) || !deniedTools.every((rule) => typeof rule === "string" && rule.trim().length > 0)) throw new LaunchFileError(`${path}.deniedTools must be an array of non-empty strings`);
@@ -92,7 +92,7 @@ export function parseClaudeLaunchFile(root: Record<string, unknown>): { readonly
   unknown.push(...Object.keys(delegationInput).filter((field) => !DELEGATION_TASKS.includes(field as DelegationTask)).map((field) => `delegations.${field}`));
   const delegations = {} as Record<DelegationTask, Profile>;
   for (const task of DELEGATION_TASKS) {
-    const parsed = profile(delegationInput[task], DEFAULT_DELEGATIONS[task], `${PATH}.delegations.${task}`, { deniedTools: task !== "explore" });
+    const parsed = profile(delegationInput[task], DEFAULT_DELEGATIONS[task], `${PATH}.delegations.${task}`, { delegation: true, deniedTools: task !== "explore" });
     delegations[task] = parsed.value;
     unknown.push(...parsed.unknown.map((field) => `delegations.${task}.${field}`));
   }

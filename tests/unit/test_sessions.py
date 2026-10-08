@@ -1,5 +1,6 @@
 import io
 import json
+import re
 import urllib.error
 from pathlib import Path
 
@@ -91,6 +92,44 @@ def test_native_provider_adapter_uses_reserved_id_mode_and_cwd(provider,mode,tmp
     assert launches[-1][2] == tmp_path.resolve()
     if mode == 'auto':
         assert ('-p' in launches[-1][0]) if provider == 'claude' else ('exec' in launches[-1][0])
+
+
+@pytest.mark.parametrize("provider", ["claude", "chatgpt"])
+@pytest.mark.parametrize("backend", ["standalone", "aboard"])
+@pytest.mark.parametrize("mode", ["auto", "interactive"])
+def test_file_reference_conversion_reaches_both_launch_backends(
+    provider, backend, mode, tmp_path, monkeypatch
+):
+    from subagents_runtime.delegation import enable_delegation, process_inbox
+
+    launches = []
+    configured(tmp_path / "state", monkeypatch, launches)
+    monkeypatch.setattr(
+        sessions, "_discover_delegation_endpoint",
+        lambda _: ("127.0.0.1", 4823, "token") if backend == "aboard" else None,
+    )
+    bodies = []
+
+    def urlopen(request, timeout):
+        bodies.append(json.loads(request.data))
+        return io.BytesIO(b'{"ok":true,"sessionId":"aboard-child"}')
+
+    monkeypatch.setattr(sessions.urllib.request, "urlopen", urlopen)
+    sessions.register_observed("parent", tmp_path, provider)
+    inbox = enable_delegation("parent", "work-with-agent").inbox
+    (inbox / "work.md").write_text(
+        f"---\ntask: general\nmode: {mode}\n---\n" + r"Inspect @src\core.py.",
+        encoding="utf-8",
+    )
+
+    [result] = process_inbox("parent", launch=sessions.launch_delegated)
+
+    assert result.status == "launched", result.reason
+    delivered = bodies[0]["prompt"] if backend == "aboard" else launches[0][0][-1]
+    references = re.findall(r"(@?)(src[/\\]core\.py)", delivered)
+    assert references == (
+        [("@", r"src\core.py")] if provider == "claude" else [("", "src/core.py")]
+    )
 
 
 def test_interactive_claude_child_does_not_inherit_nested_session_marker(
@@ -269,7 +308,6 @@ def test_standalone_claude_delegation_profile_applies_tool_denials():
         ("claude", {"model": "gpt-5.6-sol"}),
         ("claude", {"effort": "minimal"}),
         ("chatgpt", {"model": "opus"}),
-        ("chatgpt", {"model": "by-difficulty"}),
         ("chatgpt", {"effort": "max"}),
     ],
 )

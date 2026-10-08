@@ -1,0 +1,45 @@
+name = "ship"
+version = "1.2.4"
+description = "Agent-led issue delivery with guarded loop implementers"
+dependencies = ["subagents>=2.3.3,<3.0.0", "test-workflows>=1.3.0,<2.0.0", "issue-readers>=1.5.0,<2.0.0", "resolving-merge-conflicts"]
+requires = ["git", "gh"]
+
+[platforms.claude]
+status = "supported"
+fragment = "claude/settings.fragment.json"
+
+[platforms.chatgpt]
+status = "supported"
+fragment = "chatgpt/hooks.fragment.json"
+
+[[files]]
+src = "ship_hook.py"
+dest = "ship_hook.py"
+root = "hooks"
+executable = true
+
+[[files]]
+src = "SKILL.md"
+dest = "ship/SKILL.md"
+root = "skills"
+
+[[files]]
+src = "references"
+dest = "ship/references"
+root = "skills"
+
+[[files]]
+src = "chatgpt/openai.yaml"
+dest = "ship/agents/openai.yaml"
+root = "skills"
+platforms = ["chatgpt"]
+
+[[actions]]
+type = "uv-tool"
+package = "harness-issue-context"
+source = "git+https://github.com/EmilienxD/harness@869884a08b41d34355e7e2db68a863d7187e38be#subdirectory=harness/building/issue-readers"
+
+[[actions]]
+type = "uv-tool"
+package = "harness-ship-contract"
+source = "git+https://github.com/EmilienxD/harness@869884a08b41d34355e7e2db68a863d7187e38be#subdirectory=harness/building/ship"

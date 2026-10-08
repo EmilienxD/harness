@@ -3,17 +3,19 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import os
 import re
 import time
 import uuid
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 import yaml
 
 from subagents_runtime.storage import new_inbox
+from subagents_runtime.roles import RoleError, load_task_policies, task_policy
 
 PROVIDERS = frozenset({"claude", "chatgpt"})
 # Request frontmatter spells ChatGPT as "chatgpt" or "codex"; both normalize to
@@ -31,23 +33,6 @@ class RequestFileError(ValueError):
 
 
 @dataclass(frozen=True)
-class TaskPolicy:
-    task: str
-    modes: frozenset[str]
-
-
-TASK_POLICIES = {
-    "explore-with-agent": TaskPolicy("explore", frozenset({"auto"})),
-    "prototype-with-agent": TaskPolicy("prototype", frozenset({"interactive"})),
-    "websearch-with-agent": TaskPolicy("websearch", frozenset({"interactive", "auto"})),
-    "brainstorm-with-agent": TaskPolicy("brainstorm", frozenset({"interactive"})),
-    "address-with-agent": TaskPolicy("address", frozenset({"interactive", "auto"})),
-    "review-with-agent": TaskPolicy("review", frozenset({"interactive", "auto"})),
-    "work-with-agent": TaskPolicy("general", frozenset({"interactive", "auto"})),
-}
-
-
-@dataclass(frozen=True)
 class DelegationRequest:
     path: Path
     task: str
@@ -55,6 +40,10 @@ class DelegationRequest:
     mode: str
     prompt: str
     resume: str | None = None
+    cwd: Path | None = None
+    difficulty: str | None = None
+    prompt_path: Path | None = None
+    child_skill: str | None = None
 
 
 @dataclass(frozen=True)
@@ -110,6 +99,7 @@ def parse_request_file(
     *,
     parent_provider: str,
     claimed: bool = False,
+    cwd: Path | None = None,
 ) -> DelegationRequest:
     canonical_path, _ = _canonical_direct_child(path, inbox)
     if canonical_path.suffix.lower() != ".md" and not (
@@ -136,7 +126,7 @@ def parse_request_file(
     if not isinstance(metadata, dict):
         raise RequestFileError("frontmatter must be a mapping")
     keys = set(metadata)
-    accepted = {"task", "provider", "mode", "resume"}
+    accepted = {"task", "provider", "mode", "resume", "cwd", "difficulty", "prompt-file"}
     if extras := keys - accepted:
         raise RequestFileError(
             "unsupported frontmatter keys: " + ", ".join(sorted(map(str, extras)))
@@ -163,15 +153,29 @@ def parse_request_file(
     task = metadata["task"].strip()
     mode = metadata["mode"].strip()
     provider = normalize_provider(metadata.get("provider", parent_provider).strip())
-    task_policy = next(
-        (item for item in TASK_POLICIES.values() if item.task == task), None
-    )
-    if task_policy is None:
+    try:
+        policy = task_policy(task, cwd or Path.cwd(), parent_provider)
+    except RoleError as exc:
+        raise RequestFileError(str(exc)) from exc
+    if policy is None:
         raise RequestFileError(f"unsupported task {task!r}")
-    if mode not in task_policy.modes:
+    if mode not in policy.modes:
         raise RequestFileError(f"unsupported mode {mode!r} for task {task!r}")
     if provider not in PROVIDERS:
         raise RequestFileError(f"unsupported provider {provider!r}")
+    if task != "loop" and keys & {"cwd", "difficulty", "prompt-file"}:
+        raise RequestFileError("cwd, difficulty and prompt-file are only supported for loop requests")
+    if task == "loop":
+        if provider != parent_provider:
+            raise RequestFileError("loop implementers must use the Lead's provider")
+        if not {"cwd", "prompt-file"} <= keys:
+            raise RequestFileError("loop requires cwd and prompt-file")
+        if not Path(metadata["cwd"]).is_absolute() or not Path(metadata["cwd"]).is_dir():
+            raise RequestFileError("loop cwd must be an existing absolute directory")
+        if not Path(metadata["prompt-file"]).is_absolute() or not Path(metadata["prompt-file"]).is_file():
+            raise RequestFileError("loop prompt-file must be an existing absolute file")
+        if metadata.get("difficulty") not in (None, "routine", "basic", "advanced", "expert"):
+            raise RequestFileError("unsupported loop difficulty")
     prompt = "\n".join(lines[closing + 1 :]).strip()
     if not prompt:
         raise RequestFileError("request body must be nonempty")
@@ -179,7 +183,13 @@ def parse_request_file(
         raise RequestFileError(
             "request body must be a plain prompt, not a skill invocation"
         )
-    return DelegationRequest(canonical_path, task, provider, mode, prompt)
+    return DelegationRequest(
+        canonical_path, task, provider, mode, prompt,
+        cwd=Path(metadata["cwd"]).resolve() if task == "loop" else None,
+        difficulty=metadata.get("difficulty"),
+        prompt_path=Path(metadata["prompt-file"]).resolve() if task == "loop" else None,
+        child_skill=policy.skill,
+    )
 
 
 def _sessions_module():
@@ -195,8 +205,6 @@ def enable_delegation(
 ) -> DelegationInbox:
     """Enable the saved conversation's inbox; subsequent invocations reuse it."""
     sessions = _sessions_module()
-    if skill not in TASK_POLICIES and skill != "resume-agent":
-        raise sessions.SessionError(f"unknown delegation skill {skill!r}")
     with sessions._connect() as connection:
         row = connection.execute(
             "SELECT provider,cwd FROM sessions WHERE id=?", (parent_session_id,)
@@ -205,6 +213,13 @@ def enable_delegation(
             raise sessions.SessionError(
                 "the current Harness parent session is not registered"
             )
+        if skill not in {"resume-agent", "ship"}:
+            try:
+                policies = load_task_policies(original_cwd or Path(row[1]), row[0])
+            except RoleError as exc:
+                raise sessions.SessionError(str(exc)) from exc
+            if skill not in policies:
+                raise sessions.SessionError(f"unknown delegation skill {skill!r}")
         select = "SELECT inbox FROM session_delegation WHERE parent_session_id=?"
         existing = connection.execute(select, (parent_session_id,)).fetchone()
         if existing is None:
@@ -241,6 +256,12 @@ def _load_inbox(session_id: str) -> DelegationInbox:
 def _finish_launch(request, request_id, execution_id, child_id, number, cwd, path, launch):
     from subagents_runtime import processes
     sessions = _sessions_module()
+    if request.provider == "chatgpt":
+        from subagents_runtime.prompt_paths import normalize_file_references
+
+        # Hash and retain the original inbox body; adapt only the launch copy,
+        # after continuations have recovered their child's provider and cwd.
+        request = replace(request, prompt=normalize_file_references(request.prompt, cwd))
     launched_id = launch(request, request_id, number, cwd)
     with sessions._connect() as connection:
         if launched_id != child_id:
@@ -281,6 +302,8 @@ def _fail_request(path, request_id, execution_id, child_id, exc, session_id):
                 "UPDATE executions SET state=? WHERE id=?",
                 ("uncertain" if uncertain else "failed", execution_id),
             )
+            if not uncertain:
+                connection.execute("UPDATE loop_sessions SET active=0,released_at=CURRENT_TIMESTAMP WHERE session_id=?", (child_id,))
         else:
             connection.execute(
                 "INSERT OR IGNORE INTO requests(id,parent_session_id,source_name,state,reason,delivery_id,completed_at) VALUES (?,?,?,'failed',?,?,CURRENT_TIMESTAMP)",
@@ -418,7 +441,7 @@ def reconcile_inbox(session_id: str, *, launch: Callable | None = None) -> list[
     for claimed_path, request_id, execution_id, child_id, persisted in retries:
         path = claimed_path.with_name(claimed_path.name[:-8])
         try:
-            request = parse_request_file(claimed_path, delegation.inbox, parent_provider=delegation.provider, claimed=True)
+            request = parse_request_file(claimed_path, delegation.inbox, parent_provider=delegation.provider, claimed=True, cwd=delegation.original_cwd)
             task, provider, mode, prompt_hash, cwd, number, kind = persisted
             if hashlib.sha256(request.prompt.encode()).hexdigest() != prompt_hash or bool(request.resume) != (kind == "resume"):
                 raise RequestFileError("Claimed request content changed after reservation")
@@ -452,7 +475,8 @@ def reconcile_inbox(session_id: str, *, launch: Callable | None = None) -> list[
 
 
 def process_inbox(
-    session_id: str, *, launch: Callable, request_paths: set[Path] | None = None
+    session_id: str, *, launch: Callable, request_paths: set[Path] | None = None,
+    allow_loop_resume: bool = False,
 ) -> list[ProcessResult]:
     """Claim, reserve, and start requests in a persistent conversation inbox."""
     from dataclasses import replace
@@ -484,7 +508,8 @@ def process_inbox(
         claimed = path.with_name(path.name + ".running")
         try:
             request = parse_request_file(
-                path, delegation.inbox, parent_provider=delegation.provider
+                path, delegation.inbox, parent_provider=delegation.provider,
+                cwd=delegation.original_cwd,
             )
             if claimed.exists():
                 continue
@@ -498,6 +523,10 @@ def process_inbox(
                         sessions.resolve_session(request.resume, session_id)
                     )
                 )
+            elif request.mode == "loop":
+                from subagents_runtime.loop import reconcile_worktree
+
+                reconcile_worktree(request.cwd or delegation.original_cwd)
             with sessions._connect() as connection:
                 connection.execute("BEGIN IMMEDIATE")
                 if connection.execute(
@@ -520,23 +549,34 @@ def process_inbox(
                         raise RequestFileError(
                             "child is not owned by this conversation"
                         )
+                    if not row[4]:
+                        raise RequestFileError(
+                            "Provider conversation has not been bound; resume refused"
+                        )
+                    if row[1] == "loop":
+                        if not allow_loop_resume:
+                            raise RequestFileError("Use loop feedback or loop resume for a loop implementer")
+                        record = connection.execute("SELECT active,difficulty FROM loop_sessions WHERE session_id=?", (child_id,)).fetchone()
+                        if record[0]:
+                            raise RequestFileError("Release the previous wait before resuming an idle implementer")
+                        if fork:
+                            backend = connection.execute("SELECT backend FROM executions WHERE session_id=? AND superseded_at IS NULL AND state IN ('running','starting','uncertain','prepared')", (child_id,)).fetchone()
+                            if not backend or backend[0] != "aboard":
+                                raise RequestFileError("Standalone implementer terminal is still open; close it before resuming, or launch a fresh implementer")
+                        try:
+                            connection.execute("UPDATE loop_sessions SET active=1,released_at=NULL WHERE session_id=?", (child_id,))
+                            connection.execute("DELETE FROM loop_waits WHERE session_id=?", (child_id,))
+                        except Exception as exc:
+                            raise RequestFileError("worktree already has an active loop implementer") from exc
+                        request = replace(request, difficulty=record[1])
                     original = connection.execute(
                         "SELECT task FROM requests WHERE child_session_id=? ORDER BY created_at LIMIT 1",
                         (child_id,),
                     ).fetchone()
-                    policy = next(
-                        (item for item in TASK_POLICIES.values() if item.task == original[0]), None
-                    )
-                    if policy is None or row[1] not in policy.modes:
-                        raise RequestFileError(
-                            f"unsupported mode {row[1]!r} for task {original[0]!r}"
-                        )
+                    # Continuations keep the workflow already in the transcript,
+                    # even if its project registry has since changed or been removed.
                     if fork:
-                        if not row[4]:
-                            raise RequestFileError(
-                                "child has no bound conversation to fork"
-                            )
-                        fork_of = row[4]
+                        fork_of = row[4] if row[1] != "loop" else None
                         _supersede_child(connection, child_id)
                     request = replace(
                         request, provider=row[0], mode=row[1], task=original[0]
@@ -548,7 +588,11 @@ def process_inbox(
                         (session_id, session_id),
                     ).fetchone()[0]
                     child_id = str(uuid.uuid4())
-                    cwd = delegation.original_cwd
+                    cwd = request.cwd or delegation.original_cwd
+                    if request.mode == "loop":
+                        from subagents_runtime.loop import worktree_key
+                        if connection.execute("SELECT 1 FROM loop_sessions WHERE worktree_key=? AND active=1", (worktree_key(cwd),)).fetchone():
+                            raise RequestFileError("worktree already has an active loop implementer; release it first")
                     connection.execute(
                         "INSERT INTO sessions(id,cwd,provider,execution_mode,parent_session_id,agent_index) VALUES (?,?,?,?,?,?)",
                         (
@@ -560,6 +604,11 @@ def process_inbox(
                             number,
                         ),
                     )
+                    if request.mode == "loop":
+                        connection.execute(
+                            "INSERT INTO loop_sessions(session_id,worktree_key,prompt_path,difficulty) VALUES (?,?,?,?)",
+                            (child_id, worktree_key(cwd), str(request.prompt_path), request.difficulty),
+                        )
                 connection.execute(
                     "INSERT INTO requests(id,kind,parent_session_id,child_session_id,agent_number,source_name,task,provider,mode,prompt_hash,state) VALUES (?,?,?,?,?,?,?,?,?,?,'launching')",
                     (
@@ -736,10 +785,26 @@ def observe_parent_event(parent_session_id: str, event: str) -> None:
         connection.commit()
 
 
-def claim_instructions(session_id: str, *, compact: bool = False) -> str | None:
+def lead_instructions(session_id: str, inbox: str | Path) -> str:
+    """The /ship Lead drives implementers through `harness loop`; the inbox only serves its explorer."""
+    return (
+        f"Ship Lead runtime session: {session_id}. Pass --parent {session_id} to "
+        f"harness loop launch when HARNESS_SESSION_ID is unset.\nExplorer inbox: {inbox}\n"
+    )
+
+
+def claim_instructions(
+    session_id: str, *, compact: bool = False, lead: bool | None = None
+) -> str | None:
+    """Replay runtime context until acknowledged, refreshing it after compaction."""
     sessions = _sessions_module()
     with sessions._connect() as connection:
         connection.execute("BEGIN IMMEDIATE")
+        if lead is None:
+            lead = connection.execute(
+                "SELECT 1 FROM requests WHERE parent_session_id=? AND task='loop' LIMIT 1",
+                (session_id,),
+            ).fetchone() is not None
         row = connection.execute(
             "SELECT inbox,context_epoch,injected_epoch,claim_sequence,acknowledgement_sequence FROM session_delegation WHERE parent_session_id=?",
             (session_id,),
@@ -762,10 +827,22 @@ def claim_instructions(session_id: str, *, compact: bool = False) -> str | None:
                 "UPDATE session_delegation SET injected_epoch=?,claim_sequence=?,acknowledgement_sequence=NULL WHERE parent_session_id=?",
                 (epoch, sequence, session_id),
             )
-    document = (Path(__file__).parent / "resources" / "COMMON.md").read_text(
-        encoding="utf-8"
+        cwd = Path(connection.execute("SELECT cwd FROM sessions WHERE id=?", (session_id,)).fetchone()[0])
+    if lead:
+        return lead_instructions(session_id, inbox)
+    from subagents_runtime.roles import custom_registry_paths
+
+    personal_registry, project_registry = custom_registry_paths(cwd)
+    return (
+        f"Conversation inbox: {inbox}\n"
+        "Write inbox requests with a structured file-writing tool such as Write or apply_patch; "
+        "the write event launches the request automatically.\n"
+        f"Custom task registries: project {project_registry}; personal {personal_registry}. "
+        "Project entries replace personal definitions by task name. "
+        "Missing files mean no custom tasks; report malformed registries instead of falling back.\n"
+        "Invoke the subagents-toolkit skill before launching or continuing a subagent "
+        "if its instructions are not already in the current context.\n"
     )
-    return document + f"\n\nConversation inbox: {inbox}\n"
 
 
 def _plural(total: int, singular: str, plural: str) -> str:
@@ -782,11 +859,21 @@ def _delegation_status(connection, parent_session_id: str) -> str:
     )
     running = int(active.get("auto", 0))
     owed = int(active.get("interactive", 0))
+    implementing = int(active.get("loop", 0))
+    awaiting_verdict = int(
+        connection.execute(
+            "SELECT count(*) FROM loop_waits w JOIN sessions s ON s.id = w.session_id "
+            "WHERE s.parent_session_id = ? AND w.state = 'waiting'",
+            (parent_session_id,),
+        ).fetchone()[0]
+    )
+    # Loop implementers continue only through `harness loop`, never inbox resume.
     idle = int(
         connection.execute(
             """
             SELECT count(*) FROM sessions s WHERE s.parent_session_id = ?
               AND s.provider_session_id IS NOT NULL
+              AND NOT EXISTS (SELECT 1 FROM loop_sessions l WHERE l.session_id = s.id)
               AND NOT EXISTS (
                 SELECT 1 FROM requests r WHERE r.child_session_id = s.id
                   AND r.state IN ('launching','pending','uncertain')
@@ -803,6 +890,16 @@ def _delegation_status(connection, parent_session_id: str) -> str:
             f"{running} auto {_plural(running, 'agent is', 'agents are')} still running"
         )
 
+    if implementing:
+        parts.append(
+            f"{implementing} loop {_plural(implementing, 'implementer is', 'implementers are')} still working"
+        )
+
+    if awaiting_verdict:
+        parts.append(
+            f"{awaiting_verdict} loop {_plural(awaiting_verdict, 'implementer awaits', 'implementers await')} your verdict"
+        )
+
     if owed:
         parts.append(
             f"{owed} interactive {_plural(owed, 'agent', 'agents')} still "
@@ -817,18 +914,59 @@ def _delegation_status(connection, parent_session_id: str) -> str:
     return ", ".join(parts) + "." if parts else ""
 
 
+def _format_loop_event(identifier: str, reply: str) -> str | None:
+    """Render runtime loop events as prose with the implementer's report kept verbatim."""
+    try:
+        event = json.loads(reply)
+    except ValueError:
+        return None
+    kind = event.get("event") if isinstance(event, dict) else None
+    if kind not in {"report", "takeover", "wait-expired"}:
+        return None
+    if kind == "takeover":
+        return (
+            f"{identifier} was taken over by the user ({event.get('reason')}). "
+            "Discard any verdict on its previous report and wait for its next report."
+        )
+    if kind == "wait-expired":
+        return (
+            f"{identifier}'s wait expired. End this loop with [AI]-needs-decision, "
+            "a draft PR, and a precise issue comment."
+        )
+    usage = event.get("context_usage") or {}
+    percentage, window = usage.get("used_percentage"), usage.get("context_window")
+    context = f"{percentage:.0f}% of {window:,} tokens" if percentage is not None and window else "unknown"
+    lines = [f"{identifier} implementer report. Wait token: {event.get('wait_token')}. Context: {context}."]
+    steering = event.get("user_messages") or []
+    if steering:
+        lines.append("User messages since the previous report:")
+        lines.extend(
+            f"- to {'the implementer' if item.get('source') == event.get('session_id') else 'you'}: {item.get('message')}"
+            for item in steering
+        )
+    lines.append(f"<report>\n{event.get('report')}\n</report>")
+    return "\n".join(lines)
+
+
 def _format_results(rows, status: str) -> str:
     messages: list[str] = []
     for row in rows:
         _request_id, number, state, reply, reason, _delivery_id = row[:6]
+        mode = row[7] if len(row) > 7 else None
         identifier = (
             f"agent-{number}" if number is not None else f"Request {_request_id}"
         )
-        if state == "succeeded":
+        loop_event = _format_loop_event(identifier, reply) if state == "succeeded" and mode == "loop" and reply else None
+        if loop_event:
+            messages.append(loop_event)
+        elif state == "succeeded":
             messages.append(f"{identifier} finished. Agent replied:\n<reply>\n{reply}\n</reply>")
         elif state == "cancelled":
+            detail = f" Reason: {reason}." if reason and reason != "other" else ""
             messages.append(
-                f"{identifier} was cancelled" + (f": {reason}." if reason else ".")
+                f"{identifier}'s session ended before a reply was sent to the parent."
+                f"{detail} Its work may have completed. Ask the user to provide the "
+                "child's reply, or offer to resume the child so it can send its result."
             )
         else:
             messages.append(f"{identifier} failed: {reason or 'unknown failure'}.")
@@ -844,7 +982,7 @@ def claim_parent_delivery(parent_session_id: str, event: str) -> ParentDelivery 
         state_filter = "AND state IN ('succeeded', 'failed', 'cancelled')"
         rows = connection.execute(
             f"""
-            SELECT id, agent_number, state, reply, reason, delivery_id, claim_sequence
+            SELECT id, agent_number, state, reply, reason, delivery_id, claim_sequence, mode
             FROM requests WHERE parent_session_id = ? {state_filter}
               AND acknowledgement_sequence IS NULL
             ORDER BY agent_number
@@ -892,6 +1030,10 @@ def wait_parent_delivery(
         delivery = claim_parent_delivery(parent_session_id, "Stop")
         if delivery is not None:
             return delivery
-        if not has_pending_children(parent_session_id) or time.monotonic() >= deadline:
+        if not has_pending_children(parent_session_id):
             return None
+        if time.monotonic() >= deadline:
+            from subagents_runtime.loop import expire_parent_wait
+            expire_parent_wait(parent_session_id)
+            return claim_parent_delivery(parent_session_id, "Stop")
         time.sleep(min(poll_seconds, max(0.0, deadline - time.monotonic())))

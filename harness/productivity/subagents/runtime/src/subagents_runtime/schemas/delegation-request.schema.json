@@ -7,15 +7,9 @@
   "additionalProperties": false,
   "properties": {
     "task": {
-      "enum": [
-        "explore",
-        "prototype",
-        "websearch",
-        "brainstorm",
-        "address",
-        "review",
-        "general"
-      ]
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$",
+      "description": "A builtin task from subagents-toolkit, a custom task from subagent-tasks.yaml, or the internal loop task. The runtime validates registry membership and allowed modes."
     },
     "provider": {
       "description": "Defaults to the parent session's provider when omitted. 'codex' is an alias of 'chatgpt' and is normalized to it.",
@@ -28,12 +22,29 @@
     "mode": {
       "enum": [
         "interactive",
-        "auto"
+        "auto",
+        "loop"
       ]
     },
     "resume": {
       "type": "string",
       "pattern": "^agent-[1-9][0-9]*$"
+    },
+    "difficulty": {
+      "enum": [
+        "routine",
+        "basic",
+        "advanced",
+        "expert"
+      ]
+    },
+    "cwd": {
+      "type": "string",
+      "minLength": 1
+    },
+    "prompt-file": {
+      "type": "string",
+      "minLength": 1
     }
   },
   "oneOf": [
@@ -68,6 +79,21 @@
             "required": [
               "provider"
             ]
+          },
+          {
+            "required": [
+              "cwd"
+            ]
+          },
+          {
+            "required": [
+              "difficulty"
+            ]
+          },
+          {
+            "required": [
+              "prompt-file"
+            ]
           }
         ]
       }
@@ -89,5 +115,70 @@
         "const": "interactive"
       }
     }
-  }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "task": {
+            "const": "loop"
+          }
+        },
+        "required": [
+          "task"
+        ]
+      },
+      "then": {
+        "required": [
+          "cwd",
+          "prompt-file"
+        ],
+        "properties": {
+          "mode": {
+            "const": "loop"
+          }
+        }
+      },
+      "else": {
+        "not": {
+          "anyOf": [
+            {
+              "required": [
+                "cwd"
+              ]
+            },
+            {
+              "required": [
+                "difficulty"
+              ]
+            },
+            {
+              "required": [
+                "prompt-file"
+              ]
+            }
+          ]
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "mode": {
+            "const": "loop"
+          }
+        },
+        "required": [
+          "mode"
+        ]
+      },
+      "then": {
+        "properties": {
+          "task": {
+            "const": "loop"
+          }
+        }
+      }
+    }
+  ]
 }

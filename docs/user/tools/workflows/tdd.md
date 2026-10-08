@@ -1,0 +1,21 @@
+# Test-driven development
+
+## When to use
+
+Use `tdd` for features, bug fixes, or integration tests that should be built test-first. It is model-invoked when relevant and can also be requested explicitly.
+
+## Invocation
+
+Use `/tdd <feature or bug>` in Claude Code or `$tdd <feature or bug>` in ChatGPT. Include the observable behavior you expect.
+
+## What happens
+
+The agent identifies and agrees on public test seams first. It writes one failing test, adds only enough implementation to pass it, and repeats in vertical slices. Tests should use independent expected values and survive internal refactors; the skill rejects implementation-coupled and tautological tests. Refactoring belongs to review after the red-green loop.
+
+## Files and prerequisites
+
+Both providers are supported. The package installs `SKILL.md`, `tests.md`, and `mocking.md`, but no test runner or project configuration. The agent uses existing project tests, ADRs, and `CONTEXT.md` when present.
+
+## Example
+
+`/tdd Add validation for an empty checkout cart` begins with a failing behavior test at the public checkout boundary.

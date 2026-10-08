@@ -1,0 +1,5 @@
+{
+  "hooks": {
+    "PreToolUse": [{"hooks": [{"type": "command", "command": "${PYTHON} \"${HOOKS_DIR}/ship_hook.py\" --chatgpt"}]}]
+  }
+}

@@ -1,0 +1,18 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "harness-ship-contract"
+version = "1.0.0"
+description = "Structural test stub contract checking for ship Leads"
+requires-python = ">=3.11"
+
+[project.scripts]
+ship-stubs = "ship_stubs:main"
+
+[tool.hatch.build.targets.wheel]
+only-include = ["ship_stubs.py"]
+
+[tool.hatch.build.targets.sdist]
+include = ["ship_stubs.py", "pyproject.toml"]

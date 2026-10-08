@@ -1,7 +1,23 @@
 import json
+import subprocess
 
 from harness_cli.cli import main
 from harness_cli.host_actions import PreparedAction
+
+
+def test_symlink_install_warns_about_git_worktree_checkout(tmp_path, monkeypatch, capsys):
+    subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
+    monkeypatch.setenv("HARNESS_STATE_DIR", str(tmp_path / "state"))
+
+    assert main([
+        "install", "caveman", "--root", str(tmp_path), "--platform", "claude",
+        "--skill-mode", "symlink", "--dry-run", "--json",
+    ]) == 0
+
+    output = capsys.readouterr()
+    assert json.loads(output.out)["ok"] is True
+    assert "Git worktrees" in output.err
+    assert "core.symlinks" in output.err
 
 
 def test_install_and_uninstall_preserve_unrelated_installed_versions(tmp_path, monkeypatch, capsys):

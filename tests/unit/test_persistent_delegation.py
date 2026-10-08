@@ -118,8 +118,9 @@ def test_saved_conversation_has_one_persistent_inbox_for_all_tasks(
     assert not list(first.inbox.iterdir())
 
 
-def test_instruction_delivery_is_replayed_then_acknowledged_and_compaction_starts_epoch(
-    tmp_path, monkeypatch
+@pytest.mark.parametrize("provider", ["claude", "chatgpt"])
+def test_runtime_context_is_replayed_then_acknowledged_and_compaction_starts_epoch(
+    tmp_path, monkeypatch, provider
 ):
     monkeypatch.setenv("HARNESS_STATE_DIR", str(tmp_path / "state"))
     monkeypatch.delenv("HARNESS_SESSION_ID", raising=False)
@@ -127,22 +128,56 @@ def test_instruction_delivery_is_replayed_then_acknowledged_and_compaction_start
         "session_id": "parent",
         "cwd": str(tmp_path),
         "hook_event_name": "UserPromptSubmit",
-        "prompt": "/work-with-agent do work",
+        "prompt": ("/" if provider == "claude" else "$") + "work-with-agent do work",
     }
-    assert handle(payload) is not None
-    assert handle({**payload, "prompt": "Continue the work."}) is not None
+    assert handle(payload, provider) is not None
+    assert handle({**payload, "prompt": "Continue the work."}, provider) is not None
     # A different observed event proves the previous injection reached the conversation.
-    handle({**payload, "hook_event_name": "PreToolUse"})
-    assert handle(payload) is None
+    handle({**payload, "hook_event_name": "PreToolUse"}, provider)
+    assert handle(payload, provider) is None
     compacted = handle(
-        {**payload, "hook_event_name": "SessionStart", "source": "compact"}
+        {**payload, "hook_event_name": "SessionStart", "source": "compact"}, provider
     )
     assert compacted is not None
-    handle({**payload, "hook_event_name": "PreToolUse"})
+    with sessions._connect() as connection:
+        assert connection.execute(
+            "SELECT context_epoch, injected_epoch FROM session_delegation WHERE parent_session_id='parent'"
+        ).fetchone() == (1, 1)
+    handle({**payload, "hook_event_name": "PreToolUse"}, provider)
     assert (
-        handle({**payload, "hook_event_name": "SessionStart", "source": "resume"})
+        handle({**payload, "hook_event_name": "SessionStart", "source": "resume"}, provider)
         is None
     )
+
+
+@pytest.mark.parametrize("compact", [False, True])
+def test_runtime_context_delivery_does_not_load_instruction_documents(tmp_path, monkeypatch, compact):
+    from pathlib import Path
+    from subagents_runtime.delegation import claim_instructions
+
+    monkeypatch.setenv("HARNESS_STATE_DIR", str(tmp_path / "state"))
+    sessions.register_observed("parent", tmp_path, "claude")
+    inbox = enable_delegation("parent", "work-with-agent").inbox
+
+    def unexpected_read(*_args, **_kwargs):
+        pytest.fail("Runtime context delivery must not load instruction documents")
+
+    monkeypatch.setattr(Path, "read_text", unexpected_read)
+    assert claim_instructions("parent", compact=compact) is not None
+    assert inbox.is_dir()
+
+
+def test_loading_shared_skill_does_not_enable_delegation(tmp_path, monkeypatch):
+    monkeypatch.setenv("HARNESS_STATE_DIR", str(tmp_path / "state"))
+    monkeypatch.delenv("HARNESS_SESSION_ID", raising=False)
+    assert handle({
+        "session_id": "parent", "cwd": str(tmp_path),
+        "hook_event_name": "PostToolUse", "tool_name": "Skill",
+        "tool_input": {"skill": "subagents-toolkit"}, "tool_response": {"success": True},
+    }, "claude") is None
+    with sessions._connect() as connection:
+        assert connection.execute("SELECT count(*) FROM session_delegation").fetchone()[0] == 0
+        assert connection.execute("SELECT count(*) FROM requests").fetchone()[0] == 0
 
 
 @pytest.mark.parametrize("provider", ["claude", "chatgpt"])
@@ -303,6 +338,9 @@ def test_terminal_continuations_reply_through_the_original_process_hooks(tmp_pat
         original = connection.execute("SELECT id FROM executions WHERE request_id=?", (first.request_id,)).fetchone()[0]
         connection.execute("UPDATE executions SET backend='aboard',aboard_agent_id='child',aboard_handle='terminal' WHERE id=?", (original,))
         if schema_version == 3:
+            connection.execute("DROP TABLE loop_messages")
+            connection.execute("DROP TABLE loop_waits")
+            connection.execute("DROP TABLE loop_sessions")
             connection.execute("ALTER TABLE executions DROP COLUMN input_execution_id")
             connection.execute("PRAGMA user_version=3")
 
@@ -763,6 +801,62 @@ def test_verified_dead_process_completes_abandoned_request_and_allows_resume(
         resumed.status == "launched"
         and resumed.child_session_id == first.child_session_id
     )
+
+
+@pytest.mark.parametrize("provider", ["claude", "chatgpt"])
+@pytest.mark.parametrize("mode", ["auto", "interactive"])
+def test_parent_resume_delivers_dead_child_interruption_without_restarting_it(
+    tmp_path, monkeypatch, provider, mode
+):
+    from subagents_runtime.delegation import claim_parent_delivery, has_pending_children
+
+    monkeypatch.setenv("HARNESS_STATE_DIR", str(tmp_path / "state"))
+    monkeypatch.delenv("HARNESS_SESSION_ID", raising=False)
+    sessions.register_observed("parent", tmp_path, provider)
+    inbox = enable_delegation("parent", "work-with-agent").inbox
+    (inbox / "task.md").write_text(
+        f"---\ntask: general\nmode: {mode}\n---\nTask.", encoding="utf-8"
+    )
+    [child] = process_inbox("parent", launch=lambda *_: "saved-conversation")
+    with sessions._connect() as connection:
+        connection.execute(
+            "UPDATE executions SET supervisor_pid=2147483647,supervisor_birth='dead',provider_pid=2147483647,provider_birth='dead'"
+        )
+    # Acknowledge the original instructions, so only the interruption produces context.
+    handle({"session_id": "parent", "cwd": str(tmp_path), "hook_event_name": "UserPromptSubmit"}, provider)
+    handle({"session_id": "parent", "cwd": str(tmp_path), "hook_event_name": "PreToolUse"}, provider)
+    output = handle(
+        {"session_id": "parent", "cwd": str(tmp_path), "hook_event_name": "SessionStart", "source": "resume"},
+        provider,
+    )
+    assert output is not None
+    assert not has_pending_children("parent")
+    assert claim_parent_delivery("parent", "SessionStart") is not None
+    assert sessions.resolve_session("agent-1", "parent") == child.child_session_id
+    assert not list(inbox.iterdir())
+
+
+@pytest.mark.parametrize("provider", ["claude", "chatgpt"])
+def test_inbox_resume_refuses_child_without_saved_conversation(tmp_path, monkeypatch, provider):
+    from subagents_runtime.delegation import report_child_stop
+
+    monkeypatch.setenv("HARNESS_STATE_DIR", str(tmp_path / "state"))
+    sessions.register_observed("parent", tmp_path, provider)
+    inbox = enable_delegation("parent", "work-with-agent").inbox
+    (inbox / "task.md").write_text(
+        "---\ntask: general\nmode: auto\n---\nTask.", encoding="utf-8"
+    )
+    [child] = process_inbox("parent", launch=lambda *_: "conversation")
+    report_child_stop(child.child_session_id, "", success=False, cancelled=True)
+    with sessions._connect() as connection:
+        connection.execute("UPDATE executions SET state='exited'")
+        connection.execute("UPDATE sessions SET provider_session_id=NULL WHERE id=?", (child.child_session_id,))
+    (inbox / "resume.md").write_text("---\nresume: agent-1\n---\nContinue.", encoding="utf-8")
+    launches = []
+    [result] = process_inbox("parent", launch=lambda *args: launches.append(args) or child.child_session_id)
+    assert result.status == "failed"
+    assert result.reason == "Provider conversation has not been bound; resume refused"
+    assert not launches
 
 
 def test_legacy_grants_consolidate_running_files_and_preserve_indices_and_acks(

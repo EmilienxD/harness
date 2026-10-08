@@ -13,6 +13,41 @@ import {
 
 const defaults = '{"version":1}';
 
+test("loop limits and by-difficulty delegation profiles are accepted without changing interactive defaults", () => {
+  const parsed = parseLaunchFile(JSON.stringify({
+    version: 1, loop: { maxFeedback: 3, maxImplementers: 2, freshContextPercent: 65 },
+    providers: {
+      claude: { delegations: { loop: { model: "by-difficulty" } } },
+      chatgpt: { delegations: { loop: { model: "by-difficulty" } } },
+    },
+  }));
+  assert.deepEqual(parsed.diagnostics, []);
+  for (const provider of ["claude", "chatgpt"] as const) {
+    const loop = settings(parsed.value.delegationConfigurationFor(provider, "loop"));
+    assert.equal(loop.declaredModel, "by-difficulty");
+    assert.equal(loop.declaredEffort, "by-difficulty");
+    assert.equal(settings(parsed.value.configurationFor(provider, "interactive")).declaredModel, undefined);
+  }
+  for (const loop of [{ maxFeedback: -1 }, { maxImplementers: 0 }, { freshContextPercent: 101 }]) {
+    assert.throws(() => parseLaunchFile(JSON.stringify({ version: 1, loop })), LaunchFileError);
+  }
+});
+
+test("loop launch resolves the worktree profile instead of the open window's profile", async () => {
+  const root = await mkdtemp(join(tmpdir(), "aboard-loop-config-"));
+  const main = join(root, "main", ".harness", "config.json");
+  const cwd = join(root, "feature");
+  await mkdir(join(root, "main", ".harness"), { recursive: true });
+  await mkdir(join(cwd, ".harness"), { recursive: true });
+  await writeFile(main, providerFile("claude", { delegations: { loop: { model: "opus" } } }));
+  await writeFile(join(cwd, ".harness", "config.json"), providerFile("claude", { delegations: { loop: { model: "haiku", effort: "low" } } }));
+  const source = new FileLaunchConfigurationSource(main);
+  const worktree = settings(await source.getDelegationForWorktree("claude", "loop", cwd));
+  assert.equal(worktree.declaredModel, "haiku");
+  assert.equal(worktree.declaredEffort, "low");
+  assert.equal(settings(await source.getDelegationFor("claude", "loop")).declaredModel, "opus");
+});
+
 function settings(value: { readonly settings: unknown }): LaunchConfiguration {
   return value.settings as LaunchConfiguration;
 }

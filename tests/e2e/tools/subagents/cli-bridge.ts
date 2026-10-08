@@ -23,12 +23,12 @@ if (mode === "--spawn") {
   const file = args[0];
   const baseArgs = /\.[cm]?js$/u.test(args[1] ?? "") ? [args[1]!] : [];
   const providerArgs = args.slice(1 + baseArgs.length);
-  const interactive = process.env.HARNESS_EXECUTION_MODE === "interactive";
+  const interactive = ["interactive", "loop"].includes(process.env.HARNESS_EXECUTION_MODE ?? "");
   const prefix = interactive
     ? platform === "claude" ? ["-p","--output-format","stream-json","--verbose"] : ["exec","--json"]
     : [];
   const native = platform === "claude"
-    ? ["--permission-prompts","none","--dangerously-skip-permissions","--prompt-suggestions","false","--tools","Write,Bash","--allowedTools","Write,Bash"]
+    ? ["--permission-prompts","none","--dangerously-skip-permissions","--prompt-suggestions","false","--tools","Read,Write,Bash","--allowedTools","Read,Write,Bash"]
     : ["--dangerously-bypass-hook-trust","--dangerously-bypass-approvals-and-sandbox","--skip-git-repo-check"];
   const automaticCodex = !interactive && platform === "chatgpt" && providerArgs[0] === "exec";
   void drive(file,automaticCodex ? [...baseArgs,"exec",...native,...providerArgs.slice(1)] : [...baseArgs,...prefix,...native,...providerArgs],true);
@@ -62,7 +62,7 @@ async function drive(file: string | undefined, commandArgs: readonly string[], p
   const timeout = setTimeout(() => {
     timedOut = true;
     child.kill();
-  }, 120_000);
+  }, Number(process.env.HARNESS_E2E_CLI_TIMEOUT_MS ?? 120_000));
   let settled = false;
   child.once("error", () => {
     clearTimeout(timeout);
@@ -87,5 +87,8 @@ async function drive(file: string | undefined, commandArgs: readonly string[], p
 function writeStatus(root: string | undefined, role: string, value: Record<string, unknown>): void {
   if (!root) return;
   mkdirSync(root, { recursive: true });
-  writeFileSync(join(root, `${role}.json`), `${JSON.stringify({ schemaVersion: 1, role, ...value }, null, 2)}\n`, "utf8");
+  const content = `${JSON.stringify({ schemaVersion: 1, role, ...value }, null, 2)}\n`;
+  writeFileSync(join(root, `${role}.json`), content, "utf8");
+  // Journeys with several launches of one role need every process's outcome.
+  writeFileSync(join(root, `${role}-${process.pid}.json`), content, "utf8");
 }

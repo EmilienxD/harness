@@ -1,0 +1,6 @@
+*
+!docs
+!docs/**
+docs/site/**
+docs/CHATGPT-REFERENCES/**
+docs/CLAUDE-REFERENCES/**

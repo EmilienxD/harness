@@ -1,4 +1,5 @@
 import { readFile } from "node:fs/promises";
+import { join } from "node:path";
 
 import type { DelegationConfigurationSource } from "../bridge/delegation.js";
 import { parseClaudeLaunchFile } from "../claude/launch-configuration.js";
@@ -6,7 +7,7 @@ import { parseChatGptLaunchFile } from "../chatgpt/launch-configuration.js";
 import type { AgentType } from "../domain/contracts.js";
 import type { AgentPlatformId, ConfiguredLaunch } from "./agent-platform.js";
 
-export const DELEGATION_TASKS = ["explore", "prototype", "websearch", "brainstorm", "address", "review", "general"] as const;
+export const DELEGATION_TASKS = ["explore", "prototype", "websearch", "brainstorm", "address", "review", "general", "loop"] as const;
 export type DelegationTask = (typeof DELEGATION_TASKS)[number];
 
 export interface LaunchFileDiagnostic { readonly severity: "warning"; readonly message: string; }
@@ -57,6 +58,21 @@ function sessionSettings(value: unknown): { readonly unknownFields: readonly str
   return { unknownFields: Object.keys(session).filter((field) => field !== "stopWaitHours") };
 }
 
+function loopSettings(value: unknown): { readonly unknownFields: readonly string[] } {
+  if (value === undefined) return { unknownFields: [] };
+  const loop = object(value, "config.json loop");
+  for (const key of ["maxFeedback", "maxImplementers", "freshContextPercent"] as const) {
+    const selected = loop[key];
+    if (selected === undefined) continue;
+    const valid = typeof selected === "number" && Number.isFinite(selected) && (
+      key === "freshContextPercent" ? selected >= 0 && selected <= 100
+        : Number.isInteger(selected) && selected >= (key === "maxImplementers" ? 1 : 0)
+    );
+    if (!valid) throw new LaunchFileError(`config.json loop.${key} is invalid`);
+  }
+  return { unknownFields: Object.keys(loop).filter((key) => !["maxFeedback", "maxImplementers", "freshContextPercent"].includes(key)) };
+}
+
 class ConfiguredLaunchFile implements LaunchFile {
   public constructor(
     public readonly autoRunProvider: AgentPlatformId,
@@ -89,14 +105,16 @@ export function parseLaunchFile(text: string): ParsedLaunchFile {
   const autoRunProvider = root.autoRun === undefined || autoRun.provider === undefined ? "claude" : platform(autoRun.provider, "config.json autoRun.provider");
   const providerValues = root.providers === undefined ? {} : object(root.providers, "config.json providers");
   const session = sessionSettings(root.session);
+  const loop = loopSettings(root.loop);
   const claude = parseClaudeLaunchFile(providerSection(providerValues.claude, "claude"));
   const chatgpt = parseChatGptLaunchFile(providerSection(providerValues.chatgpt, "chatgpt"));
   const unknownFields = [
     // `grill` belongs to the grill-me-in-cloud hook, which shares this file.
-    ...Object.keys(root).filter((field) => !["version", "autoRun", "providers", "session", "grill"].includes(field)),
+    ...Object.keys(root).filter((field) => !["version", "autoRun", "providers", "session", "loop", "grill"].includes(field)),
     ...Object.keys(autoRun).filter((field) => field !== "provider").map((field) => `autoRun.${field}`),
     ...Object.keys(providerValues).filter((field) => field !== "claude" && field !== "chatgpt").map((field) => `providers.${field}`),
     ...session.unknownFields.map((field) => `session.${field}`),
+    ...loop.unknownFields.map((field) => `loop.${field}`),
     ...claude.unknownFields.map((field) => `providers.claude.${field}`),
     ...chatgpt.unknownFields.map((field) => `providers.chatgpt.${field}`),
   ];
@@ -159,5 +177,9 @@ export class FileLaunchConfigurationSource implements DelegationConfigurationSou
   }
   public async getDelegationFor(platform: AgentPlatformId, task: DelegationTask): Promise<ConfiguredLaunch> {
     return (await this.load()).value.delegationConfigurationFor(platform, task);
+  }
+  public async getDelegationForWorktree(platform: AgentPlatformId, task: DelegationTask, cwd: string): Promise<ConfiguredLaunch> {
+    const source = new FileLaunchConfigurationSource({ ...this.#paths, project: join(cwd, ".harness", "config.json") });
+    return source.getDelegationFor(platform, task);
   }
 }

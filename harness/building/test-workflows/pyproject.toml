@@ -1,0 +1,18 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "harness-test-workflows"
+version = "1.4.0"
+description = "Portable end-to-end workflow status and confirmation"
+requires-python = ">=3.11"
+
+[project.scripts]
+test-workflows = "test_workflows:main"
+
+[tool.hatch.build.targets.wheel]
+only-include = ["test_workflows.py"]
+
+[tool.hatch.build.targets.sdist]
+include = ["test_workflows.py", "pyproject.toml"]

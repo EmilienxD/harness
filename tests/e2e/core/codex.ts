@@ -14,6 +14,8 @@ export interface CodexHomeOptions {
   readonly envKey?: string;
   readonly trustedProjects?: readonly string[];
   readonly extraConfig?: readonly string[];
+  /** Codex model catalog JSON declaring the fake model's native tool shapes. */
+  readonly modelCatalog?: string;
 }
 
 export interface CodexProcessResult {
@@ -34,6 +36,7 @@ export async function prepareCodexHome(options: CodexHomeOptions): Promise<strin
     'sandbox_mode = "danger-full-access"',
     'approval_policy = "never"',
     'windows.sandbox = "unelevated"',
+    ...(options.modelCatalog ? [`model_catalog_json = ${JSON.stringify(resolve(options.modelCatalog))}`] : []),
     `[model_providers.${provider}]`,
     'name = "Harness deterministic E2E"',
     `base_url = ${JSON.stringify(options.baseUrl)}`,

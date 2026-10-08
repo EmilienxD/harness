@@ -10,11 +10,11 @@ disable-model-invocation: true
 
 Run an agent with the `general` task.
 
-Follow the shared delegation workflow and inbox supplied by the hook. If no hook supplied them, stop immediately and notify the user without looking for a workaround.
+Invoke the `subagents-toolkit` skill if its instructions are not already in the current context, then follow its workflow using the conversation inbox supplied by the hook.
 
 Request parameters:
 - task: general
-- mode: interactive or auto (default auto)
+- mode: interactive or auto (default interactive)
 - provider (Optional): claude, chatgpt, or codex (alias of chatgpt)
 
 Give the child a bounded task and the relevant project context.

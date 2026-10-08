@@ -6,7 +6,7 @@ import { dirname, join, resolve } from "node:path";
 import { promisify } from "node:util";
 
 import { startFakeAnthropicServer } from "../../core/anthropic-server.js";
-import { findFinalText, isolatedClaudeEnvironment, parseStreamJson, redactProcessError, runClaude, validateClaudeCli } from "../../core/claude.js";
+import { isolatedClaudeEnvironment, parseStreamJson, redactProcessError, runClaude, validateClaudeCli } from "../../core/claude.js";
 import { canonicalMkdtemp } from "../../core/temp.js";
 import { FINAL_MESSAGE, LEAD_BODY, LEAD_SKILL, LEADING_PROMPT, MID_BODY, MID_PROMPT, MID_SKILL, parseRequest, scenarioCatalogHash, transition } from "./scenario.js";
 
@@ -61,7 +61,11 @@ export async function runMidPromptSkillsJourney(): Promise<MidPromptSkillsJourne
         const structure = server.assertions().observations.map((item) => `${item.httpStatus}:${item.checkpoint ?? item.diagnostic ?? "unknown"}`).join(", ");
         throw new Error(`Claude Code exited ${result.code}: ${redactProcessError(result.stderr)}; endpoint: ${structure}`);
       }
-      finalTexts.push(findFinalText(parseStreamJson(result.stdout), result.stdout));
+      const final = [...parseStreamJson(result.stdout)].reverse().find((event): event is { type: string; result: string } =>
+        typeof event === "object" && event !== null && "type" in event && event.type === "result" &&
+        "result" in event && typeof event.result === "string");
+      if (!final) throw new Error("Claude Code omitted its final result record");
+      finalTexts.push(final.result);
     }
     const assertions = server.assertions();
     const checkpoints = ["mid-prompt-skill", "leading-and-later-skill"];

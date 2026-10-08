@@ -10,12 +10,14 @@ from pathlib import Path
 from typing import Any
 
 from subagents_runtime import sessions
+from subagents_runtime.roles import load_task_policies
 from subagents_runtime.delegation import (
     arm_reply,
     claim_instructions,
     claim_parent_delivery,
     clear_reply_authorization,
     enable_delegation,
+    lead_instructions,
     observe_parent_event,
     process_inbox,
     reconcile_inbox,
@@ -23,11 +25,13 @@ from subagents_runtime.delegation import (
     wait_parent_delivery,
 )
 
-SKILL_NAME = r"((?:work|explore|prototype|websearch|brainstorm|address|review)-with-agent|reply-to-agent|resume-agent)"
+SKILL_NAME = r"([a-z][a-z0-9-]*-with-agent|reply-to-agent|resume-agent|ship)"
+SHIP_INVOCATION = re.compile(r"(?<!\S)(?:[/$]ship|\[\$ship\]\([^\r\n]+\))(?=\s|$)")
 INVOCATIONS = {
     "claude": re.compile(rf"(?<!\S)/{SKILL_NAME}(?=\s|$)"),
     "chatgpt": re.compile(rf"(?<!\S)\${SKILL_NAME}(?=\s|$)"),
 }
+LINKED_INVOCATION = re.compile(r"\[\$([a-z][a-z0-9-]*-with-agent|reply-to-agent|resume-agent|ship)\]\([^\r\n]+?\)")
 STRUCTURED_WRITE_TOOLS = {"Write", "Edit", "MultiEdit", "apply_patch", "ApplyPatch"}
 
 
@@ -43,6 +47,36 @@ def provider_from_argv(argv: list[str]) -> str | None:
 
 def _context(event: str, text: str) -> dict[str, Any]:
     return {"hookSpecificOutput": {"hookEventName": event, "additionalContext": text}}
+
+
+def _skill_instructions(session_id: str, skill: str) -> str | None:
+    inbox = enable_delegation(session_id, skill).inbox
+    if skill != "ship":
+        return claim_instructions(session_id, lead=False)
+    # Every /ship invocation restates the Lead identity, even when already injected.
+    return claim_instructions(session_id, lead=True) or lead_instructions(session_id, inbox)
+
+
+def _registered_skill(skill: str, cwd: Path, provider: str) -> bool:
+    if skill in {"ship", "reply-to-agent", "resume-agent"}:
+        return True
+    return skill.endswith("-with-agent") and skill in load_task_policies(cwd, provider)
+
+
+def _role_directory(session_id: str) -> Path:
+    with sessions._connect() as connection:
+        return Path(connection.execute("SELECT cwd FROM sessions WHERE id=?", (session_id,)).fetchone()[0])
+
+
+def _invoked_skill(prompt: str, cwd: Path, provider: str) -> str | None:
+    patterns = [INVOCATIONS[provider]]
+    if provider == "chatgpt":
+        patterns.append(LINKED_INVOCATION)
+    for pattern in patterns:
+        for match in pattern.finditer(prompt):
+            if _registered_skill(match.group(1), cwd, provider):
+                return match.group(1)
+    return "ship" if SHIP_INVOCATION.search(prompt) else None
 
 
 def _strings(value: Any):
@@ -176,6 +210,8 @@ def handle(
             session_id, cwd, selected_provider, execution_mode
         )
     observe_parent_event(session_id, event)
+    from subagents_runtime import loop
+    loop.observe_event(session_id, event, payload.get("prompt"))
     if event == "SessionStart" and execution_id and (continued or not fresh):
         from subagents_runtime.processes import confirm_startup
 
@@ -189,6 +225,15 @@ def handle(
             ).fetchone()
         if enabled:
             recovered = reconcile_inbox(session_id, launch=sessions.launch_delegated)
+            from subagents_runtime.processes import live_executions
+
+            with sessions._connect() as connection:
+                children = connection.execute(
+                    "SELECT DISTINCT child_session_id FROM requests WHERE parent_session_id=? AND child_session_id IS NOT NULL AND state IN ('launching','pending','uncertain')",
+                    (session_id,),
+                ).fetchall()
+            for (child_id,) in children:
+                live_executions(child_id)
         instructions = claim_instructions(
             session_id, compact=payload.get("source") == "compact"
         )
@@ -211,10 +256,8 @@ def handle(
         clear_reply_authorization(session_id)
         delivery = claim_parent_delivery(session_id, event)
         prompt = payload.get("prompt")
-        pattern = INVOCATIONS[selected_provider]
-        match = pattern.search(prompt) if isinstance(prompt, str) else None
-        if match:
-            skill = match.group(1)
+        skill = _invoked_skill(prompt, _role_directory(session_id), selected_provider) if isinstance(prompt, str) else None
+        if skill:
             if skill == "reply-to-agent":
                 arm_reply(session_id, execution_id)
                 context = (
@@ -224,8 +267,7 @@ def handle(
                     event,
                     context if delivery is None else f"{delivery.text}\n\n{context}",
                 )
-            enable_delegation(session_id, skill)
-            instructions = claim_instructions(session_id)
+            instructions = _skill_instructions(session_id, skill)
             text = "\n\n".join(
                 item
                 for item in (
@@ -261,12 +303,12 @@ def handle(
             payload.get("tool_name") == "Skill"
             and isinstance(skill, str)
             and re.fullmatch(SKILL_NAME, skill)
+            and _registered_skill(skill, _role_directory(session_id), selected_provider)
         ):
             if skill == "reply-to-agent":
                 arm_reply(session_id, execution_id)
             else:
-                enable_delegation(session_id, skill)
-                instructions = claim_instructions(session_id)
+                instructions = _skill_instructions(session_id, skill)
                 if instructions:
                     return _context(event, instructions)
         processed = []
@@ -292,6 +334,17 @@ def handle(
         if not isinstance(message, str):
             message = ""
         success = event == "Stop" and bool(message.strip())
+        if loop.is_implementer(session_id):
+            if not success:
+                return None
+            feedback = loop.report_and_wait(
+                session_id, message, payload.get("transcript_path"), selected_provider,
+                timeout_seconds=_stop_wait_seconds(cwd),
+            )
+            if feedback is None:
+                return None
+            return (_context(event, feedback) if selected_provider == "claude"
+                    else {"decision": "block", "reason": feedback})
         reported = report_child_stop(
             session_id,
             message,

@@ -425,7 +425,7 @@ export function planLaunch(request: LaunchPlanRequest): LaunchPlan {
     "--add-dir", launchRuntimeDirectory,
     "--settings", `${launchRuntimeDirectory}/settings.json`,
   ];
-  const policy = launchPolicy(configuration.shape === "default" ? {} : configuration, request);
+  const policy = launchPolicy(configuration.shape === "default" && request.executionMode !== "loop" ? {} : configuration, request);
 
   switch (configuration.shape) {
     case "builtin":
@@ -513,7 +513,7 @@ export function planSessionResume(request: SessionResumePlanRequest): LaunchPlan
   const { command, wrapper, runtimeDirectory, launchCode, threshold } = commonPreconditions(request, request.configuration);
   const { configuration } = request;
   assertLaunchShape(request.agentType, configuration);
-  const policy = launchPolicy(configuration.shape === "default" ? {} : configuration, request);
+  const policy = launchPolicy(configuration.shape === "default" && request.executionMode !== "loop" ? {} : configuration, request);
 
   const launchRuntimeDirectory = agentRuntimeDirectory(runtimeDirectory, request.agentId);
   // Claude Code restores a builtin's `--agent` selection with the conversation.

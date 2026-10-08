@@ -10,7 +10,7 @@ disable-model-invocation: true
 
 Run a subagent with the `review` task.
 
-Follow the *Multi Provider Subagent System Guideline* and inbox previously supplied by the hook. If no hook supplied them, stop immediately and notify the user without looking for a workaround.
+Invoke the `subagents-toolkit` skill if you don't already have its instructions in your context, then follow its workflow using the conversation inbox supplied by the hook.
 
 Request parameters:
 - task: review

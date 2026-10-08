@@ -125,8 +125,7 @@ def live_executions(session_id: str) -> list[str]:
             if pid
         ]
         if not identities or any(
-            (birth is not None and birth_identity(pid) == birth)
-            or ((birth is None or birth_identity(pid) is None) and process_alive(pid))
+            process_alive(pid) and (birth is None or birth_identity(pid) in {birth, None})
             for pid, birth in identities
         ):
             live.append(execution_id)
@@ -146,6 +145,9 @@ def live_executions(session_id: str) -> list[str]:
             cancelled=True,
             execution_id=execution_id,
         )
+    from subagents_runtime.loop import release_expired_after_exit
+
+    release_expired_after_exit(session_id)
     return live
 
 
@@ -379,6 +381,9 @@ def supervise(execution_id: str, specification: Path) -> int:
                 ("exited" if started else "failed", code, execution_id),
             )
         from subagents_runtime.delegation import report_child_stop
+        from subagents_runtime.loop import release_expired_after_exit
+
+        release_expired_after_exit(environment["HARNESS_SESSION_ID"])
 
         if value["visible"]:
             report_child_stop(
@@ -410,6 +415,10 @@ def supervise(execution_id: str, specification: Path) -> int:
                 "UPDATE requests SET state=?,reason=?,delivery_id=CASE WHEN ?='failed' THEN COALESCE(delivery_id,lower(hex(randomblob(16)))) ELSE delivery_id END,completed_at=CASE WHEN ?='failed' THEN CURRENT_TIMESTAMP ELSE NULL END WHERE id=(SELECT request_id FROM executions WHERE id=?) AND state IN ('launching','pending','uncertain')",
                 (state, str(exc), state, state, execution_id),
             )
+        if not uncertain:
+            from subagents_runtime.loop import release_expired_after_exit
+
+            release_expired_after_exit(environment["HARNESS_SESSION_ID"])
         return 1
 
 

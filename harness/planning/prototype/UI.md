@@ -19,7 +19,7 @@ answers to one interface question.
 
 Show the design question and what to compare inside the gallery. Match the
 product's visual language closely enough to make the comparison credible while
-keeping the gallery self-contained in the prototype workspace.
+keeping the gallery self-contained.
 
 The gallery is complete when every variant is reload-stable, structurally
 distinct, usable at the relevant dimensions, and reachable through one obvious

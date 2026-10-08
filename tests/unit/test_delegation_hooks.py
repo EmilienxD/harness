@@ -99,6 +99,10 @@ def test_existing_provider_session_is_registered_by_the_user_invocation_hook(tmp
     [
         ("claude", "Please use /review-with-agent for this change", "review-with-agent"),
         ("chatgpt", "Please use $address-with-agent for this change", "address-with-agent"),
+        ("claude", "/ship 7", "ship"),
+        ("chatgpt", "$ship 7", "ship"),
+        ("chatgpt", "/ship 7", "ship"),
+        ("chatgpt", "[$ship](C:/repo/.agents/skills/ship/SKILL.md) 7", "ship"),
     ],
 )
 def test_ask_skill_invocation_after_prose_opens_its_grant(

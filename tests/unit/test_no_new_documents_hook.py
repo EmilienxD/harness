@@ -382,6 +382,20 @@ def test_a_command_without_a_path_lists_pending_drafts_and_changes_nothing(tmp_p
 
 
 @pytest.mark.parametrize("provider", ["claude", "chatgpt"])
+def test_the_agent_sees_drafts_still_waiting_for_a_decision(tmp_path, provider):
+    write_draft(tmp_path, "docs/plan.md")
+    env = isolated_env(tmp_path)
+
+    for message in ("Please revise the plan", "Anything else?"):
+        code, output, stderr = run_hook(prompt(message, tmp_path), tmp_path, env=env, provider=provider)
+
+        assert (code, stderr) == (0, "")
+        assert output is not None
+        context = output["hookSpecificOutput"]["additionalContext"]
+        assert isinstance(context, str) and context
+
+
+@pytest.mark.parametrize("provider", ["claude", "chatgpt"])
 def test_the_agent_learns_the_outcome_on_its_next_prompt_exactly_once(tmp_path, provider):
     env = isolated_env(tmp_path)
     write_draft(tmp_path, "docs/kept.md")

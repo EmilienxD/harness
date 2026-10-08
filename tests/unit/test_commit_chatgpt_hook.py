@@ -13,19 +13,13 @@ from harness_cli.receipts import ReceiptStore
 
 
 ROOT = Path(__file__).resolve().parents[2]
-CORE = ROOT / "harness/engineering/commit/commit_core.py"
 ADAPTER = ROOT / "harness/engineering/commit/commit_hook.py"
-
-core_spec = importlib.util.spec_from_file_location("commit_core", CORE)
-core = importlib.util.module_from_spec(core_spec)
-sys.modules["commit_core"] = core
-assert core_spec.loader is not None
-core_spec.loader.exec_module(core)
 
 adapter_spec = importlib.util.spec_from_file_location("commit_hook_chatgpt", ADAPTER)
 adapter = importlib.util.module_from_spec(adapter_spec)
 assert adapter_spec.loader is not None
 adapter_spec.loader.exec_module(adapter)
+core = adapter
 
 
 @pytest.fixture(autouse=True)
@@ -61,7 +55,6 @@ def test_chatgpt_install_uses_native_hooks_and_skill_roots(tmp_path):
     target = Target.for_project(tmp_path, platform="chatgpt")
     CatalogueInstaller({tool.name: tool}, target, ReceiptStore.load(tmp_path / "receipts.json")).reconcile({tool.name})
 
-    assert (tmp_path / ".codex/hooks/commit_core.py").is_file()
     assert (tmp_path / ".codex/hooks/commit_hook.py").is_file()
     assert (tmp_path / ".agents/skills/commit/SKILL.md").is_file()
     assert (tmp_path / ".agents/skills/commit/agents/openai.yaml").is_file()
@@ -151,11 +144,28 @@ def test_chatgpt_unhandled_hook_exception_blocks_with_exit_2(monkeypatch, capsys
     assert "RuntimeError: adapter failure" in stderr
 
 
-def test_chatgpt_ai_key_uses_codex_locations(repo, monkeypatch):
+def test_chatgpt_ai_key_uses_harness_local_config(repo, monkeypatch):
     monkeypatch.delenv("GEMINI_API_KEY", raising=False)
     monkeypatch.delenv("GOOGLE_API_KEY", raising=False)
-    key = repo / ".codex/commit-ai.key"
+    key = repo / ".harness/config.local.json"
     key.parent.mkdir()
-    key.write_text("chatgpt-key\n", encoding="utf-8")
+    key.write_text(json.dumps({"version": 1, "commit": {"geminiApiKey": "chatgpt-key"}}), encoding="utf-8")
 
-    assert core.find_api_key(str(repo)) == ("chatgpt-key", str(key))
+    assert core.find_api_key(str(repo)) == ("chatgpt-key", f"{key} (commit.geminiApiKey)")
+
+
+def test_ai_key_uses_user_harness_config_but_not_committed_project_config(repo, tmp_path, monkeypatch):
+    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+    monkeypatch.delenv("GOOGLE_API_KEY", raising=False)
+    state_dir = tmp_path / "state"
+    state_dir.mkdir()
+    monkeypatch.setenv("HARNESS_STATE_DIR", str(state_dir))
+    project_config = repo / ".harness/config.json"
+    project_config.parent.mkdir()
+    project_config.write_text(json.dumps({"version": 1, "commit": {"geminiApiKey": "committed-secret"}}), encoding="utf-8")
+
+    assert core.find_api_key(str(repo)) == (None, None)
+
+    user_config = state_dir / "config.json"
+    user_config.write_text(json.dumps({"version": 1, "commit": {"geminiApiKey": "user-secret"}}), encoding="utf-8")
+    assert core.find_api_key(str(repo)) == ("user-secret", f"{user_config} (commit.geminiApiKey)")

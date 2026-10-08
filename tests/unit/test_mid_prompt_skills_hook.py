@@ -36,15 +36,18 @@ def skill(root, name, body, frontmatter="disable-model-invocation: true"):
     return directory
 
 
-def run(payload):
+def run(payload, provider="claude"):
     old_stdin, old_stdout = sys.stdin, sys.stdout
+    old_argv = sys.argv
     cap = io.StringIO()
     sys.stdin = io.StringIO(json.dumps(payload))
     sys.stdout = cap
+    sys.argv = [str(HOOK_DIR / "mid_prompt_skills_hook.py"), f"--{provider}"]
     try:
         code = hook.main()
     finally:
         sys.stdin, sys.stdout = old_stdin, old_stdout
+        sys.argv = old_argv
     assert code == 0
     out = cap.getvalue().strip()
     return json.loads(out) if out else {}
@@ -67,6 +70,16 @@ def context(output):
     return output.get("hookSpecificOutput", {}).get("additionalContext", "")
 
 
+def chatgpt_skill(project, name, body):
+    directory = project / ".agents" / "skills" / name
+    directory.mkdir(parents=True, exist_ok=True)
+    (directory / "SKILL.md").write_text(
+        f"---\nname: {name}\ndescription: Test skill.\n---\n\n{body}\n",
+        encoding="utf-8",
+    )
+    return directory
+
+
 def test_mid_prompt_skill_is_injected_with_its_arguments(env):
     directory = skill(env["project"], "probe", "PROBE-BODY")
 
@@ -78,6 +91,56 @@ def test_mid_prompt_skill_is_injected_with_its_arguments(env):
     assert "<command-args>mid one</command-args>" in text
     assert f"Base directory for this skill: {directory}" in text
     assert "PROBE-BODY\n\nARGUMENTS: mid one" in text
+
+
+def test_chatgpt_mid_prompt_skill_is_injected_without_repeating_a_leading_skill(env):
+    chatgpt_skill(env["project"], "lead", "LEAD-BODY")
+    directory = chatgpt_skill(env["project"], "probe", "PROBE-BODY")
+
+    output = run({
+        "hook_event_name": "UserPromptSubmit",
+        "session_id": "s1",
+        "cwd": str(env["project"]),
+        "prompt": "$lead first, then use $probe with this request",
+    }, "chatgpt")
+
+    text = context(output)
+    assert output["hookSpecificOutput"]["hookEventName"] == "UserPromptSubmit"
+    assert "LEAD-BODY" not in text
+    assert "PROBE-BODY" in text
+    assert f"Base directory for this skill: {directory}" in text
+    assert "ARGUMENTS:" not in text
+
+
+def test_chatgpt_linked_mid_prompt_skill_uses_the_selected_skill_path(env, tmp_path):
+    selected = tmp_path / "plugin-cache" / "probe"
+    selected.mkdir(parents=True)
+    path = selected / "SKILL.md"
+    path.write_text(
+        "---\nname: probe\ndescription: Test skill.\n---\n\nLINKED-PROBE-BODY\n",
+        encoding="utf-8",
+    )
+
+    output = run({
+        "hook_event_name": "UserPromptSubmit",
+        "session_id": "s1",
+        "cwd": str(env["project"]),
+        "prompt": f"Please inspect this. [$probe]({path.as_posix()}) carefully",
+    }, "chatgpt")
+
+    text = context(output)
+    assert "LINKED-PROBE-BODY" in text
+    assert f"<skill-path>{path}</skill-path>" in text
+
+
+def test_chatgpt_package_installs_the_hook_and_fragment():
+    manifest = (HOOK_DIR / "harness.toml").read_text(encoding="utf-8")
+    fragment = json.loads((HOOK_DIR / "chatgpt" / "hooks.fragment.json").read_text(encoding="utf-8"))
+
+    assert '[platforms.chatgpt]\nstatus = "supported"' in manifest
+    assert 'platforms = ["claude", "chatgpt"]' in manifest
+    command = fragment["hooks"]["UserPromptSubmit"][0]["hooks"][0]["command"]
+    assert command.endswith('mid_prompt_skills_hook.py" --chatgpt')
 
 
 def test_skills_claude_code_expanded_are_not_injected_again(env):

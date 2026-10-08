@@ -4,7 +4,7 @@
     "UserPromptSubmit": [{"hooks": [{"type": "command", "command": "harness-subagents-hook --chatgpt"}]}],
     "PreToolUse": [{"hooks": [{"type": "command", "command": "harness-subagents-hook --chatgpt"}]}],
     "PostToolUse": [{"hooks": [{"type": "command", "command": "harness-subagents-hook --chatgpt"}]}],
-    "Stop": [{"hooks": [{"type": "command", "command": "harness-subagents-hook --chatgpt", "timeout": 86400}]}],
+    "Stop": [{"hooks": [{"type": "command", "command": "harness-subagents-hook --chatgpt", "timeout": 86430}]}],
     "Interrupt": [{"hooks": [{"type": "command", "command": "harness-subagents-hook --chatgpt", "timeout": 3}]}],
     "SessionEnd": [{"hooks": [{"type": "command", "command": "harness-subagents-hook --chatgpt"}]}]
   }

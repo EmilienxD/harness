@@ -18,7 +18,7 @@ const EXPLORE: Profile = { model: "gpt-5.6-luna", effort: "low" };
 const WORKER: Profile = { model: BY_DIFFICULTY, effort: BY_DIFFICULTY };
 const DEFAULT_DELEGATIONS: Readonly<Record<DelegationTask, Profile>> = {
   explore: EXPLORE, prototype: INHERIT, websearch: INHERIT, brainstorm: INHERIT,
-  address: INHERIT, review: INHERIT, general: INHERIT,
+  address: INHERIT, review: INHERIT, general: INHERIT, loop: INHERIT,
 };
 const DEFAULT_AUTO_RUN: Readonly<Record<AutoRunTask, Profile>> = { explore: EXPLORE, address: WORKER, review: WORKER };
 
@@ -31,16 +31,16 @@ function command(value: unknown, path: string): readonly string[] | undefined {
   if (!Array.isArray(value) || value.length === 0 || !value.every((token) => typeof token === "string" && token.trim().length > 0)) throw new LaunchFileError(`${path} must be a non-empty array of non-empty strings`);
   return value;
 }
-function profile(value: unknown, fallback: Profile, path: string, worker = false): { readonly value: Profile; readonly unknown: readonly string[] } {
+function profile(value: unknown, fallback: Profile, path: string, worker = false, delegation = false): { readonly value: Profile; readonly unknown: readonly string[] } {
   const input = value === undefined ? {} : object(value, path);
   const selectedCommand = command(input.command, `${path}.command`) ?? fallback.command;
   const rawModel = input.model;
   const selectedModel = rawModel === undefined ? fallback.model : rawModel === "inherit" ? undefined : rawModel;
-  if (selectedModel !== undefined && (typeof selectedModel !== "string" || selectedModel.trim().length === 0 || CLAUDE_MODELS.has(selectedModel) || (selectedModel === BY_DIFFICULTY && !worker))) throw new LaunchFileError(`${path}.model is not valid for platform chatgpt; expected inherit${worker ? `, ${BY_DIFFICULTY},` : ""} or a Codex model slug`);
+  if (selectedModel !== undefined && (typeof selectedModel !== "string" || selectedModel.trim().length === 0 || CLAUDE_MODELS.has(selectedModel) || (selectedModel === BY_DIFFICULTY && !worker && !delegation))) throw new LaunchFileError(`${path}.model is not valid for platform chatgpt; expected inherit${worker || delegation ? `, ${BY_DIFFICULTY},` : ""} or a Codex model slug`);
   const rawEffort = input.effort;
-  const selectedEffort = rawEffort === undefined ? fallback.effort : rawEffort === "inherit" ? undefined : rawEffort;
+  const selectedEffort = rawEffort === undefined ? (delegation && selectedModel === BY_DIFFICULTY ? BY_DIFFICULTY : fallback.effort) : rawEffort === "inherit" ? undefined : rawEffort;
   const efforts = worker ? [BY_DIFFICULTY, ...CHATGPT_EFFORTS] : CHATGPT_EFFORTS;
-  if (selectedEffort !== undefined && (typeof selectedEffort !== "string" || !efforts.includes(selectedEffort as never))) throw new LaunchFileError(`${path}.effort is not valid for platform chatgpt; expected inherit or ${efforts.join(", ")}`);
+  if (selectedEffort !== undefined && (typeof selectedEffort !== "string" || (!efforts.includes(selectedEffort as never) && !(delegation && rawEffort === undefined && selectedEffort === BY_DIFFICULTY)))) throw new LaunchFileError(`${path}.effort is not valid for platform chatgpt; expected inherit or ${efforts.join(", ")}`);
   if (!worker && (input.webSearch !== undefined || input.subagents !== undefined)) throw new LaunchFileError(`${path}.${input.webSearch !== undefined ? "webSearch" : "subagents"} is only supported for Auto Run address and review profiles`);
   const webSearch = input.webSearch ?? fallback.webSearch;
   const subagents = input.subagents ?? fallback.subagents;
@@ -89,7 +89,7 @@ export function parseChatGptLaunchFile(root: Record<string, unknown>): { readonl
   unknown.push(...Object.keys(delegationInput).filter((field) => !DELEGATION_TASKS.includes(field as DelegationTask)).map((field) => `delegations.${field}`));
   const delegations = {} as Record<DelegationTask, Profile>;
   for (const task of DELEGATION_TASKS) {
-    const parsed = profile(delegationInput[task], DEFAULT_DELEGATIONS[task], `${PATH}.delegations.${task}`);
+    const parsed = profile(delegationInput[task], DEFAULT_DELEGATIONS[task], `${PATH}.delegations.${task}`, false, true);
     delegations[task] = parsed.value;
     unknown.push(...parsed.unknown.map((field) => `delegations.${task}.${field}`));
   }

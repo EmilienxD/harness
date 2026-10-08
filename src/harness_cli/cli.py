@@ -8,6 +8,7 @@ import sys
 from pathlib import Path
 
 from harness_cli import __version__
+from harness_cli.git_warnings import symlink_worktree_warning
 from harness_cli.installer import (
     CatalogueInstaller,
     Change,
@@ -307,6 +308,9 @@ def catalogue_menu(*, local: Path | None = None, root: Path | None = None) -> in
                 _cancel(ui)
                 return 0
             skill_mode = ("copy", "symlink")[choice]
+            if skill_mode == "symlink" and not claude_target.is_user:
+                if warning := symlink_worktree_warning(claude_target.scope_root):
+                    ui.note("Git worktree warning", (warning,))
 
         installers = [CatalogueInstaller(available, target, store) for target in targets]
         if skill_mode is not None:

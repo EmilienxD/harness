@@ -1,6 +1,6 @@
 ---
 name: writing-adrs
-description: Write or edit architectural decision records (ADRs). Use whenever a task creates, changes, or supersedes an ADR.
+description: Write or edit architectural decision records (ADRs). Use whenever a task creates an ADR or changes a recorded decision.
 argument-hint: "[decision or ADR path]"
 license: MIT
 metadata:
@@ -17,10 +17,10 @@ A contract. It records decisions and rules that were agreed on and are now bindi
 
 ### Lifecycle
 
-- An ADR is written once and almost never edited. Only a reversal of an agreed decision justifies an edit.
+- When an agreed decision changes, update its existing ADR immediately so it states the current decision, values, rules, and accepted trade-offs. Remove statements that no longer apply.
 - `status: accepted` means the decision was agreed between the owner and the agents. It does not mean "verified against the code". Never claim code verification anywhere in the file.
-- Reversing a decision means a new numbered record with `supersedes`, and the old one flipped to `superseded` with `superseded-by`. Do not edit a decision into a different decision.
-- Files are `NNNN-kebab-case-title.md`, next free number, never reused. Add a row to `docs/adr/README.md`'s index.
+- Keep the existing ADR number when changing or reversing its decision. Update its title, filename, and index row if the new decision requires them. Review related ADRs and update any affected rules or cross-references in place so the records agree. Create a new ADR only for a distinct decision that does not belong in an existing record.
+- New files are `NNNN-kebab-case-title.md`, using the next free number, never reused. Add a row to `docs/adr/README.md`'s index.
 
 ### Hard prohibitions
 

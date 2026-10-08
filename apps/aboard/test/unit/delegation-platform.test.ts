@@ -1,10 +1,13 @@
 import assert from "node:assert/strict";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 
 import { DelegationCoordinator, type DelegationConfigurationSource } from "../../src/bridge/delegation.js";
 import { ChatGptAgentPlatform } from "../../src/chatgpt/platform.js";
+import { ClaudeAgentPlatform } from "../../src/claude/platform.js";
+import { FileLaunchConfigurationSource } from "../../src/platform/launch-configuration.js";
 import type { ResolvedPrompt } from "../../src/platform/prompts.js";
 import { TerminalController, type StartupProofTracker, type TerminalCreationOptions, type TerminalHandle, type TerminalHost } from "../../src/platform/terminals.js";
 import type { AgentId, IsoTimestamp, SessionId, TerminalId } from "../../src/domain/contracts.js";
@@ -42,6 +45,57 @@ class FakeTerminalHost implements TerminalHost {
     return terminal;
   }
   public onDidCloseTerminal(): { dispose(): void } { return { dispose: () => undefined }; }
+}
+
+for (const provider of ["claude", "chatgpt"] as const) {
+  test(`closed-terminal loop reopen uses the ${provider} worktree profile and retained difficulty`, async (t) => {
+    const root = await mkdtemp(join(tmpdir(), "aboard-loop-reopen-"));
+    t.after(() => rm(root, { recursive: true, force: true }));
+    const workspaceRoot = join(root, "main");
+    const cwd = join(root, "feature");
+    for (const folder of [workspaceRoot, cwd]) await mkdir(join(folder, ".harness"), { recursive: true });
+    await writeFile(join(workspaceRoot, ".harness", "config.json"), JSON.stringify({
+      version: 1, providers: { [provider]: { command: ["main-provider"], delegations: { loop: { model: provider === "claude" ? "opus" : "main-model", effort: "high" } } } },
+    }));
+    await writeFile(join(cwd, ".harness", "config.json"), JSON.stringify({
+      version: 1, providers: { [provider]: { command: ["worktree-provider"], delegations: { loop: { model: "by-difficulty" } } } },
+    }));
+    const platform: AgentPlatform = provider === "claude"
+      ? new ClaudeAgentPlatform({
+        lifecycleAssets: { settings: "hooks.json", script: "hook.py" },
+        commandRunner: async () => ({ code: 0, stdout: "2.1.100", stderr: "" }),
+        resumable: async () => true,
+      })
+      : new ChatGptAgentPlatform({
+        lifecycleAssets: { settings: "hooks.json", script: "hook.py" },
+        commandRunner: async () => ({ code: 0, stdout: "codex-cli 0.153.4", stderr: "" }),
+        sessionProbe: { inspect: async () => ({ state: "resumable" }) },
+        policyProbe: { require: async () => undefined },
+      });
+    const host = new FakeTerminalHost();
+    const terminals = new TerminalController({
+      host, shell: "powershell", environment: () => ({ port: 4823, token: "token", workspaceRoot }),
+      terminalIdFactory: () => "new-terminal" as TerminalId,
+    });
+    const coordinator = new DelegationCoordinator({
+      workspaceRoot, fleet: new FleetRegistry(), lease: new WriteLease(), terminals,
+      configurations: new FileLaunchConfigurationSource(join(workspaceRoot, ".harness", "config.json")),
+      platforms: new Map([[provider, platform]]), prompts: { resolve: async () => undefined },
+      spills: { prepare: async () => undefined, write: async () => "unused" },
+      shell: "powershell", agentIdFactory: () => "unused" as AgentId,
+    });
+    await coordinator.reopen({
+      platform: provider, agentId: "loop-agent" as AgentId, type: "general", delegationTask: "loop",
+      sessionId: "af817a6c-cd41-41e2-a4db-44d3f43cd560" as SessionId,
+      executionMode: "loop", cwd, prompt: "Continue.", difficulty: "routine",
+    });
+    const command = host.terminals[0]?.sent.at(-1) ?? "";
+    assert.ok(command.includes("worktree-provider"), command);
+    assert.ok(command.includes(provider === "claude" ? "haiku" : "gpt-5.6-luna"), command);
+    assert.match(command, /(?:--effort|model_reasoning_effort).*medium/u);
+    assert.equal(host.options[0]?.cwd, cwd);
+    assert.equal(host.options[0]?.env?.HARNESS_EXECUTION_MODE, "loop");
+  });
 }
 
 test("shared delegation asks the selected platform for an executable launch plan", async () => {

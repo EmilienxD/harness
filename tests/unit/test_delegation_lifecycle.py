@@ -208,6 +208,7 @@ def test_executions_migrate_to_the_fork_aware_schema_without_losing_their_state(
     state.mkdir()
     schema = (Path(storage.__file__).parent / "resources" / "schema.sql").read_text(encoding="utf-8")
     previous = schema.replace(" fork_of TEXT, superseded_at TEXT, input_execution_id TEXT REFERENCES executions(id),\n", "").replace(" AND superseded_at IS NULL", "")
+    previous = previous.split("CREATE TABLE loop_sessions", 1)[0]
     assert previous != schema
     connection = sqlite3.connect(state / "sessions.sqlite3")
     connection.executescript(previous)

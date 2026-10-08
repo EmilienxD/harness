@@ -1,0 +1,5 @@
+interface:
+  display_name: "Ship an issue"
+  short_description: "Lead an issue through implementation, verification, and PR delivery"
+policy:
+  allow_implicit_invocation: false
