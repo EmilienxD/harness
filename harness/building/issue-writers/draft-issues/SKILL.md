@@ -1,6 +1,6 @@
 ---
 name: draft-issues
-description: Break a plan or specification into connected tracer-bullet issue drafts. Use when the work needs multiple reviewable tickets before publication.
+description: User-invoked only. Agents must not invoke this skill on their own. Break a plan or specification into connected tracer-bullet issue drafts. Use when the work needs multiple reviewable tickets before publication.
 argument-hint: "[plan, spec, issue, or request]"
 license: MIT
 metadata:

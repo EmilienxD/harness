@@ -1,6 +1,6 @@
 ---
 name: draft-audit-issues
-description: Convert audit findings into evidence-preserving GitHub issue drafts. Use when an existing audit is ready to become reviewable tickets.
+description: User-invoked only. Agents must not invoke this skill on their own. Convert audit findings into evidence-preserving GitHub issue drafts. Use when an existing audit is ready to become reviewable tickets.
 argument-hint: "[audit report or scope]"
 license: MIT
 metadata:

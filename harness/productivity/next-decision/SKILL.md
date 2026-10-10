@@ -1,6 +1,6 @@
 ---
 name: next-decision
-description: Resolve a plan's open decisions one at a time by presenting the most important unresolved choice, four viable options, and a recommendation. Use when the user asks for the "next decision" or "one decision at a time," or wants to work through several unresolved choices sequentially. Forward-looking; use decisions to review choices already made.
+description: User-invoked only. Agents must not invoke this skill on their own. Resolve a plan's open decisions one at a time by presenting the most important unresolved choice, four viable options, and a recommendation. Use when the user asks for the "next decision" or "one decision at a time," or wants to work through several unresolved choices sequentially. Forward-looking; use decisions to review choices already made.
 argument-hint: "[plan or topic]"
 license: MIT
 metadata:

@@ -1,6 +1,6 @@
 ---
 name: address-with-agent
-description: Launch an agent to address a bounded task. Use when the user wants a separate agent to perform the work.
+description: User-invoked only. Agents must not invoke this skill on their own. Launch an agent to address a bounded task. Use when the user wants a separate agent to perform the work.
 argument-hint: "[task]"
 license: MIT
 metadata:

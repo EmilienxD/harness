@@ -1,6 +1,6 @@
 ---
 name: audit
-description: Audit a codebase or selected scope and report evidence-backed findings. Use when the user requests a security, architecture, quality, performance, or general code audit.
+description: User-invoked only. Agents must not invoke this skill on their own. Audit a codebase or selected scope and report evidence-backed findings. Use when the user requests a security, architecture, quality, performance, or general code audit.
 argument-hint: "[scope] [type] [agents=N] [focus]"
 license: MIT
 metadata:

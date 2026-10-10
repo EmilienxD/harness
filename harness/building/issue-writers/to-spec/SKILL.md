@@ -1,6 +1,6 @@
 ---
 name: to-spec
-description: Synthesize the current conversation into a specification. Use when the user wants a spec without another interview or an issue draft.
+description: User-invoked only. Agents must not invoke this skill on their own. Synthesize the current conversation into a specification. Use when the user wants a spec without another interview or an issue draft.
 argument-hint: "[reference or focus]"
 license: MIT
 metadata:

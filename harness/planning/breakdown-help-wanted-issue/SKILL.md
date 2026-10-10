@@ -1,6 +1,6 @@
 ---
 name: breakdown-help-wanted-issue
-description: Break down an unclear request into a concrete solution, provide recommendations on what to build, and agree with the user.
+description: User-invoked only. Agents must not invoke this skill on their own. Break down an unclear request into a concrete solution, provide recommendations on what to build, and agree with the user.
 argument-hint: "[request]"
 license: MIT
 metadata:

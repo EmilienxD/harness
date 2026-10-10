@@ -1,6 +1,6 @@
 ---
 name: setup-command-aliases
-description: Add or change cross-platform shell command aliases when the user asks for a new alias or shortcut command.
+description: User-invoked only. Agents must not invoke this skill on their own. Add or change cross-platform shell command aliases when the user asks for a new alias or shortcut command.
 argument-hint: "[alias request]"
 license: MIT
 metadata:

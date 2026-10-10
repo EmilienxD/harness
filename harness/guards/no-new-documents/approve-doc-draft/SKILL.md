@@ -1,6 +1,6 @@
 ---
 name: approve-doc-draft
-description: Move reviewed document drafts from .harness/doc-drafts/ to the paths they mirror. Use when the user approves a document draft.
+description: User-invoked only. Agents must not invoke this skill on their own. Move reviewed document drafts from .harness/doc-drafts/ to the paths they mirror. Use when the user approves a document draft.
 argument-hint: "[path or directory ...]"
 license: MIT
 metadata:

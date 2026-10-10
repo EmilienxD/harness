@@ -1,6 +1,6 @@
 ---
 name: review-this
-description: Review a pinned change, fix clear local problems, and validate the result. Use when the user invokes the review workflow for a specific target.
+description: User-invoked only. Agents must not invoke this skill on their own. Review a pinned change, fix clear local problems, and validate the result. Use when the user invokes the review workflow for a specific target.
 argument-hint: "[review target or expectations]"
 license: MIT
 metadata:

@@ -1,6 +1,6 @@
 ---
 name: handoff-grilling
-description: Create a detailed handoff preserving the decisions, rationale, and evidence from a grill-me session. Use when that design discussion must continue in another session.
+description: User-invoked only. Agents must not invoke this skill on their own. Create a detailed handoff preserving the decisions, rationale, and evidence from a grill-me session. Use when that design discussion must continue in another session.
 argument-hint: "[next-session focus]"
 license: MIT
 metadata:

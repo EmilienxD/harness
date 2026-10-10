@@ -1,6 +1,6 @@
 ---
 name: resume-agent
-description: Continue a delegated agent with a next message in its existing conversation.
+description: User-invoked only. Agents must not invoke this skill on their own. Continue a delegated agent with a next message in its existing conversation.
 argument-hint: "agent-i next message"
 license: MIT
 disable-model-invocation: true

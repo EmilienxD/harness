@@ -1,6 +1,6 @@
 ---
 name: prototype
-description: Build a disposable prototype to answer a design question. Use when the user asks for a prototype, draft or preview.
+description: User-invoked only. Agents must not invoke this skill on their own. Build a disposable prototype to answer a design question. Use when the user asks for a prototype, draft or preview.
 argument-hint: "[design question]"
 license: MIT
 metadata:

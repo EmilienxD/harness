@@ -1,6 +1,6 @@
 ---
 name: cleanup-git
-description: Inspect merged local branches and worktrees, then approve cleanup.
+description: User-invoked only. Agents must not invoke this skill on their own. Inspect merged local branches and worktrees, then approve cleanup.
 disable-model-invocation: true
 ---
 

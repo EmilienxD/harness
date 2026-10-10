@@ -1,6 +1,6 @@
 ---
 name: address-todo-hitl
-description: Investigate and address the most important TODO(HITL) with human agreement. Use when deferred work is ready for a human decision and implementation.
+description: User-invoked only. Agents must not invoke this skill on their own. Investigate and address the most important TODO(HITL) with human agreement. Use when deferred work is ready for a human decision and implementation.
 argument-hint: "[TODO(HITL) or scope]"
 license: MIT
 metadata:

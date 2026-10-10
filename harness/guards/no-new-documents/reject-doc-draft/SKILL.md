@@ -1,6 +1,6 @@
 ---
 name: reject-doc-draft
-description: Discard document drafts from .harness/doc-drafts/. Use when the user rejects a document draft.
+description: User-invoked only. Agents must not invoke this skill on their own. Discard document drafts from .harness/doc-drafts/. Use when the user rejects a document draft.
 argument-hint: "[path or directory ...]"
 license: MIT
 metadata:

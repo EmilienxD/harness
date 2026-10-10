@@ -1,5 +1,5 @@
 name = "auto"
-version = "1.2.2"
+version = "1.2.3"
 description = "Routes /auto and /auto --dry to an active Aboard session"
 selectable = false
 

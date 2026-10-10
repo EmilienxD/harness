@@ -1,6 +1,6 @@
 ---
 name: reply-to-agent
-description: Conclude the current agent session with a self-contained result. Use when the work must return to and continue in the parent session.
+description: User-invoked only. Agents must not invoke this skill on their own. Conclude the current agent session with a self-contained result. Use when the work must return to and continue in the parent session.
 argument-hint: "[conclusion focus]"
 license: MIT
 metadata:

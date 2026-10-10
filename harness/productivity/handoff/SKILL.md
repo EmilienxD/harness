@@ -1,6 +1,6 @@
 ---
 name: handoff
-description: Compact the current conversation into a handoff document for another agent to pick up.
+description: User-invoked only. Agents must not invoke this skill on their own. Compact the current conversation into a handoff document for another agent to pick up.
 argument-hint: "[next-session focus]"
 license: MIT
 metadata:

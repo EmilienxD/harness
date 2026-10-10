@@ -1,6 +1,6 @@
 ---
 name: address-this
-description: Implement a pinned request and validate the completed work. Use when the user invokes the address workflow for a supplied target.
+description: User-invoked only. Agents must not invoke this skill on their own. Implement a pinned request and validate the completed work. Use when the user invokes the address workflow for a supplied target.
 argument-hint: "[request or pinned target]"
 license: MIT
 metadata:

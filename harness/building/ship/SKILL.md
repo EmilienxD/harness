@@ -1,6 +1,6 @@
 ---
 name: ship
-description: Deliver an issue through a guarded implementation loop to an open or merged PR.
+description: User-invoked only. Agents must not invoke this skill on their own. Deliver an issue through a guarded implementation loop to an open or merged PR.
 argument-hint: "[issue numbers, issue URL, or PR URL]"
 disable-model-invocation: true
 ---

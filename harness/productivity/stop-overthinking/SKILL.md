@@ -1,6 +1,6 @@
 ---
 name: stop-overthinking
-description: Force a short, practical decision and identify the next action. Use when the user explicitly wants to stop analyzing and proceed.
+description: User-invoked only. Agents must not invoke this skill on their own. Force a short, practical decision and identify the next action. Use when the user explicitly wants to stop analyzing and proceed.
 argument-hint: "[decision or question]"
 license: MIT
 metadata:

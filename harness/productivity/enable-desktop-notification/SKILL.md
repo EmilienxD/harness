@@ -1,6 +1,6 @@
 ---
 name: enable-desktop-notification
-description: Enable desktop notifications for this session's final responses.
+description: User-invoked only. Agents must not invoke this skill on their own. Enable desktop notifications for this session's final responses.
 argument-hint: "[--disable]"
 license: MIT
 metadata:

@@ -1,6 +1,6 @@
 ---
 name: websearch
-description: Research a question and return a concise, source-backed answer. Use when the user explicitly requests web research.
+description: User-invoked only. Agents must not invoke this skill on their own. Research a question and return a concise, source-backed answer. Use when the user explicitly requests web research.
 argument-hint: "[research question]"
 license: MIT
 metadata:

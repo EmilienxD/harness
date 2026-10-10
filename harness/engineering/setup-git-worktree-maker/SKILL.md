@@ -1,6 +1,6 @@
 ---
 name: setup-git-worktree-maker
-description: Create or update a repository-specific command for fully initialized Git worktrees.
+description: User-invoked only. Agents must not invoke this skill on their own. Create or update a repository-specific command for fully initialized Git worktrees.
 argument-hint: "[copy or setup requirements]"
 license: MIT
 metadata:

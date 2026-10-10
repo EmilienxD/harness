@@ -1,6 +1,6 @@
 ---
 name: websearch-with-agent
-description: Launch an agent to research the web and report sourced findings. Use when the user wants a separate agent to investigate current or externally documented information.
+description: User-invoked only. Agents must not invoke this skill on their own. Launch an agent to research the web and report sourced findings. Use when the user wants a separate agent to investigate current or externally documented information.
 argument-hint: "[research task]"
 license: MIT
 metadata:

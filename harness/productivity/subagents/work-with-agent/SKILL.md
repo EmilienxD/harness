@@ -1,6 +1,6 @@
 ---
 name: work-with-agent
-description: Launch a general-purpose agent for a delegated task. Use when the user wants a separate agent to handle work that does not fit a more specific delegation skill.
+description: User-invoked only. Agents must not invoke this skill on their own. Launch a general-purpose agent for a delegated task. Use when the user wants a separate agent to handle work that does not fit a more specific delegation skill.
 argument-hint: "[task and mode/provider preferences]"
 license: MIT
 metadata:

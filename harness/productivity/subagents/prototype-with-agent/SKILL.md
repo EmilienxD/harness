@@ -1,6 +1,6 @@
 ---
 name: prototype-with-agent
-description: Launch an agent to build a focused prototype. Use when the user wants a separate agent to test an idea through a disposable implementation.
+description: User-invoked only. Agents must not invoke this skill on their own. Launch an agent to build a focused prototype. Use when the user wants a separate agent to test an idea through a disposable implementation.
 argument-hint: "[prototype task]"
 license: MIT
 metadata:

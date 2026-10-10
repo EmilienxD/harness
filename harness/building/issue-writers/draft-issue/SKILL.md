@@ -1,6 +1,6 @@
 ---
 name: draft-issue
-description: Turn a request or plan into one tracer-bullet issue draft. Use when the work belongs in a single reviewable ticket.
+description: User-invoked only. Agents must not invoke this skill on their own. Turn a request or plan into one tracer-bullet issue draft. Use when the work belongs in a single reviewable ticket.
 argument-hint: "[request, plan, spec, or reference]"
 license: MIT
 metadata:

@@ -1,5 +1,5 @@
 name = "setup-command-aliases"
-version = "1.0.4"
+version = "1.0.5"
 description = "Add or modify cross-platform shell command aliases (PowerShell, Bash, Zsh)"
 docs = "https://github.com/EmilienxD/harness/blob/main/README.md#user-invoked-skills"
 

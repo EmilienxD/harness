@@ -1,6 +1,6 @@
 ---
 name: brainstorm-with-agent
-description: Launch an interactive agent to brainstorm a plan or design with the user. Use when the user wants a separate agent to question, clarify, or stress-test their thinking.
+description: User-invoked only. Agents must not invoke this skill on their own. Launch an interactive agent to brainstorm a plan or design with the user. Use when the user wants a separate agent to question, clarify, or stress-test their thinking.
 argument-hint: "[topic]"
 license: MIT
 metadata:

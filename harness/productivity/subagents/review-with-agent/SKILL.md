@@ -1,6 +1,6 @@
 ---
 name: review-with-agent
-description: Launch an agent to review a pinned change. Use when the user wants a separate agent to inspect and validate a target.
+description: User-invoked only. Agents must not invoke this skill on their own. Launch an agent to review a pinned change. Use when the user wants a separate agent to inspect and validate a target.
 argument-hint: "[review target or expectations]"
 license: MIT
 metadata:

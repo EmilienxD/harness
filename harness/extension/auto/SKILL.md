@@ -1,6 +1,6 @@
 ---
 name: auto
-description: Start or forecast an Aboard Auto Run. Use when the user invokes the Auto command.
+description: User-invoked only. Agents must not invoke this skill on their own. Start or forecast an Aboard Auto Run. Use when the user invokes the Auto command.
 argument-hint: "[--dry]"
 license: MIT
 metadata:

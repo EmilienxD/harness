@@ -1,6 +1,6 @@
 ---
 name: to-spec-draft-issue
-description: Synthesize the current conversation into a specification draft issue. Use when the user wants an editable spec issue without another interview.
+description: User-invoked only. Agents must not invoke this skill on their own. Synthesize the current conversation into a specification draft issue. Use when the user wants an editable spec issue without another interview.
 argument-hint: "[reference or focus]"
 license: MIT
 metadata:

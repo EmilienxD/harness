@@ -1,6 +1,6 @@
 ---
 name: grill-me-in-cloud
-description: Stress-test a plan through branching interview rounds on a persistent hosted board.
+description: User-invoked only. Agents must not invoke this skill on their own. Stress-test a plan through branching interview rounds on a persistent hosted board.
 argument-hint: "[plan or design]"
 license: MIT
 metadata:

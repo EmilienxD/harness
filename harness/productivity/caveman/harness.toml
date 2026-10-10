@@ -1,5 +1,5 @@
 name = "caveman"
-version = "1.0.5"
+version = "1.0.6"
 description = "Ultra-compressed communication mode (~75% fewer tokens)"
 docs = "https://github.com/EmilienxD/harness/blob/main/harness/productivity/caveman/SKILL.md"
 

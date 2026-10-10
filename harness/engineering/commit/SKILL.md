@@ -1,6 +1,6 @@
 ---
 name: commit
-description: Commit the files changed during the current session. Use when the user requests a commit, generated message, or dry-run preview.
+description: User-invoked only. Agents must not invoke this skill on their own. Commit the files changed during the current session. Use when the user requests a commit, generated message, or dry-run preview.
 argument-hint: "[--dry | --ai [guidance] | <message>]"
 license: MIT
 metadata:

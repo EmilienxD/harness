@@ -1,7 +1,7 @@
 ---
 name: caveman
 description: >
-  Ultra-compressed communication mode. Cuts token usage \~75% by dropping
+  User-invoked only. Agents must not invoke this skill on their own. Ultra-compressed communication mode. Cuts token usage \~75% by dropping
   filler, articles, and pleasantries while keeping full technical accuracy.
   Use when the user says "caveman mode", "talk like caveman", "use caveman",
   "less tokens", "be brief", or invokes the skill explicitly.

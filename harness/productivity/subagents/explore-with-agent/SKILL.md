@@ -1,6 +1,6 @@
 ---
 name: explore-with-agent
-description: Launch a read-only agent to explore a codebase and report its findings. Use when the user wants a separate agent to investigate without making changes.
+description: User-invoked only. Agents must not invoke this skill on their own. Launch a read-only agent to explore a codebase and report its findings. Use when the user wants a separate agent to investigate without making changes.
 argument-hint: "[exploration task]"
 license: MIT
 metadata:

@@ -1,5 +1,5 @@
 name = "breakdown-help-wanted-issue"
-version = "1.4.1"
+version = "1.4.2"
 description = "Explore a request and agree with the user on what to build"
 requires = ["git", "gh"]
 docs = "https://github.com/EmilienxD/harness/blob/main/README.md#user-invoked-skills"
