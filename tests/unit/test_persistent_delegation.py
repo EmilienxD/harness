@@ -42,11 +42,14 @@ def test_resume_refuses_live_provider_without_birth_identity_even_if_supervisor_
         processes.require_exited("child")
 
 
-def test_recovery_retries_a_definitively_unspawned_reservation_with_original_identities(tmp_path, monkeypatch):
+@pytest.mark.parametrize("model", [None, "claude-opus-5-5"])
+@pytest.mark.parametrize("changed", [False, True])
+def test_recovery_retries_a_definitively_unspawned_reservation_with_original_identities(tmp_path, monkeypatch, model, changed):
     monkeypatch.setenv("HARNESS_STATE_DIR", str(tmp_path / "state"))
     sessions.register_observed("parent", tmp_path, "claude")
     inbox = enable_delegation("parent", "work-with-agent").inbox
-    (inbox / "task.md").write_text("---\ntask: general\nmode: auto\n---\nTask.", encoding="utf-8")
+    model_field = f"model: {model}\n" if model is not None else ""
+    (inbox / "task.md").write_text(f"---\ntask: general\nmode: auto\n{model_field}---\nTask.", encoding="utf-8")
     def crash_before_spawn(*_):
         raise KeyboardInterrupt()
     with pytest.raises(KeyboardInterrupt):
@@ -55,12 +58,19 @@ def test_recovery_retries_a_definitively_unspawned_reservation_with_original_ide
         request_id, child_id = connection.execute("SELECT id,child_session_id FROM requests").fetchone()
         connection.execute("UPDATE executions SET reservation_pid=2147483647,reservation_birth='dead'")
     started = []
+    if changed:
+        (inbox / "task.md.running").write_text("---\ntask: general\nmode: auto\nmodel: claude-sonnet-5-5\n---\nTask.", encoding="utf-8")
     def adapter(request, identity, number, cwd):
-        started.append((identity, number, cwd))
+        started.append((identity, number, cwd, request.model))
         return child_id
     [recovered] = process_inbox("parent", launch=adapter)
-    assert recovered.status == "launched" and recovered.child_session_id == child_id
-    assert started == [(request_id, 1, tmp_path.resolve())]
+    if changed:
+        assert recovered.status == "failed"
+        assert recovered.reason == "Claimed request metadata changed after reservation"
+        assert started == []
+    else:
+        assert recovered.status == "launched" and recovered.child_session_id == child_id
+        assert started == [(request_id, 1, tmp_path.resolve(), model)]
     assert not list(inbox.iterdir())
 
 

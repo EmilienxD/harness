@@ -48,6 +48,42 @@ class FakeTerminalHost implements TerminalHost {
 }
 
 for (const provider of ["claude", "chatgpt"] as const) {
+  test(`manual ${provider} launch and reopen retain the requested model over the configured profile`, async () => {
+    const host = new FakeTerminalHost();
+    const platform: AgentPlatform = provider === "claude"
+      ? new ClaudeAgentPlatform({ lifecycleAssets: { settings: "hooks.json", script: "hook.py" },
+        commandRunner: async () => ({ code: 0, stdout: "2.1.100", stderr: "" }), resumable: async () => true })
+      : new ChatGptAgentPlatform({ lifecycleAssets: { settings: "hooks.json", script: "hook.py" },
+        commandRunner: async () => ({ code: 0, stdout: "codex-cli 0.153.4", stderr: "" }),
+        sessionProbe: { inspect: async () => ({ state: "resumable" }) }, policyProbe: { require: async () => undefined } });
+    let number = 0;
+    const terminals = new TerminalController({ host, shell: "powershell",
+      environment: () => ({ port: 4823, token: "token", workspaceRoot: "C:/work" }),
+      terminalIdFactory: () => `terminal-${++number}` as TerminalId });
+    const coordinator = new DelegationCoordinator({ workspaceRoot: "C:/work", fleet: new FleetRegistry(), lease: new WriteLease(), terminals,
+      configurations: configurationSource(async () => ({ platform: provider, settings: {
+        shape: "default", declaredModel: provider === "claude" ? "sonnet" : "gpt-5.6-luna", declaredEffort: "high",
+      } })),
+      platforms: new Map([[provider, platform]]), prompts: { resolve: async () => undefined },
+      spills: { prepare: async () => undefined, write: async () => "unused" }, shell: "powershell",
+      agentIdFactory: () => `agent-${number + 1}` as AgentId });
+    const model = provider === "claude" ? "claude-opus-5-5" : "gpt-6.1-sol";
+
+    await coordinator.launchManual({ type: "general", description: "Work", model }, "interactive");
+    await coordinator.reopen({ platform: provider, agentId: "reopened" as AgentId, type: "general", delegationTask: "general",
+      sessionId: "af817a6c-cd41-41e2-a4db-44d3f43cd560" as SessionId, model });
+
+    for (const terminal of host.terminals) {
+      const command = terminal.sent.at(-1) ?? "";
+      assert.match(command, new RegExp(`--model '?${model.replaceAll(".", "\\.")}'?`, "u"));
+      if (provider === "chatgpt") assert.match(command, /model_reasoning_effort.*high/u);
+      else assert.ok(!command.includes("--effort"));
+    }
+    assert.equal(host.terminals.length, 2);
+  });
+}
+
+for (const provider of ["claude", "chatgpt"] as const) {
   test(`closed-terminal loop reopen uses the ${provider} worktree profile and retained difficulty`, async (t) => {
     const root = await mkdtemp(join(tmpdir(), "aboard-loop-reopen-"));
     t.after(() => rm(root, { recursive: true, force: true }));

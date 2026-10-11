@@ -44,6 +44,7 @@ export interface LaunchIsolation {
 }
 
 export interface DelegationLaunchInput {
+  readonly model?: string;
   readonly forkSessionId?: SessionId;
   readonly harnessStateDirectory?: string;
   readonly harnessRuntimePath?: string;
@@ -91,6 +92,7 @@ export interface AutomatedLaunchOutcome {
 }
 
 export interface ReopenTarget {
+  readonly model?: string;
   readonly harnessStateDirectory?: string;
   readonly harnessRuntimePath?: string;
   readonly harnessSessionId?: string;
@@ -304,6 +306,7 @@ export class DelegationCoordinator {
       ...(target.autoRunRestricted === true ? { autoRunRestricted: true as const } : {}),
       ...(isAutoRunWorkerType(target.type) && target.chromeEnabled === true ? { chrome: true } : {}),
       configuration: configured.settings,
+      ...(target.model === undefined ? {} : { modelOverride: target.model }),
       runtimeDirectory: this.options.runtimeDirectory ?? (this.options.wrapper === undefined ? undefined : dirname(dirname(this.options.wrapper.lockPathFor(target.agentId)))),
       ...(this.options.promptRoot === undefined ? {} : { promptRoot: this.options.promptRoot }),
       ...(target.prompt === undefined ? {} : { prompt: target.prompt }),
@@ -526,6 +529,7 @@ export class DelegationCoordinator {
       ...(origin === "auto-run" ? { autoRunRestricted: true as const } : {}),
       ...(isAutoRunWorkerType(agentType) && input.chrome === true ? { chrome: true } : {}),
       configuration: configured.settings,
+      ...(input.model === undefined ? {} : { modelOverride: input.model }),
       runtimeDirectory: this.options.runtimeDirectory ?? (this.options.wrapper === undefined ? undefined : dirname(dirname(this.options.wrapper.lockPathFor(agentId)))),
       ...(this.options.promptRoot === undefined ? {} : { promptRoot: this.options.promptRoot }),
       prompt,

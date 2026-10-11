@@ -73,7 +73,7 @@ interface ResolvedLaunchPolicy {
 
 function launchPolicy(
   declared: { readonly declaredModel?: string | undefined; readonly declaredEffort?: DeclaredEffort | undefined },
-  request: { readonly model?: string | undefined; readonly effort?: EffortLevel | undefined; readonly difficulty?: IssueDifficulty | undefined },
+  request: { readonly model?: string | undefined; readonly modelOverride?: string | undefined; readonly effort?: EffortLevel | undefined; readonly difficulty?: IssueDifficulty | undefined },
 ): ResolvedLaunchPolicy {
   const tier = difficultyLaunchPolicy(request.difficulty);
   const declaredModel = declared.declaredModel === BY_DIFFICULTY ? tier.model : declared.declaredModel;
@@ -81,7 +81,7 @@ function launchPolicy(
   return {
     declaredModel,
     declaredEffort,
-    model: declaredModel ?? request.model,
+    model: request.modelOverride ?? declaredModel ?? request.model,
     effort: declaredEffort ?? request.effort,
   };
 }

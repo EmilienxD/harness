@@ -39,6 +39,7 @@ const SKILL_INVOCATION = /^[/\$][A-Za-z0-9_-]+(?:\s|$)/u;
 /** A claim whose launch never reported an outcome: callers must verify, not retry. */
 class StartupUncertain extends Error {}
 export interface ManualDelegationLaunch {
+  readonly model?: string;
   readonly difficulty?: IssueDifficulty;
   readonly forkSessionId?: string;
   readonly harnessPython?: string;
@@ -152,7 +153,8 @@ function parse(body: unknown): ManualDelegationLaunch | undefined {
   if (identities.some((key) => value[key] !== undefined && (typeof value[key] !== "string" || (value[key] as string).trim().length === 0))) return undefined;
   if ((value.resumeAgentId === undefined) !== (value.resumeSessionId === undefined)) return undefined;
   if (value.forkSessionId !== undefined && value.forkSessionId !== value.resumeSessionId) return undefined;
-  if (Object.keys(value).some((key) => !["requestId", "task", "provider", "mode", "prompt", "cwd", "difficulty", ...identities].includes(key))) return undefined;
+  if (Object.keys(value).some((key) => !["requestId", "task", "provider", "mode", "model", "prompt", "cwd", "difficulty", ...identities].includes(key))) return undefined;
+  if (value.model !== undefined && (typeof value.model !== "string" || value.model.trim().length === 0)) return undefined;
   if (value.difficulty !== undefined && !ISSUE_DIFFICULTIES.includes(value.difficulty as IssueDifficulty)) return undefined;
   if (typeof value.requestId !== "string" || value.requestId.trim().length === 0) return undefined;
   if (typeof value.task !== "string" || !(value.task in TASKS)) return undefined;
@@ -171,6 +173,7 @@ function parse(body: unknown): ManualDelegationLaunch | undefined {
     task: value.task as DelegationTask,
     provider: value.provider,
     executionMode: value.mode,
+    ...(value.model === undefined ? {} : { model: (value.model as string).trim() }),
     ...(value.difficulty === undefined ? {} : { difficulty: value.difficulty as IssueDifficulty }),
     prompt: value.prompt,
     ...(skill === undefined ? {} : { skill }),

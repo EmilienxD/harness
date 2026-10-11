@@ -95,7 +95,7 @@ function planChatGptSession(request: PlatformLaunchRequest | PlatformResumeReque
         contents: `${JSON.stringify({ denySubagents: subagentsDenied, denyCommands }, null, 2)}\n`,
       }
     : undefined;
-  const policy = launchPolicy(configuration, request.difficulty);
+  const policy = launchPolicy(configuration, request.difficulty, request.modelOverride);
   const permissionProfile = readOnlyFiles.length === 0
     ? []
     : permissionProfileArguments(readOnlyFiles, explore, worker ? request.writableRoots ?? [] : []);
@@ -222,9 +222,10 @@ function assertShape(agentType: AgentType, configuration: ChatGptLaunchConfigura
 function launchPolicy(
   configuration: ChatGptLaunchConfiguration,
   difficulty: IssueDifficulty | undefined,
+  modelOverride: string | undefined,
 ): { readonly model: string | undefined; readonly effort: ChatGptEffort | undefined } {
   const tier = chatGptDifficultyLaunchPolicy(difficulty);
-  const model = configuration.declaredModel === BY_DIFFICULTY ? tier.model : configuration.declaredModel;
+  const model = modelOverride ?? (configuration.declaredModel === BY_DIFFICULTY ? tier.model : configuration.declaredModel);
   const effort = configuration.declaredEffort === BY_DIFFICULTY ? tier.effort : configuration.declaredEffort;
   if (model !== undefined && (model.trim().length === 0 || CLAUDE_MODELS.has(model))) {
     throw new LaunchPlanError("invalid-model", `Model is not valid for platform chatgpt: ${JSON.stringify(model)}`);

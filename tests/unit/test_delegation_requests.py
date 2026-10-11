@@ -54,7 +54,7 @@ def test_published_schemas_describe_the_implemented_contracts() -> None:
     modes = {mode for policy in policies.values() for mode in policy.modes}
 
     # The prompt is the Markdown body, so it is never a frontmatter key.
-    assert set(request["properties"]) == {"task", "provider", "mode", "resume", "cwd", "difficulty", "prompt-file"}
+    assert set(request["properties"]) == {"task", "provider", "mode", "model", "resume", "cwd", "difficulty", "prompt-file"}
     assert request["oneOf"][0]["required"] == ["task", "mode"]
     assert request["properties"]["task"]["type"] == "string"
     assert set(request["properties"]["mode"]["enum"]) == modes
@@ -82,6 +82,7 @@ def test_codex_is_an_alias_of_chatgpt(tmp_path: Path) -> None:
     )
 
     assert parsed.provider == "chatgpt"
+    assert parsed.model is None
 
 
 def test_provider_defaults_to_the_parent_provider(tmp_path: Path) -> None:
@@ -107,6 +108,11 @@ def test_provider_defaults_to_the_parent_provider(tmp_path: Path) -> None:
         ("request.txt", "---\ntask: general\nmode: auto\n---\nbody", "Markdown"),
         ("request.md", "---\ntask: general\nmode: auto\nextra: no\n---\nbody", "unsupported frontmatter"),
         ("request.md", "---\ntask: [general]\nmode: auto\n---\nbody", "scalar string"),
+        ("request.md", "---\ntask: general\nmode: auto\nmodel: null\n---\nbody", "scalar string"),
+        ("request.md", "---\ntask: general\nmode: auto\nmodel: 123\n---\nbody", "scalar string"),
+        ("request.md", "---\ntask: general\nmode: auto\nmodel: [gpt-6.1-sol]\n---\nbody", "scalar string"),
+        ("request.md", "---\ntask: general\nmode: auto\nmodel: ' '\n---\nbody", "scalar string"),
+        ("request.md", "---\nresume: agent-1\nmodel: gpt-6.1-sol\n---\nbody", "resume requires only"),
         ("request.md", "---\ntask: general\n---\nbody", "mode"),
         ("request.md", "---\ntask: general\nmode: auto\n---\n", "body"),
 

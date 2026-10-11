@@ -41,6 +41,11 @@
         "loop"
       ]
     },
+    "model": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Explicit model ID for this child; omitted requests retain the task's launch profile."
+    },
     "prompt": {
       "type": "string",
       "minLength": 1

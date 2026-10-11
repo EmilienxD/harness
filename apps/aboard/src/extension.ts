@@ -663,6 +663,7 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
           ? await parentTerminalUri(request.harnessSessionId)
           : undefined;
         return coordinator.launchManual({
+          ...(request.model === undefined ? {} : { model: request.model }),
           requestId: request.requestId,
           ...(request.harnessStateDirectory === undefined ? {} : { harnessStateDirectory: request.harnessStateDirectory }),
           ...(request.harnessRuntimePath === undefined ? {} : { harnessRuntimePath: request.harnessRuntimePath }),
@@ -703,6 +704,7 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
         if (request.forkSessionId !== undefined) {
           const configured = await launchFile.getDelegationFor(binding.provider, binding.task);
           return coordinator.launchManual({
+            ...(request.model === undefined ? {} : { model: request.model }),
             forkSessionId: request.forkSessionId as SessionId,
             requestId: request.requestId,
             harnessSessionId: request.harnessSessionId,
@@ -717,6 +719,7 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
         }
         if (lockMarkerLive(lockPath)) throw new Error("Delegated execution is running or uncertain; resume refused");
         return coordinator.reopen({
+          ...(request.model === undefined ? {} : { model: request.model }),
           platform: binding.provider, agentId: binding.agentId as AgentId, type: binding.type,
           delegationTask: binding.task, sessionId: binding.sessionId as SessionId,
           executionMode: binding.executionMode, cwd: binding.cwd, prompt: request.prompt,

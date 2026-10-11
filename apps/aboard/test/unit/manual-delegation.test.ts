@@ -3,6 +3,27 @@ import test from "node:test";
 
 import { createDelegationRoutes, continueHarnessDelegation, delegationParentSession } from "../../src/bridge/manual-delegation.js";
 
+test("manual delegation forwards an explicit model and omits it otherwise", async () => {
+  const launches: unknown[] = [];
+  const handler = createDelegationRoutes({ launch: async (request) => {
+    launches.push(request);
+    return { agentId: "agent", sessionId: "child", terminalId: "terminal" };
+  } });
+  for (const provider of ["claude", "chatgpt"] as const) {
+    for (const model of [undefined, provider === "claude" ? "claude-opus-5-5" : "gpt-6.1-sol"]) {
+      const response = await handler({
+        method: "POST", url: new URL("http://localhost/delegations"), headers: {}, signal: new AbortController().signal,
+        body: { requestId: `${provider}-${model}`, task: "general", provider, mode: "interactive", prompt: "Work.", cwd: "C:\\work",
+          ...(model === undefined ? {} : { model }) },
+      });
+      assert.equal(response.status, 201);
+      const received = launches.at(-1) as Record<string, unknown>;
+      assert.equal(received.model, model);
+      assert.equal(Object.hasOwn(received, "model"), model !== undefined);
+    }
+  }
+});
+
 test("loop delegation retains runtime ownership and difficulty without a worker skill", async () => {
   const launches: unknown[] = [];
   const handler = createDelegationRoutes({ launch: async (request) => {

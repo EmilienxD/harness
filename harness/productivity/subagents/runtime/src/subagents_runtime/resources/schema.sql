@@ -1,6 +1,7 @@
 CREATE TABLE sessions (
  id TEXT PRIMARY KEY, provider_session_id TEXT, cwd TEXT NOT NULL,
  provider TEXT NOT NULL DEFAULT 'claude', execution_mode TEXT NOT NULL DEFAULT 'interactive',
+ model TEXT,
  parent_session_id TEXT REFERENCES sessions(id), agent_index INTEGER CHECK(agent_index >= 1),
  hook_sequence INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
  UNIQUE(provider, provider_session_id), UNIQUE(parent_session_id, agent_index),

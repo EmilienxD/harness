@@ -44,6 +44,7 @@ class DelegationRequest:
     difficulty: str | None = None
     prompt_path: Path | None = None
     child_skill: str | None = None
+    model: str | None = None
 
 
 @dataclass(frozen=True)
@@ -126,7 +127,7 @@ def parse_request_file(
     if not isinstance(metadata, dict):
         raise RequestFileError("frontmatter must be a mapping")
     keys = set(metadata)
-    accepted = {"task", "provider", "mode", "resume", "cwd", "difficulty", "prompt-file"}
+    accepted = {"task", "provider", "mode", "model", "resume", "cwd", "difficulty", "prompt-file"}
     if extras := keys - accepted:
         raise RequestFileError(
             "unsupported frontmatter keys: " + ", ".join(sorted(map(str, extras)))
@@ -189,6 +190,7 @@ def parse_request_file(
         difficulty=metadata.get("difficulty"),
         prompt_path=Path(metadata["prompt-file"]).resolve() if task == "loop" else None,
         child_skill=policy.skill,
+        model=metadata["model"].strip() if "model" in metadata else None,
     )
 
 
@@ -416,7 +418,7 @@ def reconcile_inbox(session_id: str, *, launch: Callable | None = None) -> list[
                     connection.execute("UPDATE executions SET reservation_pid=?,reservation_birth=? WHERE id=?",
                                        (os.getpid(), processes.birth_identity(os.getpid()), execution[3]))
                     persisted = connection.execute(
-                        "SELECT r.task,r.provider,r.mode,r.prompt_hash,s.cwd,s.agent_index,r.kind FROM requests r JOIN sessions s ON s.id=r.child_session_id WHERE r.id=?", (row[0],)
+                        "SELECT r.task,r.provider,r.mode,r.prompt_hash,s.cwd,s.agent_index,r.kind,s.model FROM requests r JOIN sessions s ON s.id=r.child_session_id WHERE r.id=?", (row[0],)
                     ).fetchone()
                     retries.append((path, row[0], execution[3], row[2], persisted))
                     continue
@@ -442,14 +444,14 @@ def reconcile_inbox(session_id: str, *, launch: Callable | None = None) -> list[
         path = claimed_path.with_name(claimed_path.name[:-8])
         try:
             request = parse_request_file(claimed_path, delegation.inbox, parent_provider=delegation.provider, claimed=True, cwd=delegation.original_cwd)
-            task, provider, mode, prompt_hash, cwd, number, kind = persisted
+            task, provider, mode, prompt_hash, cwd, number, kind, model = persisted
             if hashlib.sha256(request.prompt.encode()).hexdigest() != prompt_hash or bool(request.resume) != (kind == "resume"):
                 raise RequestFileError("Claimed request content changed after reservation")
-            if kind == "launch" and (request.task, request.provider, request.mode) != (task, provider, mode):
+            if kind == "launch" and (request.task, request.provider, request.mode, request.model) != (task, provider, mode, model):
                 raise RequestFileError("Claimed request metadata changed after reservation")
             if kind == "resume" and sessions.resolve_session(request.resume, session_id) != child_id:
                 raise RequestFileError("Claimed request child changed after reservation")
-            request = replace(request, path=path, task=task, provider=provider, mode=mode)
+            request = replace(request, path=path, task=task, provider=provider, mode=mode, model=model)
             results.append(_finish_launch(request, request_id, execution_id, child_id, number, Path(cwd), path, launch))
         except Exception as exc:
             results.append(_fail_request(path, request_id, execution_id, child_id, exc, session_id))
@@ -542,7 +544,7 @@ def process_inbox(
                 if request.resume:
                     child_id = sessions.resolve_session(request.resume, session_id)
                     row = connection.execute(
-                        "SELECT provider,execution_mode,cwd,agent_index,provider_session_id FROM sessions WHERE id=? AND parent_session_id=?",
+                        "SELECT provider,execution_mode,cwd,agent_index,provider_session_id,model FROM sessions WHERE id=? AND parent_session_id=?",
                         (child_id, session_id),
                     ).fetchone()
                     if row is None:
@@ -579,7 +581,7 @@ def process_inbox(
                         fork_of = row[4] if row[1] != "loop" else None
                         _supersede_child(connection, child_id)
                     request = replace(
-                        request, provider=row[0], mode=row[1], task=original[0]
+                        request, provider=row[0], mode=row[1], task=original[0], model=row[5]
                     )
                     cwd, number = Path(row[2]), row[3]
                 else:
@@ -594,7 +596,7 @@ def process_inbox(
                         if connection.execute("SELECT 1 FROM loop_sessions WHERE worktree_key=? AND active=1", (worktree_key(cwd),)).fetchone():
                             raise RequestFileError("worktree already has an active loop implementer; release it first")
                     connection.execute(
-                        "INSERT INTO sessions(id,cwd,provider,execution_mode,parent_session_id,agent_index) VALUES (?,?,?,?,?,?)",
+                        "INSERT INTO sessions(id,cwd,provider,execution_mode,parent_session_id,agent_index,model) VALUES (?,?,?,?,?,?,?)",
                         (
                             child_id,
                             str(cwd),
@@ -602,6 +604,7 @@ def process_inbox(
                             request.mode,
                             session_id,
                             number,
+                            request.model,
                         ),
                     )
                     if request.mode == "loop":

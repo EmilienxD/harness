@@ -21,10 +21,23 @@ Launch frontmatter schema (`|` separates enum values):
 task: <registered task>    # Required. Selects a built-in or custom task (see below).
 mode: auto|interactive    # Required. Spawn the subagent in a headless or visible terminal.
 provider: claude|chatgpt|codex    # Optional. Defaults to this conversation's provider. `codex` is an alias of chatgpt.
+model: <model id>         # Optional. Include only when the user explicitly requests a particular model.
 ---
 
 <prompt for the new subagent>
 ```
+
+## Model selection
+
+Include `model` only when the user explicitly requests a particular model for the subagent. Otherwise omit the field and let the runtime apply its existing task profile and native provider defaults.
+
+Use the requested model's exact ID for the selected provider from this list:
+- ChatGPT/Codex: `gpt-6.1-sol`, `gpt-6-astra`, `gpt-6-sol`, `gpt-6-luna`, `gpt-5.6-sol`, `gpt-5.6-terra`, `gpt-5.6-luna`
+- Claude`claude-fable-5-1`, `claude-opus-5-5`, `claude-opus-5`, `claude-sonnet-5-5`, `claude-haiku-5-5` |
+
+If the requested model is absent, tell the user the list needs updating before launching with that model. An explicit model overrides the task default.
+
+## Task selection
 
 Below is the built-in list of tasks, allowed modes, and default mode:
 

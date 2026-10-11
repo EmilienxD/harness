@@ -49,7 +49,74 @@ def test_array_commands_are_argv_and_preserve_token_contents():
     assert sessions._command(["wrapper", " profile with spaces "], "terminalCommand") == ["wrapper", " profile with spaces "]
 
 
-def test_delegated_launch_prefers_the_scoped_aboard_endpoint(tmp_path, monkeypatch):
+@pytest.mark.parametrize("provider, model", [("claude", "claude-opus-5-5"), ("chatgpt", "gpt-6.1-sol")])
+@pytest.mark.parametrize("mode", ["interactive", "auto"])
+@pytest.mark.parametrize("explicit", [False, True])
+def test_delegated_model_overrides_only_when_requested(tmp_path, monkeypatch, provider, model, mode, explicit):
+    from subagents_runtime.delegation import enable_delegation, process_inbox
+
+    launches = []
+    configured(tmp_path / "state", monkeypatch, launches)
+    monkeypatch.setattr(sessions, "_discover_delegation_endpoint", lambda _: None)
+    (tmp_path / ".harness").mkdir()
+    (tmp_path / ".harness" / "config.json").write_text(json.dumps({
+        "version": 1,
+        "providers": {provider: {"delegations": {"general": {
+            "model": "sonnet" if provider == "claude" else "gpt-5.6-luna", "effort": "high",
+        }}}},
+    }), encoding="utf-8")
+    sessions.register_observed("parent", tmp_path, provider)
+    inbox = enable_delegation("parent", "work-with-agent").inbox
+    model_field = f"model: {model}\n" if explicit else ""
+    (inbox / "work.md").write_text(f"---\ntask: general\nmode: {mode}\n{model_field}---\nWork.", encoding="utf-8")
+
+    [result] = process_inbox("parent", launch=sessions.launch_delegated)
+
+    assert result.status == "launched", result.reason
+    argv = launches[-1][0]
+    assert argv.count("--model") == 1
+    assert argv[argv.index("--model") + 1] == (model if explicit else "sonnet" if provider == "claude" else "gpt-5.6-luna")
+    if provider == "claude":
+        assert argv[argv.index("--effort") + 1] == "high"
+    else:
+        assert 'model_reasoning_effort="high"' in argv
+
+
+@pytest.mark.parametrize("provider, model", [("claude", "claude-opus-5-5"), ("chatgpt", "gpt-6.1-sol")])
+@pytest.mark.parametrize("live", [False, True])
+def test_delegated_resume_retains_explicit_model(tmp_path, monkeypatch, provider, model, live):
+    import os
+    from subagents_runtime import processes
+    from subagents_runtime.delegation import enable_delegation, process_inbox
+
+    launches = []
+    configured(tmp_path / "state", monkeypatch, launches)
+    monkeypatch.setattr(sessions, "_discover_delegation_endpoint", lambda _: None)
+    sessions.register_observed("parent", tmp_path, provider)
+    inbox = enable_delegation("parent", "work-with-agent").inbox
+    (inbox / "work.md").write_text(f"---\ntask: general\nmode: auto\nmodel: {model}\n---\nWork.", encoding="utf-8")
+    [first] = process_inbox("parent", launch=sessions.launch_delegated)
+    assert first.status == "launched", first.reason
+    with sessions._connect() as connection:
+        connection.execute("UPDATE sessions SET provider_session_id='provider-child' WHERE id=?", (first.child_session_id,))
+        connection.execute("UPDATE executions SET state='exited' WHERE request_id=?", (first.request_id,))
+        connection.execute("UPDATE requests SET state='succeeded' WHERE id=?", (first.request_id,))
+        if live:
+            connection.execute("UPDATE executions SET state='running',provider_pid=?,provider_birth=? WHERE request_id=?",
+                               (os.getpid(), processes.birth_identity(os.getpid()), first.request_id))
+    (inbox / "continue.md").write_text("---\nresume: agent-1\n---\nContinue.", encoding="utf-8")
+
+    [continued] = process_inbox("parent", launch=sessions.launch_delegated)
+
+    assert continued.status == "launched", continued.reason
+    argv = launches[-1][0]
+    assert argv[argv.index("--model") + 1] == model
+    if live:
+        assert "--fork-session" in argv if provider == "claude" else "fork" in argv
+
+
+@pytest.mark.parametrize("model", [None, "gpt-6.1-sol"])
+def test_delegated_launch_prefers_the_scoped_aboard_endpoint(tmp_path, monkeypatch, model):
     monkeypatch.setenv("HARNESS_STATE_DIR",str(tmp_path / "state"))
     project = tmp_path / "project"
     project.mkdir()
@@ -67,11 +134,37 @@ def test_delegated_launch_prefers_the_scoped_aboard_endpoint(tmp_path, monkeypat
 
     monkeypatch.setattr(sessions.urllib.request, "urlopen", urlopen)
     monkeypatch.setattr(sessions, "_visible_terminal", lambda *_args: pytest.fail("native fallback used"))
-    request = type("Request", (), {"task": "prototype", "provider": "chatgpt", "mode": "auto", "prompt": "Build it."})()
+    request = type("Request", (), {"task": "prototype", "provider": "chatgpt", "mode": "auto", "prompt": "Build it.", "model": model})()
     assert sessions._launch_through_aboard(request, "request", project) == "aboard-child"
     assert captured["authorization"] == "Bearer scoped-secret"
     assert captured["body"]["requestId"] == "request"
     assert captured["body"]["cwd"] == str(project.resolve())
+    assert captured["body"].get("model") == model
+    assert ("model" in captured["body"]) == (model is not None)
+
+
+def test_existing_database_keeps_children_when_model_selection_is_added(tmp_path, monkeypatch):
+    from subagents_runtime.delegation import enable_delegation, process_inbox
+
+    launches = []
+    configured(tmp_path / "state", monkeypatch, launches)
+    monkeypatch.setattr(sessions, "_discover_delegation_endpoint", lambda _: None)
+    sessions.register_observed("parent", tmp_path, "claude")
+    inbox = enable_delegation("parent", "work-with-agent").inbox
+    (inbox / "old.md").write_text("---\ntask: general\nmode: auto\n---\nWork.", encoding="utf-8")
+    [original] = process_inbox("parent", launch=sessions.launch_delegated)
+    assert original.status == "launched", original.reason
+    with sessions._connect() as connection:
+        connection.execute("ALTER TABLE sessions DROP COLUMN model")
+        connection.execute("PRAGMA user_version=6")
+    (inbox / "new.md").write_text("---\ntask: general\nmode: auto\nmodel: claude-opus-5-5\n---\nWork.", encoding="utf-8")
+
+    [new] = process_inbox("parent", launch=sessions.launch_delegated)
+
+    assert new.status == "launched", new.reason
+    assert sessions.resolve_session("agent-1", "parent") == original.child_session_id
+    argv = launches[-1][0]
+    assert argv[argv.index("--model") + 1] == "claude-opus-5-5"
 
 
 @pytest.mark.parametrize("provider", ["claude","chatgpt"])

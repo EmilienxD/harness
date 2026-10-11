@@ -85,6 +85,8 @@ export interface PlatformLaunchRequest {
   readonly skill?: string | undefined;
   readonly autoRunRestricted?: true | undefined;
   readonly model?: string | undefined;
+  /** Explicit child selection, ahead of the configured launch profile. */
+  readonly modelOverride?: string | undefined;
   readonly effort?: EffortLevel | undefined;
   readonly difficulty?: IssueDifficulty | undefined;
   readonly command?: readonly string[] | undefined;

@@ -164,7 +164,8 @@ def _provider_command(config: dict[str, Any], provider: str) -> list[str]:
 
 
 def delegation_profile_arguments(
-    config: dict[str, Any], provider: str, task: str, *, difficulty: str | None = None
+    config: dict[str, Any], provider: str, task: str, *, difficulty: str | None = None,
+    model_override: str | None = None,
 ) -> list[str]:
     """Resolve one manual task without coupling it to another launch profile."""
     providers = config.get("providers", {})
@@ -191,6 +192,8 @@ def delegation_profile_arguments(
         model, routed_effort = _DIFFICULTY_PROFILES[provider][DIFFICULTIES.index(difficulty or "expert")]
         if "effort" not in selected:
             effort = routed_effort
+    if model_override is not None:
+        model = model_override
     model = None if model == "inherit" else model
     effort = None if effort == "inherit" else effort
     model_invalid = (
@@ -198,10 +201,10 @@ def delegation_profile_arguments(
         and (
             not isinstance(model, str)
             or not model.strip()
-            or (provider == "claude" and model not in _CLAUDE_MODELS)
+            or (provider == "claude" and model not in _CLAUDE_MODELS and not model.startswith("claude-"))
             or (
                 provider == "chatgpt"
-                and model in _CLAUDE_MODELS
+                and (model in _CLAUDE_MODELS or model.startswith("claude-"))
             )
         )
     )
@@ -561,7 +564,8 @@ def launch_delegated(request, request_id: str, agent_number: int, cwd: Path) -> 
                 fork=True,
                 fork_id=forked,
                 launch_options=delegation_profile_arguments(
-                    launch_config, request.provider, request.task, difficulty=getattr(request, "difficulty", None)
+                    launch_config, request.provider, request.task, difficulty=getattr(request, "difficulty", None),
+                    model_override=getattr(request, "model", None),
                 ),
             ),
         ]
@@ -593,7 +597,8 @@ def launch_delegated(request, request_id: str, agent_number: int, cwd: Path) -> 
             prompt,
             resume=continuing,
             launch_options=delegation_profile_arguments(
-                launch_config, request.provider, request.task, difficulty=getattr(request, "difficulty", None)
+                launch_config, request.provider, request.task, difficulty=getattr(request, "difficulty", None),
+                model_override=getattr(request, "model", None),
             ),
         )
     )
@@ -786,6 +791,7 @@ def _launch_through_aboard(request, request_id: str, cwd: Path) -> str | None:
             "task": request.task,
             "provider": request.provider,
             "mode": request.mode,
+            **({"model": request.model} if getattr(request, "model", None) is not None else {}),
             "prompt": request.prompt,
             "cwd": str(cwd.resolve()),
             **({"difficulty": request.difficulty} if getattr(request, "difficulty", None) else {}),
