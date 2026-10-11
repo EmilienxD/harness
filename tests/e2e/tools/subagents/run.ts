@@ -335,7 +335,9 @@ interface HookSettings {
 
 async function stagePayload(platform: Platform, packageRoot: string, projectRoot: string, python: string): Promise<void> {
   if (platform === "claude") {
-    await cp(join(packageRoot, "work-with-agent"), join(projectRoot, ".claude", "skills", "work-with-agent"), { recursive: true });
+    const skillRoot = join(projectRoot, ".claude", "skills", "work-with-agent");
+    await mkdir(skillRoot, { recursive: true });
+    await cp(join(packageRoot, "work-with-agent", "SKILL.md"), join(skillRoot, "SKILL.md"));
     await mkdir(join(projectRoot, ".claude"), { recursive: true });
     const settings = JSON.parse(await readFile(join(packageRoot, "claude", "settings.fragment.json"), "utf8")) as HookSettings;
     for (const groups of Object.values(settings.hooks)) {
@@ -350,9 +352,9 @@ async function stagePayload(platform: Platform, packageRoot: string, projectRoot
     return;
   }
   const skillRoot = join(projectRoot, ".agents", "skills", "work-with-agent");
-  await cp(join(packageRoot, "work-with-agent"), skillRoot, { recursive: true });
   await mkdir(join(skillRoot, "agents"), { recursive: true });
-  await cp(join(packageRoot, "chatgpt", "agents", "work-with-agent.yaml"), join(skillRoot, "agents", "openai.yaml"));
+  await cp(join(packageRoot, "work-with-agent", "SKILL.md"), join(skillRoot, "SKILL.md"));
+  await cp(join(packageRoot, "work-with-agent", "chatgpt", "openai.yaml"), join(skillRoot, "agents", "openai.yaml"));
   await mkdir(join(projectRoot, ".codex"), { recursive: true });
   const settings = JSON.parse(await readFile(join(packageRoot, "chatgpt", "hooks.fragment.json"), "utf8")) as HookSettings;
   for (const groups of Object.values(settings.hooks)) {

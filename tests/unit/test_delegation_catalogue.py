@@ -160,7 +160,10 @@ def test_toolkit_upgrade_preserves_custom_registry_and_skill_pairs(tmp_path, mon
     # Exercise the real toolkit payload without installing machine-level tools.
     old_tool = replace(
         tool, version="2.5.0", root=source.parents[1],
-        files=tuple(spec for spec in tool.files if spec.src == "subagents-toolkit"),
+        files=tuple(
+            spec for spec in tool.files
+            if spec.src in ("subagents-toolkit/SKILL.md", "subagents-toolkit/builtin-tasks.yaml")
+        ),
         dependencies=(), actions=(), platform_fragments={},
     )
     project = tmp_path / "project"

@@ -48,11 +48,12 @@ harness/<category>/<tool>/
 └── chatgpt/          # shallow ChatGPT-only files and hooks.fragment.json
 ```
 
-Omit empty overlays. Keep manifests and product-neutral documentation at the tool root. A single-skill
-package stores ChatGPT metadata at `chatgpt/openai.yaml`; a multi-skill package stores it at
-`chatgpt/agents/<skill-name>.yaml`. Manifests map those sources to installed `skills/` and `hooks/`
-destinations explicitly. Preserve real internal project trees such as `runtime/src/`; never mirror
-installation roots inside overlays or restore a `targets/` override directory.
+Omit empty overlays. Keep manifests and product-neutral documentation at the tool root. Each skill
+stores its ChatGPT metadata in `chatgpt/openai.yaml`, with `chatgpt/` beside its associated `SKILL.md`.
+For multi-skill packages, this is `<skill>/chatgpt/openai.yaml`. Manifests map shared skill files and
+metadata explicitly to installed `skills/` destinations, keeping source overlays out of installed
+skill directories. Hook payloads map to `hooks/`. Preserve real internal project trees such as
+`runtime/src/`; never mirror installation roots inside overlays or restore a `targets/` override directory.
 
 ## Commands
 

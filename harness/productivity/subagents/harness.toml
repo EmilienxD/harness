@@ -1,5 +1,5 @@
 name = "subagents"
-version = "2.6.4"
+version = "2.6.5"
 description = "Persistent conversation delegation with mode-preserving resume"
 docs = "https://github.com/EmilienxD/harness/blob/main/README.md#user-invoked-skills"
 dependencies = ["prototype>=1.1.0,<2.0.0", "websearch>=1.1.0,<2.0.0", "grill-me>=1.0.3,<2.0.0", "issue-readers>=1.0.0,<2.0.0"]
@@ -13,111 +13,116 @@ status = "supported"
 fragment = "chatgpt/hooks.fragment.json"
 
 [[files]]
-src = "subagents-toolkit"
-dest = "subagents-toolkit"
+src = "subagents-toolkit/builtin-tasks.yaml"
+dest = "subagents-toolkit/builtin-tasks.yaml"
 root = "skills"
 
 [[files]]
-src = "chatgpt/agents/subagents-toolkit.yaml"
+src = "subagents-toolkit/SKILL.md"
+dest = "subagents-toolkit/SKILL.md"
+root = "skills"
+
+[[files]]
+src = "subagents-toolkit/chatgpt/openai.yaml"
 dest = "subagents-toolkit/agents/openai.yaml"
 root = "skills"
 platforms = ["chatgpt"]
 
 [[files]]
-src = "work-with-agent"
-dest = "work-with-agent"
+src = "work-with-agent/SKILL.md"
+dest = "work-with-agent/SKILL.md"
 root = "skills"
 
 [[files]]
-src = "explore-with-agent"
-dest = "explore-with-agent"
+src = "explore-with-agent/SKILL.md"
+dest = "explore-with-agent/SKILL.md"
 root = "skills"
 
 [[files]]
-src = "prototype-with-agent"
-dest = "prototype-with-agent"
+src = "prototype-with-agent/SKILL.md"
+dest = "prototype-with-agent/SKILL.md"
 root = "skills"
 
 [[files]]
-src = "websearch-with-agent"
-dest = "websearch-with-agent"
+src = "websearch-with-agent/SKILL.md"
+dest = "websearch-with-agent/SKILL.md"
 root = "skills"
 
 [[files]]
-src = "brainstorm-with-agent"
-dest = "brainstorm-with-agent"
+src = "brainstorm-with-agent/SKILL.md"
+dest = "brainstorm-with-agent/SKILL.md"
 root = "skills"
 
 [[files]]
-src = "address-with-agent"
-dest = "address-with-agent"
+src = "address-with-agent/SKILL.md"
+dest = "address-with-agent/SKILL.md"
 root = "skills"
 
 [[files]]
-src = "review-with-agent"
-dest = "review-with-agent"
+src = "review-with-agent/SKILL.md"
+dest = "review-with-agent/SKILL.md"
 root = "skills"
 
 [[files]]
-src = "reply-to-agent"
-dest = "reply-to-agent"
+src = "reply-to-agent/SKILL.md"
+dest = "reply-to-agent/SKILL.md"
 root = "skills"
 
 [[files]]
-src = "chatgpt/agents/work-with-agent.yaml"
+src = "work-with-agent/chatgpt/openai.yaml"
 dest = "work-with-agent/agents/openai.yaml"
 root = "skills"
 platforms = ["chatgpt"]
 
 [[files]]
-src = "chatgpt/agents/explore-with-agent.yaml"
+src = "explore-with-agent/chatgpt/openai.yaml"
 dest = "explore-with-agent/agents/openai.yaml"
 root = "skills"
 platforms = ["chatgpt"]
 
 [[files]]
-src = "chatgpt/agents/prototype-with-agent.yaml"
+src = "prototype-with-agent/chatgpt/openai.yaml"
 dest = "prototype-with-agent/agents/openai.yaml"
 root = "skills"
 platforms = ["chatgpt"]
 
 [[files]]
-src = "chatgpt/agents/websearch-with-agent.yaml"
+src = "websearch-with-agent/chatgpt/openai.yaml"
 dest = "websearch-with-agent/agents/openai.yaml"
 root = "skills"
 platforms = ["chatgpt"]
 
 [[files]]
-src = "chatgpt/agents/brainstorm-with-agent.yaml"
+src = "brainstorm-with-agent/chatgpt/openai.yaml"
 dest = "brainstorm-with-agent/agents/openai.yaml"
 root = "skills"
 platforms = ["chatgpt"]
 
 [[files]]
-src = "chatgpt/agents/address-with-agent.yaml"
+src = "address-with-agent/chatgpt/openai.yaml"
 dest = "address-with-agent/agents/openai.yaml"
 root = "skills"
 platforms = ["chatgpt"]
 
 [[files]]
-src = "chatgpt/agents/review-with-agent.yaml"
+src = "review-with-agent/chatgpt/openai.yaml"
 dest = "review-with-agent/agents/openai.yaml"
 root = "skills"
 platforms = ["chatgpt"]
 
 [[files]]
-src = "chatgpt/agents/reply-to-agent.yaml"
+src = "reply-to-agent/chatgpt/openai.yaml"
 dest = "reply-to-agent/agents/openai.yaml"
 root = "skills"
 platforms = ["chatgpt"]
 
 [[files]]
-src = "resume-agent"
-dest = "resume-agent"
+src = "resume-agent/SKILL.md"
+dest = "resume-agent/SKILL.md"
 root = "skills"
 
 [[files]]
-src = "chatgpt/agents/resume-agent.yaml"
+src = "resume-agent/chatgpt/openai.yaml"
 dest = "resume-agent/agents/openai.yaml"
 root = "skills"
 platforms = ["chatgpt"]

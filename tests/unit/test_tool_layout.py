@@ -165,11 +165,19 @@ def test_first_party_tools_use_root_shared_shallow_platform_overlays():
             expected = (
                 "chatgpt/openai.yaml"
                 if len(shared_skills) == 1
-                else f"chatgpt/agents/{skill_name}.yaml"
+                else f"{skill_name}/chatgpt/openai.yaml"
             )
             assert str(file_spec["src"]).replace("\\", "/") == expected, (
                 f"{tool.name}: ChatGPT metadata for {skill_name} must be {expected}"
             )
+            assert (tool.root / expected).parent.parent.joinpath("SKILL.md").is_file()
+
+        for platform in platforms:
+            for payload in tool.expand(platform):
+                if payload.root == "skills":
+                    assert "chatgpt" not in Path(payload.dest).parts, (
+                        f"{tool.name}: source overlay leaked into {platform} skill {payload.dest}"
+                    )
 
 
 def test_no_catalogue_or_archived_package_has_a_shared_payload_directory():

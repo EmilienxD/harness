@@ -117,7 +117,7 @@ async function stageIssueWriters(platform: IssuePlatform, harnessRoot: string, p
     const claudeRoot = join(projectRoot, ".claude");
     const hookRoot = join(claudeRoot, "hooks");
     await mkdir(hookRoot, { recursive: true });
-    for (const skill of skills) await copyTree(join(source, skill), join(claudeRoot, "skills", skill));
+    for (const skill of skills) await copyTree(join(source, skill, "SKILL.md"), join(claudeRoot, "skills", skill, "SKILL.md"));
     for (const file of ["issues_core.py", HOOK]) {
       await copyFile(join(source, file), join(hookRoot, file.split("/").at(-1)!));
     }
@@ -128,9 +128,9 @@ async function stageIssueWriters(platform: IssuePlatform, harnessRoot: string, p
     const hookRoot = join(projectRoot, ".codex", "hooks");
     await mkdir(hookRoot, { recursive: true });
     for (const skill of skills) {
-      await copyTree(join(source, skill), join(projectRoot, ".agents", "skills", skill));
+      await copyTree(join(source, skill, "SKILL.md"), join(projectRoot, ".agents", "skills", skill, "SKILL.md"));
       await mkdir(join(projectRoot, ".agents", "skills", skill, "agents"), { recursive: true });
-      await copyFile(join(source, "chatgpt", "agents", `${skill}.yaml`), join(projectRoot, ".agents", "skills", skill, "agents", "openai.yaml"));
+      await copyFile(join(source, skill, "chatgpt", "openai.yaml"), join(projectRoot, ".agents", "skills", skill, "agents", "openai.yaml"));
     }
     await copyFile(join(source, "issues_core.py"), join(hookRoot, "issues_core.py"));
     await copyFile(join(source, HOOK), join(hookRoot, HOOK));

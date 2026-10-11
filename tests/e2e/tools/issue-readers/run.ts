@@ -107,7 +107,7 @@ async function stageIssueReaders(platform: IssuePlatform, harnessRoot: string, p
     const claudeRoot = join(projectRoot, ".claude");
     const hookRoot = join(claudeRoot, "hooks");
     await mkdir(hookRoot, { recursive: true });
-    for (const skill of ["address-this", "review-this"]) await copyTree(join(source, skill), join(claudeRoot, "skills", skill));
+    for (const skill of ["address-this", "review-this"]) await copyTree(join(source, skill, "SKILL.md"), join(claudeRoot, "skills", skill, "SKILL.md"));
     await copyFile(join(source, HOOK), join(hookRoot, HOOK));
     await writeFile(join(claudeRoot, "settings.json"), `${JSON.stringify({ hooks: { UserPromptSubmit: [{ hooks: [
       { type: "command", command: python, args: [join(hookRoot, HOOK), "--claude"], timeout: 120 },
@@ -116,8 +116,8 @@ async function stageIssueReaders(platform: IssuePlatform, harnessRoot: string, p
     const hookRoot = join(projectRoot, ".codex", "hooks");
     await mkdir(hookRoot, { recursive: true });
     for (const skill of ["address-this", "review-this"]) {
-      await copyTree(join(source, skill), join(projectRoot, ".agents", "skills", skill));
-      await copyTree(join(source, "chatgpt", "agents", `${skill}.yaml`), join(projectRoot, ".agents", "skills", skill, "agents", "openai.yaml"));
+      await copyTree(join(source, skill, "SKILL.md"), join(projectRoot, ".agents", "skills", skill, "SKILL.md"));
+      await copyTree(join(source, skill, "chatgpt", "openai.yaml"), join(projectRoot, ".agents", "skills", skill, "agents", "openai.yaml"));
     }
     await copyFile(join(source, HOOK), join(hookRoot, HOOK));
     await writeFile(join(projectRoot, ".codex", "hooks.json"), `${JSON.stringify({ hooks: { UserPromptSubmit: [{ hooks: [

@@ -1,5 +1,5 @@
 name = "todo-hitl"
-version = "1.0.2"
+version = "1.0.3"
 description = "Mark deferred code work for human review and address it deliberately"
 docs = "https://github.com/EmilienxD/harness/blob/main/README.md#user-invoked-skills"
 
@@ -10,23 +10,23 @@ status = "supported"
 status = "supported"
 
 [[files]]
-src = "mark-as-todo-hitl"
-dest = "mark-as-todo-hitl"
+src = "mark-as-todo-hitl/SKILL.md"
+dest = "mark-as-todo-hitl/SKILL.md"
 root = "skills"
 
 [[files]]
-src = "address-todo-hitl"
-dest = "address-todo-hitl"
+src = "address-todo-hitl/SKILL.md"
+dest = "address-todo-hitl/SKILL.md"
 root = "skills"
 
 [[files]]
-src = "chatgpt/agents/mark-as-todo-hitl.yaml"
+src = "mark-as-todo-hitl/chatgpt/openai.yaml"
 dest = "mark-as-todo-hitl/agents/openai.yaml"
 root = "skills"
 platforms = ["chatgpt"]
 
 [[files]]
-src = "chatgpt/agents/address-todo-hitl.yaml"
+src = "address-todo-hitl/chatgpt/openai.yaml"
 dest = "address-todo-hitl/agents/openai.yaml"
 root = "skills"
 platforms = ["chatgpt"]

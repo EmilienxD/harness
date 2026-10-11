@@ -1,5 +1,5 @@
 name = "issue-writers"
-version = "2.2.2"
+version = "2.2.3"
 description = "Draft and publish GitHub issues"
 requires = ["git", "gh"]
 docs = "https://github.com/EmilienxD/harness/blob/main/README.md#user-invoked-skills"
@@ -25,55 +25,55 @@ root = "hooks"
 executable = true
 
 [[files]]
-src = "draft-issue"
-dest = "draft-issue"
+src = "draft-issue/SKILL.md"
+dest = "draft-issue/SKILL.md"
 root = "skills"
 
 [[files]]
-src = "draft-issues"
-dest = "draft-issues"
+src = "draft-issues/SKILL.md"
+dest = "draft-issues/SKILL.md"
 root = "skills"
 
 [[files]]
-src = "publish-issues"
-dest = "publish-issues"
+src = "publish-issues/SKILL.md"
+dest = "publish-issues/SKILL.md"
 root = "skills"
 
 [[files]]
-src = "to-spec"
-dest = "to-spec"
+src = "to-spec/SKILL.md"
+dest = "to-spec/SKILL.md"
 root = "skills"
 
 [[files]]
-src = "to-spec-draft-issue"
-dest = "to-spec-draft-issue"
+src = "to-spec-draft-issue/SKILL.md"
+dest = "to-spec-draft-issue/SKILL.md"
 root = "skills"
 
 [[files]]
-src = "chatgpt/agents/draft-issue.yaml"
+src = "draft-issue/chatgpt/openai.yaml"
 dest = "draft-issue/agents/openai.yaml"
 root = "skills"
 platforms = ["chatgpt"]
 [[files]]
-src = "chatgpt/agents/draft-issues.yaml"
+src = "draft-issues/chatgpt/openai.yaml"
 dest = "draft-issues/agents/openai.yaml"
 root = "skills"
 platforms = ["chatgpt"]
 
 [[files]]
-src = "chatgpt/agents/publish-issues.yaml"
+src = "publish-issues/chatgpt/openai.yaml"
 dest = "publish-issues/agents/openai.yaml"
 root = "skills"
 platforms = ["chatgpt"]
 
 [[files]]
-src = "chatgpt/agents/to-spec.yaml"
+src = "to-spec/chatgpt/openai.yaml"
 dest = "to-spec/agents/openai.yaml"
 root = "skills"
 platforms = ["chatgpt"]
 
 [[files]]
-src = "chatgpt/agents/to-spec-draft-issue.yaml"
+src = "to-spec-draft-issue/chatgpt/openai.yaml"
 dest = "to-spec-draft-issue/agents/openai.yaml"
 root = "skills"
 platforms = ["chatgpt"]
