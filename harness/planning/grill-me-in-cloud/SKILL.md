@@ -50,15 +50,17 @@ Nothing persists between rounds or between questions: give every question all th
 }
 ```
 
-- These are the only fields; `init_js` is optional, and the runtime numbers the round.
+- `init_js` is optional, and the runtime numbers the round.
 - IDs are unique `Q1`, `Q2`, …; an unanswered question keeps its ID in later rounds.
-- `question` is the plain-text heading. `explanation_html` says why the decision matters (context, consequences, uncertainty), scaled to its difficulty: a few sentences or a compact visual.
-- Options are lettered consecutively from A. Each plain-text `detail` explains that option's behavior and tradeoff; the recommended option's `detail` carries your rationale.
+- `question` is the plain-text heading. `explanation_html` gives the minimum context needed to choose: a short lead and, when useful, a compact visual of the consequences or uncertainty.
+- Options are lettered consecutively from A. Give each `label` a short, descriptive title that identifies the choice on its own. Each plain-text `detail` gives the behavior and tradeoff in one concise sentence; the recommended option's `detail` carries your rationale.
 - The board adds a "None of these" choice and a free-text note to every question, so skip catch-all options.
 
 ## Explanation HTML
 
-Write semantic HTML; the board styles paragraphs, headings, tables, figures, code, and `<details>`. Custom styling uses the board's variables (`--paper`, `--surface`, `--ink`, `--ink-2`, `--ink-soft`, `--accent`, `--accent-soft`, `--font-head`, `--font-body`), never another theme or CDN design system; only a preview of a product's UI reproduces that product's real look. Helpers: `.grid` (two columns, stacked when narrow), `.panel` (inset card), `.note` (accent callout), and `<details>` for optional depth, with the essential rationale left visible. Label code blocks as `<pre><code class="language-python">`; guessing is unreliable, and `language-text` keeps diagrams and output plain.
+Write semantic HTML; the board styles paragraphs, headings, tables, figures, code, and `<details>`. Custom styling uses the board's variables (`--paper`, `--surface`, `--ink`, `--ink-2`, `--ink-soft`, `--accent`, `--accent-soft`, `--font-head`, `--font-body`), never another theme or CDN design system; only a preview of a product's UI reproduces that product's real look. Helpers: `.grid` (two columns, stacked when narrow), `.panel` (inset card), and `.note` (accent callout). Label code blocks as `<pre><code class="language-python">`; guessing is unreliable, and `language-text` keeps diagrams and output plain.
+
+Prefer visuals over long prose text.
 
 Every visual explains the decision rather than decorating it:
 

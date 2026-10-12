@@ -4,6 +4,7 @@ import {
   Check,
   CheckCheck,
   ChevronLeft,
+  ChevronRight,
   CircleHelp,
   Folder,
   LoaderCircle,
@@ -1258,6 +1259,7 @@ function Questionnaire({
             onSave={onSave}
             onSaveState={onSaveState}
             registerFlush={registerFlush}
+            onNext={index < questions.length - 1 ? () => showQuestion(index + 1) : undefined}
             onReview={reviewPrompt}
           />
         ))}
@@ -1279,6 +1281,7 @@ function QuestionCard({
   onSave,
   onSaveState,
   registerFlush,
+  onNext,
   onReview,
 }: {
   round: Round;
@@ -1293,6 +1296,7 @@ function QuestionCard({
   onSave: SaveAnswer;
   onSaveState: ReportSave;
   registerFlush: (id: string, flush: () => Promise<boolean>) => () => void;
+  onNext: (() => void) | undefined;
   onReview: () => Promise<void>;
 }) {
   // "None of these" takes the letter after the last option; it is stored as no selected option.
@@ -1553,6 +1557,17 @@ function QuestionCard({
             >
               {reviewing ? <LoaderCircle className="spin" size={16} /> : null} Review prompt
             </button>
+            {onNext ? (
+              <button
+                type="button"
+                className="submit is-ghost"
+                aria-keyshortcuts={shortcuts.aria("nextQuestion")}
+                title={shortcuts.title("Next question", "nextQuestion")}
+                onClick={onNext}
+              >
+                Next question <ChevronRight size={16} aria-hidden="true" />
+              </button>
+            ) : null}
           </div>
         </div>
       </div>

@@ -1198,7 +1198,7 @@ kbd {
   border-radius: 3px;
   box-shadow: var(--focus);
 }
-.round-submit {
+.question__foot > .submit.is-ghost {
   margin-left: auto;
 }
 .question-map {
@@ -1681,7 +1681,7 @@ kbd {
   .question__foot .submit {
     flex: 1 1 180px;
   }
-  .round-submit {
+  .question__foot > .submit.is-ghost {
     margin-left: 0;
   }
   .question-map {
