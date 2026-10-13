@@ -10,7 +10,7 @@ metadata:
 
 A subagent is an agent whose parent is you.
 
-Use the conversation inbox supplied by the runtime hook for every subagent launch and continuation, including after this conversation is resumed. If the hook has not supplied an inbox, stop and notify the user. Launch subagents only when the user explicitly requests it. This method is now the default method for running subagents; always use it when the user wants to "run subagents", "delegate the work to", or "resume subagents".
+Use the assigned inbox supplied by the session-start hook for every subagent launch and continuation, including after this conversation is resumed. If the hook has not supplied an inbox, stop and notify the user. Launch subagents only when the user explicitly requests it. This method is now the default method for running subagents; always use it when the user wants to "run subagents", "delegate the work to", or "resume subagents".
 
 Write one Markdown file directly in the supplied inbox for each subagent. When the user requests multiple subagents, write their separate request files in parallel; each file launches independently, so never combine multiple subagents in one file. Writing to this inbox will automatically launch the subagent. You will be notified when it completes — do not poll; never sleep, poll, proactively check progress, or run a command to do so. Do other work that doesn't depend on the subagent's result. End your turn to wait for the result of whichever subagent finishes first.
 

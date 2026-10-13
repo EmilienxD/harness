@@ -15,6 +15,8 @@ import uuid
 from pathlib import Path
 from typing import Any
 
+from subagents_runtime.messages import runtime_message
+
 
 class SessionError(RuntimeError):
     pass
@@ -544,7 +546,7 @@ def launch_delegated(request, request_id: str, agent_number: int, cwd: Path) -> 
                 (child_id,),
             ).fetchone()
         if previous:
-            raise SessionError("Aboard is unavailable for the live released implementer; launch a fresh implementer instead")
+            raise SessionError("The runtime is unavailable for the live released implementer; launch a fresh implementer instead")
     if fork_of:
         # The original session is still open and still owns its provider handle, so a
         # fork starts its own process here and takes over the child's identity.
@@ -658,11 +660,11 @@ def _discover_delegation_endpoint(cwd: Path, *, include_worktrees: bool = False)
     inherited_token = os.environ.get("ABOARD_BRIDGE_TOKEN")
     if inherited_port is not None or inherited_token is not None:
         if not inherited_port or not inherited_token:
-            raise SessionError("inherited Aboard authentication is incomplete")
+            raise SessionError("Inherited runtime authentication is incomplete")
         try:
             return "127.0.0.1", int(inherited_port), inherited_token
         except ValueError as exc:
-            raise SessionError("inherited Aboard bridge port is invalid") from exc
+            raise SessionError("Inherited runtime endpoint port is invalid") from exc
     directory = _endpoint_directory()
     try:
         entries = list(directory.glob("*.json"))
@@ -712,7 +714,7 @@ def _aboard_error(exc: urllib.error.HTTPError) -> tuple[str | None, str]:
     message = error.get("message")
     return (
         code if isinstance(code, str) else None,
-        message if isinstance(message, str) else "",
+        runtime_message(message) if isinstance(message, str) else "",
     )
 
 
@@ -768,7 +770,7 @@ def _launch_through_aboard(request, request_id: str, cwd: Path) -> str | None:
     )
     if getattr(request, "resume", None):
         if not previous:
-            raise SessionError("Aboard child handle is unavailable; resume refused")
+            raise SessionError("The runtime's saved child handle is unavailable; resume refused")
         identities.update(
             {"resumeAgentId": previous[0], "resumeSessionId": reservation[3]}
         )
@@ -820,7 +822,7 @@ def _launch_through_aboard(request, request_id: str, cwd: Path) -> str | None:
                 refreshed = discover()
                 if refreshed is None:
                     raise SessionError(
-                        "Aboard delegation endpoint authentication expired"
+                        "The runtime's delegation authentication expired"
                     ) from None
                 endpoint = refreshed
                 continue
@@ -834,17 +836,17 @@ def _launch_through_aboard(request, request_id: str, cwd: Path) -> str | None:
                         (reservation[1],),
                     )
             raise SessionError(
-                f"Aboard refused the delegation with HTTP {exc.code}"
+                f"The runtime refused the delegation with HTTP {exc.code}"
                 + (f": {detail}" if detail else "")
             ) from None
         except (OSError, ValueError) as exc:
             raise SessionError(
-                "Aboard delegation endpoint could not launch the request"
+                "The runtime could not launch the delegation request"
             ) from exc
     session_id = result.get("sessionId") if isinstance(result, dict) else None
     if not isinstance(session_id, str) or not session_id:
         raise SessionError(
-            "Aboard delegation endpoint returned an invalid launch result"
+            "The runtime returned an invalid delegation launch result"
         )
     if reservation:
         with _connect() as connection:

@@ -15,6 +15,7 @@ from pathlib import Path
 import yaml
 
 from subagents_runtime.storage import new_inbox
+from subagents_runtime.messages import runtime_message
 from subagents_runtime.roles import RoleError, load_task_policies, task_policy
 
 PROVIDERS = frozenset({"claude", "chatgpt"})
@@ -222,6 +223,20 @@ def enable_delegation(
                 raise sessions.SessionError(str(exc)) from exc
             if skill not in policies:
                 raise sessions.SessionError(f"unknown delegation skill {skill!r}")
+    return ensure_inbox(parent_session_id)
+
+
+def ensure_inbox(parent_session_id: str) -> DelegationInbox:
+    """Assign a persistent inbox without loading or validating task registries."""
+    sessions = _sessions_module()
+    with sessions._connect() as connection:
+        row = connection.execute(
+            "SELECT provider,cwd FROM sessions WHERE id=?", (parent_session_id,)
+        ).fetchone()
+        if row is None:
+            raise sessions.SessionError(
+                "the current Harness parent session is not registered"
+            )
         select = "SELECT inbox FROM session_delegation WHERE parent_session_id=?"
         existing = connection.execute(select, (parent_session_id,)).fetchone()
         if existing is None:
@@ -797,9 +812,13 @@ def lead_instructions(session_id: str, inbox: str | Path) -> str:
 
 
 def claim_instructions(
-    session_id: str, *, compact: bool = False, lead: bool | None = None
+    session_id: str,
+    *,
+    compact: bool = False,
+    lead: bool | None = None,
+    session_start: bool = False,
 ) -> str | None:
-    """Replay runtime context until acknowledged, refreshing it after compaction."""
+    """Replay context until acknowledged; refresh it on session start or compaction."""
     sessions = _sessions_module()
     with sessions._connect() as connection:
         connection.execute("BEGIN IMMEDIATE")
@@ -815,7 +834,7 @@ def claim_instructions(
         if row is None:
             return None
         inbox, epoch, injected, claimed, acknowledged = row
-        if compact:
+        if compact or (session_start and injected is not None):
             epoch += 1
             injected = claimed = acknowledged = None
             connection.execute(
@@ -830,7 +849,15 @@ def claim_instructions(
                 "UPDATE session_delegation SET injected_epoch=?,claim_sequence=?,acknowledgement_sequence=NULL WHERE parent_session_id=?",
                 (epoch, sequence, session_id),
             )
-        cwd = Path(connection.execute("SELECT cwd FROM sessions WHERE id=?", (session_id,)).fetchone()[0])
+        if not session_start:
+            cwd = Path(connection.execute("SELECT cwd FROM sessions WHERE id=?", (session_id,)).fetchone()[0])
+    if session_start:
+        text = (
+            "This session manages subagents via the subagents-toolkit skill. "
+            "If at any time you end up working with this tool, "
+            f"this is your assigned inbox `{inbox}`."
+        )
+        return f"{text}\n\n{lead_instructions(session_id, inbox)}" if lead else text
     if lead:
         return lead_instructions(session_id, inbox)
     from subagents_runtime.roles import custom_registry_paths
@@ -965,14 +992,14 @@ def _format_results(rows, status: str) -> str:
         elif state == "succeeded":
             messages.append(f"{identifier} finished and replied:\n<reply>\n{reply}\n</reply>")
         elif state == "cancelled":
-            detail = f" Reason: {reason}." if reason and reason != "other" else ""
+            detail = f" Reason: {runtime_message(reason)}." if reason and reason != "other" else ""
             messages.append(
                 f"{identifier}'s session ended before a reply was sent to the parent."
                 f"{detail} Its work may have completed. Ask the user to provide the "
                 "child's reply, or offer to resume the child so it can send its result."
             )
         else:
-            messages.append(f"{identifier} failed: {reason or 'unknown failure'}.")
+            messages.append(f"{identifier} failed: {runtime_message(reason) if reason else 'unknown failure'}.")
     messages.append(status)
     return "\n" + "\n\n".join(messages)
 

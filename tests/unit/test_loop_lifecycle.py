@@ -158,6 +158,10 @@ def test_lead_receives_report_verbatim_with_its_wait_token(tmp_path, monkeypatch
 @pytest.mark.parametrize("provider", ["claude", "chatgpt"])
 def test_ship_lead_context_carries_its_session_and_explorer_inbox(tmp_path, monkeypatch, provider):
     configured(tmp_path, monkeypatch, provider)
+    directory = ".claude" if provider == "claude" else ".agents"
+    toolkit = tmp_path / directory / "skills" / "subagents-toolkit" / "SKILL.md"
+    toolkit.parent.mkdir(parents=True)
+    toolkit.touch()
     inbox = str(enable_delegation("lead", "ship").inbox)
     invocation = event(tmp_path, provider, "lead", "UserPromptSubmit", prompt="/ship 7" if provider == "claude" else "$ship 7")
     compacted = event(tmp_path, provider, "lead", "SessionStart", source="compact")
@@ -360,7 +364,7 @@ def test_unavailable_aboard_does_not_duplicate_a_live_released_loop(tmp_path, mo
     def terminal(*args):
         pytest.fail("a live conversation must not be opened a second time")
     monkeypatch.setattr(sessions, "_visible_terminal", terminal)
-    with pytest.raises(sessions.SessionError, match="Aboard"):
+    with pytest.raises(sessions.SessionError):
         loop.resume(child, "Review fixes", parent_id="lead")
     assert loop.lookup(child)["active"] is False
 

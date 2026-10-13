@@ -134,6 +134,14 @@ def test_runtime_context_is_replayed_then_acknowledged_and_compaction_starts_epo
 ):
     monkeypatch.setenv("HARNESS_STATE_DIR", str(tmp_path / "state"))
     monkeypatch.delenv("HARNESS_SESSION_ID", raising=False)
+    directory = ".claude" if provider == "claude" else ".agents"
+    toolkit = tmp_path / directory / "skills" / "subagents-toolkit" / "SKILL.md"
+    toolkit.parent.mkdir(parents=True)
+    from subagents_runtime.roles import builtin_toolkit
+    toolkit.write_bytes(builtin_toolkit().read_bytes())
+    toolkit.with_name("builtin-tasks.yaml").write_bytes(
+        builtin_toolkit().with_name("builtin-tasks.yaml").read_bytes()
+    )
     payload = {
         "session_id": "parent",
         "cwd": str(tmp_path),
@@ -156,7 +164,7 @@ def test_runtime_context_is_replayed_then_acknowledged_and_compaction_starts_epo
     handle({**payload, "hook_event_name": "PreToolUse"}, provider)
     assert (
         handle({**payload, "hook_event_name": "SessionStart", "source": "resume"}, provider)
-        is None
+        is not None
     )
 
 

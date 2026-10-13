@@ -10,13 +10,15 @@ from pathlib import Path
 from typing import Any
 
 from subagents_runtime import sessions
-from subagents_runtime.roles import load_task_policies
+from subagents_runtime.messages import runtime_message
+from subagents_runtime.roles import find_skill, load_task_policies
 from subagents_runtime.delegation import (
     arm_reply,
     claim_instructions,
     claim_parent_delivery,
     clear_reply_authorization,
     enable_delegation,
+    ensure_inbox,
     lead_instructions,
     observe_parent_event,
     process_inbox,
@@ -171,7 +173,7 @@ def _processing_context(processed) -> str:
             ).fetchone()
             label = f"agent-{row[0]}" if row else item.path.name
             labels.append(
-                f"{label}: {item.status}" + (f" ({item.reason})" if item.reason else "")
+                f"{label}: {item.status}" + (f" ({runtime_message(item.reason)})" if item.reason else "")
             )
     return "\n".join(labels)
 
@@ -217,6 +219,11 @@ def handle(
 
         confirm_startup(execution_id)
     if event == "SessionStart":
+        toolkit_installed = find_skill(
+            _role_directory(session_id), selected_provider, "subagents-toolkit"
+        ) is not None
+        if toolkit_installed:
+            ensure_inbox(session_id)
         recovered = []
         with sessions._connect() as connection:
             enabled = connection.execute(
@@ -234,9 +241,11 @@ def handle(
                 ).fetchall()
             for (child_id,) in children:
                 live_executions(child_id)
-        instructions = claim_instructions(
-            session_id, compact=payload.get("source") == "compact"
-        )
+        instructions = None
+        if toolkit_installed:
+            instructions = claim_instructions(
+                session_id, compact=payload.get("source") == "compact", session_start=True
+            )
         delivery = claim_parent_delivery(session_id, event)
         text = "\n\n".join(
             item
