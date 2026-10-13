@@ -687,9 +687,26 @@ def build_message(reported: list[tuple[str, list[str]]], limits: dict[str, float
         if extra:
             lines.append(f"  - +{extra} more")
     listing = "\n".join(lines)
+    exception = (
+        "Ignore this reminder when a comment or docstring has a concrete functional "
+        "benefit, such as required runtime behavior."
+    )
+
+    if (
+        (limits["max-comment-lines"] == 0 or limits["max-comment-chars"] == 0)
+        and (limits["max-doc-lines"] == 0 or limits["max-doc-chars"] == 0)
+    ):
+        return (
+            "The configured policy is zero comments and zero docstrings:\n"
+            f"{listing}\n"
+            "Going forward in this session, do not add comments or docstrings, including "
+            "file-header docstrings. Use clear names and smaller functions to express "
+            "intent. Put explanations in the conversation, commit messages, or documentation. "
+            f"{exception}"
+        )
 
     if not first:
-        return f"Over the comment budget again:\n{listing}\n{budget_line(limits)}"
+        return f"Over the comment budget again:\n{listing}\n{budget_line(limits)}\n{exception}"
 
     return (
         "You just wrote more commentary than the code needs:\n"
@@ -704,7 +721,8 @@ def build_message(reported: list[tuple[str, list[str]]], limits: dict[str, float
         "contract -- what goes in, what comes out, what surprises the caller -- not an "
         "essay. Clearer names and smaller functions replace most of what a long comment "
         "was trying to fix. What you already wrote stands; do not go back and rewrite it "
-        "now, and cut it down next time you are in that code for another reason."
+        "now, and cut it down next time you are in that code for another reason. "
+        f"{exception}"
     )
 
 
