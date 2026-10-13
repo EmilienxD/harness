@@ -1,7 +1,7 @@
 ---
 name: work-with-agent
 description: User-invoked only. Agents must not invoke this skill on their own. Launch a general-purpose agent for a delegated task. Use when the user wants a separate agent to handle work that does not fit a more specific delegation skill.
-argument-hint: "[task and mode/provider preferences]"
+argument-hint: "[task and mode/provider/model preferences]"
 license: MIT
 metadata:
   author: EMB
@@ -16,5 +16,6 @@ Request parameters:
 - task: general
 - mode: interactive or auto (default interactive)
 - provider (Optional): claude, chatgpt, or codex (alias of chatgpt)
+- model (Optional): model ID
 
 Give the child a bounded task and the relevant project context.

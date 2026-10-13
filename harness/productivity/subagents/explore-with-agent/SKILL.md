@@ -16,5 +16,6 @@ Request parameters:
 - task: explore
 - mode: auto
 - provider (Optional): claude, chatgpt, or codex (alias of chatgpt)
+- model (Optional): model ID
 
 Ask the child to inspect the codebase and report findings without editing files. The task param already tells the agent how to explore, not what to explore.

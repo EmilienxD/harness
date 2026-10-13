@@ -16,5 +16,6 @@ Request parameters:
 - task: brainstorm
 - mode: interactive
 - provider (Optional): claude, chatgpt, or codex (alias of chatgpt)
+- model (Optional): model ID
 
 State the design question and constraints for the user to explore interactively. The task param already tells the agent how to brainstorm, not what to brainstorm.

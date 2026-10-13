@@ -16,5 +16,6 @@ Request parameters:
 - task: websearch
 - mode: interactive or auto (default auto)
 - provider (Optional): claude, chatgpt, or codex (alias of chatgpt)
+- model (Optional): model ID
 
 State the research question, source requirements, and requested output. The task param already tells the agent how to websearch, not what to websearch.

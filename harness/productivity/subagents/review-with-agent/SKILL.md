@@ -16,5 +16,6 @@ Request parameters:
 - task: review
 - mode: interactive or auto (default auto)
 - provider (Optional): claude, chatgpt, or codex (alias of chatgpt)
+- model (Optional): model ID
 
 State the review scope, relevant changes, and validation expectations. The task param already tells the agent how to review, not what to review.

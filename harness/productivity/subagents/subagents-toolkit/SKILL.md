@@ -108,7 +108,7 @@ The user wants to understand why configuration precedence differs between the tw
 
 In real requests, include all details the subagent needs to act.
 
-Agents have stable identifiers (e.g. `agent-1`, `agent-2`). Continue any subagent at any time with exclusive resume frontmatter and a nonempty next message; it keeps its task, provider, mode, directory, and id:
+Agents have stable identifiers (e.g. `agent-1`, `agent-2`). Continue any subagent at any time with exclusive resume frontmatter and a nonempty next message; it keeps its task, provider, model, mode, directory, and id:
 
 ```markdown
 ---

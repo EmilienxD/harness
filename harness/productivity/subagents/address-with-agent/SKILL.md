@@ -16,5 +16,6 @@ Request parameters:
 - task: address
 - mode: interactive or auto (default auto)
 - provider (Optional): claude, chatgpt, or codex (alias of chatgpt)
+- model (Optional): model ID
 
 Give the child a bounded task and the relevant project context. The task param already tells the agent how to address something, not what to address.

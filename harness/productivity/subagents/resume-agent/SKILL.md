@@ -12,4 +12,4 @@ Invoke the `subagents-toolkit` skill if its instructions are not already in the 
 
 Resolve the user-selected `agent-i` where `i` is the id in this parent conversation, and write a fresh request file with only `resume: agent-i` in frontmatter and the nonempty next message as its body.
 
-The agent keeps its task, provider, execution mode, directory, and id.
+The agent keeps its task, provider, model, execution mode, directory, and id.

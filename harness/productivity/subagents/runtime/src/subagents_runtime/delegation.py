@@ -963,7 +963,7 @@ def _format_results(rows, status: str) -> str:
         if loop_event:
             messages.append(loop_event)
         elif state == "succeeded":
-            messages.append(f"{identifier} finished. Agent replied:\n<reply>\n{reply}\n</reply>")
+            messages.append(f"{identifier} finished and replied:\n<reply>\n{reply}\n</reply>")
         elif state == "cancelled":
             detail = f" Reason: {reason}." if reason and reason != "other" else ""
             messages.append(
