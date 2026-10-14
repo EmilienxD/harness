@@ -209,3 +209,40 @@ be `EmilienxD`. A token is passed to the isolated child environment in memory on
 The run closes only its UUID-tagged issues and restores any gateway label it added; it never
 resets the fixture, changes branches, or recreates the repository. Run this explicit live command
 when GitHub acceptance is needed; `npm test` retains credential-free local journeys.
+
+## Pi hosted interviews
+
+`npm run test:pi-grill` uses the real installed Pi 1.2.0 CLI, actual catalogue payloads,
+and the authenticated fake OpenAI Responses endpoint shared with Codex. A local hosted
+transport fixture injects unsupported-service, outage and acknowledgement failures.
+It verifies project RPC and user JSON-to-RPC workflows, malformed-round rejection,
+SVG upload, queued-only answer effects, a single persisted correlated user message,
+publication outbox recovery and abandoned-branch suppression, reload recovery, competing
+claims/processes, tree/fork isolation, explicit stop, new sessions and receipt-driven removal.
+No unit tests or paid inference are involved.
+
+To exercise the actual Grill API/database/Storage, start the local Supabase stack and Grill
+app as described in `apps/grill/README.md`, or deploy the additive Pi migration and app.
+Then supply that service's origin and access code to the explicit journey:
+
+```powershell
+$env:HARNESS_GRILL_URL = 'http://127.0.0.1:8080' # or the upgraded production origin
+$env:HARNESS_GRILL_CODE = '<configured four-digit code>'
+npm run e2e:pi-grill:live
+```
+
+It runs both scopes, publishes a real round/image, verifies exact uploaded bytes, reviews
+only queued answers, creates a delivery, waits for Pi's persisted receipt and server
+acknowledgement, and removes only its UUID-owned sessions/publications/assets. Each success
+uses five model requests; lifecycle commands and recovery create none. Credentials go only
+to the explicitly selected hosted service and isolated child environment; inference remains
+loopback-only with upstream forbidden. Run `npm run e2e:pi-grill -- --admission` against an
+older service to verify rejection before inference without publishing remote data.
+
+The actual local service/database/Storage gate passed on Windows with Pi 1.2.0. On 2026-10-14,
+the migration and app were deployed and both live journeys passed against
+`https://grill-me-in-cloud.vercel.app/`, with exactly five fake inference requests per scope.
+Each verified the uploaded SVG bytes, queued-only answer effects, one persisted correlated
+user message, confirmed server delivery, reload/fork/tree isolation and owned test cleanup.
+These headless checks do not certify browser rendering, Pi TUI behavior or unscripted model
+interview quality.

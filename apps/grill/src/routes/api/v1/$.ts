@@ -23,6 +23,7 @@ import {
   validatePublication,
 } from "@/lib/grill-api.server";
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
+import { PROVIDERS } from "@/lib/grill-contract";
 
 export const Route = createFileRoute("/api/v1/$")({
   server: {
@@ -49,8 +50,10 @@ const syncBody = z.object({
   sessions: z
     .array(
       z.object({
-        provider: z.enum(["claude", "chatgpt"]),
+        provider: z.enum(PROVIDERS),
         session_id: z.string().min(1).max(512),
+        active_round_id: z.string().uuid().optional(),
+        accepting: z.boolean().optional(),
       }),
     )
     .max(200),
@@ -76,7 +79,8 @@ async function handle(request: Request, path: string, method: string): Promise<R
   }
   if (path === "logout" && method === "POST") return json({ ok: true }, 200, { "Set-Cookie": clearAccessCookie() });
 
-  const machineOnly = path.startsWith("publications/") || path === "publications/prepare" || path === "aboard/sync";
+  const machineOnly =
+    path.startsWith("publications/") || path === "publications/prepare" || path === "aboard/sync" || path === "pi/sync";
   const bearer = await authenticateBearer(request);
   if (bearer === "limited") return problem(429, "too_many_attempts", "Too many attempts. Retry later");
   const machine = bearer === "authorized";
@@ -85,6 +89,8 @@ async function handle(request: Request, path: string, method: string): Promise<R
   }
 
   if (path === "sessions" && method === "GET") return listSessions();
+  if (path === "capabilities" && method === "GET")
+    return json({ schema_version: 1, providers: PROVIDERS, pi_relay: 1 });
 
   const sessionMatch = /^sessions\/([^/]+)\/(.+)$/u.exec(path);
   if (sessionMatch && method === "GET")
@@ -126,6 +132,7 @@ async function handle(request: Request, path: string, method: string): Promise<R
   if (deliveryStatusMatch && method === "GET") return deliveryStatus(deliveryStatusMatch[1] ?? "");
 
   if (path === "aboard/sync" && method === "POST") return syncAboard(request);
+  if (path === "pi/sync" && method === "POST") return syncAboard(request, true);
   return problem(404, "not_found", "Endpoint not found.");
 }
 
@@ -174,7 +181,7 @@ async function listSessions(): Promise<Response> {
 }
 
 async function readSession(provider: string, sessionId: string): Promise<Response> {
-  if (!(["claude", "chatgpt"] as string[]).includes(provider))
+  if (!(PROVIDERS as readonly string[]).includes(provider))
     return problem(404, "session_not_found", "Session not found.");
   const { data: session, error } = await supabaseAdmin
     .from("grill_sessions")
@@ -202,7 +209,7 @@ async function readSession(provider: string, sessionId: string): Promise<Respons
 }
 
 async function setSessionFinished(provider: string, sessionId: string, finished: boolean): Promise<Response> {
-  if (!(provider === "claude" || provider === "chatgpt"))
+  if (!(PROVIDERS as readonly string[]).includes(provider))
     return problem(404, "session_not_found", "Session not found.");
   const { data: session, error } = await supabaseAdmin
     .from("grill_sessions")
@@ -221,7 +228,7 @@ async function setSessionFinished(provider: string, sessionId: string, finished:
 }
 
 async function deleteSession(provider: string, sessionId: string): Promise<Response> {
-  if (!("claude" === provider || "chatgpt" === provider))
+  if (!(PROVIDERS as readonly string[]).includes(provider))
     return problem(404, "session_not_found", "Session not found.");
   const { data: session, error: sessionError } = await supabaseAdmin
     .from("grill_sessions")
@@ -598,7 +605,14 @@ async function createDelivery(snapshotId: string): Promise<Response> {
     .gte("last_heartbeat_at", cutoff)
     .limit(1)
     .maybeSingle();
-  if (!presence) return problem(409, "aboard_unavailable", "Aboard is not connected to this exact session.");
+  if (!presence) return problem(409, "aboard_unavailable", "The answer relay is not connected to this exact session.");
+  // Network retries of one reviewed snapshot refer to the same delivery.
+  const { data: existing } = await supabaseAdmin
+    .from("grill_deliveries")
+    .select("*")
+    .eq("prompt_snapshot_id", snapshotId)
+    .maybeSingle();
+  if (existing) return json({ delivery: existing });
   const { data, error } = await supabaseAdmin
     .from("grill_deliveries")
     .insert({
@@ -608,7 +622,14 @@ async function createDelivery(snapshotId: string): Promise<Response> {
     })
     .select("*")
     .single();
-  if (error) return problem(500, "delivery_failed", "The delivery could not be created.");
+  if (error) {
+    const { data: raced } = await supabaseAdmin
+      .from("grill_deliveries")
+      .select("*")
+      .eq("prompt_snapshot_id", snapshotId)
+      .maybeSingle();
+    return raced ? json({ delivery: raced }) : problem(500, "delivery_failed", "The delivery could not be created.");
+  }
   await touchSession(round.session_id);
   return json({ delivery: data }, 201);
 }
@@ -622,11 +643,18 @@ async function deliveryStatus(id: string): Promise<Response> {
   return data ? json({ delivery: data }) : problem(404, "delivery_not_found", "Delivery not found.");
 }
 
-async function syncAboard(request: Request): Promise<Response> {
+async function syncAboard(request: Request, piRelay = false): Promise<Response> {
   const parsed = syncBody.safeParse(await readJson(request));
   if (!parsed.success)
     return problem(422, "invalid_sync", "The Aboard sync payload is invalid.", parsed.error.flatten());
   const input = parsed.data;
+  if (
+    piRelay &&
+    input.sessions.some(
+      (session) => session.provider !== "pi" || !session.active_round_id || session.accepting === undefined,
+    )
+  )
+    return problem(422, "invalid_sync", "Pi presence requires the exact active round and acceptance state.");
   const now = new Date().toISOString();
   await supabaseAdmin
     .from("grill_deliveries")
@@ -660,8 +688,14 @@ async function syncAboard(request: Request): Promise<Response> {
       .eq("id", acknowledgement.delivery_id)
       .maybeSingle();
     if (!delivery || delivery.target_instance_id !== input.instance_id) continue;
-    if (delivery.status === "claimed") {
-      await supabaseAdmin
+    if (
+      delivery.status === "claimed" ||
+      (piRelay &&
+        delivery.provider === "pi" &&
+        delivery.status === "expired" &&
+        acknowledgement.status === "submitted-to-terminal")
+    ) {
+      const { error: acknowledgementError } = await supabaseAdmin
         .from("grill_deliveries")
         .update({
           status: acknowledgement.status,
@@ -672,7 +706,10 @@ async function syncAboard(request: Request): Promise<Response> {
           completed_at: now,
         })
         .eq("id", delivery.id)
-        .eq("status", "claimed");
+        .eq("target_instance_id", input.instance_id)
+        .eq("status", delivery.status);
+      if (acknowledgementError)
+        return problem(500, "acknowledgement_failed", "The confirmed delivery could not be recorded.");
       const { data: session } = await supabaseAdmin
         .from("grill_sessions")
         .select("id")

@@ -1,9 +1,8 @@
 # Pi provider architecture proposal
 
-Status: **21 shared skill packages, three path-guard extensions and two issue workflow extensions implemented; remaining extensions and runtime architecture proposed**.
+Status: **21 shared skill packages, three path-guard extensions, two issue workflow extensions and the cloud interview extension implemented; remaining extensions and runtime architecture proposed**.
 Pi is an opt-in catalogue target for `flush-out-useless-tests` and the 20 shared packages marked
-implemented below. Shared skill installation works at project and user scope; three path guards and both issue workflow packages ship; remaining extensions,
-persistent runtime, Aboard, and hosted Grill integrations are pending.
+implemented below. Shared skill installation works at project and user scope; three path guards, both issue workflow packages, and the cloud interview ship. The hosted Pi migration/app are deployed and verified against the production board. Remaining extensions, persistent runtime, and Aboard are pending.
 This proposal defines the implementation boundaries and first release scope.
 The [compatibility report](PI-COMPATIBILITY.md) retains the catalogue-wide feasibility assessment.
 
@@ -78,7 +77,7 @@ it can also include shared skills. Rows marked implemented ship the stated Pi re
 | 32 | `enable-desktop-notification` | Extension | Persist per-session opt-in and notify once at final settlement using the existing OS notifier. |
 | 33 | `report-gotchas` | Extension | Reuse CLI/queue/worker; bind receipts to Pi identity and preserve idempotent reporting. |
 | 34 | `commit` | Extension | Reuse staging/Git/message generation; attribute successful writes to the active Pi session branch. |
-| 35 | `grill-me-in-cloud` | Extension | Prepare/publish rounds and deliver queued answers; extend hosted provider contracts and database constraints. |
+| 35 | `grill-me-in-cloud` | Extension | Implemented in 2.2.0. Shared publication/assets/outbox core, native round preparation and standalone persisted-message answer relay. Additive hosted contract/migration deployed; real Pi project/user journeys pass against local and production services. |
 
 That is **22 skill-led packages and 13 extension-backed packages**. These are routes, not effort
 estimates: commit and hosted grilling have substantially larger state/integration requirements.
@@ -288,7 +287,7 @@ and acknowledges only after a correlated, persisted user-message receipt confirm
 the bound session. The void return from `sendUserMessage` alone is insufficient confirmation.
 It needs no Harness ask/reply runtime and keeps the real Pi TUI visible.
 
-The relay and a later Aboard relay must compete through the same delivery lease/idempotency
+The relay and a later Aboard relay must compete through the same delivery claim/idempotency
 rules, so both running cannot double-submit an answer. Persist delivery IDs and submission receipts
 before retrying; recover an accepted-but-unacknowledged submission without resending it. Rebind on
 session replacement, invalidate stale round context after branch navigation, cancel polling on
@@ -334,8 +333,8 @@ as enforceable. Strong restriction guarantees need OS/container enforcement.
 | E. Hosted interview | Grilling extension, standalone answer relay, hosted additive schema/migration changes. | Publish/answer/reconnect/reload flows work, delivery is acknowledged correctly, and competing relays do not duplicate answers. |
 
 Do not declare all catalogue tools Pi-supported at once. Add `[platforms.pi]` mappings and bump
-each package version when its payload/support actually ships. The proposed `pi-support` package
-and dependency syntax are absent today. Each advertised package needs its own applicable gate;
+each package version when its payload/support actually ships. The shared `pi-support` package
+and platform-filtered dependencies are implemented. Each advertised package needs its own applicable gate;
 passing a skill discovery check does not certify an extension-backed command.
 
 Use existing installer/core unit tests for reconciliation and policy semantics. Real-CLI journeys
@@ -364,7 +363,7 @@ headless transport; adopting it must not silently replace the visible-terminal p
 These future adapters consume the same event/identity contracts without making the initial
 35 packages depend on their implementation. The compatibility report retains their detailed
 feasibility and broader release gates. The 21 shared skill packages and installer slice are implemented in
-the checkout; the three path guards and both issue workflow packages also ship; remaining adapters, service migrations, deployment, and release remain pending.
+the checkout; the three path guards, both issue workflow packages, and cloud interview also ship. The hosted Pi migration and application are deployed and verified. Remaining adapters remain proposed.
 
 ## Shipped path-guard slice
 
@@ -427,3 +426,78 @@ and fake inference. A parent/child draft batch is published with labels, rewritt
 and a real parent link. Both readers receive the live issue graph and a maintainer comment.
 Dry-run leaves GitHub untouched and publication uses zero inference. Only the run's UUID-tagged
 issues and newly added gateway labels are cleaned; existing repository state is preserved.
+
+## Shipped cloud interview slice
+
+`grill-me-in-cloud` 2.2.0 installs the shared skill/publisher, a small Python adapter,
+and a native extension/relay, with a Pi-only coupled `pi-support` dependency. Project and
+user installation remain independent of Aboard. The implementation was verified on Windows
+with installed Pi 1.2.0, including the actual local Grill app, Supabase database and private
+Storage uploads. On 2026-10-14 the additive migration was applied to the production database
+and Vercel deployment `dpl_2y7fyTUeTSTTJwNaEB8RpUr9VPQB` reached READY at
+`https://grill-me-in-cloud.vercel.app/`. Real Pi project RPC and user JSON-to-RPC journeys
+both passed against that board with exactly five fake Responses requests apiece. They verified
+private SVG uploads, queued-only answers, a single persisted correlated user message, server
+acknowledgement, reload/fork/tree isolation, stop/new-session commands, and owned test cleanup.
+The older deployment was also verified to reject Pi before inference.
+
+The authoring contract stays file-based: prepare reserved round/assets paths, write assets
+first, then write the complete round. Pi's successful tool-result event publishes through the
+existing Python validation, immutable asset staging, idempotent preparation/commit, and outbox.
+This retains native tools and shared skill semantics, including nested tool results. Failed
+preparation consumes explicit invocations before inference. Malformed rounds receive new paths;
+network publication failures keep their staged payload/assets for retry on the next user input.
+Pi's local staged metadata binds retry to the exact native session file and an anchor still in
+the active ancestry; a queued round on an abandoned branch is preserved without being published.
+Unrelated sessions do not resolve configuration or poll the board. Titles come from
+`pi.getSessionName()` and identity from the native session manager, never a model-provider name.
+
+The relay uses the public extension API in TUI, JSON and RPC. The installed
+`agent-session.js` was inspected alongside the mirrored [extension API](PI-REFERENCES/docs/extensions.md)
+and [session format](PI-REFERENCES/docs/session-format.md): `message_end` handlers execute
+before the user message is appended, and `pi.sendUserMessage()` returns void. The awaited
+`sendUserMessage` API belongs to replacement-session callbacks; it is not a general receipt.
+Consequently neither callback nor submission return acknowledges a cloud answer.
+
+Delivery follows these boundaries:
+
+1. `/pi/sync` advertises the exact native session, current branch's published round, workspace,
+   and whether Pi is idle. The shared database claim function admits Pi only for that active
+   round and an idle session. All relays compete for the same locked delivery row; a Pi owner
+   can recover its own outstanding claim. Credentials travel only through internal transport.
+2. An external atomic journal binds a random persistent instance ID to the exact session file.
+   A process lock excludes simultaneous resumptions; dead-process reclamation is serialized.
+   Before submission it records the delivery ID, round, content hash and activation identity.
+   Only one user message is submitted per tick, because asynchronous input preflight can delay
+   Pi's busy state. Slash/skill expansion is disabled for answers.
+3. The injected user message carries a delivery correlation marker. Acknowledgement requires
+   a matching persisted user entry in the exact JSONL file, with the native session header and
+   complete content hash checked. A custom session receipt links the delivery to that entry.
+   Reload can acknowledge an accepted message after an outage without resending it. An
+   in-memory matching user message also prevents resubmission while awaiting persistence.
+4. Shutdown, reload, new/fork and tree navigation stop the old relay and abort transport.
+   Native start/stop and round receipts are reconstructed from active ancestry and bound to
+   the native session ID. Tree navigation appends a non-context branch receipt to persist the
+   selected leaf immediately; a restart therefore cannot revive the prior branch's outbox.
+   Forks require an explicit new invocation. `/grill-cloud-stop` creates
+   a branch-local stop receipt without inference or remote deletion. Accepted messages on an
+   abandoned branch still count as received for delivery idempotency; that history never
+   supplies the current branch's round authority.
+
+The additive migration widens all four provider checks and the claim function result adds
+`round_id`. Internal v1 snapshot reason `aboard` and success status `submitted-to-terminal`
+remain compatible names; the Pi UI uses **Send to Pi**, and success means persisted native
+receipt. Snapshot retries reuse one Pi delivery. A late, previously owned acknowledgement can
+repair expiry after disconnect. An unaccepted expired delivery stays unsubmitted; board drafts
+remain available for a newly reviewed send or manual copy. This is explicit receipt recovery,
+not a lease takeover that could replay an answer from a still-running owner.
+
+`test:pi-grill` verifies real installed Pi and fake Responses inference with a hosted fault
+fixture: project/user install/removal, native aliases, zero-inference unsupported/outage
+admission, malformed-round rejection, SVG publication, queued-only answers, persisted receipt,
+publication outage/recovery and abandoned outboxes, acknowledgement failure/reload, competing
+claims/processes, tree/fork isolation, stop/reload and new-session behavior. The
+explicit `e2e:pi-grill:live` journey verifies the same successful publication/Storage/delivery
+boundaries against an actual configured service. It checks exact inference counts and deletes
+only its UUID-owned sessions/assets. Scripted inference certifies integration; TUI/browser
+rendering, unscripted design quality and a future Pi Aboard adapter are outside this gate.

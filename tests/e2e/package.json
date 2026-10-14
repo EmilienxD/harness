@@ -56,7 +56,10 @@
     "test:pi-path-guards": "esbuild test/pi-path-guards.test.ts --bundle --platform=node --format=cjs --target=node22 --outfile=dist/test/pi-path-guards.test.js && node --test dist/test/pi-path-guards.test.js",
     "e2e:pi-path-guards": "esbuild tools/pi-path-guards/cli.ts --bundle --platform=node --format=cjs --target=node22 --outfile=dist/tools/pi-path-guards/cli.js && node dist/tools/pi-path-guards/cli.js",
     "test:pi-issues": "esbuild test/pi-issues.test.ts --bundle --platform=node --format=cjs --target=node22 --outfile=dist/test/pi-issues.test.js && node --test dist/test/pi-issues.test.js",
-    "e2e:pi-issues:live": "esbuild tools/pi-issues/live-cli.ts --bundle --platform=node --format=cjs --target=node22 --outfile=dist/tools/pi-issues/live-cli.js && node dist/tools/pi-issues/live-cli.js"
+    "e2e:pi-issues:live": "esbuild tools/pi-issues/live-cli.ts --bundle --platform=node --format=cjs --target=node22 --outfile=dist/tools/pi-issues/live-cli.js && node dist/tools/pi-issues/live-cli.js",
+    "e2e:pi-grill": "esbuild tools/pi-grill/cli.ts --bundle --platform=node --format=cjs --target=node22 --outfile=dist/tools/pi-grill/cli.js && node dist/tools/pi-grill/cli.js",
+    "e2e:pi-grill:live": "esbuild tools/pi-grill/cli.ts --bundle --platform=node --format=cjs --target=node22 --outfile=dist/tools/pi-grill/cli.js && node dist/tools/pi-grill/cli.js --live",
+    "test:pi-grill": "esbuild test/pi-grill.test.ts --bundle --platform=node --format=cjs --target=node22 --outfile=dist/test/pi-grill.test.js && node --test dist/test/pi-grill.test.js"
   },
   "devDependencies": {
     "@types/node": "22.20.1",

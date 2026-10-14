@@ -26,7 +26,7 @@ The session is done when the frontier is empty: every branch of the design tree 
 
 ## Publishing a round
 
-The hook supplies the round path, the assets directory with its URL prefix, and the publishing steps, then reports each publication's outcome; follow it exactly. If it supplies no path, or writing a round gets no reply, tell the user the grill hooks did not respond and stop.
+The runtime supplies the round path, the assets directory with its URL prefix, and the publishing steps, then reports each publication's outcome; follow it exactly. If it supplies no path, or writing a round gets no reply, tell the user the grill runtime did not respond and stop. Pi uses a native extension for this workflow; its board's **Send to Pi** action returns reviewed answers to the originating session. `/grill-cloud-stop` disconnects that session's interview while preserving its board history.
 
 Nothing persists between rounds or between questions: give every question all the context, styles, scripts, and images it needs. The user answers from the board alone, with no access to the codebase: a file path is only a label, so when a decision depends on specific code, quote those lines as a code block captioned with the path and line range, inside `<details>` when long.
 

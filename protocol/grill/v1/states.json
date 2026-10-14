@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "providers": ["claude", "chatgpt"],
+  "providers": ["claude", "chatgpt", "pi"],
   "round": ["active", "superseded"],
   "answer": ["draft", "queued"],
   "publication": ["prepared", "uploading", "committed", "failed", "expired"],

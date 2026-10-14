@@ -112,7 +112,7 @@ Claude Code invokes a skill as `/skill-name`; ChatGPT uses `$skill-name`; Pi use
 
 - **`breakdown-help-wanted-issue`**: Explores a request against the codebase and helps you agree on what to build, with questions and concrete recommendations. With no argument, it fetches the oldest open `[AI]-help-wanted` GitHub issue.
 
-- **`grill-me-in-cloud`**: Stress-tests a plan through branching rounds on a persistent hosted board. The hook supplies fresh round and asset paths outside the project, uploads local explanation images, publishes without waiting for answers, and returns the session URL. Drafts survive refreshes; only queued answers enter the deterministic prompt. Copy that prompt into any provider session, or let Aboard submit it into the exact session's open terminal; the send completes only once the provider confirms it received the prompt.
+- **`grill-me-in-cloud`**: Stress-tests a plan through branching rounds on a persistent hosted board. Hooks or Pi's native extension supply fresh round and asset paths outside the project, upload local explanation images, publish without waiting for answers, and return the session URL. Drafts survive refreshes; only queued answers enter the deterministic prompt. Copy the reviewed prompt, send through Aboard for Claude/ChatGPT, or choose **Send to Pi** for Pi's standalone relay. Pi confirms a persisted user message and recovers delivery after reload without resubmission; `/grill-cloud-stop` disconnects the interview. Pi requires the current hosted app and additive provider migration.
 
 - **`prototype`**: Builds a throwaway logic or UI prototype to answer one explicit design question. It follows user or project instructions; otherwise it requires a clean working tree, creates and switches to a new `proto/<prototype-name>` branch. It exercises only the decisive paths and reports what the result supports and where its evidence stops.
 
@@ -400,7 +400,7 @@ The access cookie is marked `Secure` whenever the request arrives over HTTPS, so
 
 ### Provider research and reference documentation
 
-Pi is an opt-in target for 21 shared skill packages and the three path guards. Project skills use `.pi/skills`;
+Pi is an opt-in target for 21 shared skill packages, the three path guards, both issue workflows, and the cloud interview extension. Project skills use `.pi/skills`;
 user installs use `~/.pi/agent/skills` or the configured `PI_CODING_AGENT_DIR`. Omitted `--platform`
 continues to select Claude Code and ChatGPT. Other Pi extensions and persistent runtime are pending.
 The [Pi architecture proposal](docs/PI-ARCHITECTURE.md) records the requested 35-package backlog

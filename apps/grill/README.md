@@ -2,15 +2,15 @@
 
 Grill-Me board is a private, self-hosted review surface for decisions raised during an agent conversation. An agent publishes a round of questions, the board keeps those rounds available across devices, and the user answers them before reviewing one compact prompt to return to the originating conversation.
 
-The board is designed for one person. It uses a shared four-digit access code instead of accounts, stores its data and private images in Supabase, and runs as a Vercel application. Aboard can optionally relay a reviewed prompt to the exact open provider session; copying the prompt always remains available.
+The board is designed for one person. It uses a shared four-digit access code instead of accounts, stores its data and private images in Supabase, and runs as a Vercel application. Pi's native cloud extension and Aboard can relay a reviewed prompt to the exact provider session; copying the prompt always remains available.
 
 ## What the board does
 
-- Lists Claude Code and Codex sessions in active and finished sections of one responsive interface.
+- Lists Claude Code, Codex, and Pi sessions in active and finished sections of one responsive interface.
 - Preserves earlier rounds as read-only history.
 - Shows one question at a time, including the agent's explanation, recommendation, and optional interactive content.
 - Accepts an option, a note, or a custom answer. Every edit saves automatically and is included in the prompt.
-- Produces a read-only prompt that can be copied or sent through Aboard when that session is waiting for input.
+- Produces a read-only prompt that can be copied, sent through Aboard, or sent to Pi when its session relay is connected. Pi claims answers only while idle and confirms receipt from its saved session.
 - Keeps unfinished sessions indefinitely. Finishing a session moves it to the archive and starts a 30-day period before the daily cleanup removes its data and stored images. Finished sessions can be restored during that period, and a newly published round restores its session automatically.
 
 ## Personal deployment
@@ -57,7 +57,7 @@ The included Vercel configuration runs cleanup once per day. Vercel sends `CRON_
 
 ### 3. Connect the local clients
 
-Set these two variables in the environment that launches Claude Code or Codex:
+Set these two variables in the environment that launches Claude Code, Codex, or Pi:
 
 ```text
 HARNESS_GRILL_URL=https://your-production-origin.example
@@ -67,6 +67,10 @@ HARNESS_GRILL_CODE=1234
 Use the same values in the VS Code extension host if you want Aboard delivery. Each initialized project relays separately and labels its presence with its own project name and home-relative path. Aboard reports only recent, exact-session presence, and a delivery succeeds only once the provider's own prompt-submit hook confirms the prompt arrived.
 
 Open the deployed URL, enter the four-digit code, and publish a test round before relying on the board for active work.
+
+For Pi, install Harness's `grill-me-in-cloud` package with `--platform pi`, reload Pi, and invoke `/grill-me-in-cloud` or `/skill:grill-me-in-cloud`. Its extension owns publication and the answer relay; Aboard is optional. The board labels this connection **Pi** and offers **Send to Pi**. `/grill-cloud-stop` disconnects without deleting rounds or answers.
+
+When upgrading an existing board for Pi, apply `20261014120000_add_pi_grill_relay.sql` before deploying the app. It widens provider constraints, adds snapshot idempotency for Pi, and extends the shared claim function with native round binding and recovery of an owner's outstanding claims. `GET /api/v1/capabilities` lets the extension reject older services before inference. Existing Claude/ChatGPT session identities and delivery status values remain compatible.
 
 ## Local development
 
@@ -100,10 +104,10 @@ Published explanation HTML and JavaScript are intentionally trusted. Only connec
 
 ## Current limits
 
-- The browser workflow has been validated end to end with test sessions, but a complete real agentic session has not yet been validated.
+- Pi 1.2.0 JSON/RPC workflows have been verified with real native tools and fake model inference against both the local stack and production Vercel/Supabase/Storage service. Project RPC and user JSON-to-RPC live journeys passed on 2026-10-14; see `tests/e2e/README.md` for repeatable acceptance. This certifies integration, not unscripted model judgment, browser rendering or Pi's interactive TUI.
 - Answers autosave: options at once, notes after a short pause in typing. Concurrent edits from two devices resolve to whichever saved last.
 - The generated prompt is deliberately compact and refers to answers by question ID and option letter. It works best when returned to the conversation that authored the round; an unrelated conversation may lack enough context.
-- Aboard confirmation means the text was submitted to the terminal, not that the provider received or processed it.
+- Relay confirmation means the provider accepted the prompt. Pi additionally verifies its persisted user message; confirmation does not imply successful model processing.
 - The four-digit code is a lightweight gate. It is not a substitute for user accounts or strong public-facing authentication.
 
 For the visual and interaction conventions, see [docs/design.md](docs/design.md).

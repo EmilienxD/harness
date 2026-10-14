@@ -1,7 +1,7 @@
 import { z } from "zod";
 
 export const SCHEMA_VERSION = 1 as const;
-export const PROVIDERS = ["claude", "chatgpt"] as const;
+export const PROVIDERS = ["claude", "chatgpt", "pi"] as const;
 export const MEDIA_TYPES = [
   "image/png",
   "image/jpeg",

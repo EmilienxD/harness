@@ -4,7 +4,7 @@
 
 Harness is the canonical catalogue and installer for independently selectable agent skills, hooks,
 command-line tools, and optional apps for Claude Code, ChatGPT, and Pi. Pi catalogue support includes
-21 shared skill packages, three path-guard extensions, and two issue workflow extensions; other
+21 shared skill packages, three path-guard extensions, two issue workflow extensions, and a native cloud interview relay; other
 extensions and persistent runtime remain proposed. Its deterministic real-CLI E2E environment is
 available. Harness also owns persistent visible-session
 commands and ask/reply state.

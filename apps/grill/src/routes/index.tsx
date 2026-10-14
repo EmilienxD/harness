@@ -108,7 +108,7 @@ function useConfirmation(): [boolean, () => void] {
   return [confirmed, confirm];
 }
 
-/** Resolves once Aboard reports that the provider confirmed the prompt; the server expires deliveries after 30 seconds. */
+/** Resolves once the answer relay confirms receipt by the bound provider session. */
 async function awaitDelivery(id: string): Promise<void> {
   const deadline = Date.now() + 45_000;
   for (;;) {
@@ -116,9 +116,10 @@ async function awaitDelivery(id: string): Promise<void> {
       `deliveries/${id}`,
     );
     if (delivery.status === "submitted-to-terminal") return;
-    if (delivery.status === "failed") throw new Error(delivery.failure_message ?? "Aboard could not send the prompt.");
+    if (delivery.status === "failed")
+      throw new Error(delivery.failure_message ?? "The answer relay could not send the prompt.");
     if (delivery.status === "expired" || Date.now() >= deadline)
-      throw new Error("Aboard did not confirm the prompt in time.");
+      throw new Error("The answer relay did not confirm the prompt in time. Answers remain on the board.");
     await new Promise((resolve) => window.setTimeout(resolve, 1_000));
   }
 }
@@ -135,6 +136,7 @@ function copyText(text: string): Promise<void> {
 const PROVIDERS: Record<string, { name: string; icon: string }> = {
   claude: { name: "Claude", icon: "/anthropic.svg" },
   chatgpt: { name: "ChatGPT", icon: "/openai.svg" },
+  pi: { name: "Pi", icon: "/pi.svg" },
 };
 
 function ProviderTag({ provider }: { provider: string }) {
@@ -706,12 +708,12 @@ function GrillBoard() {
                 role="status"
                 title={
                   online
-                    ? `Aboard online in ${detail.aboard?.workspace_path ?? detail.aboard?.workspace_name ?? "an unknown project"}`
-                    : "Aboard offline"
+                    ? `${detail.session.provider === "pi" ? "Pi" : "Aboard"} online in ${detail.aboard?.workspace_path ?? detail.aboard?.workspace_name ?? "an unknown project"}`
+                    : `${detail.session.provider === "pi" ? "Pi" : "Aboard"} offline`
                 }
               >
                 <span className="aboard-badge__dot" aria-hidden="true" />
-                Aboard
+                {detail.session.provider === "pi" ? "Pi" : "Aboard"}
                 <span className="visually-hidden">{online ? "online" : "offline"}</span>
               </span>
             )}
@@ -1824,8 +1826,10 @@ function PromptModal({
                 : sent
                   ? "Prompt sent"
                   : aboardReady
-                    ? "Send via Aboard"
-                    : "Aboard is not connected to this session"
+                    ? session.provider === "pi"
+                      ? "Send to Pi"
+                      : "Send via Aboard"
+                    : "The answer relay is not connected to this session"
             }
             onClick={() => (alreadySent ? setConfirmingResend(true) : void snapshot("aboard"))}
           >
@@ -1836,7 +1840,7 @@ function PromptModal({
             ) : (
               <Send size={14} />
             )}{" "}
-            Send via Aboard
+            {session.provider === "pi" ? "Send to Pi" : "Send via Aboard"}
           </button>
         </div>
       </div>

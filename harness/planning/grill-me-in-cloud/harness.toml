@@ -1,8 +1,9 @@
 name = "grill-me-in-cloud"
-version = "2.1.8"
+version = "2.2.0"
 description = "Publishes visual design interviews to a persistent hosted board"
 docs = "https://github.com/EmilienxD/harness/blob/main/README.md#user-invoked-skills"
 requires = []
+dependencies = [{ name = "pi-support", version = ">=1.1.0,<2.0.0", lifecycle = "coupled", platforms = ["pi"] }]
 workspace_gitignore = [".harness/config.local.json"]
 
 [platforms.claude]
@@ -12,6 +13,27 @@ fragment = "claude/settings.fragment.json"
 [platforms.chatgpt]
 status = "supported"
 fragment = "chatgpt/hooks.fragment.json"
+
+[platforms.pi]
+status = "supported"
+
+[[files]]
+src = "pi/extension.ts"
+dest = "harness-grill-me-in-cloud/index.ts"
+root = "extensions"
+platforms = ["pi"]
+
+[[files]]
+src = "grill_cloud_pi.py"
+dest = "grill_cloud_pi.py"
+root = "hooks"
+platforms = ["pi"]
+
+[[files]]
+src = "pi/relay.ts"
+dest = "grill-cloud/relay.ts"
+root = "hooks"
+platforms = ["pi"]
 
 [[files]]
 src = "SKILL.md"
