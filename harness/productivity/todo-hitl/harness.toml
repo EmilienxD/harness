@@ -1,5 +1,5 @@
 name = "todo-hitl"
-version = "1.0.3"
+version = "1.1.0"
 description = "Mark deferred code work for human review and address it deliberately"
 docs = "https://github.com/EmilienxD/harness/blob/main/README.md#user-invoked-skills"
 
@@ -7,6 +7,9 @@ docs = "https://github.com/EmilienxD/harness/blob/main/README.md#user-invoked-sk
 status = "supported"
 
 [platforms.chatgpt]
+status = "supported"
+
+[platforms.pi]
 status = "supported"
 
 [[files]]

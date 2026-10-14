@@ -13,6 +13,8 @@ disable-model-invocation: true
 A prototype is **throwaway code that answers a design question**. The question
 decides the shape and the stopping point.
 
+Run this workflow in an interactive conversation where the user can inspect the prototype and give feedback. If the session cannot accept user replies, report that requirement before creating a branch or building the prototype.
+
 ## Frame the question
 
 State the question in one sentence and name the decision its answer will inform.
@@ -45,6 +47,10 @@ conventions.
 2. Build the smallest artifact that makes the answer observable.
 3. Run the decisive happy path and edge cases; fix only defects that obscure
    the answer.
+   Use browser or UI automation only when those tools are actually available.
+   If they are unavailable, run the checks you can perform, give the user the
+   exact open/run instruction, and request the remaining visual or interaction
+   checks. Distinguish your verified results from checks awaiting the user.
 4. Put the runnable prototype in front of the user and incorporate feedback
    while it sharpens the same question.
 5. Stop when the prototype supplies enough evidence for the named decision.

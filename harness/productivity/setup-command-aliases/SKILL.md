@@ -63,6 +63,8 @@ User: "Add alias `dc` for `docker-compose`"
 
 ## Multi-platform Requests
 
+For a requested Pi shortcut, verify the installed `pi` CLI and build the alias from the user's requested command and supported options. State the exact Pi command it runs and how to activate the shell configuration. A shell alias launches the CLI; an in-session skill is invoked as `/skill:name` and requires no shell alias.
+
 When the user asks for "cross-platform" or mentions multiple shells, update all applicable files for their system:
 - On Windows: Update both PowerShell profile and `~/.bashrc` (for Git Bash)
 - On macOS/Linux: Update both `~/.bashrc` and `~/.zshrc` (if both shells are used)

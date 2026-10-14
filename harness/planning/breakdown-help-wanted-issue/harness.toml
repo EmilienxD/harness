@@ -1,5 +1,5 @@
 name = "breakdown-help-wanted-issue"
-version = "1.4.2"
+version = "1.5.0"
 description = "Explore a request and agree with the user on what to build"
 requires = ["git", "gh"]
 docs = "https://github.com/EmilienxD/harness/blob/main/README.md#user-invoked-skills"
@@ -8,6 +8,9 @@ docs = "https://github.com/EmilienxD/harness/blob/main/README.md#user-invoked-sk
 status = "supported"
 
 [platforms.chatgpt]
+status = "supported"
+
+[platforms.pi]
 status = "supported"
 
 [[files]]

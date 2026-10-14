@@ -1,0 +1,17 @@
+// Test-only inspection of the host's structured native skill parser; no prompt data is persisted.
+import { writeFile } from "node:fs/promises";
+import { join } from "node:path";
+import { loadSkills, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
+
+export default function (pi: ExtensionAPI) {
+  pi.registerCommand("e2e-skill-resources", {
+    description: "Inspect structured fixture-owned skill resources",
+    handler: async (_args, ctx) => {
+      const resources = loadSkills({ cwd: ctx.cwd, agentDir: process.env.PI_CODING_AGENT_DIR!, skillPaths: [], includeDefaults: true });
+      await writeFile(join(ctx.cwd, "skill-resources.json"), JSON.stringify({
+        skills: resources.skills.map(({ name, filePath, disableModelInvocation }) => ({ name, filePath, disableModelInvocation })),
+        diagnostics: resources.diagnostics.map(({ type }) => ({ type })),
+      }), "utf8");
+    },
+  });
+}

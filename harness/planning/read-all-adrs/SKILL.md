@@ -13,3 +13,5 @@ finish.
 
 Read each file in full so every documented architectural decision informs the
 current work.
+
+Inventory the ADR files first and track which have been read completely. Continue truncated reads until each file is covered. If an ADR is inaccessible or the inventory exceeds the available context, state the unread files or lost coverage and agree how to continue; claim complete decision context only when the full inventory remains available.

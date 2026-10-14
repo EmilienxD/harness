@@ -1,5 +1,5 @@
 name = "zoom-out"
-version = "1.0.6"
+version = "1.1.0"
 description = "Gives a higher-level map of a codebase area"
 docs = "https://github.com/EmilienxD/harness/blob/main/harness/productivity/zoom-out/SKILL.md"
 
@@ -7,6 +7,9 @@ docs = "https://github.com/EmilienxD/harness/blob/main/harness/productivity/zoom
 status = "supported"
 
 [platforms.chatgpt]
+status = "supported"
+
+[platforms.pi]
 status = "supported"
 
 [[files]]

@@ -1,5 +1,5 @@
 name = "grill-me"
-version = "1.0.7"
+version = "1.1.0"
 description = "Interviews you to stress-test a plan or design"
 docs = "https://github.com/EmilienxD/harness/blob/main/harness/planning/grill-me/SKILL.md"
 
@@ -7,6 +7,9 @@ docs = "https://github.com/EmilienxD/harness/blob/main/harness/planning/grill-me
 status = "supported"
 
 [platforms.chatgpt]
+status = "supported"
+
+[platforms.pi]
 status = "supported"
 
 [[files]]

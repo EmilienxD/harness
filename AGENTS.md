@@ -3,8 +3,8 @@
 ## Project Shape
 
 Harness is the canonical catalogue and installer for independently selectable agent skills, hooks,
-command-line tools, and optional apps for Claude Code, ChatGPT, and Pi. Pi catalogue support starts
-with `flush-out-useless-tests`; its other tools and persistent runtime are still proposed. Its
+command-line tools, and optional apps for Claude Code, ChatGPT, and Pi. Pi catalogue support includes
+21 shared skill packages; extension integrations and persistent runtime are still proposed. Its
 deterministic real-CLI E2E environment is available. Harness also owns persistent visible-session
 commands and ask/reply state.
 

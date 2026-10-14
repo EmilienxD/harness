@@ -49,7 +49,9 @@ Count relevant source, test, configuration, infrastructure, and documentation fi
 
 ## 2. Decide whether to delegate
 
-Honor an explicit agent count or no-agent request first. Otherwise:
+Check whether explorer delegation is available in this session. Pi's shared skill installation does not provide the Harness explorer runtime. If delegation is unavailable and the user explicitly requests `agents=N` with N greater than zero, report the missing capability and wait for the user to choose a single-session audit or a session with explorer support. Otherwise, audit the entire scope yourself and skip step 3.
+
+When delegation is available, honor an explicit agent count or no-agent request first. Otherwise:
 
 - 10 files or less: audit alone.
 - More than 10 files: delegate to N explorer subagents based on codebase size and the number of genuinely distinct areas.
@@ -76,7 +78,7 @@ After delegating, do nothing else until every explorer has reported. Do not cont
 
 ## 4. Synthesize and verify
 
-Only after every report has arrived:
+For a single-session audit, inspect the entire requested scope and verify your findings directly. For a delegated audit, only after every report has arrived:
 
 1. Combine the reports, reconcile cross-boundary observations, and remove duplicates.
 2. Selectively inspect the cited code to verify every critical finding, any contradiction, weakly supported claim, unclear case, or claim you are personally unsure about.

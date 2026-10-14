@@ -1,5 +1,5 @@
 name = "writing-adrs"
-version = "1.0.2"
+version = "1.1.0"
 description = "Writes architectural decision records as durable decision contracts"
 docs = "https://github.com/EmilienxD/harness/blob/main/harness/planning/writing-adrs/SKILL.md"
 
@@ -7,6 +7,9 @@ docs = "https://github.com/EmilienxD/harness/blob/main/harness/planning/writing-
 status = "supported"
 
 [platforms.chatgpt]
+status = "supported"
+
+[platforms.pi]
 status = "supported"
 
 [[files]]

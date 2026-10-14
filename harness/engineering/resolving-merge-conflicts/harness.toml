@@ -1,5 +1,5 @@
 name = "resolving-merge-conflicts"
-version = "1.0.1"
+version = "1.1.0"
 description = "Resolves in-progress Git merge and rebase conflicts"
 docs = "https://github.com/EmilienxD/harness/blob/main/harness/engineering/resolving-merge-conflicts/SKILL.md"
 
@@ -7,6 +7,9 @@ docs = "https://github.com/EmilienxD/harness/blob/main/harness/engineering/resol
 status = "supported"
 
 [platforms.chatgpt]
+status = "supported"
+
+[platforms.pi]
 status = "supported"
 
 [[files]]

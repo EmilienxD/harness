@@ -1,8 +1,9 @@
 # Pi provider architecture proposal
 
-Status: **first skill implemented; remaining provider architecture proposed**. Pi is an opt-in
-catalogue target for `flush-out-useless-tests` 1.1.0. Shared skill installation works at project
-and user scope; extensions, persistent runtime, Aboard, and hosted Grill integrations are pending.
+Status: **21 shared skill packages implemented; extension and runtime architecture proposed**.
+Pi is an opt-in catalogue target for `flush-out-useless-tests` and the 20 shared packages marked
+implemented below. Shared skill installation works at project and user scope; extensions,
+persistent runtime, Aboard, and hosted Grill integrations are pending.
 This proposal defines the implementation boundaries and first release scope.
 The [compatibility report](PI-COMPATIBILITY.md) retains the catalogue-wide feasibility assessment.
 
@@ -19,6 +20,12 @@ runs its native skill in JSON/RPC, verifies a real passing test baseline and app
 and checks receipt-driven removal. Inference is scripted; these checks certify integration,
 not the quality of an unscripted model's audit judgments.
 
+The shared-skill batch additionally checks native command discovery and explicit invocation
+for all 21 skill entry points in its 20 packages, at project and user scopes. The real Pi
+parser verifies invocation policy; native tools read installed support files and write
+fixture results, with exact inference counts and receipt-driven removal. These checks certify
+resource integration, not unscripted workflow quality or external browser/GitHub services.
+
 ## First release scope
 
 The following **35 packages** are the requested backlog, sorted by recommended implementation
@@ -33,32 +40,32 @@ prerequisites must land before their dependent packages.
 
 **Skill** means reuse the shared instructions/scripts/CLI with Pi mappings and any required
 portability edits. **Extension** means a native Pi entry point plus existing package cores;
-it can also include shared skills. Only the first row is implemented; the remaining rows are planned.
+it can also include shared skills. Rows marked implemented ship shared Pi skills; unmarked rows remain planned.
 
 | Priority | Package | Route | Completion requirement beyond installer support |
 | --- | --- | --- | --- |
 | 1 | `flush-out-useless-tests` | Skill | Implemented in 1.1.0. Project JSON/RPC and user RPC journeys verify installation, audit, approved cleanup, and removal. |
-| 2 | `tdd` | Skill | Preserve behavior-focused red/green work and supporting references. |
+| 2 | `tdd` | Skill | Implemented. Behavior-focused red/green work and supporting references are installed. |
 | 3 | `test-workflows` | Skill | Install the existing CLI; retain explicit status, execution evidence, and confirmation. |
-| 4 | `resolving-merge-conflicts` | Skill | Preserve merge/rebase intent and project verification. |
-| 5 | `setup-git-worktree-maker` | Skill | Copy necessary project Pi resources while keeping personal credentials and sessions outside worktrees. |
-| 6 | `audit` | Skill | Support the single-session audit; explicit explorer delegation waits for the later runtime adapter. |
-| 7 | `grill-me` | Skill | Preserve frontier questions and explicit user decisions. |
-| 8 | `breakdown-help-wanted-issue` | Skill | Preserve clarification and authenticated GitHub lookup. |
-| 9 | `read-all-adrs` | Skill | Read the full ADR inventory with honest context limits. |
-| 10 | `writing-adrs` | Skill | Preserve decision-document conventions and supporting references. |
-| 11 | `writing-for-agents` | Skill | Add Pi invocation/discovery/frontmatter mechanics to its shared reference when the payload ships. |
-| 12 | `zoom-out` | Skill | Reuse abstraction mapping and codebase navigation. |
-| 13 | `prototype` | Skill | Preserve throwaway branch and interactive-only workflow; verify UI with actually available tools. |
-| 14 | `lavish` | Skill | Make argument handling portable; retain the existing Lavish CLI and external review requirements. |
-| 15 | `handoff` | Skill | Preserve temporary output and secret redaction. |
-| 16 | `handoff-grilling` | Skill | Preserve design-tree handoff and temporary output. |
-| 17 | `todo-hitl` | Skill | Support both `mark-as-todo-hitl` and `address-todo-hitl`, retaining agreement before remediation. |
-| 18 | `decisions` | Skill | Reuse retrospective decision review over available conversation context. |
-| 19 | `next-decision` | Skill | Preserve recommendations and the wait for explicit decisions. |
-| 20 | `stop-overthinking` | Skill | Reuse the practical-decision workflow. |
-| 21 | `setup-command-aliases` | Skill | Preserve shell configuration and activation; document any Pi alias explicitly. |
-| 22 | `setup-text-replacements` | Skill | Preserve AutoHotkey edit/reload behavior and Windows-only scope. |
+| 4 | `resolving-merge-conflicts` | Skill | Implemented. Preserve merge/rebase intent and project verification. |
+| 5 | `setup-git-worktree-maker` | Skill | Implemented. Copy necessary project Pi resources while keeping personal credentials and sessions outside worktrees. |
+| 6 | `audit` | Skill | Implemented. Pi runs the audit in one session; explicit explorer delegation waits for the later runtime adapter. |
+| 7 | `grill-me` | Skill | Implemented. Preserve frontier questions and explicit user decisions. |
+| 8 | `breakdown-help-wanted-issue` | Skill | Implemented. Preserve clarification and authenticated GitHub lookup. |
+| 9 | `read-all-adrs` | Skill | Implemented. Read the full ADR inventory with honest context limits. |
+| 10 | `writing-adrs` | Skill | Implemented. Preserve decision-document conventions and supporting references. |
+| 11 | `writing-for-agents` | Skill | Implemented. Shared reference includes Pi invocation, discovery, and frontmatter mechanics. |
+| 12 | `zoom-out` | Skill | Implemented. Reuse abstraction mapping and codebase navigation. |
+| 13 | `prototype` | Skill | Implemented. Preserve throwaway branch and interactive-only workflow; verify UI with actually available tools. |
+| 14 | `lavish` | Skill | Implemented. Make argument handling portable; retain the existing Lavish CLI and external review requirements. |
+| 15 | `handoff` | Skill | Implemented. Preserve temporary output and secret redaction. |
+| 16 | `handoff-grilling` | Skill | Implemented. Preserve design-tree handoff and temporary output. |
+| 17 | `todo-hitl` | Skill | Implemented. Support both `mark-as-todo-hitl` and `address-todo-hitl`, retaining agreement before remediation. |
+| 18 | `decisions` | Skill | Implemented. Reuse retrospective decision review over available conversation context. |
+| 19 | `next-decision` | Skill | Implemented. Preserve recommendations and the wait for explicit decisions. |
+| 20 | `stop-overthinking` | Skill | Implemented. Reuse the practical-decision workflow. |
+| 21 | `setup-command-aliases` | Skill | Implemented. Preserve shell configuration and activation; document any Pi alias explicitly. |
+| 22 | `setup-text-replacements` | Skill | Implemented. Preserve AutoHotkey edit/reload behavior and Windows-only scope. |
 | 23 | `command-guard` | Extension | Evaluate `bash` / `powershell` with existing Python TOML/regex rules; malformed policy blocks commands. |
 | 24 | `on-read-reminder` | Extension | Match successful reads and recognized shell reads; record partial reads accurately. |
 | 25 | `on-edit-reminder` | Extension | After a successful edit, supply matching guidance with existing cooldown and deduplication behavior. |
@@ -357,5 +364,5 @@ headless transport; adopting it must not silently replace the visible-terminal p
 
 These future adapters consume the same event/identity contracts without making the initial
 35 packages depend on their implementation. The compatibility report retains their detailed
-feasibility and broader release gates. The first skill and installer slice are implemented in
+feasibility and broader release gates. The 21 shared skill packages and installer slice are implemented in
 the checkout; the remaining adapters, service migrations, deployment, and release remain pending.

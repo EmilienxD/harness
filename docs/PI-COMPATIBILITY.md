@@ -3,12 +3,15 @@
 The [Pi architecture proposal](PI-ARCHITECTURE.md) extends this investigation with the user's
 requested 35-package backlog and concrete provider boundaries. It owns first-release scope and
 sequencing; this report retains catalogue-wide feasibility and broader integration considerations.
-Current implementation starts with `flush-out-useless-tests` 1.1.0 and opt-in Pi skill installation;
-the remaining tool and runtime integrations remain proposed.
+Current implementation includes `flush-out-useless-tests` and the 20 shared skill packages
+listed as implemented in the architecture backlog, with opt-in Pi installation. Extension-backed
+tools and runtime integrations remain proposed.
 
 Follow-up preparation now provides a [real Pi JSON/RPC E2E environment](../tests/e2e/README.md),
 verified against installed Pi 1.2.0. The investigation results below predate that bootstrap;
-the first tool now has real installer/CLI journeys, while other tools, runtime, and Aboard remain proposed.
+the first tool has a workflow journey and the shared-skill batch has native discovery/invocation
+checks. The feasibility tables below describe original port requirements; consult the architecture
+backlog for current shipped status. Extensions, runtime, and Aboard remain proposed.
 
 ## Executive conclusion
 

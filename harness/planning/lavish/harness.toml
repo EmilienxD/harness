@@ -1,5 +1,5 @@
 name = "lavish"
-version = "1.0.3"
+version = "1.1.0"
 description = "Create reviewable HTML artifacts with the Lavish Editor"
 docs = "https://github.com/EmilienxD/harness/blob/main/harness/planning/lavish/SKILL.md"
 requires = ["npx"]
@@ -8,6 +8,9 @@ requires = ["npx"]
 status = "supported"
 
 [platforms.chatgpt]
+status = "supported"
+
+[platforms.pi]
 status = "supported"
 
 [[files]]

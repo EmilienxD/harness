@@ -26,7 +26,6 @@ If lavish-axi output shows a follow-up command starting with `lavish-axi`, run i
 
 ## Request
 
-$ARGUMENTS
+Treat the user's text accompanying the skill invocation as the artifact request. Pi appends arguments after `/skill:lavish` to the loaded instructions as a user request; other hosts supply invocation details through their own skill mechanism.
 
-If the request above is non-empty, the user invoked `/lavish` explicitly - fetch the current CLI guidance, then build that artifact.
-If it is empty, infer what to visualize from the conversation.
+Fetch the current CLI guidance, then build the requested artifact. If the user supplied no artifact request, infer what to visualize from the conversation. Use the CLI's external review loop; report unavailable CLI or browser capabilities rather than claiming the user reviewed an artifact.

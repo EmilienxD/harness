@@ -4,8 +4,9 @@
 
 Harness is a catalogue and installer for small, independently selectable agent skills, hooks, command-line tools, and the optional Aboard VS Code extension. It supports Claude Code and ChatGPT without making you adopt an all-or-nothing workflow.
 
-Pi support starts with `flush-out-useless-tests`, installed into Pi's native skills directory.
-The [architecture and initial tool scope](docs/PI-ARCHITECTURE.md) track the remaining ports.
+Pi supports `flush-out-useless-tests` and 20 shared skill packages, installed into its native
+skills directory. The [architecture and initial tool scope](docs/PI-ARCHITECTURE.md) track
+shipped skills and the remaining extension and runtime ports.
 
 The project is built around deliberate control. Most skills run only when you invoke them. Hooks act at narrow, visible lifecycle boundaries, with editable policies where configuration is needed. Aboard keeps delegated and automated work in visible terminals that you can inspect, stop, and resume.
 
@@ -49,6 +50,20 @@ uvx --from "git+https://github.com/EmilienxD/harness" harness uninstall commit
 ```
 
 Commands default to project scope in the current directory and Claude Code plus ChatGPT. Select `--platform pi` explicitly for Pi-supported packages. Use `--scope user`, `--root <path>`, or repeat `--platform` to narrow the target. Every mutating command supports `--dry-run`; every installer command supports `--json`. `install` and `upgrade` fail rather than replace files Harness does not own; rerun them with `--overwrite` to take those files over, and with `--adopt` to take over host products installed outside Harness. Run `harness --help` for the complete CLI.
+
+Pi-compatible shared packages are `tdd`, `resolving-merge-conflicts`,
+`setup-git-worktree-maker`, `audit`, `grill-me`, `breakdown-help-wanted-issue`,
+`read-all-adrs`, `writing-adrs`, `writing-for-agents`, `zoom-out`, `prototype`,
+`lavish`, `handoff`, `handoff-grilling`, `todo-hitl`, `decisions`, `next-decision`,
+`stop-overthinking`, `setup-command-aliases`, and `setup-text-replacements`, plus
+`flush-out-useless-tests`. For example, run `uv run harness install tdd audit --platform pi`
+from this checkout, then invoke `/skill:tdd` or `/skill:audit` in Pi. `todo-hitl` installs
+`/skill:mark-as-todo-hitl` and `/skill:address-todo-hitl`.
+Project skills live in `.pi/skills`; user skills live in `~/.pi/agent/skills`, or the agent
+directory selected by `PI_CODING_AGENT_DIR`. Review project resources before granting Pi trust.
+Audit runs in the current session; Pi explorer delegation remains pending. UI prototypes
+require available browser tools, Lavish requires `npx` and external browser review, GitHub
+lookup requires authenticated `gh`, and text replacements remain Windows-only.
 
 ## Reference
 

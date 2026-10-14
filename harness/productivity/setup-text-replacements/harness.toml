@@ -1,5 +1,5 @@
 name = "setup-text-replacements"
-version = "1.0.5"
+version = "1.1.0"
 description = "Add or change always-on AutoHotkey text replacements (Windows only)"
 docs = "https://github.com/EmilienxD/harness/blob/main/README.md#user-invoked-skills"
 
@@ -7,6 +7,9 @@ docs = "https://github.com/EmilienxD/harness/blob/main/README.md#user-invoked-sk
 status = "supported"
 
 [platforms.chatgpt]
+status = "supported"
+
+[platforms.pi]
 status = "supported"
 
 [[files]]

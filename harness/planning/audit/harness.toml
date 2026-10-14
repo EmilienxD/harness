@@ -1,5 +1,5 @@
 name = "audit"
-version = "1.1.3"
+version = "1.2.0"
 description = "Audits a codebase and reports evidence-backed findings"
 docs = "https://github.com/EmilienxD/harness/blob/main/harness/planning/audit/SKILL.md"
 
@@ -7,6 +7,9 @@ docs = "https://github.com/EmilienxD/harness/blob/main/harness/planning/audit/SK
 status = "supported"
 
 [platforms.chatgpt]
+status = "supported"
+
+[platforms.pi]
 status = "supported"
 
 [[files]]

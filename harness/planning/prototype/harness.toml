@@ -1,11 +1,14 @@
 name = "prototype"
-version = "1.2.5"
+version = "1.3.0"
 description = "Build throwaway design prototypes to answer a design question"
 
 [platforms.claude]
 status = "supported"
 
 [platforms.chatgpt]
+status = "supported"
+
+[platforms.pi]
 status = "supported"
 
 [[files]]

@@ -18,6 +18,7 @@ npm ci
 npm run check
 npm run e2e:pi
 npm run test:pi
+npm run test:pi-shared-skills
 npm run e2e:flush-out-useless-tests
 ```
 
@@ -31,6 +32,12 @@ runs project JSON/RPC and user RPC journeys. It checks a real Node test baseline
 discovery, no edits before scripted approval, exact cleanup and passing verification, dry-run,
 repeat install, agent-directory receipt separation, and cross-provider uninstall preservation.
 Run `uv sync` in the repository first; the installer helper uses that environment offline.
+
+`test:pi-shared-skills` installs the 20 shared-skill ports at project and user scopes,
+checks native discovery of all 21 entry points and their explicit-invocation flags, invokes
+each skill, reads bundled references with real tools, and checks exact inference counts
+and receipt-driven removal. Scripted fixture actions certify resource integration;
+they do not evaluate unscripted workflow judgment or external services.
 
 Each fixture creates its own external temporary directory:
 
