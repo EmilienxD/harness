@@ -373,16 +373,21 @@ ADDRESS_INTRO = (
 )
 
 
-def build_address_context(argument: str, cwd: Path) -> str:
+def address_checkout_context(cwd: Path) -> str:
+    """Admit an address workflow and describe ownership of its initial checkout."""
     continuation = os.environ.get("ABOARD_WORKER_CONTINUATION") == "1"
     if not continuation:
         require_clean_worktree(cwd, "address-this", ADDRESS_GIT)
-    depth = relation_depth()
-    checkout = (
+    return (
         "Aboard is continuing the exact worker conversation over its preserved working tree. Treat every existing change as part of that continuation."
         if continuation else
         "Worktree verified clean by the address-this hook before this invocation; every change now present is yours."
     )
+
+
+def build_address_context(argument: str, cwd: Path) -> str:
+    checkout = address_checkout_context(cwd)
+    depth = relation_depth()
     references = strict_references(argument, "")
     if references is None:
         supplied = (

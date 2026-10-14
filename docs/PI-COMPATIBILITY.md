@@ -5,13 +5,13 @@ requested 35-package backlog and concrete provider boundaries. It owns first-rel
 sequencing; this report retains catalogue-wide feasibility and broader integration considerations.
 Current implementation includes `flush-out-useless-tests` and the 20 shared skill packages
 listed as implemented in the architecture backlog, with opt-in Pi installation. Extension-backed
-tools and runtime integrations remain proposed.
+tools now include the three path guards and both issue workflow packages; remaining extensions and runtime integrations remain proposed.
 
 Follow-up preparation now provides a [real Pi JSON/RPC E2E environment](../tests/e2e/README.md),
 verified against installed Pi 1.2.0. The investigation results below predate that bootstrap;
 the first tool has a workflow journey and the shared-skill batch has native discovery/invocation
 checks. The feasibility tables below describe original port requirements; consult the architecture
-backlog for current shipped status. Extensions, runtime, and Aboard remain proposed.
+backlog for current shipped status. The three path guards and both issue workflow packages ship; remaining extensions, runtime, and Aboard remain proposed.
 
 ## Executive conclusion
 
@@ -29,7 +29,7 @@ Recommendations:
 
 **The original investigation delivered research, mirrored references, and synchronization wiring.**
 Follow-up work added `--platform pi` skill installation and the first tool's E2E journeys.
-Pi extensions, persistent runtime, and Aboard remain unimplemented. Feasible below describes
+The three Pi path guards and both issue workflow packages are implemented; other extensions, persistent runtime, and Aboard remain unimplemented. Feasible below describes
 the research assessment; consult the architecture's implementation status for shipped slices.
 
 ## Scope and evidence

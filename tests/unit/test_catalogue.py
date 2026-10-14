@@ -1384,7 +1384,7 @@ def test_every_catalogue_manifest_loads():
             "prefer-edit-tool", "prefer-fewer-comments", "prefer-read-tool",
             "redirect-subagents", "usage-limit-wait",
         },
-        "extension": {"aboard", "auto"},
+        "extension": {"aboard", "auto", "pi-support"},
     }
     actual_categories = {}
     catalogue_root = next(parent for parent in tools["aboard"].root.parents if parent.name == "harness")

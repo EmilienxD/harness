@@ -1,8 +1,8 @@
 # Pi provider architecture proposal
 
-Status: **21 shared skill packages implemented; extension and runtime architecture proposed**.
+Status: **21 shared skill packages, three path-guard extensions and two issue workflow extensions implemented; remaining extensions and runtime architecture proposed**.
 Pi is an opt-in catalogue target for `flush-out-useless-tests` and the 20 shared packages marked
-implemented below. Shared skill installation works at project and user scope; extensions,
+implemented below. Shared skill installation works at project and user scope; three path guards and both issue workflow packages ship; remaining extensions,
 persistent runtime, Aboard, and hosted Grill integrations are pending.
 This proposal defines the implementation boundaries and first release scope.
 The [compatibility report](PI-COMPATIBILITY.md) retains the catalogue-wide feasibility assessment.
@@ -40,7 +40,7 @@ prerequisites must land before their dependent packages.
 
 **Skill** means reuse the shared instructions/scripts/CLI with Pi mappings and any required
 portability edits. **Extension** means a native Pi entry point plus existing package cores;
-it can also include shared skills. Rows marked implemented ship shared Pi skills; unmarked rows remain planned.
+it can also include shared skills. Rows marked implemented ship the stated Pi resources; unmarked rows remain planned.
 
 | Priority | Package | Route | Completion requirement beyond installer support |
 | --- | --- | --- | --- |
@@ -67,13 +67,13 @@ it can also include shared skills. Rows marked implemented ship shared Pi skills
 | 21 | `setup-command-aliases` | Skill | Implemented. Preserve shell configuration and activation; document any Pi alias explicitly. |
 | 22 | `setup-text-replacements` | Skill | Implemented. Preserve AutoHotkey edit/reload behavior and Windows-only scope. |
 | 23 | `command-guard` | Extension | Evaluate `bash` / `powershell` with existing Python TOML/regex rules; malformed policy blocks commands. |
-| 24 | `on-read-reminder` | Extension | Match successful reads and recognized shell reads; record partial reads accurately. |
-| 25 | `on-edit-reminder` | Extension | After a successful edit, supply matching guidance with existing cooldown and deduplication behavior. |
-| 26 | `on-edit-block` | Extension | Block matching writes until required guidance was successfully read or delivered on the active branch. |
+| 24 | `on-read-reminder` | Extension | Implemented in 2.2.0. Successful native/shell reads remind; partial read ranges are recorded accurately. |
+| 25 | `on-edit-reminder` | Extension | Implemented in 2.2.0. Successful native edits remind with the existing 120-second cooldown and branch-local read suppression. |
+| 26 | `on-edit-block` | Extension | Implemented in 2.2.0. Native writes/edits require complete reads or fully delivered denial guidance on the active branch, including nested calls. |
 | 27 | `prefer-fewer-comments` | Extension | Reuse scanning/budgets/exemptions; examine newly introduced comments only. |
 | 28 | `no-new-documents` | Extension | Preserve draft mirrors, pending notices, user approval, and no-overwrite approval commands. |
-| 29 | `issue-readers` | Extension | Prepare complete `address-this` / `review-this` context through the existing issue graph and CLI. |
-| 30 | `issue-writers` | Extension | Supply session draft paths for all five skills; publish through a native command with existing locks and ordering. |
+| 29 | `issue-readers` | Extension | Implemented in 1.6.0. Prepare complete paginated `address-this` / `review-this` context through the issue graph before native skill expansion; preparation errors stop inference. |
+| 30 | `issue-writers` | Extension | Implemented in 2.3.0. Supply native session draft paths for the four drafting/spec skills; intercept the fifth (`publish-issues`) through a native command with existing locks and ordering, without inference. |
 | 31 | `cleanup-git` | Extension | Inject the existing read-only inventory; keep approval and live-state checks before cleanup. |
 | 32 | `enable-desktop-notification` | Extension | Persist per-session opt-in and notify once at final settlement using the existing OS notifier. |
 | 33 | `report-gotchas` | Extension | Reuse CLI/queue/worker; bind receipts to Pi identity and preserve idempotent reporting. |
@@ -112,7 +112,7 @@ independent and avoids moving workflow behavior into an application dependency.
 
 The [platform adapters](../src/harness_cli/platforms.py) now provide `Platform.PI`, `PiAdapter`,
 and centralized available/default provider sets consumed by both installer entry points.
-An explicit logical `extensions` destination remains part of the extension foundation.
+The logical `extensions` destination is implemented for Pi at project and user scope.
 Available platforms are separate from default targets: Pi is opt-in, and omitted
 `--platform` retains the existing Claude/ChatGPT behavior. The interactive menu offers Pi
 without adding it to an existing installation's selections automatically.
@@ -137,10 +137,10 @@ the first tool journey verifies that separation. A Pi user receipt also records 
 namespace, keeping it separate from a project rooted in the same agent directory.
 Claude/ChatGPT receipt identities are unchanged.
 
-The table describes the intended full layout. The current slice supports skill payloads without
+The table describes the intended full layout. The current slice supports skill and extension payloads without
 configuration fragments. Pi user `workspace` payloads and configuration fragments explicitly
 fail until shared-workspace ownership and native settings reconciliation are implemented;
-those paths must not be advertised as ready for guard packages.
+the three path guards use hook-local user starters rather than user workspace mappings.
 
 Source packages retain their root-level shared skill/core files and shallow `pi/` overlays:
 
@@ -181,14 +181,13 @@ pinned Python tools and VSIXs; adding npm/CLI ownership would be a separate desi
 
 ## Shared Pi support and Python reuse
 
-Propose a non-selectable `harness/extension/pi-support` package with versioned transport,
-event normalization, command routing, session identity, and receipt utilities. It has no tool
-policies, automatic workflow selection, model-service defaults, or background services of its own.
+The path guards ship a non-selectable `harness/extension/pi-support` package with versioned transport,
+event normalization and branch receipt utilities for these three guards. Issue workflow input routing and native publication also ship; broader provider support remains proposed. Package cores own the TOML policies.
 Each selected extension imports the installed support modules and registers its own behavior.
 Skills without extension behavior do not depend on it.
 
-Extend [manifest dependencies](../src/harness_cli/manifest.py) and catalogue resolution with an
-optional platform filter. Extension packages declare a version-constrained, Pi-only, coupled
+The installer filters [manifest dependencies](../src/harness_cli/manifest.py) by their optional
+platform list before catalogue resolution and receipt accounting. Extension packages declare a version-constrained, Pi-only, coupled
 dependency on `pi-support`; existing dependencies without a filter retain their behavior.
 Multiple Pi packages share one receipt-owned copy, removed when its last dependent is removed.
 This avoids requiring the bridge for Claude/ChatGPT and avoids one bridge copy per package.
@@ -365,4 +364,66 @@ headless transport; adopting it must not silently replace the visible-terminal p
 These future adapters consume the same event/identity contracts without making the initial
 35 packages depend on their implementation. The compatibility report retains their detailed
 feasibility and broader release gates. The 21 shared skill packages and installer slice are implemented in
-the checkout; the remaining adapters, service migrations, deployment, and release remain pending.
+the checkout; the three path guards and both issue workflow packages also ship; remaining adapters, service migrations, deployment, and release remain pending.
+
+## Shipped path-guard slice
+
+`on-read-reminder`, `on-edit-reminder`, and `on-edit-block` 2.2.0 use `pi-support` 1.0.0
+through a Pi-only coupled dependency. The bridge imports each package's existing Python parser
+and message builders. It selects the same uv/Python preference as the installer and records
+launch argv in session receipts. Subprocess requests and responses are versioned JSON, bounded
+at 2 MiB and ten seconds, with cancellation on session replacement/shutdown. Guard transport
+errors deny native edits; reminder errors append diagnostics while preserving successful results.
+Original tool content and structured output are preserved.
+
+User policy starters live beside Python hooks in the effective Pi agent directory. This avoids
+adding user workspace ownership to this slice. Shared home and project policies still load later.
+Branch receipts record observed ranges and content digests, complete denial deliveries, and
+reminder times. State comes from active ancestry on every event, including nested calls, so
+reload/resume and tree navigation do not import abandoned-branch permissions. A denial records
+only guidance actually inlined within the existing message budget, after an observed
+`tool_execution_end` error carries that denial. Pi skips `tool_result` for denied calls.
+
+`npm run test:pi-path-guards` in `tests/e2e/` installs real catalogue payloads and tests Pi 1.2.0
+against the authenticated fake OpenAI Responses API. JSON/RPC and project/user checks cover
+reminders, cooldown, failed calls, denial/retry, partial-read coverage, shell reads, nested tools,
+reload, tree navigation, exact file effects, request counts, and coupled removal. These checks
+certify native read/write/edit integration on Windows; they do not certify arbitrary shell
+mutations, third-party tools, restricted-launch admission, or a security sandbox. The broader
+bridge/event contracts above remain the proposal for later consumers.
+
+## Shipped issue workflow slice
+
+`issue-readers` 1.6.0 and `issue-writers` 2.3.0 depend on `pi-support` 1.1.0 for
+bounded, cancellable Python calls. Native input interception runs before `/skill:` expansion;
+short slash aliases expand through the selected native skill too. The extension checks that
+the skill is available, preserves images, and stops workflow preparation during another active
+turn. Context travels with the actual input rather than mutable pending state. Session replacement,
+tree navigation and shutdown cancel transport and suppress stale delivery. Issue helpers have a
+two-minute deadline and the bridge's 2 MiB input/output bounds; oversize context fails instead of
+silently truncating requirements. Interpreter cancellation terminates the subprocess tree.
+
+Readers reuse checkout admission and local review scope from the existing hook, and all-page
+GraphQL retrieval from `issue_graph.py`. Primary issues must be open for addressing. Relation depth
+is still `HARNESS_ISSUE_CONTEXT_DEPTH`; parent, sub-issue, blocker, blocking and body references
+are deduplicated, and every included issue retains its full paginated context.
+
+Writers reuse `issues_core.py` without changing publishing semantics. UUIDv5 identities use
+`harness:issues:pi:<native-session-id>`; reload/resume retain that batch, while native new/fork
+sessions select another. `/publish-issues [--dry]` and `/skill:publish-issues [--dry]` are consumed
+without inference. Repository locks, draft ordering, parent links, crash recovery, stale sweeping
+and next-prompt notices remain owned by the shared core.
+
+`npm run test:pi-issues` installs actual catalogue payloads at project and user scopes on Pi 1.2.0.
+Real JSON/RPC tools implement and review a fixture, stop dirty addressing before inference, write
+the supplied session draft path, and publish through a local fake GitHub CLI. Checks include dry-run,
+invalid options, reload, session isolation, all five native skill routes, exact request counts,
+starter ownership and last-dependent bridge removal. This certifies native integration and shared
+core reuse, not unscripted model judgment.
+
+`npm run e2e:pi-issues:live` additionally verifies real `gh` against the private
+`EmilienxD/harness-e2e` repository at project and user scope, with real Pi 1.2.0 JSON/RPC
+and fake inference. A parent/child draft batch is published with labels, rewritten references
+and a real parent link. Both readers receive the live issue graph and a maintainer comment.
+Dry-run leaves GitHub untouched and publication uses zero inference. Only the run's UUID-tagged
+issues and newly added gateway labels are cleaned; existing repository state is preserved.

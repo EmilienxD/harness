@@ -1,7 +1,12 @@
 name = "on-read-reminder"
-version = "2.1.0"
+version = "2.2.0"
 description = "PostToolUse hook that reminds the agent to read key files when it reads paths matching gitignore-style patterns"
 docs = "https://github.com/EmilienxD/harness/blob/main/README.md#hooks"
+
+dependencies = [{ name = "pi-support", version = ">=1.0.0,<2.0.0", lifecycle = "coupled", platforms = ["pi"] }]
+
+[platforms.pi]
+status = "supported"
 
 [platforms.claude]
 status = "supported"
@@ -11,7 +16,7 @@ fragment = "claude/settings.fragment.json"
 src = "on_read_reminder_hook.py"
 dest = "on_read_reminder_hook.py"
 root = "hooks"
-platforms = ["claude"]
+platforms = ["claude", "pi"]
 executable = true
 
 # Provider-neutral starter policy shared by every installed provider.
@@ -20,4 +25,26 @@ src = "on-read-reminder.toml"
 dest = ".harness/guards/on-read-reminder.toml"
 root = "workspace"
 platforms = ["claude"]
+starter = true
+
+[[files]]
+src = "pi/extension.ts"
+dest = "harness-on-read-reminder/index.ts"
+root = "extensions"
+platforms = ["pi"]
+
+[[files]]
+src = "on-read-reminder.toml"
+dest = ".harness/guards/on-read-reminder.toml"
+root = "workspace"
+platforms = ["pi"]
+scopes = ["project"]
+starter = true
+
+[[files]]
+src = "on-read-reminder.toml"
+dest = "on-read-reminder.toml"
+root = "hooks"
+platforms = ["pi"]
+scopes = ["user"]
 starter = true

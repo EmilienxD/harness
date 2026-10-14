@@ -72,6 +72,7 @@ class PackageDependency:
     name: str
     constraint: str = ""
     lifecycle: str = "shared"
+    platforms: tuple[Platform, ...] | None = None
 
 
 @dataclass(frozen=True)
@@ -205,6 +206,13 @@ def _parse_dependencies(data: dict, manifest_path: Path) -> tuple[PackageDepende
                 raise ManifestError(f"{manifest_path}: invalid dependency '{entry}'")
             result.append(PackageDependency(match.group(1), match.group(2).strip()))
         elif isinstance(entry, dict) and isinstance(entry.get("name"), str):
+            selected = entry.get("platforms")
+            if selected is not None and (not isinstance(selected, list) or not selected):
+                raise ManifestError(f"{manifest_path}: dependency platforms must be a nonempty array")
+            try:
+                platforms = tuple(Platform.parse(p) for p in selected) if selected is not None else None
+            except (TypeError, ValueError) as exc:
+                raise ManifestError(f"{manifest_path}: invalid dependency platforms") from exc
             lifecycle = entry.get("lifecycle", "shared")
             if lifecycle not in {"shared", "coupled"}:
                 raise ManifestError(
@@ -215,6 +223,7 @@ def _parse_dependencies(data: dict, manifest_path: Path) -> tuple[PackageDepende
                     entry["name"].strip(),
                     str(entry.get("version", "")).strip(),
                     lifecycle,
+                    platforms,
                 )
             )
         else:

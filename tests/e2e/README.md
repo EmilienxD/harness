@@ -19,6 +19,8 @@ npm run check
 npm run e2e:pi
 npm run test:pi
 npm run test:pi-shared-skills
+npm run test:pi-path-guards
+npm run test:pi-issues
 npm run e2e:flush-out-useless-tests
 ```
 
@@ -174,3 +176,36 @@ provider parity need their applicable additional journeys. GitHub-backed tools s
 existing disposable fixture rules from the `harness-e2e` skill. Supply any scoped external-fixture
 credentials explicitly for that journey; keep model-service credentials excluded. Do not reset
 shared remote state to prepare a local Pi smoke run.
+
+## Pi path guards
+
+`test:pi-path-guards` installs the real `on-read-reminder`, `on-edit-reminder`, and
+`on-edit-block` catalogue payloads with their coupled `pi-support` dependency. It exercises
+headless JSON/RPC and project/user installations through the fake Responses endpoint. Assertions
+cover original tool output, additive guidance, cooldown, failed calls, complete and partial reads,
+denied mutation effects, shell reads, nested native calls, reload/tree ancestry, exact bytes,
+inference counts, starter preservation, and removal of the last dependent's bridge. Test-only
+probe commands orchestrate lifecycle changes without inference; production guards decide policy.
+
+## Pi issue workflows
+
+`test:pi-issues` installs `issue-readers` and `issue-writers` with their coupled bridge at
+project and user scope. Real Pi 1.2.0 JSON/RPC sessions prepare issue context, implement and review
+fixture files, reject dirty addressing without inference, invoke the four writing skills and
+publish with no inference. A local fake `gh` records read and publish effects; no GitHub credentials
+or external tracker mutations are involved. Checks include supplied draft paths, reload identity,
+foreign-session preservation, dry-run/invalid options, exact inference counts, user-owned reader
+starters and removal of the bridge after its last dependent. Python unit tests exercise complete
+context, relation deduplication, provider identity and notice isolation; the existing issue graph
+and publishing tests retain all-page retrieval and dependency/crash-recovery coverage.
+
+`npm run e2e:pi-issues:live` additionally exercises the exact private
+`EmilienxD/harness-e2e` repository with the real authenticated `gh` CLI, while retaining
+fake Responses inference and isolated real Pi JSON/RPC at project and user scope. It publishes
+a parent/child draft batch, verifies labels and rewritten references, adds a maintainer comment,
+and verifies both readers receive the live issue graph. Dry-run leaves GitHub untouched;
+publication and repeat publication make zero inference requests. The active GitHub account must
+be `EmilienxD`. A token is passed to the isolated child environment in memory only.
+The run closes only its UUID-tagged issues and restores any gateway label it added; it never
+resets the fixture, changes branches, or recreates the repository. Run this explicit live command
+when GitHub acceptance is needed; `npm test` retains credential-free local journeys.

@@ -1,8 +1,13 @@
 name = "issue-writers"
-version = "2.2.3"
+version = "2.3.0"
 description = "Draft and publish GitHub issues"
 requires = ["git", "gh"]
 docs = "https://github.com/EmilienxD/harness/blob/main/README.md#user-invoked-skills"
+
+dependencies = [{ name = "pi-support", version = ">=1.1.0,<2.0.0", lifecycle = "coupled", platforms = ["pi"] }]
+
+[platforms.pi]
+status = "supported"
 
 [platforms.claude]
 status = "supported"
@@ -78,3 +83,15 @@ dest = "to-spec-draft-issue/agents/openai.yaml"
 root = "skills"
 platforms = ["chatgpt"]
 
+
+[[files]]
+src = "pi/extension.ts"
+dest = "harness-issue-writers/index.ts"
+root = "extensions"
+platforms = ["pi"]
+
+[[files]]
+src = "issue_writers_pi.py"
+dest = "issue_writers_pi.py"
+root = "hooks"
+platforms = ["pi"]

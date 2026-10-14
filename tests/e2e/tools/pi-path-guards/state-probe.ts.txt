@@ -1,0 +1,38 @@
+// Test-only orchestration. All policy decisions and nested tools use installed production extensions.
+import { writeFile } from "node:fs/promises";
+import { join } from "node:path";
+import { Type } from "typebox";
+
+export default function (pi: any) {
+  pi.registerTool({
+    name: "guard_probe", label: "Guard probe", description: "Exercise nested path guard operations",
+    parameters: Type.Object({}),
+    execute: async (_id: string, _args: unknown, _signal: unknown, _update: unknown, ctx: any) => {
+      const first = await ctx.executeTool("write", { path: "blocked.txt", content: "bad\n" });
+      const read = await ctx.executeTool("read", { path: "guide.md" });
+      const retry = await ctx.executeTool("write", { path: "blocked.txt", content: "after\n" });
+      await writeFile(join(ctx.cwd, "probe-result.json"), JSON.stringify({
+        firstError: first.isError, readError: read.isError, retryError: retry.isError,
+      }));
+      return { content: [{ type: "text", text: "Probe complete." }] };
+    },
+  });
+  pi.registerCommand("guard-anchor", { description: "Save a tree anchor", handler: () => pi.appendEntry("guard-anchor", {}) });
+  pi.registerCommand("guard-reload", { description: "Reload extensions", handler: async (_: string, ctx: any) => ctx.reload() });
+  pi.registerCommand("guard-inspect", {
+    description: "Inspect structural receipt state",
+    handler: async (_: string, ctx: any) => {
+      const receipts = ctx.sessionManager.getBranch().filter((e: any) => e.type === "custom" && e.customType === "harness-path-guard-v1");
+      await writeFile(join(ctx.cwd, "receipt-count.json"), JSON.stringify({ count: receipts.length,
+        nested: receipts.some((e: any) => e.data.parentCallId),
+      }));
+    },
+  });
+  pi.registerCommand("guard-back", {
+    description: "Navigate before read receipts",
+    handler: async (_: string, ctx: any) => {
+      const anchor = ctx.sessionManager.getBranch().find((e: any) => e.type === "custom" && e.customType === "guard-anchor");
+      await ctx.navigateTree(anchor.id, { summarize: false });
+    },
+  });
+}

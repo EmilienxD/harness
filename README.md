@@ -5,7 +5,8 @@
 Harness is a catalogue and installer for small, independently selectable agent skills, hooks, command-line tools, and the optional Aboard VS Code extension. It supports Claude Code and ChatGPT without making you adopt an all-or-nothing workflow.
 
 Pi supports `flush-out-useless-tests` and 20 shared skill packages, installed into its native
-skills directory. The [architecture and initial tool scope](docs/PI-ARCHITECTURE.md) track
+skills directory, plus the `on-read-reminder`, `on-edit-reminder`, and `on-edit-block` extensions.
+The [architecture and initial tool scope](docs/PI-ARCHITECTURE.md) track
 shipped skills and the remaining extension and runtime ports.
 
 The project is built around deliberate control. Most skills run only when you invoke them. Hooks act at narrow, visible lifecycle boundaries, with editable policies where configuration is needed. Aboard keeps delegated and automated work in visible terminals that you can inspect, stop, and resume.
@@ -65,6 +66,30 @@ Audit runs in the current session; Pi explorer delegation remains pending. UI pr
 require available browser tools, Lavish requires `npx` and external browser review, GitHub
 lookup requires authenticated `gh`, and text replacements remain Windows-only.
 
+Install Pi issue workflows with `uv run harness install issue-readers issue-writers --platform pi`,
+then run `/reload` and approve the installed resources. Use `/skill:address-this 123` or
+`/skill:review-this 123` for prepared issue and checkout context. `/address-this` and
+`/review-this` are also accepted. Pi fetches every page of issue comments and relationships
+at `HARNESS_ISSUE_CONTEXT_DEPTH` (default 1); preparation failures stop before inference.
+Use `/skill:draft-issue`, `/skill:draft-issues`, `/skill:to-spec`, or
+`/skill:to-spec-draft-issue` for the shared writing workflows. `/publish-issues --dry`
+previews the current Pi session's drafts; `/publish-issues` publishes through the existing
+locked gateway without a model call. Pi draft identities are separate from Claude and ChatGPT.
+Both packages support project and user installation; issue-reader starter bodies remain user-owned.
+
+Install the Pi path guards with:
+
+```powershell
+uv run harness install on-read-reminder on-edit-reminder on-edit-block --platform pi
+```
+
+Run `/reload` in Pi, approve the project resources, and configure the corresponding
+`.harness/guards/*.toml` policies. The empty starters leave the guards inactive until rules
+are added. Extensions live in `.pi/extensions`; Python helpers live in `.pi/hooks`.
+User installs use the effective Pi agent directory, with policy starters beside the hooks.
+Pi guards require uv or Python 3.11+. They cover native reads/edits/writes, including nested
+calls, and recognized shell reads; shell mutations need separate controls.
+
 ## Reference
 
 Claude Code invokes a skill as `/skill-name`; ChatGPT uses `$skill-name`; Pi uses `/skill:skill-name` for its supported skills. The exceptions are hook-backed commands such as `/commit`, whose prompt is intercepted before a model call.
@@ -95,9 +120,9 @@ Claude Code invokes a skill as `/skill-name`; ChatGPT uses `$skill-name`; Pi use
 
 - **`websearch`**: Researches a question using relevant web and documentation sources, then returns a concise, cited synthesis. It maintains a user-editable index of trusted sources while leaving the rest of the workspace unchanged.
 
-- **`issue-writers`**: Provides `draft-issue`, `draft-issues`, `to-spec`, and `to-spec-draft-issue`, followed by the explicit `publish-issues` step. Drafts remain editable local Markdown until you publish them; the publishing hook creates GitHub issues, resolves batch dependencies and parent links, and avoids another model call. Add `--dry` to preview what would be created without touching the tracker. Drafts are flat files in `.harness/issue-drafts/`; a published draft is deleted, an abandoned one is swept after a week of inactivity, and the publishing lock lives outside the repository, so there is no cleanup command to learn and nothing but drafts in your working tree.
+- **`issue-writers`**: Provides `draft-issue`, `draft-issues`, `to-spec`, and `to-spec-draft-issue`, followed by the explicit `publish-issues` step. Drafts remain editable local Markdown until you publish them; the publishing hook (or native Pi command) creates GitHub issues, resolves batch dependencies and parent links, and avoids another model call. Add `--dry` to preview what would be created without touching the tracker. Drafts are flat files in `.harness/issue-drafts/`; a published draft is deleted, an abandoned one is swept after a week of inactivity, and the publishing lock lives outside the repository, so there is no cleanup command to learn and nothing but drafts in your working tree.
 
-- **`issue-readers`**: Installs `address-this` and `review-this`, plus a hook that prepares bounded issue or commit context. Their user-owned starter bodies describe implementation, review, and validation without assuming commit policy; callers such as Aboard add the completion contract for each turn.
+- **`issue-readers`**: Installs `address-this` and `review-this`, plus context preparation through hooks or a native Pi extension. Claude/ChatGPT use bounded context; Pi fetches complete paginated issue data and prepares the local review scope. Their user-owned starter bodies describe implementation, review, and validation without assuming commit policy; callers such as Aboard add the completion contract for each turn.
 
 - **`commit`**: `/commit <message>` stages the files changed by the current session and commits them without another model call. Add `--dry` to preview or `--ai` to generate a message through a direct Gemini request. Everything except `--ai` is local and needs no API key. For `--ai`, set `GEMINI_API_KEY` (or `GOOGLE_API_KEY`), or put `{"version": 1, "commit": {"geminiApiKey": "your-key"}}` in the gitignored `.harness/config.local.json`. The user-level `~/.harness/config.json` (or `$HARNESS_STATE_DIR/config.json`) can hold the same section for every repository. Do not put the key in committed `.harness/config.json`.
 
@@ -223,9 +248,9 @@ Hooks do not need a skill invocation. Select them in the catalogue and restart t
 | --- | --- | --- |
 | `command-guard` | Claude Code, ChatGPT | Denies shell commands matching an editable dangerous-command policy. It is a guardrail, not a security sandbox. |
 | `no-new-documents` | Claude Code, ChatGPT | Stops agents from creating files in configured documentation directories and has them write a draft for your approval instead. Edits to existing files are allowed. |
-| `on-read-reminder` | Claude Code | Reminds the agent to read required guidance when it reads paths matching configured patterns. |
-| `on-edit-reminder` | Claude Code | Lets a matching edit land, then requires the relevant guidance to be read and violations corrected. |
-| `on-edit-block` | Claude Code | Denies a matching edit until the required guidance has been read in the current session. |
+| `on-read-reminder` | Claude Code, Pi | Reminds the agent to read required guidance when it reads paths matching configured patterns. |
+| `on-edit-reminder` | Claude Code, Pi | Lets a matching edit land, then requires the relevant guidance to be read and violations corrected. |
+| `on-edit-block` | Claude Code, Pi | Denies a matching edit until the required guidance has been read or delivered in the current session branch. |
 | `prefer-read-tool` | Claude Code | Nudges the agent toward the reviewable Read tool after shell-based file reads. |
 | `prefer-edit-tool` | Claude Code | Nudges the agent toward Write/Edit after shell-based file changes. |
 | `prefer-fewer-comments` | Claude Code, ChatGPT | Flags newly written comments or docstrings that exceed an editable budget. |
@@ -375,9 +400,9 @@ The access cookie is marked `Secure` whenever the request arrives over HTTPS, so
 
 ### Provider research and reference documentation
 
-Pi is an opt-in install target for **`flush-out-useless-tests`**. Project installs use `.pi/skills`;
+Pi is an opt-in target for 21 shared skill packages and the three path guards. Project skills use `.pi/skills`;
 user installs use `~/.pi/agent/skills` or the configured `PI_CODING_AGENT_DIR`. Omitted `--platform`
-continues to select Claude Code and ChatGPT. Pi extensions and persistent runtime are pending.
+continues to select Claude Code and ChatGPT. Other Pi extensions and persistent runtime are pending.
 The [Pi architecture proposal](docs/PI-ARCHITECTURE.md) records the requested 35-package backlog
 in priority order: 22 packages primarily reuse shared skills and 13 need native extensions.
 It defines provider-owned install roots, receipt ownership, a versioned bridge to existing Python

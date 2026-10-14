@@ -1,0 +1,33 @@
+name = "pi-support"
+version = "1.1.0"
+description = "Internal Pi event transport, issue workflows and branch-local path guard receipts"
+selectable = false
+
+[platforms.claude]
+status = "unsupported"
+reason = "Internal support for native Pi extensions only."
+
+[platforms.chatgpt]
+status = "unsupported"
+reason = "Internal support for native Pi extensions only."
+
+[platforms.pi]
+status = "supported"
+
+[[files]]
+src = "bridge.ts"
+dest = "pi-support/bridge.ts"
+root = "hooks"
+platforms = ["pi"]
+
+[[files]]
+src = "path_guards.py"
+dest = "pi-support/path_guards.py"
+root = "hooks"
+platforms = ["pi"]
+
+[[files]]
+src = "workflows.ts"
+dest = "pi-support/workflows.ts"
+root = "hooks"
+platforms = ["pi"]

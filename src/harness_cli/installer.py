@@ -331,7 +331,12 @@ class CatalogueInstaller:
         self, available: dict[str, Tool], target: Target, store: ReceiptStore | None = None,
         skill_mode: str | None = None,
     ):
-        self.available = available
+        self.available = {
+            name: replace(tool, dependencies=tuple(
+                dependency for dependency in tool.dependencies
+                if dependency.platforms is None or target.platform in dependency.platforms
+            )) for name, tool in available.items()
+        }
         self.target = target
         self.store = store or ReceiptStore.load()
         if skill_mode not in (None, "copy", "symlink"):

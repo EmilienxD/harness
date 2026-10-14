@@ -31,7 +31,7 @@ class Platform(str, Enum):
             raise ValueError(f"unknown platform '{value}'") from exc
 
 
-DESTINATION_ROOTS = frozenset({"platform", "skills", "hooks", "workspace"})
+DESTINATION_ROOTS = frozenset({"platform", "skills", "hooks", "workspace", "extensions"})
 AVAILABLE_PLATFORMS = tuple(Platform)
 DEFAULT_PLATFORMS = (Platform.CLAUDE, Platform.CHATGPT)
 
@@ -142,6 +142,8 @@ class PiAdapter(PlatformAdapter):
     def destination_root(self, scope_root: Path, is_user: bool, root: str) -> Path:
         if is_user and root == "workspace":
             raise ValueError("Pi user workspace payloads are not supported yet")
+        if root == "extensions":
+            return self.platform_root(scope_root, is_user) / "extensions"
         return super().destination_root(scope_root, is_user, root)
 
     def prepare_config(self, base: dict, fragment: dict) -> dict:
