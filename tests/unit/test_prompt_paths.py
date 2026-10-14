@@ -1,4 +1,5 @@
 import hashlib
+import os
 import re
 from pathlib import PurePosixPath
 
@@ -6,6 +7,8 @@ import pytest
 
 from subagents_runtime import sessions
 from subagents_runtime.delegation import enable_delegation, process_inbox
+from subagents_runtime import prompt_paths
+from agent_launcher import prompt_paths as launcher_prompt_paths
 from subagents_runtime.prompt_paths import FILE_REFERENCE, normalize_file_references
 
 
@@ -22,12 +25,15 @@ from subagents_runtime.prompt_paths import FILE_REFERENCE, normalize_file_refere
     ],
 )
 @pytest.mark.parametrize("quote", ["", '"', "'", "`"])
-def test_file_reference_path_conversion(path, quote, tmp_path):
-    converted = normalize_file_references(f"@{quote}{path}{quote}", tmp_path)
+@pytest.mark.parametrize("separator", ["\\", "/"])
+@pytest.mark.parametrize("module", [prompt_paths, launcher_prompt_paths])
+def test_file_reference_path_conversion(path, quote, tmp_path, monkeypatch, separator, module):
+    monkeypatch.setattr(module, "sep", separator)
+    converted = module.normalize_file_references(f"@{quote}{path}{quote}", tmp_path)
     converted_path = converted[1:-1] if quote else converted
 
-    assert PurePosixPath(converted_path).parts == PurePosixPath(path.replace("\\", "/")).parts
-    assert set(converted_path).isdisjoint({"@", "\\"})
+    assert PurePosixPath(converted_path.replace("\\", "/")).parts == PurePosixPath(path.replace("\\", "/")).parts
+    assert set(converted_path).isdisjoint({"@", "/" if separator == "\\" else "\\"})
     if quote:
         assert converted[0] == converted[-1] == quote
 
@@ -41,8 +47,8 @@ def test_markdown_punctuation_spaces_and_unrelated_text(tmp_path):
     )
 
     # Check the file syntax and independent non-path tokens, not instruction wording.
-    assert re.findall(r"\(`([^`]+)`\),", converted) == ["src/core.py"]
-    assert re.findall(r'"([^"]+)";', converted) == ["C:/a project/notes.md"]
+    assert re.findall(r"\(`([^`]+)`\),", converted) == [os.sep.join(["src", "core.py"])]
+    assert re.findall(r'"([^"]+)";', converted) == [os.sep.join(["C:", "a project", "notes.md"])]
     assert FILE_REFERENCE.findall(converted) == ["owner"]
     assert re.findall(r"\S+@\S+", converted) == [
         "dev@example.com", "https://example.com/@src/file."
@@ -112,5 +118,32 @@ def test_launch_and_resume_normalize_using_child_provider_and_preserve_request_h
     assert references == (
         [("@", r"src\core.py")] * 2
         if provider == "claude"
-        else [("", "src/core.py")] * 2
+        else [("", os.sep.join(["src", "core.py"]))] * 2
+    )
+
+
+@pytest.mark.parametrize("provider", ["claude", "chatgpt"])
+def test_standalone_launch_and_resume_convert_file_references(tmp_path, monkeypatch, provider):
+    from subagents_runtime import processes
+
+    monkeypatch.setenv("HARNESS_STATE_DIR", str(tmp_path / "state"))
+    monkeypatch.setattr(sessions, "launch_configuration", lambda _cwd: {})
+    monkeypatch.setattr(sessions, "_provider_command", lambda _config, _provider: [_provider])
+    references = []
+
+    def start(execution_id, argv, *_args, **_kwargs):
+        references.extend(re.findall(r"(@?)(src[/\\]core\.py)", argv[-1]))
+        with sessions._connect() as connection:
+            connection.execute("UPDATE executions SET state='exited' WHERE id=?", (execution_id,))
+
+    monkeypatch.setattr(processes, "start", start)
+    session_id = sessions.launch(r"@src/core.py", tmp_path, provider=provider)
+    with sessions._connect() as connection:
+        connection.execute("UPDATE sessions SET provider_session_id='conversation' WHERE id=?", (session_id,))
+    sessions.resume(session_id, r"@src\core.py")
+
+    assert references == (
+        [("@", "src/core.py"), ("@", r"src\core.py")]
+        if provider == "claude"
+        else [("", os.sep.join(["src", "core.py"]))] * 2
     )

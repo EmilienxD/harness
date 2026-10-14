@@ -75,6 +75,51 @@ def test_absent_configuration_launches_provider_unchanged(
     assert render(provider=provider) == ""
 
 
+@pytest.mark.parametrize(("provider", "_entrypoint", "executable"), PROVIDERS)
+@pytest.mark.parametrize("command", [[], ["resume", "conversation"], ["exec", "resume", "conversation"]])
+def test_launcher_normalizes_codex_file_references(tmp_path, monkeypatch, provider, _entrypoint, executable, command):
+    monkeypatch.chdir(tmp_path)
+    seen = []
+    monkeypatch.setattr("agent_launcher.cli._run_child", lambda argv: seen.extend(argv) or 0)
+    (tmp_path / "LICENSE").touch()
+
+    assert main([*command, "--", r"@src\core.py", "@LICENSE"], provider=provider) == 0
+
+    assert seen[:-2] == [executable, *command, "--"]
+    assert seen[-2:] == (
+        [os.sep.join(["src", "core.py"]), "LICENSE"]
+        if provider == "chatgpt" else [r"@src\core.py", "@LICENSE"]
+    )
+
+
+@pytest.mark.parametrize("arguments", [
+    ["-c", 'developer_instructions="@src/core.py"'],
+    ['--config=developer_instructions="@src/core.py"'],
+    ["--profile", "@profiles/local.toml"],
+    ["--image", "@images/screen.png"],
+    ["resume", "@saved/session.json"],
+    ["mcp", "add", "server", "--", "@scripts/server.py"],
+])
+def test_launcher_preserves_codex_option_values_and_nonprompt_operands(tmp_path, monkeypatch, arguments):
+    monkeypatch.chdir(tmp_path)
+    seen = []
+    monkeypatch.setattr("agent_launcher.cli._run_child", lambda argv: seen.extend(argv) or 0)
+
+    assert main(arguments, provider="chatgpt") == 0
+    assert seen == ["codex", *arguments]
+
+
+@pytest.mark.parametrize("option", ["--dangerously-bypass-hook-trust", "--json", "--strict-config"])
+def test_launcher_converts_prompt_after_options_without_separator(tmp_path, monkeypatch, option):
+    monkeypatch.chdir(tmp_path)
+    seen = []
+    monkeypatch.setattr("agent_launcher.cli._run_child", lambda argv: seen.extend(argv) or 0)
+    arguments = ["exec", option, "-c", 'developer_instructions="@src/core.py"', "@src/core.py"]
+
+    assert main(arguments, provider="chatgpt") == 0
+    assert seen == ["codex", *arguments[:-1], os.sep.join(["src", "core.py"])]
+
+
 @pytest.mark.parametrize(("provider", "_entrypoint", "_executable"), PROVIDERS)
 def test_nearest_config_preserves_cwd_and_forwards_custom_command(
     tmp_path, monkeypatch, provider, _entrypoint, _executable

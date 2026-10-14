@@ -14,6 +14,7 @@ from typing import Iterator, Mapping, Sequence
 
 from agent_launcher import LaunchOptions
 from agent_launcher.errors import ConfigurationError
+from agent_launcher.prompt_paths import normalize_file_references
 
 
 BARE_KEY = re.compile(r"[A-Za-z0-9_-]+")
@@ -228,6 +229,53 @@ class ChatGPTAdapter(ProviderAdapter):
     default_command = ("codex",)
     supported_options = frozenset({"settings"})
     settings_flags = frozenset({"-c", "--config"})
+    # Unknown options conservatively consume their next argument. Only these
+    # options can precede a positional prompt without an intervening value.
+    boolean_flags = frozenset({
+        "--search", "--full-auto", "--dangerously-bypass-approvals-and-sandbox",
+        "--dangerously-bypass-hook-trust", "--yolo", "--oss", "--no-alt-screen",
+        "--json", "--last", "--all", "--skip-git-repo-check", "--ephemeral",
+        "--uncommitted", "--help", "-h", "--version", "-V", "--strict-config",
+        "--approve-for-me", "--worktree", "--no-daemon", "--ignore-user-config",
+        "--ignore-rules", "--include-non-interactive",
+    })
+
+    def _prompt_arguments(self, arguments: Sequence[str]) -> list[str]:
+        """Adapt prompt operands without rewriting provider options or IDs."""
+        normalized = list(arguments)
+        operands = []
+        after_separator = False
+        skip_value = False
+        for index, argument in enumerate(arguments):
+            if skip_value:
+                skip_value = False
+            elif after_separator:
+                operands.append(index)
+            elif argument == "--":
+                after_separator = True
+            elif argument.startswith("-"):
+                attached = len(argument) > 2 and argument[:2] in {"-c", "-i", "-m", "-p", "-s", "-C", "-a", "-o"}
+                skip_value = not attached and "=" not in argument and argument not in self.boolean_flags
+            else:
+                operands.append(index)
+        # These are the provider commands that accept a user prompt.
+        if operands and arguments[operands[0]] in {"exec", "e", "resume", "fork", "review"}:
+            command = arguments[operands.pop(0)]
+            if operands and command in {"exec", "e"} and arguments[operands[0]] in {"resume", "fork", "review"}:
+                command = arguments[operands.pop(0)]
+            if command in {"resume", "fork"} and "--last" not in arguments and operands:
+                operands.pop(0)  # The conversation ID is a separate operand.
+        elif operands and arguments[operands[0]] in {
+            "app-server", "remote-control", "app", "debug", "apply", "a", "archive",
+            "unarchive", "delete", "cloud", "completion", "doctor", "features",
+            "execpolicy", "login", "logout", "mcp", "plugin", "mcp-server",
+            "sandbox", "update", "help", "agents", "queue", "migrate-rollouts", "exec-server",
+        }:
+            return normalized
+        cwd = Path.cwd()
+        for index in operands:
+            normalized[index] = normalize_file_references(arguments[index], cwd)
+        return normalized
 
     @contextmanager
     def native_arguments(
@@ -241,7 +289,7 @@ class ChatGPTAdapter(ProviderAdapter):
         if overrides:
             self.reject_conflicts(arguments, self.settings_flags, path, "settings")
         generated = [item for override in overrides for item in ("-c", override)]
-        yield [*command, *generated, *arguments]
+        yield [*command, *generated, *self._prompt_arguments(arguments)]
 
     def _overrides(self, options: LaunchOptions, path: Path | None) -> list[str]:
         if not _is_meaningful(options.settings):

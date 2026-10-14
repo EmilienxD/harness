@@ -36,10 +36,10 @@ function temporaryRepository(): { readonly root: string; readonly startingSha: s
   return { root, startingSha: git(root, "rev-parse", "HEAD"), dispose: () => rmSync(root, { recursive: true, force: true }) };
 }
 
-function fleetWithWorker(): FleetRegistry {
+function fleetWithWorker(platform: "claude" | "chatgpt" = "claude"): FleetRegistry {
   const fleet = new FleetRegistry();
   const worker: AgentSession = {
-    platform: "claude",
+    platform,
     identity: { agentId: parentId, type: "address" },
     sessionId: "4db0ed4c-5d9e-4ab5-a493-2b8575ab19ee" as SessionId,
     sessionBinding: "bound",
@@ -80,6 +80,16 @@ test("records compact telemetry and serves each continuation", async () => {
   }
   const serialized: unknown = JSON.parse(JSON.stringify(fleet.toPersistenceDto()));
   assert.equal((await import("../../src/domain/validation.js")).parseFleetPersistenceDto(serialized).ok, true);
+});
+
+test("Codex continuation context uses native task paths without file-reference markers", async () => {
+  const service = new WorkerHookService(fleetWithWorker("chatgpt"), {
+    task: async () => ({ path: "C:/Temp/prompts/task.md", contents: '@"src/core.py" @owner' }),
+  });
+  const context = await service.reground(parentId);
+  assert.deepEqual(context.match(/@\S+/gu), ["@owner"]);
+  const [path] = [...context.matchAll(/"([^"]+)"/gu)].map((match) => match[1]);
+  assert.equal(path, process.platform === "win32" ? "src\\core.py" : "src/core.py");
 });
 
 test("re-grounding names every bound issue and refuses a worker bound to none", async () => {

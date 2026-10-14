@@ -5,6 +5,7 @@ import type { WriteCapability } from "../domain/capability.js";
 import { isAutoRunWorkerType, isHeadlessExecution, type AgentId, type AgentType, type SessionId } from "../domain/contracts.js";
 import { buildCommandLine, canQuoteArgument, type ShellKind } from "../platform/shell.js";
 import { promptFileReference, skillInvocation } from "../platform/prompts.js";
+import { normalizeFileReferences } from "../platform/prompt-paths.js";
 import { BY_DIFFICULTY, MAX_COMMAND_LINE_CHARS, promptSpillRoot, requiresWriteLease, taskPromptPath, type LaunchPlan, LaunchPlanError, type PromptDelivery, type RuntimeFile, type SessionWrapperLayout } from "../platform/launch.js";
 import type { PlatformLaunchPlan, PlatformLaunchRequest, PlatformResumeRequest } from "../platform/agent-platform.js";
 import type { IssueDifficulty } from "../shared/labels.js";
@@ -116,7 +117,7 @@ function planChatGptSession(request: PlatformLaunchRequest | PlatformResumeReque
   const task = typeof request.prompt === "string" ? request.prompt : request.prompt?.text;
   if (explore && (task === undefined || task.length === 0)) throw new LaunchPlanError("missing-prompt", "explore cannot launch without its exploration task");
   if (worker && kind === "start" && (task === undefined || task.length === 0)) throw new LaunchPlanError("missing-prompt", `${request.agentType} cannot launch without its initial prompt`);
-  const text = task === undefined || task.trim().length === 0 ? undefined : task;
+  const text = task === undefined || task.trim().length === 0 ? undefined : normalizeFileReferences(task, request.cwd);
   // Only a launch owns the frozen task; a resume message must not replace the
   // archive that regrounds the worker after compaction.
   const archived: RuntimeFile | undefined = worker && kind === "start" && text !== undefined
@@ -143,7 +144,7 @@ function planChatGptSession(request: PlatformLaunchRequest | PlatformResumeReque
           ?? `${join(promptSpillRoot(runtimeRoot, request.promptRoot), request.agentId, "prompt.md").replaceAll("\\", "/")}`;
         if (/\s/u.test(relativePath)) throw new LaunchPlanError("unsafe-spill-path", `Prompt spill path must not contain whitespace: ${relativePath}`);
         spill = { agentId: request.agentId, relativePath, contents: text };
-        const reference = promptFileReference(relativePath);
+        const reference = normalizeFileReferences(promptFileReference(relativePath), request.cwd);
         promptArgs = ["--", invocation === undefined ? reference : `${invocation} ${reference}`];
       }
     }

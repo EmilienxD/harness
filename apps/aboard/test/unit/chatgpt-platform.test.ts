@@ -245,7 +245,11 @@ test("the ChatGPT adapter spills a large initial prompt", () => {
 
   assert.equal(plan.promptDelivery, "spilled");
   assert.ok(plan.spill !== undefined);
-  assert.match(plan.args.at(-1) ?? "", new RegExp(`@${plan.spill.relativePath.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&")}`, "u"));
+  const reference = /(?:[A-Za-z]:)?[/\\][^\s]+\.md/u.exec(plan.args.at(-1) ?? "")?.[0];
+  assert.ok(reference);
+  assert.equal((plan.args.at(-1) ?? "").includes("@"), false);
+  assert.equal(reference.replaceAll("\\", "/"), plan.spill.relativePath.replaceAll("\\", "/"));
+  assert.equal(reference.includes(process.platform === "win32" ? "/" : "\\"), false);
 });
 
 test("the ChatGPT adapter spills an inline-eligible prompt when the shell command would overflow", () => {
@@ -509,9 +513,30 @@ test("a ChatGPT address keeps its skill invocation when the frozen contract spil
   });
 
   assert.equal(plan.promptDelivery, "spilled");
-  assert.match(plan.args.at(-1) ?? "", /^\$address-this Perform the task described in @/u);
+  assert.equal(plan.args.at(-1)?.split(/\s/u)[0], "$address-this");
+  assert.equal((plan.args.at(-1) ?? "").includes("@"), false);
   assert.equal(plan.spill?.relativePath, "C:/Temp/abd-K7M2Q1/address-1/task.md");
   assert.equal(plan.task?.relativePath, plan.spill?.relativePath);
+});
+
+test("Codex launch, fork, and resume deliver native file references in inline and spilled tasks", () => {
+  const platform = chatGpt();
+  const request = {
+    agentId, sessionId: provisional, agentType: "interactive" as const, shell: "powershell" as const,
+    configuration: { shape: "default" }, prompt: '@"src/core.py" @owner', runtimeDirectory: "C:/aboard/runtime",
+  };
+  for (const maxInlinePromptChars of [4000, 0]) {
+    for (const plan of [
+      platform.planLaunch({ ...request, maxInlinePromptChars }),
+      platform.planLaunch({ ...request, forkSessionId: actual, maxInlinePromptChars }),
+      platform.planSessionResume({ ...request, maxInlinePromptChars }),
+    ]) {
+      const delivered = plan.spill?.contents ?? plan.args.at(-1) ?? "";
+      const [path] = [...delivered.matchAll(/"([^"]+)"/gu)].map((match) => match[1]);
+      assert.equal(path, process.platform === "win32" ? "src\\core.py" : "src/core.py");
+      assert.deepEqual(delivered.match(/@\S+/gu), ["@owner"]);
+    }
+  }
 });
 
 test("a ChatGPT address cannot spawn subagents, search the web, or mutate Aboard-owned Git state", () => {

@@ -1,5 +1,6 @@
 import type { AgentId, IsoTimestamp } from "../domain/contracts.js";
 import { workerContinuationPrompt } from "../platform/prompts.js";
+import { normalizeFileReferences } from "../platform/prompt-paths.js";
 import type { FleetRegistry } from "../domain/fleet.js";
 import { describeIssueNumbers } from "../shared/issues.js";
 import type { BridgeRequestHandler } from "./protocol.js";
@@ -27,7 +28,8 @@ export class WorkerHookService {
       throw new Error("Compaction re-grounding requires a registered issue-bound worker");
     }
     const task = await this.tasks.task(agentId);
-    return workerContinuationPrompt(describeIssueNumbers(worker.issueNumbers), task);
+    const context = workerContinuationPrompt(describeIssueNumbers(worker.issueNumbers), task);
+    return worker.platform === "chatgpt" ? normalizeFileReferences(context, worker.cwd) : context;
   }
 
   private timestamp(): IsoTimestamp {

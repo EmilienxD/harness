@@ -419,6 +419,10 @@ def launch(prompt: str | None = None, cwd: Path | None = None, *, provider: str)
     session_id = str(uuid.uuid4())
     execution_id = str(uuid.uuid4())
     selected_cwd = (cwd or Path.cwd()).resolve()
+    if prompt and provider == "chatgpt":
+        from subagents_runtime.prompt_paths import normalize_file_references
+
+        prompt = normalize_file_references(prompt, selected_cwd)
     command = [
         *_provider_command(launch_configuration(selected_cwd), provider),
         *provider_arguments(
@@ -917,6 +921,10 @@ def resume(session_id: str, message: str | None = None) -> None:
             )
         return
     processes.require_exited(session_id)
+    if message and row[2] == "chatgpt":
+        from subagents_runtime.prompt_paths import normalize_file_references
+
+        message = normalize_file_references(message, Path(row[1]))
     command = [
         *_provider_command(launch_configuration(Path(row[1])), row[2]),
         *provider_arguments(row[2], row[3], row[0], message, resume=True),

@@ -4,6 +4,7 @@ import {
 } from "./shell.js";
 import { randomUUID } from "node:crypto";
 import { createBackgroundProcess } from "./background.js";
+import { normalizeFileReferences } from "./prompt-paths.js";
 
 import {
   agentLabel,
@@ -417,6 +418,7 @@ export class TerminalController {
     const record = this.#requireRecord(terminalId);
     if (record.backend === "process") throw new Error("Resume messages require an interactive terminal");
     validateResumeMessage(message);
+    if (record.provider === "chatgpt") message = normalizeFileReferences(message, record.cwd);
     this.#requireOpenHandle(terminalId).sendText(`\u001b[200~${message.replace(/\r\n?/gu, "\n")}\u001b[201~`, false);
     // Codex treats Enter within 120 ms of a paste burst as a pasted newline.
     // Wait longer for larger writes so the tail can reach its composer first.

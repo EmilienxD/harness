@@ -106,6 +106,19 @@ test("resuming in an open terminal pastes a multiline message and submits it onc
   assert.equal(controller.list().length, 1);
 });
 
+test("live Codex replies normalize file references while Claude replies retain their syntax", async () => {
+  for (const provider of ["claude", "chatgpt"] as const) {
+    const { controller, host } = setup();
+    const created = controller.create({ agentId: agent("child"), sessionId: session("conversation"), agentType: "general", provider });
+    host.created[0]!.terminal.sent.length = 0;
+    await controller.sendResumeMessage(created.terminalId, '@"src/core.py" @owner');
+    const paste = host.created[0]!.terminal.sent[0]!.text;
+    assert.deepEqual(paste.match(/@[^\s\u001b]+/gu), provider === "claude" ? ['@"src/core.py"', "@owner"] : ["@owner"]);
+    const [path] = [...paste.matchAll(/"([^"]+)"/gu)].map((match) => match[1]);
+    assert.equal(path, provider === "chatgpt" && process.platform === "win32" ? "src\\core.py" : "src/core.py");
+  }
+});
+
 test("Codex receives Enter after its paste suppression window has elapsed", async () => {
   let elapsedMs = 0;
   const { controller, host } = setup(async (milliseconds) => { elapsedMs += milliseconds; });

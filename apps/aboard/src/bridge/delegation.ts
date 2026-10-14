@@ -297,6 +297,7 @@ export class DelegationCoordinator {
       : [];
 
     const plan = platform.planSessionResume({
+      cwd,
       agentId: target.agentId,
       sessionId: target.sessionId,
       agentType: target.type,
@@ -519,6 +520,7 @@ export class DelegationCoordinator {
     const createdSession = platform.createSession();
     const sessionId = (input.forkSessionId === undefined ? input.harnessSessionId ?? createdSession.sessionId : createdSession.sessionId) as SessionId;
     const plan = platform.planLaunch({
+      cwd: input.isolation?.cwd ?? this.options.workspaceRoot,
       ...(input.forkSessionId === undefined ? {} : { forkSessionId: input.forkSessionId }),
       agentId,
       sessionId,

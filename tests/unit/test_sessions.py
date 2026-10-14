@@ -1,5 +1,6 @@
 import io
 import json
+import os
 import re
 import urllib.error
 from pathlib import Path
@@ -221,7 +222,7 @@ def test_file_reference_conversion_reaches_both_launch_backends(
     delivered = bodies[0]["prompt"] if backend == "aboard" else launches[0][0][-1]
     references = re.findall(r"(@?)(src[/\\]core\.py)", delivered)
     assert references == (
-        [("@", r"src\core.py")] if provider == "claude" else [("", "src/core.py")]
+        [("@", r"src\core.py")] if provider == "claude" else [("", os.sep.join(["src", "core.py"]))]
     )
 
 
