@@ -65,7 +65,9 @@
     "test:pi-test-workflows": "esbuild test/pi-test-workflows.test.ts --bundle --platform=node --format=cjs --target=node22 --outfile=dist/test/pi-test-workflows.test.js && node --test dist/test/pi-test-workflows.test.js",
     "e2e:pi-no-new-documents": "esbuild tools/pi-no-new-documents/cli.ts --bundle --platform=node --format=cjs --target=node22 --outfile=dist/tools/pi-no-new-documents/cli.js && node dist/tools/pi-no-new-documents/cli.js",
     "e2e:pi-cleanup-git": "esbuild tools/pi-cleanup-git/cli.ts --bundle --platform=node --format=cjs --target=node22 --outfile=dist/tools/pi-cleanup-git/cli.js && node dist/tools/pi-cleanup-git/cli.js",
-    "e2e:pi-test-workflows": "esbuild tools/pi-test-workflows/cli.ts --bundle --platform=node --format=cjs --target=node22 --outfile=dist/tools/pi-test-workflows/cli.js && node dist/tools/pi-test-workflows/cli.js"
+    "e2e:pi-test-workflows": "esbuild tools/pi-test-workflows/cli.ts --bundle --platform=node --format=cjs --target=node22 --outfile=dist/tools/pi-test-workflows/cli.js && node dist/tools/pi-test-workflows/cli.js",
+    "test:pi-prefer-fewer-comments": "esbuild test/pi-prefer-fewer-comments.test.ts --bundle --platform=node --format=cjs --target=node22 --outfile=dist/test/pi-prefer-fewer-comments.test.js && node --test dist/test/pi-prefer-fewer-comments.test.js",
+    "e2e:pi-prefer-fewer-comments": "esbuild tools/pi-prefer-fewer-comments/cli.ts --bundle --platform=node --format=cjs --target=node22 --outfile=dist/tools/pi-prefer-fewer-comments/cli.js && node dist/tools/pi-prefer-fewer-comments/cli.js"
   },
   "devDependencies": {
     "@types/node": "22.20.1",

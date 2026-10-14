@@ -1,6 +1,6 @@
 # Prefer Fewer Comments
 
-`prefer-fewer-comments` checks newly added comments and docstrings after a write in Claude Code or ChatGPT. When a comment, docstring, or the overall change exceeds a budget, it asks the agent to trim commentary. It is a PostToolUse preference, so the write has already happened.
+`prefer-fewer-comments` checks newly added comments and docstrings after a write in Claude Code, ChatGPT, or Pi. When a comment, docstring, or the overall change exceeds a budget, it asks the agent to use less commentary going forward. Writes remain successful; existing comments stay in place. Functional comments and docstrings can exceed the budget.
 
 Install with `harness install prefer-fewer-comments` and restart the provider. Edit `.harness/guards/prefer-fewer-comments.toml` or `~/.harness/guards/prefer-fewer-comments.toml` at user scope. The commented starter uses built-in defaults until you set values:
 
@@ -21,6 +21,16 @@ exempt = true
 ```
 
 Each limit is optional. Ordered path rules can set `exempt = true` and a later, narrower `exempt = false` to include a path again. User rules precede project rules; edited starter files survive upgrades.
+
+## Pi
+
+Install with `harness install prefer-fewer-comments --platform pi`, then run `/reload` and approve the project resources. The shipped defaults are active immediately. Project policy uses `.harness/guards/prefer-fewer-comments.toml`. A user installation puts its starter in the effective Pi agent directory at `hooks/prefer-fewer-comments.toml`; shared `~/.harness/guards/prefer-fewer-comments.toml` and project overrides take precedence. Pi requires uv or Python 3.11+.
+
+The extension wraps local native `write` and `edit`, including nested calls. It captures the old contents and the exact written contents inside Pi's file mutation queue, then checks additions after successful execution. Unchanged comment bodies are excluded even when neighboring code changes. Existing line comments are excluded before new adjacent lines are grouped; a changed block comment or docstring is checked as a complete comment. The ratio counts added lines only. Native paths, edit matching, multi-edit input, BOM/line endings, diffs, renderers, and other extensions' tool guards remain intact.
+
+Each file gets at most one reminder every 180 seconds. Cooldown receipts persist in Pi's native session ancestry, survive reload/resume, and follow the selected branch. They contain paths, times, call IDs and interpreter launch arguments. Full snapshots stay in memory; Pi persists ordinary tool results, including reminder excerpts. Failed or cancelled calls consume no reminder. Analysis failure or snapshots over 512 KiB append a diagnostic while preserving successful writes.
+
+This extension owns the `write` and `edit` definitions. Use it with Pi's local filesystem tools; another extension replacing those names, such as a remote filesystem adapter, requires explicit integration. Shell commands, MCP mutators, and direct filesystem writes by other extensions are outside Pi coverage. This is advisory feedback, not a mutation restriction. Acceptance uses headless Pi 1.2.0 on Windows; other Pi versions, POSIX and TUI behavior need their own runtime verification.
 
 ## When to use it
 

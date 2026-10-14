@@ -1,8 +1,8 @@
 # Pi provider architecture proposal
 
-Status: **22 shared skill packages, three path-guard extensions, document draft approval, Git cleanup inventory, two issue workflow extensions and the cloud interview extension implemented; remaining extensions and runtime architecture proposed**.
+Status: **22 shared skill packages, three path-guard extensions, comment budgets, document draft approval, Git cleanup inventory, two issue workflow extensions and the cloud interview extension implemented; remaining extensions and runtime architecture proposed**.
 Pi is an opt-in catalogue target for all 22 skill-led packages below. Shared skill installation
-works at project and user scope; three path guards, document draft approval, Git cleanup inventory,
+works at project and user scope; three path guards, comment budgets, document draft approval, Git cleanup inventory,
 both issue workflow packages, and the cloud interview ship. The hosted Pi migration/app are deployed
 and verified against the production board. Remaining extensions, persistent runtime, and Aboard are pending.
 This proposal defines the implementation boundaries and first release scope.
@@ -71,7 +71,7 @@ it can also include shared skills. Rows marked implemented ship the stated Pi re
 | 24 | `on-read-reminder` | Extension | Implemented in 2.2.0. Successful native/shell reads remind; partial read ranges are recorded accurately. |
 | 25 | `on-edit-reminder` | Extension | Implemented in 2.2.0. Successful native edits remind with the existing 120-second cooldown and branch-local read suppression. |
 | 26 | `on-edit-block` | Extension | Implemented in 2.2.0. Native writes/edits require complete reads or fully delivered denial guidance on the active branch, including nested calls. |
-| 27 | `prefer-fewer-comments` | Extension | Reuse scanning/budgets/exemptions; examine newly introduced comments only. |
+| 27 | `prefer-fewer-comments` | Extension | Implemented in 2.3.0. Native queued before/after snapshots, shared lexer/budgets/exemptions, branch-local advisory cooldown; unchanged comment bodies are excluded. |
 | 28 | `no-new-documents` | Extension | Implemented. Native creation guard, draft mirrors, branch-local notices and zero-inference approval/rejection with exclusive publication. |
 | 29 | `issue-readers` | Extension | Implemented in 1.6.0. Prepare complete paginated `address-this` / `review-this` context through the issue graph before native skill expansion; preparation errors stop inference. |
 | 30 | `issue-writers` | Extension | Implemented in 2.3.0. Supply native session draft paths for the four drafting/spec skills; intercept the fifth (`publish-issues`) through a native command with existing locks and ordering, without inference. |
@@ -304,6 +304,83 @@ must pass together. Development and migration preparation precede any separately
 deployment; an older hosted service needs an explicit unsupported-provider error.
 
 ## Guard coverage and admission
+
+### Shipped comment-budget implementation
+
+`prefer-fewer-comments` 2.3.0 uses **native tool definitions with injected filesystem
+operations**, rather than `tool_call`/`tool_result` disk snapshots. Research covered the
+mirrored [extension contract](PI-REFERENCES/docs/extensions.md#custom-tools),
+[override example](PI-REFERENCES/examples/extensions/tool-override.ts),
+[event types](PI-REFERENCES/src/core/extensions/types.ts), and the installed Pi 1.2.0
+public exports, write/edit implementations, argument preparation, and mutation queue.
+The pinned source evidence is upstream's
+[write definition](https://github.com/earendil-works/pi/blob/47fc5f38ec18d56fe64abd41a2dcf9e5170a3dcf/packages/coding-agent/src/core/tools/write.ts),
+[edit definition](https://github.com/earendil-works/pi/blob/47fc5f38ec18d56fe64abd41a2dcf9e5170a3dcf/packages/coding-agent/src/core/tools/edit.ts), and
+[file queue](https://github.com/earendil-works/pi/blob/47fc5f38ec18d56fe64abd41a2dcf9e5170a3dcf/packages/coding-agent/src/core/tools/file-mutation-queue.ts).
+Those sources were cross-checked against the installed 1.2.0 runtime before implementation.
+
+The decision preserves the package's forward-looking preference. Pre-execution blocking
+would reject useful comments before the existing functional-benefit exception could be
+applied. Automatic removal or corrective continuation would alter existing code and spend
+additional inference without user intent. Advisory guidance belongs on the successful tool
+result; it neither rewrites comments nor triggers an extra model turn.
+
+Event snapshots lose mutation attribution: sibling calls can capture the same stale before
+state outside Pi's queue, and a result callback can read a later sibling's write. Git diffs
+also include pre-session/user changes, miss untracked files without extra machinery, and
+require a repository. Native operation injection captures each queued mutation directly,
+including non-Git projects, without copying Pi's private path/edit algorithms or replacing
+the existing lexer in TypeScript.
+
+The extension spreads `createWriteToolDefinition` / `createEditToolDefinition` and replaces
+only execution. Every execution creates fresh operations closures. Native edit supplies
+the old buffer and the final string after matching, BOM and line-ending handling; native write
+reads its old contents immediately before its queued write. Missing files have an empty
+before snapshot; unreadable/unbounded snapshots do not obstruct a native write. Guidance
+uses captured strings after native success, never a result-time reread. The full native
+operation retains Pi's own queue; acquiring the same queue around delegation would deadlock.
+Native schema preparation, multi-edit/fuzzy matching, path normalization, prompt guidelines,
+renderers, diffs and other tool guards remain native. Nested `ctx.executeTool` dispatch still
+passes through their regular events.
+
+The Python adapter reuses policy precedence, language scanning, budgets, exemptions and
+message construction. With the old snapshot supplied, scanning excludes unchanged comment
+bodies by multiplicity before grouping new adjacent line comments. This avoids flagging a
+large old inline comment when only neighboring code changed, or charging an old line-comment
+block to one short addition. Changed block comments/docstrings retain whole-comment budgets;
+density charges only added lines. Multiline backticks remain string context; inline comments
+retain the code line that ends the file-header region. The lexer is
+heuristic rather than a language parser; unsupported file families are skipped.
+
+Feedback is serialized separately from mutations, so parallel successes cannot both spend
+the same cooldown or first-reminder slot. Durable `harness-prefer-fewer-comments-v1` entries
+contain call ID, interpreter argv and canonical file path/time receipts only. Absolute file
+identity separates same-named files outside the project and shares cooldown through path aliases.
+They are reconstructed from
+`getBranch()`, including nested calls, instead of external process-global markers. Reload
+and exact resume retain cooldown; navigating before delivery discards that branch's authority.
+Session/tree/shutdown events cancel stale helper work. Failed/cancelled native calls consume
+no reminder, and analysis failures retain success with an additive diagnostic. Snapshots are
+bounded at 512 KiB each; the shared versioned subprocess transport adds timeout, cancellation
+and request/output bounds. There are no persistent workers, filesystem snapshot files or
+paid model calls.
+
+This selection owns local-native `write`/`edit`. Another extension replacing those names,
+especially remote filesystem tools, requires explicit composition; whichever definition wins
+cannot automatically inspect the other's mutations. Shell scripts, MCP/custom mutators and
+arbitrary extension I/O remain uncovered. Advisory installation does not certify mandatory
+restrictions or OS isolation. This narrower boundary is explicit in the catalogue-facing docs.
+
+Acceptance uses `npm run test:pi-prefer-fewer-comments`: four project/user JSON/RPC journeys,
+a concurrent nested/lifecycle journey and a helper outage/recovery journey through the actual installer and real Pi 1.2.0 on
+Windows, with the authenticated fake Responses endpoint shared with Codex. They assert exact
+bytes, native error/status and diff contracts, additive feedback structure, rule precedence,
+comment/doc/header/density and zero budgets, strings/directives, unchanged comments, bounds, cooldown,
+reload/resume/tree/new-session receipts, helper failure/recovery, denied mutations alongside the path guards, inference counts,
+starter preservation and coupled dependency removal. These are integration acceptance checks;
+POSIX, Pi TUI, other runtime versions and unscripted model obedience remain outside this gate.
+
+### Restricted launch boundaries
 
 Pi project trust controls resource loading, and extensions execute with the user's permissions
 ([Security](PI-REFERENCES/docs/security.md)). Installing files does not prove a required guard

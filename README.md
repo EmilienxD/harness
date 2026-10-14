@@ -90,6 +90,13 @@ User installs use the effective Pi agent directory, with policy starters beside 
 Pi guards require uv or Python 3.11+. They cover native reads/edits/writes, including nested
 calls, and recognized shell reads; shell mutations need separate controls.
 
+`harness install prefer-fewer-comments --platform pi` adds advisory comment budgets to local
+native `write` and `edit`, including nested calls. Its default budgets are active immediately.
+It compares immutable contents captured inside Pi's mutation queue, excludes unchanged comment
+bodies, and appends feedback after successful writes. Cooldown follows native session ancestry
+through reload/resume/tree navigation. Shell writes and competing remote tool replacements require
+separate integration. See the [policy and Pi coverage](docs/user/tools/guards/prefer-fewer-comments.md#pi).
+
 ## Reference
 
 Claude Code invokes a skill as `/skill-name`; ChatGPT uses `$skill-name`; Pi uses `/skill:skill-name` for its supported skills. The exceptions are hook-backed commands such as `/commit`, whose prompt is intercepted before a model call.
@@ -253,7 +260,7 @@ Hooks do not need a skill invocation. Select them in the catalogue and restart t
 | `on-edit-block` | Claude Code, Pi | Denies a matching edit until the required guidance has been read or delivered in the current session branch. |
 | `prefer-read-tool` | Claude Code | Nudges the agent toward the reviewable Read tool after shell-based file reads. |
 | `prefer-edit-tool` | Claude Code | Nudges the agent toward Write/Edit after shell-based file changes. |
-| `prefer-fewer-comments` | Claude Code, ChatGPT | Flags newly written comments or docstrings that exceed an editable budget. |
+| `prefer-fewer-comments` | Claude Code, ChatGPT, Pi | Flags newly written comments or docstrings that exceed an editable budget. Pi wraps native writes/edits with exact mutation snapshots. |
 | `mid-prompt-skills` | Claude Code, ChatGPT | Loads skills typed after other prompt text when the provider otherwise leaves them as plain text. |
 | `redirect-subagents` | Claude Code | Redirects built-in Agent tool work to configured alternate providers and returns the result to the parent session. |
 | `usage-limit-wait` | Claude Code, ChatGPT | Pauses at an exhausted subscription window and resumes after reset; usage-reader failures always fail open. |
@@ -411,7 +418,7 @@ The access cookie is marked `Secure` whenever the request arrives over HTTPS, so
 
 ### Provider research and reference documentation
 
-Pi is an opt-in target for all 22 shared skill packages, the three path guards, document draft approval, Git cleanup inventory, both issue workflows, and the cloud interview extension. Project skills use `.pi/skills`;
+Pi is an opt-in target for all 22 shared skill packages, the three path guards, comment budgets, document draft approval, Git cleanup inventory, both issue workflows, and the cloud interview extension. Project skills use `.pi/skills`;
 user installs use `~/.pi/agent/skills` or the configured `PI_CODING_AGENT_DIR`. Omitted `--platform`
 continues to select Claude Code and ChatGPT. Other Pi extensions and persistent runtime are pending.
 The [Pi architecture proposal](docs/PI-ARCHITECTURE.md) records the requested 35-package backlog

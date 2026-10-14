@@ -1,7 +1,12 @@
 name = "prefer-fewer-comments"
-version = "2.2.2"
-description = "PostToolUse hook that reads what a write added and asks for less commentary when a comment, a docstring, or the change as a whole runs over budget"
+version = "2.3.0"
+description = "Advisory comment and docstring budgets over newly written commentary, with native Pi mutation snapshots"
 docs = "https://github.com/EmilienxD/harness/blob/main/README.md#hooks"
+
+dependencies = [{ name = "pi-support", version = ">=1.1.0,<2.0.0", lifecycle = "coupled", platforms = ["pi"] }]
+
+[platforms.pi]
+status = "supported"
 
 [platforms.claude]
 status = "supported"
@@ -24,4 +29,33 @@ executable = true
 src = "prefer-fewer-comments.toml"
 dest = ".harness/guards/prefer-fewer-comments.toml"
 root = "workspace"
+starter = true
+platforms = ["claude", "chatgpt"]
+
+[[files]]
+src = "prefer_fewer_comments_pi.py"
+dest = "prefer_fewer_comments_pi.py"
+root = "hooks"
+platforms = ["pi"]
+
+[[files]]
+src = "pi/extension.ts"
+dest = "harness-prefer-fewer-comments/index.ts"
+root = "extensions"
+platforms = ["pi"]
+
+[[files]]
+src = "prefer-fewer-comments.toml"
+dest = ".harness/guards/prefer-fewer-comments.toml"
+root = "workspace"
+platforms = ["pi"]
+scopes = ["project"]
+starter = true
+
+[[files]]
+src = "prefer-fewer-comments.toml"
+dest = "prefer-fewer-comments.toml"
+root = "hooks"
+platforms = ["pi"]
+scopes = ["user"]
 starter = true

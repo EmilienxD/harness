@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-PostToolUse hook: prefer-fewer-comments. Runs on Claude Code and ChatGPT.
+Shared comment policy and Claude Code/ChatGPT PostToolUse entry point.
 
 Fires after a write -- Write/Edit/MultiEdit, ChatGPT's `apply_patch`, or a
 literal shell write -- and reads only the text that call added. An oversized
@@ -21,6 +21,7 @@ file every REMIND_INTERVAL_SECONDS, tracked in a per-session marker file.
 from __future__ import annotations
 
 import ast
+from collections import Counter
 import difflib
 import json
 import os
@@ -165,7 +166,7 @@ def _consume_string(text: str, index: int, quote: str) -> int:
             continue
         if text.startswith(quote, position):
             return position + len(quote)
-        if character == "\n" and len(quote) == 1:
+        if character == "\n" and len(quote) == 1 and quote != "`":
             return position  # unterminated: treat the newline as the end
         position += 1
     return end
@@ -285,16 +286,28 @@ def summarise(text: str) -> str:
     return flat[:60] + ("..." if len(flat) > 60 else "")
 
 
-def findings(text: str, added: set[int], family: Family, limits: dict[str, float]) -> list[str]:
+def findings(text: str, added: set[int], family: Family, limits: dict[str, float], previous: str | None = None) -> list[str]:
     """Budget violations among the comments *added* touches.
 
-    The whole text is scanned so comment state stays correct, then a comment
-    counts only when the edit actually put one of its lines there.
+    Scan full text for lexical context. When a previous snapshot is supplied,
+    exclude unchanged comment bodies before grouping introduced line comments.
     """
     results: list[tuple[int, str]] = []
     comment_lines = 0
-    merged = blocks(scan_comments(text, family))
-    header_until = first_code_line(text, merged)
+    nonblank = {number for number, line in enumerate(text.splitlines()) if line.strip()}
+    scanned = scan_comments(text, family)
+    header_until = first_code_line(text, scanned)
+    if previous is not None:
+        unchanged = Counter((comment.kind, comment.text) for comment in scan_comments(previous, family))
+        introduced = []
+        for comment in scanned:
+            key = (comment.kind, comment.text)
+            if unchanged[key]:
+                unchanged[key] -= 1
+            else:
+                introduced.append(comment)
+        scanned = introduced
+    merged = blocks(scanned)
     for comment in merged:
         touched = any(number in added for number in range(comment.start, comment.end + 1))
         if not touched:
@@ -306,7 +319,10 @@ def findings(text: str, added: set[int], family: Family, limits: dict[str, float
         # The header is charged to its own budget, not to the file's density:
         # a short new file with a proper header is not a comment-heavy file.
         if comment.own_line and not header:
-            comment_lines += comment.lines
+            comment_lines += min(comment.lines, sum(
+                number in added and number in nonblank
+                for number in range(comment.start, comment.end + 1)
+            ))
         if header:
             max_lines, max_chars, label = (
                 limits["max-header-lines"], limits["max-header-chars"], "file-header docstring"
@@ -322,7 +338,7 @@ def findings(text: str, added: set[int], family: Family, limits: dict[str, float
             results.append((comment.start, f"line {comment.start + 1}: {len(body)}-character {label} "
                                            f"(budget {int(max_chars)}) -- \"{summarise(body)}\""))
 
-    added_code = sum(1 for number in added if _line_at(text, number).strip())
+    added_code = len(added & nonblank)
     if added_code >= limits["min-lines-for-ratio"]:
         ratio = comment_lines / added_code
         if ratio > limits["max-comment-ratio"]:
@@ -341,22 +357,20 @@ def first_code_line(text: str, comments: list[Comment]) -> int:
     """
     covered: set[int] = set()
     for comment in comments:
-        covered.update(range(comment.start, comment.end + 1))
+        if comment.own_line:
+            covered.update(range(comment.start, comment.end + 1))
     for number, line in enumerate(text.splitlines()):
         if line.strip() and number not in covered:
             return number
     return len(text.splitlines())
 
 
-def _line_at(text: str, number: int) -> str:
-    lines = text.splitlines()
-    return lines[number] if 0 <= number < len(lines) else ""
-
-
 
 def added_indices(old: str, new: str) -> set[int]:
     """Line numbers in *new* that *old* didn't have."""
     old_lines, new_lines = old.splitlines(), new.splitlines()
+    if old_lines == new_lines:
+        return set()
     added: set[int] = set()
     matcher = difflib.SequenceMatcher(None, old_lines, new_lines, autojunk=False)
     for tag, _, _, start, stop in matcher.get_opcodes():

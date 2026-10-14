@@ -20,6 +20,7 @@ npm run e2e:pi
 npm run test:pi
 npm run test:pi-shared-skills
 npm run test:pi-path-guards
+npm run test:pi-prefer-fewer-comments
 npm run test:pi-issues
 npm run test:pi-no-new-documents
 npm run test:pi-cleanup-git
@@ -189,6 +190,25 @@ cover original tool output, additive guidance, cooldown, failed calls, complete 
 denied mutation effects, shell reads, nested native calls, reload/tree ancestry, exact bytes,
 inference counts, starter preservation, and removal of the last dependent's bridge. Test-only
 probe commands orchestrate lifecycle changes without inference; production guards decide policy.
+
+## Pi comment budgets
+
+`test:pi-prefer-fewer-comments` installs actual `prefer-fewer-comments` 2.3.0 and its coupled
+bridge at project/user scopes and runs the installed Pi 1.2.0 JSON/RPC CLI against the fake
+Responses endpoint shared with Codex. Four scope/mode journeys verify unchanged overwrites,
+inline code changes, new adjacent comment lines, full multiline lexical context, template strings,
+comment/doc/header/density budgets, directives, ordered exemptions and project precedence,
+cooldown, distinct outside-project files, failed edits, native `@` paths, multi-edit diffs and BOM/CRLF bytes. A bounded analysis
+failure preserves the mutation and adds a diagnostic. Receipts contain no file snapshots.
+
+The lifecycle journey exercises concurrent nested native writes alongside the actual edit guards,
+denied mutation effects, one comment receipt per file cooldown, reload, tree ancestry, exact saved
+session resume, zero-inference lifecycle commands and shared dependency removal. A sixth journey
+removes/restores the real helper, verifies successful writes and unspent cooldown across the outage,
+then checks explicit zero comment/doc/header budgets and a fresh native session. The suite checks exact
+filesystem bytes and inference counts; scripted inference certifies integration, not unscripted
+model response to advice. Run `e2e:pi-prefer-fewer-comments` for the executable project JSON,
+user RPC and lifecycle journeys. Shell mutations and competing tool replacements are outside coverage.
 
 ## Pi issue workflows
 

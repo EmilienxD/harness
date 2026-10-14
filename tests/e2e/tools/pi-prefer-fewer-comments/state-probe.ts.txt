@@ -1,0 +1,43 @@
+// Test-only lifecycle orchestration; installed native tools perform every mutation.
+import { writeFile } from "node:fs/promises";
+import { join } from "node:path";
+import { Type } from "typebox";
+
+const content = "# First explanation.\n# Second explanation.\n# Third explanation.\nvalue = 1\n";
+
+export default function (pi: any) {
+  pi.registerTool({
+    name: "comments_probe", label: "Comment probe", description: "Exercise parallel nested native mutations",
+    parameters: Type.Object({}),
+    execute: async (_id: string, _args: unknown, _signal: unknown, _update: unknown, ctx: any) => {
+      const denied = await ctx.executeTool("write", { path: "denied.py", content });
+      const parallel = await Promise.all([
+        ctx.executeTool("write", { path: "parallel.py", content }),
+        ctx.executeTool("write", { path: "parallel.py", content }),
+      ]);
+      const secondFile = await ctx.executeTool("write", { path: "other.py", content });
+      const unchanged = await ctx.executeTool("edit", { path: "other.py", edits: [{ oldText: "value = 1", newText: "value = 2" }] });
+      await writeFile(join(ctx.cwd, "counts.json"), JSON.stringify({ denied: denied.isError,
+        parallel: parallel.map((outcome: any) => outcome.result.content.length), secondFile: secondFile.result.content.length, unchanged: unchanged.result.content.length,
+      }));
+      return { content: [{ type: "text", text: "Probe complete." }], details: undefined };
+    },
+  });
+  pi.registerCommand("comments-anchor", { description: "Save an anchor", handler: () => pi.appendEntry("comments-anchor", {}) });
+  pi.registerCommand("comments-reload", { description: "Reload extensions", handler: async (_: string, ctx: any) => ctx.reload() });
+  pi.registerCommand("comments-inspect", { description: "Inspect branch receipts", handler: async (_: string, ctx: any) => {
+    const entries = ctx.sessionManager.getBranch().filter((entry: any) => entry.type === "custom" && entry.customType === "harness-prefer-fewer-comments-v1");
+    await writeFile(join(ctx.cwd, "receipts.json"), JSON.stringify({ count: entries.length, nested: entries.some((entry: any) => entry.data.callId.includes("/")) }));
+  } });
+  pi.registerCommand("comments-back", { description: "Navigate before receipts", handler: async (_: string, ctx: any) => {
+    const anchor = ctx.sessionManager.getBranch().find((entry: any) => entry.type === "custom" && entry.customType === "comments-anchor");
+    await ctx.navigateTree(anchor.id, { summarize: false });
+  } });
+  pi.registerTool({ name: "comments_again", label: "Comment lifecycle probe", description: "Exercise a later native write", parameters: Type.Object({}),
+    execute: async (_id: string, _args: unknown, _signal: unknown, _update: unknown, ctx: any) => {
+      const result = await ctx.executeTool("write", { path: "other.py", content: content.replaceAll("explanation.", `explanation ${ctx.sessionManager.getLeafId()}.`) });
+      await writeFile(join(ctx.cwd, "again.json"), JSON.stringify({ count: result.result.content.length }));
+      return { content: [{ type: "text", text: "Probe complete." }], details: undefined };
+    },
+  });
+}

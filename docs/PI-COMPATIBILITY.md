@@ -5,7 +5,7 @@ requested 35-package backlog and concrete provider boundaries. It owns first-rel
 sequencing; this report retains catalogue-wide feasibility and broader integration considerations.
 Current implementation includes all 22 shared skill packages in the architecture backlog,
 including `test-workflows`, with opt-in Pi installation. Extension-backed tools include the three
-path guards, `no-new-documents`, `cleanup-git`, both issue workflow packages, and the cloud interview
+path guards, `prefer-fewer-comments`, `no-new-documents`, `cleanup-git`, both issue workflow packages, and the cloud interview
 with its standalone relay. The hosted Pi migration/application are deployed; real Pi project/user
 journeys pass against local and production boards. Remaining extensions and runtime integrations remain proposed.
 
@@ -13,7 +13,7 @@ Follow-up preparation now provides a [real Pi JSON/RPC E2E environment](../tests
 verified against installed Pi 1.2.0. The investigation results below predate that bootstrap;
 the first tool has a workflow journey and the shared-skill batch has native discovery/invocation
 checks. The feasibility tables below describe original port requirements; consult the architecture
-backlog for current shipped status. The three path guards, document draft approval, Git cleanup
+backlog for current shipped status. The three path guards, comment budgets, document draft approval, Git cleanup
 inventory, both issue workflow packages, and cloud interview ship; remaining extensions, runtime,
 and Aboard remain proposed.
 
@@ -33,7 +33,7 @@ Recommendations:
 
 **The original investigation delivered research, mirrored references, and synchronization wiring.**
 Follow-up work added `--platform pi` skill installation and the first tool's E2E journeys.
-The three Pi path guards and both issue workflow packages are implemented; other extensions, persistent runtime, and Aboard remain unimplemented. Feasible below describes
+The three Pi path guards, comment budgets, document drafts, Git cleanup, both issue workflows and cloud interviews are implemented; remaining extensions, persistent runtime, and Aboard are proposed. Feasible below describes
 the research assessment; consult the architecture's implementation status for shipped slices.
 
 ## Scope and evidence
@@ -150,7 +150,7 @@ Effort is relative implementation complexity: **low**, **medium**, **high**. It 
 | [`on-edit-reminder`](../harness/guards/on-edit-reminder/harness.toml) | Yes / E | Successful edit result adds relevant guidance context; preserve cooldown/deduplication and already-read tracking. Let the edit land, then ask for compliance fixes. | Medium / 1 |
 | [`on-read-reminder`](../harness/guards/on-read-reminder/harness.toml) | Yes / E | Successful `read` and recognized shell reads trigger matching guidance through tool-result context. Preserve shared ordered rules and path semantics. Treat partial reads explicitly rather than asserting an entire guide was read. | Low–medium / 1 |
 | [`prefer-edit-tool`](../harness/guards/prefer-edit-tool/harness.toml) | Yes / E | Pi has dedicated `edit`/`write`, so shell-write nudges are useful even though ChatGPT currently declares this package unsupported. Reuse shell detection; change tool names in guidance. This is a nudge, not a denial. | Low / 1 |
-| [`prefer-fewer-comments`](../harness/guards/prefer-fewer-comments/harness.toml) | Yes / E | Reuse language/comment scanning, budgets and exemptions. Normalize Pi `edit` old/new text and `write` content, or compare per-call before/after snapshots, then append guidance only after success. Avoid blaming pre-existing comments or racing sibling writes. | Medium / 1 |
+| [`prefer-fewer-comments`](../harness/guards/prefer-fewer-comments/harness.toml) | Shipped / E | 2.3.0 wraps public native tool definitions, capturing before/after in Pi's mutation queue. Shared Python scanning excludes unchanged bodies and counts only added lines; success-only guidance and branch-local cooldown pass real JSON/RPC project/user journeys. Shell/remote/custom writes require separate adapters. | Medium / 1 |
 | [`prefer-read-tool`](../harness/guards/prefer-read-tool/harness.toml) | Yes / E | Pi's dedicated `read` makes the same reviewability nudge meaningful. Reuse shell-read detection and reference Pi's lowercase tool. Search tools are legitimate searches, not violations. | Low / 1 |
 | [`redirect-subagents`](../harness/guards/redirect-subagents/harness.toml) | No as a Pi-installed guard / N | Intercepts Claude's built-in `Agent`; Pi has no corresponding core tool. Use Harness `subagents` or a Harness-owned Pi tool instead. Separately, Pi can be an alternate child executable for this guard when the **parent remains Claude**, after defining/configuring its invocation contract. | No Pi port / 3 |
 | [`usage-limit-wait`](../harness/guards/usage-limit-wait/harness.toml) | Conditional / C | Token/cost telemetry is not subscription quota. Select a backend-specific reset reader only when supported, bind it to the actual Pi model service/account, and retain cancellation, bounded waits and fail-open reader errors. Generic rate-limit retry is already available in Pi and is not hours-long subscription-window parity. | High/uncertain / 3 |
