@@ -7,10 +7,10 @@ import { routeSharedSkills } from "../tools/pi-shared-skills/scenario.js";
 for (const scope of ["project", "user"] as const) {
   test(`real Pi discovers and invokes all shared skill ports at ${scope} scope`, { timeout: 240_000 }, async () => {
     const result = await runPiSharedSkillsJourney(scope);
-    assert.equal(result.packages, 20);
-    assert.equal(result.skills, 21);
+    assert.equal(result.packages, 22);
+    assert.equal(result.skills, 23);
     assert.equal(result.referenceReads, 5);
-    assert.equal(result.inferenceRequests, 47);
+    assert.equal(result.inferenceRequests, 51);
     assert.equal(result.unexpectedRequests, 0);
   });
 }

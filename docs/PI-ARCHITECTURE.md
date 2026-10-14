@@ -1,7 +1,8 @@
 # Pi provider architecture proposal
 
-Status: **22 shared skill packages, three path-guard extensions, comment budgets, document draft approval, Git cleanup inventory, two issue workflow extensions, cloud interviews, session commits, desktop notifications and gotcha reports implemented; remaining extensions and runtime architecture proposed**.
-Pi is an opt-in catalogue target for all 22 skill-led packages below. Shared skill installation
+Status: **24 shared skill packages, three path-guard extensions, comment budgets, document draft approval, Git cleanup inventory, two issue workflow extensions, cloud interviews, session commits, desktop notifications and gotcha reports implemented; remaining extensions and runtime architecture proposed**.
+Pi is an opt-in catalogue target for all 22 skill-led packages below, plus `caveman` and
+`setup-help`. Shared skill installation
 works at project and user scope; three path guards, comment budgets, document draft approval, Git cleanup inventory,
 both issue workflow packages, cloud interviews, session commits, desktop notifications and gotcha reports ship. The hosted Pi migration/app are deployed
 and verified against the production board. Remaining extensions, persistent runtime, and Aboard are pending.
@@ -22,7 +23,8 @@ and checks receipt-driven removal. Inference is scripted; these checks certify i
 not the quality of an unscripted model's audit judgments.
 
 The shared-skill batch additionally checks native command discovery and explicit invocation
-for all 21 skill entry points in its 20 packages, at project and user scopes. The real Pi
+for all 23 skill entry points in its 22 packages, including `caveman` and `setup-help`, at
+project and user scopes. The real Pi
 parser verifies invocation policy; native tools read installed support files and write
 fixture results, with exact inference counts and receipt-driven removal. These checks certify
 resource integration, not unscripted workflow quality or external browser/GitHub services.
@@ -84,7 +86,14 @@ it can also include shared skills. Rows marked implemented ship the stated Pi re
 That is **22 skill-led packages and 13 extension-backed packages**. These are routes, not effort
 estimates: commit and hosted grilling have substantially larger state/integration requirements.
 
-The first release does not require `subagents`, `ship`, `aboard`, `auto`, `agent-launcher`,
+`caveman` and `setup-help` additionally ship Pi support in 1.1.0, outside the original
+35-package backlog. They install the unchanged shared skills at project and user scope;
+native discovery and explicit invocation are verified by the shared-skill batch.
+
+`redirect-subagents`, `prefer-read-tool`, and `prefer-edit-tool` are Claude-only tools.
+`agent-launcher` is not required for Pi and is excluded from planned Pi ports.
+
+The first release does not require `subagents`, `ship`, `aboard`, `auto`,
 `mid-prompt-skills`, quota waiting, or archived packages. Keep those as future consumers of the
 same provider boundaries. Tools requiring browser/search integrations must report missing
 capabilities; choosing Pi or a model service does not supply those tools automatically.
@@ -583,7 +592,7 @@ headless transport; adopting it must not silently replace the visible-terminal p
 
 These future adapters consume the same event/identity contracts without making the initial
 35 packages depend on their implementation. The compatibility report retains their detailed
-feasibility and broader release gates. All 22 shared skill packages and the installer slice are implemented
+feasibility and broader release gates. All 24 shared skill packages and the installer slice are implemented
 in the checkout; the three path guards, document draft approval, Git cleanup inventory, both issue
 workflow packages, cloud interview, session commits and desktop notifications also ship. The hosted Pi migration and application are deployed
 and verified. Remaining adapters remain proposed.

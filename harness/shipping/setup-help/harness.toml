@@ -1,5 +1,5 @@
 name = "setup-help"
-version = "1.0.2"
+version = "1.1.0"
 description = "Guides users through setup one step at a time"
 docs = "https://github.com/EmilienxD/harness/blob/main/harness/shipping/setup-help/SKILL.md"
 
@@ -7,6 +7,9 @@ docs = "https://github.com/EmilienxD/harness/blob/main/harness/shipping/setup-he
 status = "supported"
 
 [platforms.chatgpt]
+status = "supported"
+
+[platforms.pi]
 status = "supported"
 
 [[files]]

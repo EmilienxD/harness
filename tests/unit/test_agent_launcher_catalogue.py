@@ -26,9 +26,10 @@ def installer(target, store, monkeypatch, actions=None, removals=None):
 
 def test_catalogue_declares_shared_dual_provider_runtime_and_claude_skill():
     tool = discover()["agent-launcher"]
-    assert tool.version == "1.1.7"
+    assert tool.version == "1.1.8"
     assert tool.support_for("claude").status is SupportStatus.SUPPORTED
     assert tool.support_for("chatgpt").status is SupportStatus.SUPPORTED
+    assert tool.support_for("pi").status is SupportStatus.UNSUPPORTED
     assert len(tool.actions) == 1
     assert tool.actions[0].data["package"] == "harness-agent-launcher"
     assert "harness/productivity/agent-launcher/runtime" in tool.actions[0].data["source"]

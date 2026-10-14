@@ -4,7 +4,8 @@ The [Pi architecture proposal](PI-ARCHITECTURE.md) extends this investigation wi
 requested 35-package backlog and concrete provider boundaries. It owns first-release scope and
 sequencing; this report retains catalogue-wide feasibility and broader integration considerations.
 Current implementation includes all 22 shared skill packages in the architecture backlog,
-including `test-workflows`, with opt-in Pi installation. Extension-backed tools include the three
+including `test-workflows`, plus `caveman` and `setup-help`, for 24 packages with opt-in Pi
+installation. Extension-backed tools include the three
 path guards, `prefer-fewer-comments`, `no-new-documents`, `cleanup-git`, both issue workflow packages, `commit`, `enable-desktop-notification`, and the cloud interview
 with its standalone relay, plus native gotcha reporting. The hosted Pi migration/application are deployed; real Pi project/user
 journeys pass against local and production boards. Remaining extensions and runtime integrations remain proposed.
@@ -28,7 +29,7 @@ Recommendations:
 1. Introduce an installer adapter and ship shared skills plus a small, tested extension bridge.
 2. Port guards and deterministic commands using existing Python cores, not independent TypeScript rewrites of every policy.
 3. Complete the requested tool rollout, including a standalone hosted-answer relay; then add native Pi session orchestration, Aboard, and `/ship`.
-4. Do not install `redirect-subagents` on Pi: there is no built-in Claude `Agent` tool to redirect. Offer Harness delegation instead.
+4. Keep `redirect-subagents`, `prefer-read-tool`, and `prefer-edit-tool` Claude-only. `agent-launcher` is not required for Pi and is excluded from planned ports.
 5. Keep `usage-limit-wait` conditional on the selected model service and a verified quota/reset reader. There is no documented universal Pi subscription-window API.
 
 **The original investigation delivered research, mirrored references, and synchronization wiring.**
@@ -149,10 +150,10 @@ Effort is relative implementation complexity: **low**, **medium**, **high**. It 
 | [`on-edit-block`](../harness/guards/on-edit-block/harness.toml) | Yes / E | Block `edit`/`write` until required guidance has actually been delivered/read. Existing TOML matching transfers. Replace Claude transcript traversal with Pi branch-aware successful-read/delivered-guidance state, retaining exclusions, missing guidance behavior and readable-guide delivery. | Medium / 1 |
 | [`on-edit-reminder`](../harness/guards/on-edit-reminder/harness.toml) | Yes / E | Successful edit result adds relevant guidance context; preserve cooldown/deduplication and already-read tracking. Let the edit land, then ask for compliance fixes. | Medium / 1 |
 | [`on-read-reminder`](../harness/guards/on-read-reminder/harness.toml) | Yes / E | Successful `read` and recognized shell reads trigger matching guidance through tool-result context. Preserve shared ordered rules and path semantics. Treat partial reads explicitly rather than asserting an entire guide was read. | Low–medium / 1 |
-| [`prefer-edit-tool`](../harness/guards/prefer-edit-tool/harness.toml) | Yes / E | Pi has dedicated `edit`/`write`, so shell-write nudges are useful even though ChatGPT currently declares this package unsupported. Reuse shell detection; change tool names in guidance. This is a nudge, not a denial. | Low / 1 |
+| [`prefer-edit-tool`](../harness/guards/prefer-edit-tool/harness.toml) | Claude-only / N | Nudges use of Claude Code's Write/Edit tools. Explicitly unsupported on ChatGPT and Pi; excluded from Pi ports. | No Pi port |
 | [`prefer-fewer-comments`](../harness/guards/prefer-fewer-comments/harness.toml) | Shipped / E | 2.3.0 wraps public native tool definitions, capturing before/after in Pi's mutation queue. Shared Python scanning excludes unchanged bodies and counts only added lines; success-only guidance and branch-local cooldown pass real JSON/RPC project/user journeys. Shell/remote/custom writes require separate adapters. | Medium / 1 |
-| [`prefer-read-tool`](../harness/guards/prefer-read-tool/harness.toml) | Yes / E | Pi's dedicated `read` makes the same reviewability nudge meaningful. Reuse shell-read detection and reference Pi's lowercase tool. Search tools are legitimate searches, not violations. | Low / 1 |
-| [`redirect-subagents`](../harness/guards/redirect-subagents/harness.toml) | No as a Pi-installed guard / N | Intercepts Claude's built-in `Agent`; Pi has no corresponding core tool. Use Harness `subagents` or a Harness-owned Pi tool instead. Separately, Pi can be an alternate child executable for this guard when the **parent remains Claude**, after defining/configuring its invocation contract. | No Pi port / 3 |
+| [`prefer-read-tool`](../harness/guards/prefer-read-tool/harness.toml) | Claude-only / N | Nudges use of Claude Code's Read tool. Explicitly unsupported on ChatGPT and Pi; excluded from Pi ports. | No Pi port |
+| [`redirect-subagents`](../harness/guards/redirect-subagents/harness.toml) | Claude-only / N | Intercepts Claude Code's built-in `Agent` tool. Explicitly unsupported on ChatGPT and Pi; excluded from Pi ports. | No Pi port |
 | [`usage-limit-wait`](../harness/guards/usage-limit-wait/harness.toml) | Conditional / C | Token/cost telemetry is not subscription quota. Select a backend-specific reset reader only when supported, bind it to the actual Pi model service/account, and retain cancellation, bounded waits and fail-open reader errors. Generic rate-limit retry is already available in Pi and is not hours-long subscription-window parity. | High/uncertain / 3 |
 
 ### Planning — 9 packages
@@ -173,8 +174,8 @@ Effort is relative implementation complexity: **low**, **medium**, **high**. It 
 
 | Package | Useful to Pi? / route | Implementation and parity requirements | Effort / priority |
 | --- | --- | --- | --- |
-| [`agent-launcher`](../harness/productivity/agent-launcher/harness.toml) | Yes / P | Add Pi wrapper/entry point, command/config validation and prompt arguments to existing Python launcher abstraction. `--system-prompt` and `--append-system-prompt` exist, but Pi does not document Claude's arbitrary per-run `--settings` file interface. Map supported flags or use an explicit native extension; do not isolate the entire agent directory and accidentally lose auth/skills. Existing Claude-only prompt skill remains Claude-only. | Medium / 1 |
-| [`caveman`](../harness/productivity/caveman/harness.toml) | Yes / S | Same response-style skill. Portability does not verify the manifest's token-savings claim. Persistence remains instruction-driven, subject to compaction. | Low / 1 |
+| [`agent-launcher`](../harness/productivity/agent-launcher/harness.toml) | Not required / N | Provides Claude Code and Codex launchers. Not required for Pi; explicitly unsupported and excluded from planned Pi ports. | No Pi port |
+| [`caveman`](../harness/productivity/caveman/harness.toml) | Shipped / S | 1.1.0 installs the shared response-style skill at project and user scopes. Real Pi discovery and explicit invocation are verified. Portability does not verify the manifest's token-savings claim; persistence remains instruction-driven, subject to compaction. | Implemented |
 | [`cleanup-git`](../harness/productivity/cleanup-git/harness.toml) | Yes / E | Read-only inventory script and approval rules transfer. Native skill wrapper/input preparation injects the inventory before the model; preserve fallback reads, missing `gh` behavior and protected-branch/worktree rules. Never turn inspection into automatic cleanup. | Low–medium / 1 |
 | [`decisions`](../harness/productivity/decisions/harness.toml) | Yes / S | Same retrospective confidence review within the available conversation. | Low / 1 |
 | [`enable-desktop-notification`](../harness/productivity/enable-desktop-notification/harness.toml) | Yes / E | Native enable/disable command and session-persistent opt-in. `agent_settled` triggers existing OS notifier with Pi session name and final-text preview. Do not emit terminal escape notifications into RPC/JSON stdout; upstream notify example is precedent, not our full opt-in implementation. | Low–medium / 1 |
@@ -202,7 +203,7 @@ Effort is relative implementation complexity: **low**, **medium**, **high**. It 
 
 | Package | Useful to Pi? / route | Implementation and parity requirements | Effort / priority |
 | --- | --- | --- | --- |
-| [`setup-help`](../harness/shipping/setup-help/harness.toml) | Yes / S | Same one-current-step plus complete remaining-checklist guidance. Useful for Pi installation/authentication/trust as well as project setup. | Low / 1 |
+| [`setup-help`](../harness/shipping/setup-help/harness.toml) | Shipped / S | 1.1.0 installs the shared setup checklist skill at project and user scopes. Real Pi discovery and explicit invocation are verified; setup guidance retains one current step and the remaining checklist. | Implemented |
 
 ### Archived and unmanifested tools — 6 additional assessments
 
@@ -348,7 +349,7 @@ Add Pi adapter, visible terminals, worker restrictions, auto command, provider c
 
 ### Phase 5 — Optional quota and ergonomics
 
-Prototype one clearly identified quota backend if demanded; add native custom UI where it improves the same tool contract. Keep redirect-subagents unsupported on Pi and archived tools archived. Core support must not depend on quota scraping or adopting third-party extensions.
+Prototype one clearly identified quota backend if demanded; add native custom UI where it improves the same tool contract. Keep the three Claude-only tools and `agent-launcher` outside Pi port scope, and archived tools archived. Core support must not depend on quota scraping or adopting third-party extensions.
 
 ### Deterministic E2E approach
 

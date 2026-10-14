@@ -1,5 +1,5 @@
 name = "agent-launcher"
-version = "1.1.7"
+version = "1.1.8"
 description = "Project-configurable launcher for Claude Code and Codex"
 
 [platforms.claude]
@@ -7,6 +7,10 @@ status = "supported"
 
 [platforms.chatgpt]
 status = "supported"
+
+[platforms.pi]
+status = "unsupported"
+reason = "Not required for Pi; this package provides Claude Code and Codex launchers."
 
 [[files]]
 src = "claude/SKILL.md"

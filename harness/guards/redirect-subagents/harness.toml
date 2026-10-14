@@ -1,5 +1,5 @@
 name = "redirect-subagents"
-version = "1.3.1"
+version = "1.3.2"
 description = "Redirect Claude Code's built-in Agent tool subagents to alternate providers, avoiding Claude subscription usage"
 requires = []
 docs = "https://github.com/EmilienxD/harness/blob/main/README.md#hooks"
@@ -7,6 +7,14 @@ docs = "https://github.com/EmilienxD/harness/blob/main/README.md#hooks"
 [platforms.claude]
 status = "supported"
 fragment = "claude/settings.fragment.json"
+
+[platforms.chatgpt]
+status = "unsupported"
+reason = "Claude-only tool: redirects Claude Code's built-in Agent tool."
+
+[platforms.pi]
+status = "unsupported"
+reason = "Claude-only tool: redirects Claude Code's built-in Agent tool."
 
 [[files]]
 src = "rs_io.py"

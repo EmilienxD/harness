@@ -1,5 +1,5 @@
 name = "prefer-edit-tool"
-version = "1.1.0"
+version = "1.1.1"
 description = "PostToolUse nudge to prefer the Write/Edit tools over heredocs, redirects, sed -i and inline python for file writes"
 docs = "https://github.com/EmilienxD/harness/blob/main/README.md#hooks"
 
@@ -10,6 +10,10 @@ fragment = "claude/settings.fragment.json"
 [platforms.chatgpt]
 status = "unsupported"
 reason = "This preference is specific to Claude Code; ChatGPT already uses apply_patch as its native edit path."
+
+[platforms.pi]
+status = "unsupported"
+reason = "Claude-only tool: nudges use of Claude Code's Write/Edit tools."
 
 [[files]]
 src = "prefer_edit_tool_hook.py"

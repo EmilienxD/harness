@@ -14,6 +14,7 @@ export const SHARED_SKILL_PACKAGES = [
   ["productivity", "handoff"], ["productivity", "handoff-grilling"], ["productivity", "todo-hitl"],
   ["productivity", "decisions"], ["productivity", "next-decision"], ["productivity", "stop-overthinking"],
   ["productivity", "setup-command-aliases"], ["productivity", "setup-text-replacements"],
+  ["productivity", "caveman"], ["shipping", "setup-help"],
 ] as const;
 
 const AUTOMATIC_SKILLS = new Set(["tdd", "resolving-merge-conflicts", "writing-adrs", "writing-for-agents"]);

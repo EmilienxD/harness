@@ -1,5 +1,5 @@
 name = "prefer-read-tool"
-version = "1.1.0"
+version = "1.1.1"
 description = "PostToolUse nudge to prefer the Read tool over shell file-read commands"
 docs = "https://github.com/EmilienxD/harness/blob/main/README.md#hooks"
 
@@ -10,6 +10,10 @@ fragment = "claude/settings.fragment.json"
 [platforms.chatgpt]
 status = "unsupported"
 reason = "This preference is specific to Claude Code's Read tool; shell and local reads are native ChatGPT workflows."
+
+[platforms.pi]
+status = "unsupported"
+reason = "Claude-only tool: nudges use of Claude Code's Read tool."
 
 [[files]]
 src = "prefer_read_tool_hook.py"

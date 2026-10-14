@@ -29,6 +29,8 @@ PI_SKILL_PACKAGES = (
     "stop-overthinking",
     "setup-command-aliases",
     "setup-text-replacements",
+    "caveman",
+    "setup-help",
 )
 
 

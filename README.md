@@ -4,7 +4,7 @@
 
 Harness is a catalogue and installer for small, independently selectable agent skills, hooks, command-line tools, and the optional Aboard VS Code extension. It supports Claude Code and ChatGPT without making you adopt an all-or-nothing workflow.
 
-Pi supports 22 shared skill packages, installed into its native skills directory, plus native
+Pi supports 24 shared skill packages, installed into its native skills directory, plus native
 extensions for path guards, comment budgets, document drafts, issue workflows, Git cleanup,
 cloud interviews, session commits, desktop notifications, and Discord gotcha reports.
 The [architecture and initial tool scope](docs/PI-ARCHITECTURE.md) track
@@ -144,7 +144,7 @@ Claude Code invokes a skill as `/skill-name`; ChatGPT uses `$skill-name`; Pi use
 
 - **`setup-text-replacements`**: Adds or updates system-wide AutoHotkey text replacements and reloads the startup script. Windows only.
 
-- **`agent-launcher`**: Installs `cch` and `cxh`, project-configurable wrappers for launching Claude Code and ChatGPT/Codex. A starter `.harness/agent-launcher/` configuration can add a Claude system prompt, provider settings, and standard-library Python extensions; the Claude-only `extend-claude-system-prompt` skill helps maintain and validate that prompt.
+- **`agent-launcher`**: Installs `cch` and `cxh`, project-configurable wrappers for launching Claude Code and ChatGPT/Codex. A starter `.harness/agent-launcher/` configuration can add a Claude system prompt, provider settings, and standard-library Python extensions; the Claude-only `extend-claude-system-prompt` skill helps maintain and validate that prompt. This package is not required for Pi.
 
 - **`decisions`**: Reviews decisions already made during the current conversation and reports only important choices that remain low-confidence, together with the strongest alternative. If no meaningful uncertainty remains, it says so.
 
@@ -423,7 +423,7 @@ The access cookie is marked `Secure` whenever the request arrives over HTTPS, so
 
 ### Provider research and reference documentation
 
-Pi is an opt-in target for all 22 shared skill packages, the three path guards, comment budgets, document draft approval, Git cleanup inventory, both issue workflows, and the cloud interview extension. Project skills use `.pi/skills`;
+Pi is an opt-in target for all 24 shared skill packages, including `caveman` and `setup-help`, the three path guards, comment budgets, document draft approval, Git cleanup inventory, both issue workflows, and the cloud interview extension. Project skills use `.pi/skills`;
 user installs use `~/.pi/agent/skills` or the configured `PI_CODING_AGENT_DIR`. Omitted `--platform`
 continues to select Claude Code and ChatGPT. Other Pi extensions and persistent runtime are pending.
 The [Pi architecture proposal](docs/PI-ARCHITECTURE.md) records the requested 35-package backlog
