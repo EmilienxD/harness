@@ -1,5 +1,5 @@
 name = "test-workflows"
-version = "1.4.1"
+version = "1.5.0"
 description = "Define and confirm end-to-end workflows when their covered code changes"
 requires = ["git"]
 
@@ -7,6 +7,9 @@ requires = ["git"]
 status = "supported"
 
 [platforms.chatgpt]
+status = "supported"
+
+[platforms.pi]
 status = "supported"
 
 [[files]]

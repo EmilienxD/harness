@@ -1,17 +1,17 @@
 # Guards and extensions
 
-Guards are hooks: install one, then restart Claude Code or ChatGPT so the provider reloads its hook registration. Run the Harness catalogue to choose packages, platforms, and project or user scope:
+Guards install provider hooks or native Pi extensions. Install one, then restart the selected provider so it reloads the registration. Run the Harness catalogue to choose packages, platforms, and project or user scope:
 
 ```bash
 uvx --from "git+https://github.com/EmilienxD/harness" harness
 ```
 
-For a scripted project install, use `harness install command-guard no-new-documents`; add `--platform claude` or `--platform chatgpt` when needed. `--scope user` installs at user scope, and `--root <path>` chooses another project. Use `harness list` to inspect selections and `harness info <name>` for package details. Installed starter policies are preserved when you upgrade.
+For a scripted project install, use `harness install command-guard no-new-documents`; add `--platform claude` or `--platform chatgpt` when needed. For Pi document protection, use `harness install no-new-documents --platform pi`. `--scope user` installs at user scope, and `--root <path>` chooses another project. Use `harness list` to inspect selections and `harness info <name>` for package details. Installed starter policies are preserved when you upgrade.
 
 | Package | Platforms | Behavior |
 | --- | --- | --- |
 | [`command-guard`](guards/command-guard.md) | Claude Code, ChatGPT | Denies shell commands matching policy regular expressions. This is a guardrail, not a security sandbox. |
-| [`no-new-documents`](guards/no-new-documents.md) | Claude Code, ChatGPT | Sends new files in protected documentation paths to user-approved drafts; existing files remain editable. |
+| [`no-new-documents`](guards/no-new-documents.md) | Claude Code, ChatGPT, Pi | Sends new files in protected documentation paths to user-approved drafts; existing files remain editable. |
 | [`on-read-reminder`](guards/on-read-reminder.md) | Claude Code | Prompts the agent to read required guidance after it reads matching paths. |
 | [`on-edit-reminder`](guards/on-edit-reminder.md) | Claude Code | Allows a matching edit, then asks the agent to read guidance and correct violations. |
 | [`on-edit-block`](guards/on-edit-block.md) | Claude Code | Denies a matching edit until required guidance has been read in the session. |

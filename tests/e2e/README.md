@@ -21,6 +21,9 @@ npm run test:pi
 npm run test:pi-shared-skills
 npm run test:pi-path-guards
 npm run test:pi-issues
+npm run test:pi-no-new-documents
+npm run test:pi-cleanup-git
+npm run test:pi-test-workflows
 npm run e2e:flush-out-useless-tests
 ```
 
@@ -209,6 +212,30 @@ be `EmilienxD`. A token is passed to the isolated child environment in memory on
 The run closes only its UUID-tagged issues and restores any gateway label it added; it never
 resets the fixture, changes branches, or recreates the repository. Run this explicit live command
 when GitHub acceptance is needed; `npm test` retains credential-free local journeys.
+
+## Pi document drafts, Git cleanup and test workflows
+
+`test:pi-no-new-documents` installs actual project/user catalogue payloads, then runs JSON/RPC
+with the fake Responses endpoint shared with Codex. It checks denied direct/shell/nested creations,
+allowed existing-document edits, mirrored drafts, quoted paths, zero-inference approval/rejection,
+no overwrite, competing publication, malformed policy, escaping paths, reload/resume/tree notices,
+starter preservation and receipt-driven removal. Other extensions' direct I/O and arbitrary scripts
+remain outside the guardrail; native commands are also callable by trusted extensions.
+
+`test:pi-cleanup-git` verifies project JSON and user RPC invocation through native skill expansion.
+Inventory collection performs only local Git and fake paginated GitHub reads. The scripted model
+waits for named approval, rechecks live state, preserves a branch with newly arrived commits, and
+removes only the approved merged branch/worktree. Unrelated input starts no inventory; unavailable
+skills/helpers stop before inference. These checks certify integration, not unscripted cleanup judgment.
+
+`test:pi-test-workflows` installs the shared skill and actual uv-managed CLI in isolated tool
+directories. Project JSON and user RPC run a passing acceptance check before explicit confirmation,
+then introduce a regression and prove failed acceptance leaves verification stale. Broken/invalid
+coverage, exact hashes, request counts, and shared host-action receipt removal are checked. Status
+and confirmation do not execute the acceptance steps themselves.
+
+These journeys use real Pi 1.2.0 on Windows, isolated configuration/session directories and fake
+inference only. POSIX runtime acceptance and Pi TUI behavior need their own applicable checks.
 
 ## Pi hosted interviews
 

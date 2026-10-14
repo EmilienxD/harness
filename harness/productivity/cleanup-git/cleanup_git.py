@@ -341,6 +341,19 @@ def collect(cwd: Path | None = None) -> dict:
             "collection_policy": "Read-only local snapshot; remote refs were not fetched. Missing facts require investigation, never deletion."}
 
 
+def prepared_inventory(cwd: Path) -> str:
+    """Collect the shared prompt inventory without mutating Git or refreshing remote refs."""
+    facts = collect(cwd)
+    # Preserve every branch/worktree; keep per-item file previews bounded.
+    for checkout in facts["worktrees"]:
+        for key in ("changes", "ignored"):
+            checkout[f"{key}_omitted"] = max(0, checkout[f"{key}_count"] - 5)
+            del checkout[key][5:]
+    facts["inventory_command"] = [sys.executable, str(Path(__file__).resolve())]
+    facts["inventory_cwd"] = str(cwd.resolve())
+    return render_inventory(facts)
+
+
 def render_inventory(facts: dict) -> str:
     """Render inventory types as TOON, with states in tables and keyed details."""
     def quoted(value: str) -> str:

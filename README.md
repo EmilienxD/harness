@@ -100,7 +100,7 @@ Claude Code invokes a skill as `/skill-name`; ChatGPT uses `$skill-name`; Pi use
 
 - **`ship`**: Leads one GitHub issue from selection through a guarded implementation loop to an open or merged PR. `/ship` selects the oldest actionable triaged issue; explicit issue numbers bypass triage, parents expand to dependency-ordered leaf loops, and a PR URL resumes review work. Installs `subagents`, `test-workflows`, `issue-readers`, and `resolving-merge-conflicts`.
 
-- **`cleanup-git`**: Automatically inventories every local branch and worktree with a bundled read-only script that runs without arguments from the current directory. Supplies a titled **Git cleanup inventory** in compact TOON tables. Checks merge ancestry, protected branches, local and ignored files, locks, submodules, and ongoing Git operations; includes GitHub facts when `gh` is available. The skill contains the cleanup rules and proposes named actions for approval before deletion or worktree removal.
+- **`cleanup-git`**: Automatically inventories every local branch and worktree with a bundled read-only script that runs without arguments from the current directory. Supplies a titled **Git cleanup inventory** in compact TOON tables. Checks merge ancestry, protected branches, local and ignored files, locks, submodules, and ongoing Git operations; includes GitHub facts when `gh` is available. The skill contains the cleanup rules and proposes named actions for approval before deletion or worktree removal. On Pi, `/cleanup-git` and `/skill:cleanup-git` prepare the inventory before expanding the native skill.
 
 - **`resolving-merge-conflicts`**: Resolves an in-progress Git merge or rebase by tracing the intent behind each side, preserving both where possible, running the repository's checks, and finishing the operation. It never aborts the merge or invents unrelated behavior.
 
@@ -247,7 +247,7 @@ Hooks do not need a skill invocation. Select them in the catalogue and restart t
 | Package | Platforms | What it does |
 | --- | --- | --- |
 | `command-guard` | Claude Code, ChatGPT | Denies shell commands matching an editable dangerous-command policy. It is a guardrail, not a security sandbox. |
-| `no-new-documents` | Claude Code, ChatGPT | Stops agents from creating files in configured documentation directories and has them write a draft for your approval instead. Edits to existing files are allowed. |
+| `no-new-documents` | Claude Code, ChatGPT, Pi | Stops agents from creating files in configured documentation directories and has them write a draft for your approval instead. Edits to existing files are allowed. |
 | `on-read-reminder` | Claude Code, Pi | Reminds the agent to read required guidance when it reads paths matching configured patterns. |
 | `on-edit-reminder` | Claude Code, Pi | Lets a matching edit land, then requires the relevant guidance to be read and violations corrected. |
 | `on-edit-block` | Claude Code, Pi | Denies a matching edit until the required guidance has been read or delivered in the current session branch. |
@@ -261,6 +261,15 @@ Hooks do not need a skill invocation. Select them in the catalogue and restart t
 `mid-prompt-skills` covers the case where a provider recognizes a skill at the start of a message but leaves a later mention as plain text. On Claude Code, `/skill-name` gets Claude's argument substitutions and searches managed, personal, and project skills plus `.claude/commands/`; already expanded, disabled, non-invocable, and forked skills are skipped. On ChatGPT, later `$skill-name` mentions and the linked form produced by its skill picker load the selected `SKILL.md`; a leading mention stays with the native loader. Bare names search project and user `.agents/skills` plus Codex's local skill roots, while linked selections can reach plugin skills. Mentions inside fenced code blocks are ignored. Claude plugin and `--add-dir` skills remain outside the hook, and the Claude adapter cannot reproduce shell injection or frontmatter controls such as `allowed-tools` and `model`.
 
 When `no-new-documents` blocks a new file such as `docs/arch/plan.md`, it tells the agent to write it to the mirrored draft path `.harness/doc-drafts/docs/arch/plan.md` instead. That folder is git-ignored, and the agent cannot move or copy drafts into place itself. Review the draft, then run `/approve-doc-draft docs/arch/plan.md` to move it into place or `/reject-doc-draft docs/arch/plan.md` to delete it (`$approve-doc-draft` and `$reject-doc-draft` in ChatGPT). Both commands take files or whole directories, list the pending drafts when run without a path, and run without a model call. Approval never overwrites a file that already exists at the target path. On your next message, the agent learns which drafts were approved or rejected and which are still pending. To request changes, just reply with feedback and the agent revises the draft.
+
+On Pi, install with `harness install no-new-documents --platform pi`, then restart or reload Pi.
+The same slash commands and their `/skill:` forms run without inference. The extension guards native
+`write` and recognized literal shell creations, including nested tool calls. Arbitrary scripts,
+third-party mutators, and filesystem access inside other extensions remain outside this guardrail.
+Project policies use `.harness/guards/no-new-documents.toml`; Pi user policies start at
+`<PI_CODING_AGENT_DIR>/hooks/no-new-documents.toml` (default `~/.pi/agent/hooks/`). Home and project
+policies also apply. Command outcomes follow the active session branch; pending drafts follow the
+current filesystem. Quote paths containing spaces.
 
 #### Guard configuration
 
@@ -358,7 +367,7 @@ covers: ["src/greeting/**/*.py"]
 
 Run the workflow, then `test-workflows confirm tests/workflow/greeting.md` to automatically create or update the sibling `greeting.manifest.json` with the normalized covered-file hash and generated `verified_files` inventory. Commit both files. Agents write and read the Markdown, including its `covers` patterns; the CLI manages the manifest. A workflow without a manifest is unconfirmed (`stale`). Hashes normalize line endings, so equivalent Windows and Unix checkouts agree. `test-workflows status` reports workflow states and changed covered files in TOON format, including broken mappings whose globs match nothing and malformed workflows or manifests. Add `--json` before or after the command to output JSON instead; this also applies to confirmation and command errors. Exit codes are 0 for all passing, 1 for a stale/broken/invalid workflow, and 2 for a command error. Discovery finds tracked/non-ignored Markdown with `covers` front matter; use `--directory <folder>` or `--root <checkout>` before the subcommand to narrow it.
 
-Run `test-workflows status` explicitly when verifying changes, as you would run unit tests, then run the affected checks and confirm passing ones. Loop implementers run and report; only the Lead stamps their results.
+Run `test-workflows status` explicitly when verifying changes, as you would run unit tests, then run the affected checks and confirm passing ones. Loop implementers run and report; only the Lead stamps their results. Pi installs the same CLI and shared skill; invoke `/skill:test-workflows` to load it explicitly. Confirmation records verification performed by the agent; it does not execute the acceptance steps.
 
 ## Aboard
 
@@ -400,7 +409,7 @@ The access cookie is marked `Secure` whenever the request arrives over HTTPS, so
 
 ### Provider research and reference documentation
 
-Pi is an opt-in target for 21 shared skill packages, the three path guards, both issue workflows, and the cloud interview extension. Project skills use `.pi/skills`;
+Pi is an opt-in target for all 22 shared skill packages, the three path guards, document draft approval, Git cleanup inventory, both issue workflows, and the cloud interview extension. Project skills use `.pi/skills`;
 user installs use `~/.pi/agent/skills` or the configured `PI_CODING_AGENT_DIR`. Omitted `--platform`
 continues to select Claude Code and ChatGPT. Other Pi extensions and persistent runtime are pending.
 The [Pi architecture proposal](docs/PI-ARCHITECTURE.md) records the requested 35-package backlog

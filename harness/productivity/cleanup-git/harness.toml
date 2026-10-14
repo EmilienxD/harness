@@ -1,7 +1,11 @@
 name = "cleanup-git"
-version = "1.1.4"
+version = "1.2.0"
 description = "Explain every local branch and worktree before confirming cleanup"
 requires = ["git"]
+dependencies = [{ name = "pi-support", version = ">=1.1.0,<2.0.0", lifecycle = "coupled", platforms = ["pi"] }]
+
+[platforms.pi]
+status = "supported"
 
 [platforms.claude]
 status = "supported"
@@ -39,3 +43,15 @@ src = "chatgpt/openai.yaml"
 dest = "cleanup-git/agents/openai.yaml"
 root = "skills"
 platforms = ["chatgpt"]
+
+[[files]]
+src = "pi/extension.ts"
+dest = "harness-cleanup-git/index.ts"
+root = "extensions"
+platforms = ["pi"]
+
+[[files]]
+src = "cleanup_git_pi.py"
+dest = "cleanup_git_pi.py"
+root = "hooks"
+platforms = ["pi"]

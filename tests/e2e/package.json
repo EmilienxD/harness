@@ -59,7 +59,13 @@
     "e2e:pi-issues:live": "esbuild tools/pi-issues/live-cli.ts --bundle --platform=node --format=cjs --target=node22 --outfile=dist/tools/pi-issues/live-cli.js && node dist/tools/pi-issues/live-cli.js",
     "e2e:pi-grill": "esbuild tools/pi-grill/cli.ts --bundle --platform=node --format=cjs --target=node22 --outfile=dist/tools/pi-grill/cli.js && node dist/tools/pi-grill/cli.js",
     "e2e:pi-grill:live": "esbuild tools/pi-grill/cli.ts --bundle --platform=node --format=cjs --target=node22 --outfile=dist/tools/pi-grill/cli.js && node dist/tools/pi-grill/cli.js --live",
-    "test:pi-grill": "esbuild test/pi-grill.test.ts --bundle --platform=node --format=cjs --target=node22 --outfile=dist/test/pi-grill.test.js && node --test dist/test/pi-grill.test.js"
+    "test:pi-grill": "esbuild test/pi-grill.test.ts --bundle --platform=node --format=cjs --target=node22 --outfile=dist/test/pi-grill.test.js && node --test dist/test/pi-grill.test.js",
+    "test:pi-no-new-documents": "esbuild test/pi-no-new-documents.test.ts --bundle --platform=node --format=cjs --target=node22 --outfile=dist/test/pi-no-new-documents.test.js && node --test dist/test/pi-no-new-documents.test.js",
+    "test:pi-cleanup-git": "esbuild test/pi-cleanup-git.test.ts --bundle --platform=node --format=cjs --target=node22 --outfile=dist/test/pi-cleanup-git.test.js && node --test dist/test/pi-cleanup-git.test.js",
+    "test:pi-test-workflows": "esbuild test/pi-test-workflows.test.ts --bundle --platform=node --format=cjs --target=node22 --outfile=dist/test/pi-test-workflows.test.js && node --test dist/test/pi-test-workflows.test.js",
+    "e2e:pi-no-new-documents": "esbuild tools/pi-no-new-documents/cli.ts --bundle --platform=node --format=cjs --target=node22 --outfile=dist/tools/pi-no-new-documents/cli.js && node dist/tools/pi-no-new-documents/cli.js",
+    "e2e:pi-cleanup-git": "esbuild tools/pi-cleanup-git/cli.ts --bundle --platform=node --format=cjs --target=node22 --outfile=dist/tools/pi-cleanup-git/cli.js && node dist/tools/pi-cleanup-git/cli.js",
+    "e2e:pi-test-workflows": "esbuild tools/pi-test-workflows/cli.ts --bundle --platform=node --format=cjs --target=node22 --outfile=dist/tools/pi-test-workflows/cli.js && node dist/tools/pi-test-workflows/cli.js"
   },
   "devDependencies": {
     "@types/node": "22.20.1",

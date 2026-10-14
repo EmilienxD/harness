@@ -8,7 +8,7 @@ import re
 import subprocess
 import sys
 
-from cleanup_git import FactError, collect, render_inventory
+from cleanup_git import FactError, collect, prepared_inventory, render_inventory
 
 
 def handle(payload: dict) -> dict | None:
@@ -21,16 +21,8 @@ def handle(payload: dict) -> dict | None:
     if not match:
         return None
     cwd = Path(payload.get("cwd") or Path.cwd())
-    facts = collect(cwd)
-    # Preserve every branch/worktree; keep per-item previews small.
-    for checkout in facts["worktrees"]:
-        for key in ("changes", "ignored"):
-            checkout[f"{key}_omitted"] = max(0, checkout[f"{key}_count"] - 5)
-            del checkout[key][5:]
-    facts["inventory_command"] = [sys.executable, str(Path(__file__).with_name("cleanup_git.py"))]
-    facts["inventory_cwd"] = str(cwd.resolve())
     return {"hookSpecificOutput": {"hookEventName": "UserPromptSubmit",
-                                   "additionalContext": render_inventory(facts)}}
+                                   "additionalContext": prepared_inventory(cwd)}}
 
 
 def main() -> None:

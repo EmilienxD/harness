@@ -13,6 +13,8 @@ import hashlib
 import json
 import os
 import re
+import shlex
+import stat
 import sys
 import tomllib
 from pathlib import Path
@@ -24,7 +26,8 @@ DRAFTS_DIR = Path(".harness/doc-drafts")
 
 CLAUDE = "claude"
 CHATGPT = "chatgpt"
-COMMAND_PREFIX = {CLAUDE: "/", CHATGPT: "$"}
+PI = "pi"
+COMMAND_PREFIX = {CLAUDE: "/", CHATGPT: "$", PI: "/"}
 
 # Set by `main` from argv, before anything reads it.
 PROVIDER = CLAUDE
@@ -95,7 +98,7 @@ def _configuration(root: Path) -> tuple[re.Pattern[str], ...]:
 
 
 def _root(payload: dict[str, Any]) -> Path:
-    project = os.environ.get("CLAUDE_PROJECT_DIR")
+    project = os.environ.get("CLAUDE_PROJECT_DIR") if PROVIDER == CLAUDE else None
     if project:
         return Path(project).resolve()
     cwd = payload.get("cwd")
@@ -220,17 +223,22 @@ def _shell_candidates(command: str, root: Path) -> list[str]:
 
 def _prepare_drafts(root: Path) -> None:
     drafts = root / DRAFTS_DIR
+    if not _safe_child(drafts, root):
+        raise ValueError("draft directory must not traverse symbolic links or junctions")
     drafts.mkdir(parents=True, exist_ok=True)
     ignore = drafts / ".gitignore"
-    if not ignore.exists():
-        ignore.write_text("*\n", encoding="utf-8", newline="\n")
+    try:
+        with ignore.open("x", encoding="utf-8", newline="\n") as stream:
+            stream.write("*\n")
+    except FileExistsError:
+        pass
 
 
 def _deny(path: str, root: Path) -> None:
     draft = f"{DRAFTS_DIR.as_posix()}/{path}"
     try:
         _prepare_drafts(root)
-    except OSError:
+    except (OSError, ValueError):
         pass
     existing = (
         "A draft already exists there; update it instead of starting over. "
@@ -302,6 +310,24 @@ def _block_prompt(message: str) -> int:
     return 2
 
 
+def _safe_child(path: Path, root: Path) -> bool:
+    """Reject lexical escapes and linked ancestors, including Windows junctions."""
+    try:
+        relative = Path(os.path.abspath(path)).relative_to(root)
+        current = root
+        for part in relative.parts:
+            current /= part
+            try:
+                info = current.lstat()
+            except FileNotFoundError:
+                continue
+            if stat.S_ISLNK(info.st_mode) or getattr(info, "st_file_attributes", 0) & getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0):
+                return False
+        return True
+    except (OSError, ValueError):
+        return False
+
+
 def _draft_files(root: Path, argument: str) -> list[str]:
     """Draft target paths named by `argument`, a file or a directory of drafts."""
     drafts = root / DRAFTS_DIR
@@ -309,22 +335,22 @@ def _draft_files(root: Path, argument: str) -> list[str]:
     prefix = DRAFTS_DIR.as_posix() + "/"
     if argument.startswith(prefix):
         argument = argument[len(prefix):]
-    parts = _relative_parts(argument, drafts)
-    if not parts:
+    selected = Path(os.path.abspath(drafts / argument))
+    if not _safe_child(drafts, root) or not _safe_child(selected, drafts) or selected == drafts:
         return []
-    selected = drafts.joinpath(*parts)
     if selected.is_file():
-        return ["/".join(parts)]
+        return [selected.relative_to(drafts).as_posix()]
     return _drafts_below(selected, drafts)
 
 
 def _drafts_below(directory: Path, drafts: Path) -> list[str]:
-    if not directory.is_dir():
+    if not _safe_child(drafts, drafts.parent.parent) or not _safe_child(directory, drafts) or not directory.is_dir():
         return []
     return sorted(
         path.relative_to(drafts).as_posix()
         for path in directory.rglob("*")
         if path.is_file() and path != drafts / ".gitignore"
+        and _safe_child(path, drafts)
     )
 
 
@@ -340,27 +366,72 @@ def _listing(root: Path, command: str) -> str:
 
 
 def _prune_empty(directory: Path, stop: Path) -> None:
-    while directory != stop and directory.is_dir() and not any(directory.iterdir()):
-        directory.rmdir()
+    while directory != stop:
+        try:
+            directory.rmdir()
+        except OSError:
+            # Another approval may already have removed it or added a sibling.
+            # Pruning must not turn a completed publication into a failed command.
+            break
         directory = directory.parent
 
 
 def _approve(root: Path, target: str) -> bool:
     draft = root / DRAFTS_DIR / target
     destination = root / target
-    if destination.exists():
+    if not _safe_child(draft, root):
+        raise ValueError("draft must stay inside the draft directory")
+    if not _safe_child(destination, root):
+        raise ValueError("document must stay inside the project")
+    if destination.exists() or destination.is_symlink():
         return False
     destination.parent.mkdir(parents=True, exist_ok=True)
-    draft.rename(destination)
+    # link() publishes atomically and fails if another process created the target.
+    # rename() can overwrite that concurrent file on POSIX.
+    try:
+        os.link(draft, destination)
+    except FileExistsError:
+        return False
+    draft.unlink()
     _prune_empty(draft.parent, root / DRAFTS_DIR)
     return True
 
 
 def _reject(root: Path, target: str) -> bool:
     draft = root / DRAFTS_DIR / target
+    if not _safe_child(draft, root):
+        raise ValueError("draft must stay inside the draft directory without linked ancestors")
     draft.unlink()
     _prune_empty(draft.parent, root / DRAFTS_DIR)
     return True
+
+
+def draft_command(root: Path, verb: str, argument: str) -> tuple[str, dict[str, list[str]]]:
+    """Provider-neutral deterministic command; providers own notice delivery."""
+    try:
+        arguments = shlex.split(argument, posix=False)
+    except ValueError:
+        return "Invalid quoted draft path.", {}
+    if not arguments:
+        return _listing(root, f"{verb}-doc-draft"), {}
+    done: list[str] = []
+    lines: list[str] = []
+    for item in arguments:
+        targets = _draft_files(root, item)
+        if not targets:
+            lines.append(f"No draft found for `{item}`.")
+        for target in targets:
+            try:
+                changed = (_approve if verb == "approve" else _reject)(root, target)
+            except (OSError, ValueError) as error:
+                lines.append(f"Could not {verb} `{target}`: {error}")
+                continue
+            if not changed:
+                lines.append(f"Kept the draft of `{target}`: a file already exists there.")
+                continue
+            done.append(target)
+            lines.append(f"Approved `{target}`." if verb == "approve" else f"Discarded the draft of `{target}`.")
+    return "\n".join(lines), ({"approved" if verb == "approve" else "rejected": done} if done else {})
 
 
 # A blocked prompt is erased from the agent's context, so each outcome waits
@@ -441,38 +512,18 @@ def handle_prompt(payload: dict[str, Any]) -> int:
                 }
             }))
         return 0
-    arguments = match.group(2).split()
-    if not arguments:
-        return _block_prompt(_listing(root, f"{match.group(1)}-doc-draft"))
-    approve = match.group(1) == "approve"
-    done: list[str] = []
-    lines = []
-    for argument in arguments:
-        targets = _draft_files(root, argument)
-        if not targets:
-            lines.append(f"No draft found for `{argument}`.")
-        for target in targets:
-            try:
-                changed = (_approve if approve else _reject)(root, target)
-            except OSError as error:
-                lines.append(f"Could not {match.group(1)} `{target}`: {error}")
-                continue
-            if not changed:
-                lines.append(f"Kept the draft of `{target}`: a file already exists there.")
-                continue
-            done.append(target)
-            lines.append(f"Approved `{target}`." if approve else f"Discarded the draft of `{target}`.")
-    if done:
+    message, outcomes = draft_command(root, match.group(1), match.group(2))
+    if outcomes:
         try:
-            _record_outcomes(notices, {"approved" if approve else "rejected": done})
+            _record_outcomes(notices, outcomes)
         except OSError:
-            lines.append("The agent could not be told about this; mention it in your next message.")
-    return _block_prompt("\n".join(lines))
+            message += "\nThe agent could not be told about this; mention it in your next message."
+    return _block_prompt(message)
 
 
 def main() -> int:
     global PROVIDER
-    PROVIDER = CHATGPT if "--" + CHATGPT in sys.argv[1:] else CLAUDE
+    PROVIDER = PI if "--pi" in sys.argv[1:] else CHATGPT if "--" + CHATGPT in sys.argv[1:] else CLAUDE
     try:
         payload = json.load(sys.stdin)
     except (json.JSONDecodeError, OSError):

@@ -3,15 +3,19 @@
 The [Pi architecture proposal](PI-ARCHITECTURE.md) extends this investigation with the user's
 requested 35-package backlog and concrete provider boundaries. It owns first-release scope and
 sequencing; this report retains catalogue-wide feasibility and broader integration considerations.
-Current implementation includes `flush-out-useless-tests` and the 20 shared skill packages
-listed as implemented in the architecture backlog, with opt-in Pi installation. Extension-backed
-tools now include the three path guards, both issue workflow packages, and the cloud interview with its standalone relay. The hosted Pi migration/application are deployed; real Pi project/user journeys pass against local and production boards. Remaining extensions and runtime integrations remain proposed.
+Current implementation includes all 22 shared skill packages in the architecture backlog,
+including `test-workflows`, with opt-in Pi installation. Extension-backed tools include the three
+path guards, `no-new-documents`, `cleanup-git`, both issue workflow packages, and the cloud interview
+with its standalone relay. The hosted Pi migration/application are deployed; real Pi project/user
+journeys pass against local and production boards. Remaining extensions and runtime integrations remain proposed.
 
 Follow-up preparation now provides a [real Pi JSON/RPC E2E environment](../tests/e2e/README.md),
 verified against installed Pi 1.2.0. The investigation results below predate that bootstrap;
 the first tool has a workflow journey and the shared-skill batch has native discovery/invocation
 checks. The feasibility tables below describe original port requirements; consult the architecture
-backlog for current shipped status. The three path guards, both issue workflow packages, and cloud interview ship; remaining extensions, runtime, and Aboard remain proposed.
+backlog for current shipped status. The three path guards, document draft approval, Git cleanup
+inventory, both issue workflow packages, and cloud interview ship; remaining extensions, runtime,
+and Aboard remain proposed.
 
 ## Executive conclusion
 

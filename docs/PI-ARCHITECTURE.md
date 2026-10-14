@@ -1,8 +1,10 @@
 # Pi provider architecture proposal
 
-Status: **21 shared skill packages, three path-guard extensions, two issue workflow extensions and the cloud interview extension implemented; remaining extensions and runtime architecture proposed**.
-Pi is an opt-in catalogue target for `flush-out-useless-tests` and the 20 shared packages marked
-implemented below. Shared skill installation works at project and user scope; three path guards, both issue workflow packages, and the cloud interview ship. The hosted Pi migration/app are deployed and verified against the production board. Remaining extensions, persistent runtime, and Aboard are pending.
+Status: **22 shared skill packages, three path-guard extensions, document draft approval, Git cleanup inventory, two issue workflow extensions and the cloud interview extension implemented; remaining extensions and runtime architecture proposed**.
+Pi is an opt-in catalogue target for all 22 skill-led packages below. Shared skill installation
+works at project and user scope; three path guards, document draft approval, Git cleanup inventory,
+both issue workflow packages, and the cloud interview ship. The hosted Pi migration/app are deployed
+and verified against the production board. Remaining extensions, persistent runtime, and Aboard are pending.
 This proposal defines the implementation boundaries and first release scope.
 The [compatibility report](PI-COMPATIBILITY.md) retains the catalogue-wide feasibility assessment.
 
@@ -45,7 +47,7 @@ it can also include shared skills. Rows marked implemented ship the stated Pi re
 | --- | --- | --- | --- |
 | 1 | `flush-out-useless-tests` | Skill | Implemented in 1.1.0. Project JSON/RPC and user RPC journeys verify installation, audit, approved cleanup, and removal. |
 | 2 | `tdd` | Skill | Implemented. Behavior-focused red/green work and supporting references are installed. |
-| 3 | `test-workflows` | Skill | Install the existing CLI; retain explicit status, execution evidence, and confirmation. |
+| 3 | `test-workflows` | Skill | Implemented. Existing CLI and shared skill; real acceptance execution, explicit confirmation and stale covered-file hashes verified through Pi. |
 | 4 | `resolving-merge-conflicts` | Skill | Implemented. Preserve merge/rebase intent and project verification. |
 | 5 | `setup-git-worktree-maker` | Skill | Implemented. Copy necessary project Pi resources while keeping personal credentials and sessions outside worktrees. |
 | 6 | `audit` | Skill | Implemented. Pi runs the audit in one session; explicit explorer delegation waits for the later runtime adapter. |
@@ -70,10 +72,10 @@ it can also include shared skills. Rows marked implemented ship the stated Pi re
 | 25 | `on-edit-reminder` | Extension | Implemented in 2.2.0. Successful native edits remind with the existing 120-second cooldown and branch-local read suppression. |
 | 26 | `on-edit-block` | Extension | Implemented in 2.2.0. Native writes/edits require complete reads or fully delivered denial guidance on the active branch, including nested calls. |
 | 27 | `prefer-fewer-comments` | Extension | Reuse scanning/budgets/exemptions; examine newly introduced comments only. |
-| 28 | `no-new-documents` | Extension | Preserve draft mirrors, pending notices, user approval, and no-overwrite approval commands. |
+| 28 | `no-new-documents` | Extension | Implemented. Native creation guard, draft mirrors, branch-local notices and zero-inference approval/rejection with exclusive publication. |
 | 29 | `issue-readers` | Extension | Implemented in 1.6.0. Prepare complete paginated `address-this` / `review-this` context through the issue graph before native skill expansion; preparation errors stop inference. |
 | 30 | `issue-writers` | Extension | Implemented in 2.3.0. Supply native session draft paths for the four drafting/spec skills; intercept the fifth (`publish-issues`) through a native command with existing locks and ordering, without inference. |
-| 31 | `cleanup-git` | Extension | Inject the existing read-only inventory; keep approval and live-state checks before cleanup. |
+| 31 | `cleanup-git` | Extension | Implemented. Inject the existing read-only inventory before native skill expansion; keep approval and live-state checks before cleanup. |
 | 32 | `enable-desktop-notification` | Extension | Persist per-session opt-in and notify once at final settlement using the existing OS notifier. |
 | 33 | `report-gotchas` | Extension | Reuse CLI/queue/worker; bind receipts to Pi identity and preserve idempotent reporting. |
 | 34 | `commit` | Extension | Reuse staging/Git/message generation; attribute successful writes to the active Pi session branch. |
@@ -362,8 +364,10 @@ headless transport; adopting it must not silently replace the visible-terminal p
 
 These future adapters consume the same event/identity contracts without making the initial
 35 packages depend on their implementation. The compatibility report retains their detailed
-feasibility and broader release gates. The 21 shared skill packages and installer slice are implemented in
-the checkout; the three path guards, both issue workflow packages, and cloud interview also ship. The hosted Pi migration and application are deployed and verified. Remaining adapters remain proposed.
+feasibility and broader release gates. All 22 shared skill packages and the installer slice are implemented
+in the checkout; the three path guards, document draft approval, Git cleanup inventory, both issue
+workflow packages, and cloud interview also ship. The hosted Pi migration and application are deployed
+and verified. Remaining adapters remain proposed.
 
 ## Shipped path-guard slice
 
@@ -426,6 +430,37 @@ and fake inference. A parent/child draft batch is published with labels, rewritt
 and a real parent link. Both readers receive the live issue graph and a maintainer comment.
 Dry-run leaves GitHub untouched and publication uses zero inference. Only the run's UUID-tagged
 issues and newly added gateway labels are cleaned; existing repository state is preserved.
+
+## Shipped document, cleanup and test-workflow slice
+
+`test-workflows` 1.5.0 maps its shared skill to Pi and retains the existing pinned uv-managed CLI.
+Pi's native skill format already supplies the required context; an extension would add no executable
+boundary. Status compares covered-file hashes, actual workflow execution supplies evidence, and explicit
+confirmation records a passing run. Failed execution leaves the earlier manifest stale.
+
+`cleanup-git` 1.2.0 uses a Pi-only coupled `pi-support` dependency and package-local input adapter.
+Both `/cleanup-git` and `/skill:cleanup-git` collect the shared read-only Git/GitHub inventory before
+native skill expansion, preserving arguments and images in one submission. No mutable pending inventory
+survives branch changes. Missing skills, invalid repositories and transport failures stop the invocation
+before inference; informational missing facts remain visible in the inventory. Approval and immediate
+live-state checks remain the shared skill's model-driven workflow, not an automatic deletion policy.
+
+`no-new-documents` 3.1.0 uses the same bridge with package-local native tool and command translation.
+It denies native writes and recognized literal shell creations in protected paths, including nested
+calls, while allowing draft mirrors and existing-document edits. Malformed policy or transport failure
+blocks covered calls. Native approval/rejection and their `/skill:` forms make zero inference requests.
+Publication uses exclusive hard-link creation followed by draft removal, so an existing destination
+cannot be overwritten by a concurrent approval. Unsupported hard links leave the draft for correction.
+Native custom messages persist outcomes on the active branch; current pending drafts are refreshed
+from disk before model turns. Pi user policy starters live beside the installed hooks; shared home and
+project policies also apply. Arbitrary scripts, third-party mutators, trusted extension command dispatch
+and direct extension I/O remain outside the protection boundary.
+
+The three `test:pi-*` journeys documented in [the E2E guide](../tests/e2e/README.md#pi-document-drafts-git-cleanup-and-test-workflows)
+install real catalogue payloads at project/user scope and exercise Pi 1.2.0 JSON/RPC on Windows against
+the authenticated fake Responses endpoint. They verify filesystem/Git/manifest effects, request counts,
+command failures, lifecycle behavior and receipt-driven removal. They certify native integration with
+scripted inference; they do not certify unscripted model judgments or POSIX/TUI runtime behavior.
 
 ## Shipped cloud interview slice
 

@@ -1,6 +1,6 @@
 # No New Documents
 
-`no-new-documents` protects new files in chosen documentation paths on Claude Code and ChatGPT. Existing files remain editable. A blocked new file is written as a draft under `.harness/doc-drafts/` with the same relative path, for example `docs/arch/plan.md` becomes `.harness/doc-drafts/docs/arch/plan.md`. The draft directory is git-ignored.
+`no-new-documents` protects new files in chosen documentation paths on Claude Code, ChatGPT, and Pi. Existing files remain editable. A blocked new file is written as a draft under `.harness/doc-drafts/` with the same relative path, for example `docs/arch/plan.md` becomes `.harness/doc-drafts/docs/arch/plan.md`. The draft directory is git-ignored.
 
 Install with `harness install no-new-documents` and restart the provider. Set protected paths in `.harness/guards/no-new-documents.toml`, or `~/.harness/guards/no-new-documents.toml` for user scope:
 
@@ -11,7 +11,9 @@ protected = ["**/docs/**", "project-notes/**"]
 
 The starter protects `**/docs/**`. Patterns use gitignore-style `*`, `?`, and `**`. User and project protected paths both apply; Harness preserves the starter file after edits.
 
-Review the draft, then run `/approve-doc-draft docs/arch/plan.md` or `/reject-doc-draft docs/arch/plan.md` in Claude Code; use `$approve-doc-draft` or `$reject-doc-draft` in ChatGPT. With no path, these commands list drafts; a directory handles its pending drafts together. Approval never overwrites an existing target. To request changes, tell the agent what to revise in the draft.
+For Pi, add `--platform pi`. Its user-scope starter lives at `<PI_CODING_AGENT_DIR>/hooks/no-new-documents.toml`, defaulting to `~/.pi/agent/hooks/no-new-documents.toml`. Home and project policies also apply. The extension guards native writes and recognized literal shell creations, including nested tool calls; arbitrary scripts and other extensions' direct filesystem access remain outside this guardrail.
+
+Review the draft, then run `/approve-doc-draft docs/arch/plan.md` or `/reject-doc-draft docs/arch/plan.md` in Claude Code or Pi; use `$approve-doc-draft` or `$reject-doc-draft` in ChatGPT. With no path, these commands list drafts; a directory handles its pending drafts together. Quote paths containing spaces. Approval never overwrites an existing target. To request changes, tell the agent what to revise in the draft.
 
 ## When to use it
 

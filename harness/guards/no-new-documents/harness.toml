@@ -1,7 +1,12 @@
 name = "no-new-documents"
-version = "3.0.3"
+version = "3.1.0"
 description = "Cross-platform guard that routes new files in configured documentation directories through user-approved drafts"
 docs = "https://github.com/EmilienxD/harness/blob/main/README.md#hooks"
+
+dependencies = [{ name = "pi-support", version = ">=1.1.0,<2.0.0", lifecycle = "coupled", platforms = ["pi"] }]
+
+[platforms.pi]
+status = "supported"
 
 [platforms.claude]
 status = "supported"
@@ -21,7 +26,36 @@ executable = true
 src = "no-new-documents.toml"
 dest = ".harness/guards/no-new-documents.toml"
 root = "workspace"
+platforms = ["claude", "chatgpt"]
 starter = true
+
+[[files]]
+src = "no-new-documents.toml"
+dest = ".harness/guards/no-new-documents.toml"
+root = "workspace"
+platforms = ["pi"]
+scopes = ["project"]
+starter = true
+
+[[files]]
+src = "no-new-documents.toml"
+dest = "no-new-documents.toml"
+root = "hooks"
+platforms = ["pi"]
+scopes = ["user"]
+starter = true
+
+[[files]]
+src = "pi/extension.ts"
+dest = "harness-no-new-documents/index.ts"
+root = "extensions"
+platforms = ["pi"]
+
+[[files]]
+src = "no_new_documents_pi.py"
+dest = "no_new_documents_pi.py"
+root = "hooks"
+platforms = ["pi"]
 
 [[files]]
 src = "approve-doc-draft/SKILL.md"
