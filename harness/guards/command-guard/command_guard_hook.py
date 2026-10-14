@@ -66,6 +66,27 @@ def _rules(root: Path) -> list[tuple[re.Pattern[str], str]]:
     return rules
 
 
+MALFORMED_POLICY_MESSAGE = (
+    "Command blocked because the command-guard policy could not be "
+    "loaded safely. Repair or restore command-guard.toml."
+)
+
+
+def denial_reason(command: str, root: Path) -> str | None:
+    """Deny message for a command, or None when it is allowed.
+
+    A missing or malformed policy denies every command.
+    """
+    try:
+        rules = _rules(root)
+    except (OSError, UnicodeError, re.error, tomllib.TOMLDecodeError, ValueError, KeyError):
+        return MALFORMED_POLICY_MESSAGE
+    for pattern, reason in rules:
+        if pattern.search(command):
+            return f"Command blocked by command-guard policy: {reason}."
+    return None
+
+
 def _deny(reason: str) -> None:
     print(json.dumps({
         "hookSpecificOutput": {
@@ -93,18 +114,13 @@ def main() -> int:
     try:
         configured_root = os.environ.get("CLAUDE_PROJECT_DIR") or payload.get("cwd")
         root = Path(configured_root).resolve() if isinstance(configured_root, str) and configured_root else Path.cwd().resolve()
-        rules = _rules(root)
-    except (OSError, UnicodeError, re.error, tomllib.TOMLDecodeError, ValueError, KeyError):
-        _deny(
-            "Command blocked because the command-guard policy could not be "
-            "loaded safely. Repair or restore command-guard.toml."
-        )
+    except (OSError, UnicodeError, ValueError):
+        _deny(MALFORMED_POLICY_MESSAGE)
         return 0
 
-    for pattern, reason in rules:
-        if pattern.search(command):
-            _deny(f"Command blocked by command-guard policy: {reason}.")
-            break
+    reason = denial_reason(command, root)
+    if reason:
+        _deny(reason)
     return 0
 
 

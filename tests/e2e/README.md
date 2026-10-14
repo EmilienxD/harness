@@ -20,6 +20,7 @@ npm run e2e:pi
 npm run test:pi
 npm run test:pi-shared-skills
 npm run test:pi-path-guards
+npm run test:pi-command-guard
 npm run test:pi-prefer-fewer-comments
 npm run test:pi-issues
 npm run test:pi-no-new-documents
@@ -243,6 +244,15 @@ cover original tool output, additive guidance, cooldown, failed calls, complete 
 denied mutation effects, shell reads, nested native calls, reload/tree ancestry, exact bytes,
 inference counts, starter preservation, and removal of the last dependent's bridge. Test-only
 probe commands orchestrate lifecycle changes without inference; production guards decide policy.
+
+`test:pi-command-guard` installs the real `command-guard` 2.2.0 payload with its coupled
+`pi-support` dependency. It runs the installed Pi 1.2.0 JSON/RPC CLI at project and user scopes
+through the fake Responses endpoint: a safe native `bash`/`powershell` call runs and writes its
+file, while a configured dangerous command is denied with no side effect. A malformed policy
+denies every command, matching the hook's fail-closed behavior. Assertions cover dry-run bridge
+absence, idempotent reinstall, denied-call effects, exact inference counts, starter policy
+preservation, and removal of the extension, Python helper, and the last dependent's bridge. The
+shared Python core owns policy parsing; the extension only translates native events.
 
 ## Pi comment budgets
 

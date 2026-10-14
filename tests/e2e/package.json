@@ -28,6 +28,8 @@
     "e2e:no-new-documents": "npm run e2e:no-new-documents:build && node dist/tools/no-new-documents/cli.js",
     "e2e:command-guard:build": "esbuild tools/command-guard/cli.ts --bundle --platform=node --format=cjs --target=node22 --outfile=dist/tools/command-guard/cli.js --sourcemap",
     "e2e:command-guard": "npm run e2e:command-guard:build && node dist/tools/command-guard/cli.js",
+    "e2e:pi-command-guard": "esbuild tools/pi-command-guard/cli.ts --bundle --platform=node --format=cjs --target=node22 --outfile=dist/tools/pi-command-guard/cli.js && node dist/tools/pi-command-guard/cli.js",
+    "test:pi-command-guard": "esbuild test/pi-command-guard.test.ts --bundle --platform=node --format=cjs --target=node22 --outfile=dist/test/pi-command-guard.test.js && node --test dist/test/pi-command-guard.test.js",
     "e2e:issue-readers:build": "esbuild tools/issue-readers/cli.ts --bundle --platform=node --format=cjs --target=node22 --outfile=dist/tools/issue-readers/cli.js --sourcemap",
     "e2e:issue-readers": "npm run e2e:issue-readers:build && node dist/tools/issue-readers/cli.js",
     "e2e:issue-writers:build": "esbuild tools/issue-writers/cli.ts --bundle --platform=node --format=cjs --target=node22 --outfile=dist/tools/issue-writers/cli.js --sourcemap",

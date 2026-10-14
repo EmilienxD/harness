@@ -1,7 +1,9 @@
 name = "command-guard"
-version = "2.1.0"
+version = "2.2.0"
 description = "Cross-platform PreToolUse guard that denies configured dangerous Bash and PowerShell commands"
 docs = "https://github.com/EmilienxD/harness/blob/main/README.md#hooks"
+
+dependencies = [{ name = "pi-support", version = ">=1.1.0,<2.0.0", lifecycle = "coupled", platforms = ["pi"] }]
 
 [platforms.claude]
 status = "supported"
@@ -11,14 +13,51 @@ fragment = "claude/settings.fragment.json"
 status = "supported"
 fragment = "chatgpt/hooks.fragment.json"
 
+[platforms.pi]
+status = "supported"
+
+# Shared Python policy core imported by every provider, including the Pi helper.
 [[files]]
 src = "command_guard_hook.py"
 dest = "command_guard_hook.py"
 root = "hooks"
 executable = true
 
+# Pi command/event translation reusing the shared core.
+[[files]]
+src = "command_guard_pi.py"
+dest = "command_guard_pi.py"
+root = "hooks"
+platforms = ["pi"]
+
+[[files]]
+src = "pi/extension.ts"
+dest = "harness-command-guard/index.ts"
+root = "extensions"
+platforms = ["pi"]
+
+# Provider-neutral starter policy shared by Claude and ChatGPT installations.
 [[files]]
 src = "command-guard.toml"
 dest = ".harness/guards/command-guard.toml"
 root = "workspace"
+platforms = ["claude", "chatgpt"]
+starter = true
+
+# Pi project scope shares the same workspace policy path.
+[[files]]
+src = "command-guard.toml"
+dest = ".harness/guards/command-guard.toml"
+root = "workspace"
+platforms = ["pi"]
+scopes = ["project"]
+starter = true
+
+# Pi user scope keeps the policy beside the installed hook as the bundled default.
+[[files]]
+src = "command-guard.toml"
+dest = "command-guard.toml"
+root = "hooks"
+platforms = ["pi"]
+scopes = ["user"]
 starter = true

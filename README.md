@@ -258,7 +258,7 @@ Hooks do not need a skill invocation. Select them in the catalogue and restart t
 
 | Package | Platforms | What it does |
 | --- | --- | --- |
-| `command-guard` | Claude Code, ChatGPT | Denies shell commands matching an editable dangerous-command policy. It is a guardrail, not a security sandbox. |
+| `command-guard` | Claude Code, ChatGPT, Pi | Denies shell commands matching an editable dangerous-command policy. It is a guardrail, not a security sandbox. Pi evaluates native `bash`/`powershell` calls against the same policy. |
 | `no-new-documents` | Claude Code, ChatGPT, Pi | Stops agents from creating files in configured documentation directories and has them write a draft for your approval instead. Edits to existing files are allowed. |
 | `on-read-reminder` | Claude Code, Pi | Reminds the agent to read required guidance when it reads paths matching configured patterns. |
 | `on-edit-reminder` | Claude Code, Pi | Lets a matching edit land, then requires the relevant guidance to be read and violations corrected. |

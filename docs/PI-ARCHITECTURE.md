@@ -1,9 +1,9 @@
 # Pi provider architecture proposal
 
-Status: **24 shared skill packages, three path-guard extensions, comment budgets, document draft approval, Git cleanup inventory, two issue workflow extensions, cloud interviews, session commits, desktop notifications and gotcha reports implemented; remaining extensions and runtime architecture proposed**.
+Status: **24 shared skill packages, three path-guard extensions, the command guard, comment budgets, document draft approval, Git cleanup inventory, two issue workflow extensions, cloud interviews, session commits, desktop notifications and gotcha reports implemented; remaining extensions and runtime architecture proposed**.
 Pi is an opt-in catalogue target for all 22 skill-led packages below, plus `caveman` and
 `setup-help`. Shared skill installation
-works at project and user scope; three path guards, comment budgets, document draft approval, Git cleanup inventory,
+works at project and user scope; three path guards, the command guard, comment budgets, document draft approval, Git cleanup inventory,
 both issue workflow packages, cloud interviews, session commits, desktop notifications and gotcha reports ship. The hosted Pi migration/app are deployed
 and verified against the production board. Remaining extensions, persistent runtime, and Aboard are pending.
 This proposal defines the implementation boundaries and first release scope.
@@ -69,7 +69,7 @@ it can also include shared skills. Rows marked implemented ship the stated Pi re
 | 20 | `stop-overthinking` | Skill | Implemented. Reuse the practical-decision workflow. |
 | 21 | `setup-command-aliases` | Skill | Implemented. Preserve shell configuration and activation; document any Pi alias explicitly. |
 | 22 | `setup-text-replacements` | Skill | Implemented. Preserve AutoHotkey edit/reload behavior and Windows-only scope. |
-| 23 | `command-guard` | Extension | Evaluate `bash` / `powershell` with existing Python TOML/regex rules; malformed policy blocks commands. |
+| 23 | `command-guard` | Extension | Implemented in 2.2.0. Native `tool_call` evaluates `bash` / `powershell` against the shared Python TOML/regex core; a matched command, malformed policy, or broken runtime denies the call fail-closed. |
 | 24 | `on-read-reminder` | Extension | Implemented in 2.2.0. Successful native/shell reads remind; partial read ranges are recorded accurately. |
 | 25 | `on-edit-reminder` | Extension | Implemented in 2.2.0. Successful native edits remind with the existing 120-second cooldown and branch-local read suppression. |
 | 26 | `on-edit-block` | Extension | Implemented in 2.2.0. Native writes/edits require complete reads or fully delivered denial guidance on the active branch, including nested calls. |
