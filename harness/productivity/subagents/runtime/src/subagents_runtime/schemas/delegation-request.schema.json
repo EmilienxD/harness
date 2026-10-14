@@ -31,6 +31,11 @@
       "minLength": 1,
       "description": "Explicit model ID, supplied only when the user requests a particular model. Omit to retain the task's launch profile and native defaults."
     },
+    "root": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Optional child working directory, absolute or relative to the parent session directory. Must exist. Omit to inherit the parent root."
+    },
     "resume": {
       "type": "string",
       "pattern": "^agent-[1-9][0-9]*$"
@@ -91,6 +96,9 @@
             ]
           },
           {
+            "required": ["root"]
+          },
+          {
             "required": [
               "cwd"
             ]
@@ -147,7 +155,8 @@
           "mode": {
             "const": "loop"
           }
-        }
+        },
+        "not": {"required": ["root"]}
       },
       "else": {
         "not": {

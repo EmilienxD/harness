@@ -54,7 +54,7 @@ def test_published_schemas_describe_the_implemented_contracts() -> None:
     modes = {mode for policy in policies.values() for mode in policy.modes}
 
     # The prompt is the Markdown body, so it is never a frontmatter key.
-    assert set(request["properties"]) == {"task", "provider", "mode", "model", "resume", "cwd", "difficulty", "prompt-file"}
+    assert set(request["properties"]) == {"task", "provider", "mode", "model", "root", "resume", "cwd", "difficulty", "prompt-file"}
     assert request["oneOf"][0]["required"] == ["task", "mode"]
     assert request["properties"]["task"]["type"] == "string"
     assert set(request["properties"]["mode"]["enum"]) == modes
@@ -100,6 +100,20 @@ def test_provider_defaults_to_the_parent_provider(tmp_path: Path) -> None:
     )
 
     assert parsed.provider == "chatgpt"
+    assert parsed.root is None
+
+
+def test_root_resolves_from_parent_directory(tmp_path: Path) -> None:
+    parent = tmp_path / "project"
+    root = tmp_path / "worktree"
+    parent.mkdir()
+    root.mkdir()
+    inbox = tmp_path / "inbox"
+    request = write_request(inbox, "work.md", "---\ntask: general\nmode: auto\nroot: ../worktree\n---\nWork")
+
+    parsed = parse_request_file(request, inbox, parent_provider="claude", cwd=parent)
+
+    assert parsed.root == root.resolve()
 
 
 @pytest.mark.parametrize(
@@ -112,7 +126,12 @@ def test_provider_defaults_to_the_parent_provider(tmp_path: Path) -> None:
         ("request.md", "---\ntask: general\nmode: auto\nmodel: 123\n---\nbody", "scalar string"),
         ("request.md", "---\ntask: general\nmode: auto\nmodel: [gpt-6.1-sol]\n---\nbody", "scalar string"),
         ("request.md", "---\ntask: general\nmode: auto\nmodel: ' '\n---\nbody", "scalar string"),
+        ("request.md", "---\ntask: general\nmode: auto\nroot: missing\n---\nbody", "existing directory"),
+        ("request.md", "---\ntask: general\nmode: auto\nroot: null\n---\nbody", "scalar string"),
+        ("request.md", "---\ntask: general\nmode: auto\nroute: ../worktree\n---\nbody", "unsupported frontmatter"),
+        ("request.md", "---\ntask: loop\nmode: loop\ncwd: /tmp\nprompt-file: /tmp/prompt\nroot: /tmp\n---\nbody", "instead of root"),
         ("request.md", "---\nresume: agent-1\nmodel: gpt-6.1-sol\n---\nbody", "resume requires only"),
+        ("request.md", "---\nresume: agent-1\nroot: elsewhere\n---\nbody", "resume requires only"),
         ("request.md", "---\ntask: general\n---\nbody", "mode"),
         ("request.md", "---\ntask: general\nmode: auto\n---\n", "body"),
 
@@ -203,6 +222,22 @@ def test_live_grant_processes_three_siblings_independently(tmp_path: Path, monke
     assert len({request_id for _name, _provider, request_id, _cwd in launched}) == 3
     assert {cwd for _name, _provider, _request_id, cwd in launched} == {grant.original_cwd}
     assert grant.inbox.exists()
+
+
+def test_explicit_root_is_persisted_for_resume(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    parent = configured_parent(tmp_path, monkeypatch)
+    grant = enable_delegation(parent, "work-with-agent", original_cwd=tmp_path / "project")
+    root = tmp_path / "worktree"
+    root.mkdir()
+    write_request(grant.inbox, "one.md", "---\ntask: general\nmode: auto\nroot: ../worktree\n---\nWork")
+    launched: list[Path] = []
+
+    [first] = process_inbox(grant.id, launch=lambda _request, _id, _number, cwd: launched.append(cwd) or "child")
+
+    assert first.status == "launched"
+    assert launched == [root.resolve()]
+    with sessions._connect() as connection:
+        assert connection.execute("SELECT cwd FROM sessions WHERE id=?", (first.child_session_id,)).fetchone()[0] == str(root.resolve())
 
 
 def test_ask_requires_a_live_grant(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

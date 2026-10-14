@@ -22,6 +22,7 @@ task: <registered task>    # Required. Selects a built-in or custom task (see be
 mode: auto|interactive    # Required. Spawn the subagent in a headless or visible terminal.
 provider: claude|chatgpt|codex    # Optional. Defaults to this conversation's provider. `codex` is an alias of chatgpt.
 model: <model id>         # Optional. Include only when the user explicitly requests a particular model.
+root: <directory path>    # Optional. Include only when the user explicitly requests another root.
 ---
 
 <prompt for the new subagent>
@@ -36,6 +37,10 @@ Use the requested model's exact ID for the selected provider from this list:
 - Claude`claude-fable-5-1`, `claude-opus-5-5`, `claude-opus-5`, `claude-sonnet-5-5`, `claude-haiku-5-5` |
 
 If the requested model is absent, tell the user the list needs updating before launching with that model. An explicit model overrides the task default.
+
+## Root selection
+
+Omit `root` to start the child in this conversation's working directory. When the user explicitly asks the child to work in another directory or worktree, set `root` to that directory's path. Use an existing directory; relative paths resolve from this conversation's working directory. A resumed child keeps its original root, so resume requests contain only `resume`.
 
 ## Task selection
 

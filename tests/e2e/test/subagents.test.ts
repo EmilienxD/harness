@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { runSubagentsJourney, runSubagentsRecoveryJourney } from "../tools/subagents/run.js";
+import { runSubagentsJourney, runSubagentsRecoveryJourney, runSubagentsRootJourney } from "../tools/subagents/run.js";
 import { parseAnthropicMessagesRequest } from "../core/anthropic-protocol.js";
 import { startFakeAnthropicServer } from "../core/anthropic-server.js";
 import { startFakeOpenAiServer } from "../core/openai-server.js";
@@ -28,6 +28,12 @@ for (const platform of ["claude", "chatgpt"] as const) {
   test(`subagents resumes a killed parent and child through real ${platform} CLIs`, { timeout: 240_000 }, async () => {
     const result = await runSubagentsRecoveryJourney(platform);
     assert.equal(result.recoveredSessions, 2);
+    assert.deepEqual(result.completedClis, ["child", "parent"]);
+    assert.equal(result.requestFilesRemaining, 0);
+    assert.equal(result.unexpectedRequests, 0);
+  });
+  test(`subagents starts and resumes a child in another worktree root through real ${platform} CLIs`, { timeout: 180_000 }, async () => {
+    const result = await runSubagentsRootJourney(platform);
     assert.deepEqual(result.completedClis, ["child", "parent"]);
     assert.equal(result.requestFilesRemaining, 0);
     assert.equal(result.unexpectedRequests, 0);

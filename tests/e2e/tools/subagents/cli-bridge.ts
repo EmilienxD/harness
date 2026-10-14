@@ -87,7 +87,7 @@ async function drive(file: string | undefined, commandArgs: readonly string[], p
 function writeStatus(root: string | undefined, role: string, value: Record<string, unknown>): void {
   if (!root) return;
   mkdirSync(root, { recursive: true });
-  const content = `${JSON.stringify({ schemaVersion: 1, role, ...value }, null, 2)}\n`;
+  const content = `${JSON.stringify({ schemaVersion: 1, role, cwd: process.cwd(), ...value }, null, 2)}\n`;
   writeFileSync(join(root, `${role}.json`), content, "utf8");
   // Journeys with several launches of one role need every process's outcome.
   writeFileSync(join(root, `${role}-${process.pid}.json`), content, "utf8");

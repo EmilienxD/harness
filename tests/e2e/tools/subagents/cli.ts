@@ -1,4 +1,4 @@
-import { runSubagentsJourney, runSubagentsRecoveryJourney } from "./run.js";
+import { runSubagentsJourney, runSubagentsRecoveryJourney, runSubagentsRootJourney } from "./run.js";
 
 async function main(): Promise<void> {
   const selected = process.argv[2];
@@ -7,6 +7,8 @@ async function main(): Promise<void> {
   }
   const platforms = selected === undefined ? ["claude", "chatgpt"] as const : [selected] as const;
   for (const platform of platforms) {
+    const rooted = await runSubagentsRootJourney(platform);
+    process.stdout.write(`subagents ${platform} root E2E passed (${rooted.checkpoints.join(" -> ")})\n`);
     const recovery = await runSubagentsRecoveryJourney(platform);
     process.stdout.write(`subagents ${platform} recovery E2E passed (${recovery.checkpoints.join(" -> ")})\n`);
     for (const mode of ["interactive","auto"] as const) {

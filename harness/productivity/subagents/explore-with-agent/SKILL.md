@@ -17,5 +17,6 @@ Request parameters:
 - mode: auto
 - provider (Optional): claude, chatgpt, or codex (alias of chatgpt)
 - model (Optional): model ID
+- root (Optional): existing directory or worktree path, only when the user explicitly requests another root
 
 Ask the child to inspect the codebase and report findings without editing files. The task param already tells the agent how to explore, not what to explore.

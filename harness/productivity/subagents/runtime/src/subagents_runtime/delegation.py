@@ -46,6 +46,7 @@ class DelegationRequest:
     prompt_path: Path | None = None
     child_skill: str | None = None
     model: str | None = None
+    root: Path | None = None
 
 
 @dataclass(frozen=True)
@@ -128,7 +129,7 @@ def parse_request_file(
     if not isinstance(metadata, dict):
         raise RequestFileError("frontmatter must be a mapping")
     keys = set(metadata)
-    accepted = {"task", "provider", "mode", "model", "resume", "cwd", "difficulty", "prompt-file"}
+    accepted = {"task", "provider", "mode", "model", "root", "resume", "cwd", "difficulty", "prompt-file"}
     if extras := keys - accepted:
         raise RequestFileError(
             "unsupported frontmatter keys: " + ", ".join(sorted(map(str, extras)))
@@ -167,6 +168,16 @@ def parse_request_file(
         raise RequestFileError(f"unsupported provider {provider!r}")
     if task != "loop" and keys & {"cwd", "difficulty", "prompt-file"}:
         raise RequestFileError("cwd, difficulty and prompt-file are only supported for loop requests")
+    if task == "loop" and "root" in keys:
+        raise RequestFileError("loop requests use cwd instead of root")
+    root = None
+    if "root" in metadata:
+        root = Path(metadata["root"]).expanduser()
+        if not root.is_absolute():
+            root = (cwd or Path.cwd()) / root
+        if not root.is_dir():
+            raise RequestFileError("root must be an existing directory")
+        root = root.resolve()
     if task == "loop":
         if provider != parent_provider:
             raise RequestFileError("loop implementers must use the Lead's provider")
@@ -192,6 +203,7 @@ def parse_request_file(
         prompt_path=Path(metadata["prompt-file"]).resolve() if task == "loop" else None,
         child_skill=policy.skill,
         model=metadata["model"].strip() if "model" in metadata else None,
+        root=root,
     )
 
 
@@ -462,7 +474,7 @@ def reconcile_inbox(session_id: str, *, launch: Callable | None = None) -> list[
             task, provider, mode, prompt_hash, cwd, number, kind, model = persisted
             if hashlib.sha256(request.prompt.encode()).hexdigest() != prompt_hash or bool(request.resume) != (kind == "resume"):
                 raise RequestFileError("Claimed request content changed after reservation")
-            if kind == "launch" and (request.task, request.provider, request.mode, request.model) != (task, provider, mode, model):
+            if kind == "launch" and (request.task, request.provider, request.mode, request.model, request.root or delegation.original_cwd) != (task, provider, mode, model, Path(cwd)):
                 raise RequestFileError("Claimed request metadata changed after reservation")
             if kind == "resume" and sessions.resolve_session(request.resume, session_id) != child_id:
                 raise RequestFileError("Claimed request child changed after reservation")
@@ -605,7 +617,7 @@ def process_inbox(
                         (session_id, session_id),
                     ).fetchone()[0]
                     child_id = str(uuid.uuid4())
-                    cwd = request.cwd or delegation.original_cwd
+                    cwd = request.cwd or request.root or delegation.original_cwd
                     if request.mode == "loop":
                         from subagents_runtime.loop import worktree_key
                         if connection.execute("SELECT 1 FROM loop_sessions WHERE worktree_key=? AND active=1", (worktree_key(cwd),)).fetchone():

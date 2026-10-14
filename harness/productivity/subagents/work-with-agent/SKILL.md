@@ -17,5 +17,6 @@ Request parameters:
 - mode: interactive or auto (default interactive)
 - provider (Optional): claude, chatgpt, or codex (alias of chatgpt)
 - model (Optional): model ID
+- root (Optional): existing directory or worktree path, only when the user explicitly requests another root
 
 Give the child a bounded task and the relevant project context.

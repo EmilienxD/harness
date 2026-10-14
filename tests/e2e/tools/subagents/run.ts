@@ -34,6 +34,7 @@ interface CliStatus {
   readonly markerSeen: boolean;
   readonly timedOut: boolean;
   readonly exitCode: number | null;
+  readonly cwd: string;
 }
 
 export interface SubagentsJourneyResult {
@@ -48,10 +49,15 @@ export async function runSubagentsRecoveryJourney(platform: Platform): Promise<S
   return runSubagentsJourney(platform, "auto", true);
 }
 
-export async function runSubagentsJourney(platform: Platform, mode: "interactive" | "auto" = "interactive", recovery = false): Promise<SubagentsJourneyResult> {
+export async function runSubagentsRootJourney(platform: Platform): Promise<SubagentsJourneyResult> {
+  return runSubagentsJourney(platform, "auto", false, true);
+}
+
+export async function runSubagentsJourney(platform: Platform, mode: "interactive" | "auto" = "interactive", recovery = false, alternateRoot = false): Promise<SubagentsJourneyResult> {
   if (platform === "claude") await validateClaudeCli(); else await validateCodexCli();
   const root = await canonicalMkdtemp(join(tmpdir(), `harness-subagents-${platform}-e2e-`));
   const projectRoot = join(root, "project");
+  const worktreeRoot = join(root, "worktree");
   const stateRoot = join(root, "state");
   const cliStatusRoot = join(root, "cli-status");
   const diagnosticsPath = join(root, "structural-diagnostics.json");
@@ -66,10 +72,16 @@ export async function runSubagentsJourney(platform: Platform, mode: "interactive
     const runtimeSource = join(root, "runtime", "src");
     await mkdir(projectRoot, { recursive: true });
     await cp(join(packageRoot, "runtime", "src"), runtimeSource, { recursive: true });
+    await cp(join(packageRoot, "subagents-toolkit"), join(root, "subagents-toolkit"), { recursive: true });
     const python = await pythonCommand(runtimeSource);
     const binRoot = await createRuntimeShim(root, python);
     await stagePayload(platform, packageRoot, projectRoot, python);
     await initializeRepository(projectRoot);
+    if (alternateRoot) {
+      await execFileAsync("git", ["-c", "user.name=Harness E2E", "-c", "user.email=harness-e2e@example.invalid", "commit", "--quiet", "--allow-empty", "-m", "fixture"], { cwd: projectRoot, windowsHide: true });
+      await execFileAsync("git", ["worktree", "add", "--quiet", "--detach", worktreeRoot, "HEAD"], { cwd: projectRoot, windowsHide: true });
+      await stagePayload(platform, packageRoot, worktreeRoot, python);
+    }
 
     const bridge = join(harnessRoot, "tests", "e2e", "dist", "tools", "subagents", "cli-bridge.js");
     await readFile(bridge, "utf8");
@@ -89,6 +101,10 @@ export async function runSubagentsJourney(platform: Platform, mode: "interactive
       },
       session: { stopWaitHours: 0.025 },
     }, null, 2)}\n`, "utf8");
+    if (alternateRoot) {
+      await mkdir(join(worktreeRoot, ".harness"), { recursive: true });
+      await cp(join(projectRoot, ".harness", "config.json"), join(worktreeRoot, ".harness", "config.json"));
+    }
 
     const commonEnvironment: NodeJS.ProcessEnv = {
       ...process.env,
@@ -110,7 +126,7 @@ export async function runSubagentsJourney(platform: Platform, mode: "interactive
       await writeFile(join(configRoot, "settings.json"), `${JSON.stringify({ theme: "dark" }, null, 2)}\n`, "utf8");
       await writeFile(join(home, ".claude.json"), `${JSON.stringify({
         hasCompletedOnboarding: true,
-        projects: { [projectRoot]: { hasTrustDialogAccepted: true } },
+        projects: { [projectRoot]: { hasTrustDialogAccepted: true }, ...(alternateRoot ? { [worktreeRoot]: { hasTrustDialogAccepted: true } } : {}) },
       }, null, 2)}\n`, "utf8");
       server = await startFakeAnthropicServer({
         repoRoot: projectRoot,
@@ -118,7 +134,7 @@ export async function runSubagentsJourney(platform: Platform, mode: "interactive
         scenarioCatalogHash,
         parseRequest: parseAnthropicMessagesRequest,
         transition: async (request,repoRoot) => {
-          const response = claudeTransition(request,repoRoot,mode,recovery);
+          const response = claudeTransition(request,repoRoot,mode,recovery,alternateRoot);
           if (response.checkpoint === "child-interruption-ready") {
             interruptionReady = true;
             await interruption;
@@ -146,7 +162,7 @@ export async function runSubagentsJourney(platform: Platform, mode: "interactive
         diagnosticsPath,
         scenarioCatalogHash,
         transition: async (request) => {
-          const response = codexTransition(request,projectRoot,mode,recovery);
+          const response = codexTransition(request,projectRoot,mode,recovery,alternateRoot);
           if (response.checkpoint === "child-interruption-ready") {
             interruptionReady = true;
             await interruption;
@@ -158,7 +174,7 @@ export async function runSubagentsJourney(platform: Platform, mode: "interactive
       const codexHome = await prepareCodexHome({
         root,
         baseUrl: codexServer.baseUrl,
-        trustedProjects: [projectRoot],
+        trustedProjects: alternateRoot ? [projectRoot, worktreeRoot] : [projectRoot],
         extraConfig: ["[features]", "hooks = true"],
       });
       environment = isolatedCodexEnvironment(commonEnvironment, codexHome, codexServer.authToken);
@@ -172,7 +188,7 @@ export async function runSubagentsJourney(platform: Platform, mode: "interactive
         }
       }
     };
-    const prompt = `${platform === "claude" ? "/" : "$"}work-with-agent ${PARENT_MARKER} Delegate the deterministic inspection to one ${mode} child.`;
+    const prompt = `${platform === "claude" ? "/" : "$"}work-with-agent ${PARENT_MARKER} Delegate the deterministic inspection to one ${mode} child${alternateRoot ? " in the ../worktree worktree" : ""}.`;
     const launch = await execFileAsync(python, [
       "-c", "from subagents_runtime.cli import main; raise SystemExit(main())",
       "run", "--provider", platform, prompt,
@@ -239,6 +255,7 @@ export async function runSubagentsJourney(platform: Platform, mode: "interactive
     const [childStatus, parentStatus] = statuses;
     requireCompleted(childStatus);
     requireCompleted(parentStatus);
+    if (childStatus.cwd !== (alternateRoot ? worktreeRoot : projectRoot) || parentStatus.cwd !== projectRoot) throw new Error("Real CLI launched from the wrong root");
 
     await rm(join(cliStatusRoot,'child.json'),{force:true});
     const nextEnvironment = { ...environment, HARNESS_SESSION_ID: parentId, HARNESS_E2E_CHILD_COMPLETE: NEXT_REPLY.split(':',1)[0]! };
@@ -246,6 +263,7 @@ export async function runSubagentsJourney(platform: Platform, mode: "interactive
     await execFileAsync(python,["-c","from subagents_runtime.cli import main; raise SystemExit(main())","resume","agent-1",NEXT_MARKER],{cwd:projectRoot,env:nextEnvironment,encoding:"utf8",windowsHide:true,timeout:30_000});
     const [resumedChild] = await waitForStatuses(cliStatusRoot);
     requireCompleted(resumedChild);
+    if (resumedChild.cwd !== (alternateRoot ? worktreeRoot : projectRoot)) throw new Error("Resumed child changed its root");
     const visible = JSON.parse(await readFile(join(cliStatusRoot,'visible.json'),'utf8')) as { parent: number; child: number };
     if (visible.parent !== 1 || visible.child !== (mode === 'interactive' ? 2 : 0)) throw new Error('Execution mode did not preserve visible-terminal behavior');
     const assertions = server.assertions();
@@ -335,6 +353,10 @@ interface HookSettings {
 
 async function stagePayload(platform: Platform, packageRoot: string, projectRoot: string, python: string): Promise<void> {
   if (platform === "claude") {
+    const toolkitRoot = join(projectRoot, ".claude", "skills", "subagents-toolkit");
+    await mkdir(toolkitRoot, { recursive: true });
+    await cp(join(packageRoot, "subagents-toolkit", "SKILL.md"), join(toolkitRoot, "SKILL.md"));
+    await cp(join(packageRoot, "subagents-toolkit", "builtin-tasks.yaml"), join(toolkitRoot, "builtin-tasks.yaml"));
     const skillRoot = join(projectRoot, ".claude", "skills", "work-with-agent");
     await mkdir(skillRoot, { recursive: true });
     await cp(join(packageRoot, "work-with-agent", "SKILL.md"), join(skillRoot, "SKILL.md"));
@@ -351,6 +373,11 @@ async function stagePayload(platform: Platform, packageRoot: string, projectRoot
     await writeFile(join(projectRoot, ".claude", "settings.json"), `${JSON.stringify(settings, null, 2)}\n`, "utf8");
     return;
   }
+  const toolkitRoot = join(projectRoot, ".agents", "skills", "subagents-toolkit");
+  await mkdir(join(toolkitRoot, "agents"), { recursive: true });
+  await cp(join(packageRoot, "subagents-toolkit", "SKILL.md"), join(toolkitRoot, "SKILL.md"));
+  await cp(join(packageRoot, "subagents-toolkit", "builtin-tasks.yaml"), join(toolkitRoot, "builtin-tasks.yaml"));
+  await cp(join(packageRoot, "subagents-toolkit", "chatgpt", "openai.yaml"), join(toolkitRoot, "agents", "openai.yaml"));
   const skillRoot = join(projectRoot, ".agents", "skills", "work-with-agent");
   await mkdir(join(skillRoot, "agents"), { recursive: true });
   await cp(join(packageRoot, "work-with-agent", "SKILL.md"), join(skillRoot, "SKILL.md"));
@@ -424,10 +451,10 @@ async function waitForStatuses(root: string): Promise<readonly [CliStatus, CliSt
   while (Date.now() < deadline) {
     const child = await readStatus(join(root, "child.json"));
     const parent = await readStatus(join(root, "parent.json"));
-    if (child !== undefined && child.status !== "completed" || parent !== undefined && parent.status !== "completed") {
+    if (child !== undefined && child.status !== "completed" || parent !== undefined && parent.status !== "completed" && !(parent.exitCode === 0 && !parent.markerSeen && !parent.timedOut)) {
       throw new Error(`real CLI failed before delegation completed: ${JSON.stringify({ child, parent })}`);
     }
-    if (child !== undefined && parent !== undefined) return [child, parent];
+    if (child?.status === "completed" && parent?.status === "completed") return [child, parent];
     await new Promise((resolvePromise) => setTimeout(resolvePromise, 100));
   }
   throw new Error("timed out waiting for structural child and parent CLI statuses");

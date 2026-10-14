@@ -17,5 +17,6 @@ Request parameters:
 - mode: interactive
 - provider (Optional): claude, chatgpt, or codex (alias of chatgpt)
 - model (Optional): model ID
+- root (Optional): existing directory or worktree path, only when the user explicitly requests another root
 
 State the design question and constraints for the user to explore interactively. The task param already tells the agent how to brainstorm, not what to brainstorm.
