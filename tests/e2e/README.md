@@ -27,6 +27,7 @@ npm run test:pi-cleanup-git
 npm run test:pi-test-workflows
 npm run test:pi-commit
 npm run test:pi-desktop-notification
+npm run test:pi-report-gotchas
 npm run e2e:flush-out-useless-tests
 ```
 
@@ -210,6 +211,28 @@ for an explicit real-desktop smoke through the installed Pi package. The existin
 successfully submitted a toast without the recording backend, and the user confirmed visible
 delivery. POSIX desktop services and the interactive Pi TUI remain outside this headless gate. `--ai` requires its own explicitly
 requested Gemini service; command integration uses fake inference, never paid Pi inference.
+
+## Pi gotcha reports
+
+`test:pi-report-gotchas` installs actual `report-gotchas` and its coupled bridge in all four
+project/user × JSON/RPC combinations. Real Pi 1.2.0 uses the same fake Responses endpoint as
+Codex. The shared Python queue and detached worker send HTTPS through a loopback-only CONNECT
+proxy to a temporary Discord TLS fixture; `openssl` is required to generate its per-run
+certificate. The proxy refuses every destination except the fixture's Discord host and never
+forwards externally. The isolated worker verifies the fixture with that temporary certificate. Webhook payloads
+stay in memory and all generated configuration/keys/queue/session files remain in the external
+temporary root. No real webhook configuration is read and no live Discord messages are sent.
+
+The gate verifies native discovery/invocation, Pi session/cwd/Git binding, identical-report
+deduplication after delivery, parallel nested calls, missing configuration, empty input and
+helper outage, reload/exact saved resume/tree/fork/new identity, Unicode and mention suppression,
+429 retry, preserved multipart progress after permanent failure, zero-inference native retry
+and no-gotcha turns. Each journey uses exactly 30 inference requests. The installed host CLI
+configures the shared webhook; Pi's queue is isolated under the state directory's `pi/` child,
+so legacy CLI retry cannot race it. Uninstall removes the
+extension/runtime/last coupled bridge and preserves user-owned queue/deduplication history.
+Run `e2e:pi-report-gotchas` for project JSON and user RPC executable journeys. This certifies
+the Windows headless integration, not Pi TUI, POSIX or real Discord service acceptance.
 
 ## Pi path guards
 

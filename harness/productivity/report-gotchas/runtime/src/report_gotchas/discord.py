@@ -7,7 +7,7 @@ import urllib.error
 import urllib.request
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
-from report_gotchas.reports import QueuedReport, delete_queued, load_queued, save_queued
+from report_gotchas.reports import QueuedReport, delete_queued, load_queued, save_queued, receipt_lock, _queue_path
 
 
 MESSAGE_BODY_LIMIT = 1800
@@ -40,7 +40,7 @@ def _fitting_index(value: str, limit: int) -> int:
 def _header(report: QueuedReport) -> str:
     import os
 
-    provider = "Codex" if report.provider == "chatgpt" else "Claude"
+    provider = {"chatgpt": "Codex", "claude": "Claude", "pi": "Pi"}.get(report.provider, report.provider)
     timestamp = int(datetime.fromisoformat(report.reported_at).timestamp())
     project = os.path.basename(report.cwd)
 
@@ -110,6 +110,16 @@ def deliver(
     webhook_url: str,
     *,
     post: Callable[[str, dict[str, Any]], None] | None = None,
+) -> None:
+    with receipt_lock(receipt, operation="deliver"):
+        # Another worker may have completed while we waited for the lock.
+        if not _queue_path(receipt).exists():
+            return
+        _deliver_locked(receipt, webhook_url, post=post)
+
+
+def _deliver_locked(
+    receipt: str, webhook_url: str, *, post: Callable[[str, dict[str, Any]], None] | None = None,
 ) -> None:
     report = load_queued(receipt)
     parts = messages(report)

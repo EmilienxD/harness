@@ -40,6 +40,8 @@
     "e2e:prefer-read-tool": "npm run e2e:prefer-read-tool:build && node dist/tools/prefer-read-tool/cli.js",
     "e2e:prefer-fewer-comments:build": "esbuild tools/prefer-fewer-comments/cli.ts --bundle --platform=node --format=cjs --target=node22 --outfile=dist/tools/prefer-fewer-comments/cli.js --sourcemap",
     "e2e:prefer-fewer-comments": "npm run e2e:prefer-fewer-comments:build && node dist/tools/prefer-fewer-comments/cli.js",
+    "test:pi-report-gotchas": "esbuild test/pi-report-gotchas.test.ts --bundle --platform=node --format=cjs --target=node22 --outfile=dist/test/pi-report-gotchas.test.js && node --test dist/test/pi-report-gotchas.test.js",
+    "e2e:pi-report-gotchas": "esbuild tools/pi-report-gotchas/cli.ts --bundle --platform=node --format=cjs --target=node22 --outfile=dist/tools/pi-report-gotchas/cli.js && node dist/tools/pi-report-gotchas/cli.js",
     "e2e:report-gotchas:build": "esbuild tools/report-gotchas/cli.ts --bundle --platform=node --format=cjs --target=node22 --outfile=dist/tools/report-gotchas/cli.js --sourcemap",
     "e2e:report-gotchas": "npm run e2e:report-gotchas:build && node dist/tools/report-gotchas/cli.js",
     "e2e:commit:build": "esbuild tools/commit/cli.ts --bundle --platform=node --format=cjs --target=node22 --outfile=dist/tools/commit/cli.js --sourcemap",

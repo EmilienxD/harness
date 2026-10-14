@@ -51,6 +51,9 @@ def _launch_worker(receipt: str) -> None:
         flags = subprocess.CREATE_NO_WINDOW
     subprocess.Popen(
         [sys.executable, "-m", "report_gotchas.cli", "deliver", receipt],
+        env={**os.environ, "PYTHONPATH": os.pathsep.join(filter(None, [
+            str(Path(__file__).resolve().parent.parent), os.environ.get("PYTHONPATH"),
+        ]))},
         stdin=subprocess.DEVNULL,
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,

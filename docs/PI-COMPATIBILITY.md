@@ -6,7 +6,7 @@ sequencing; this report retains catalogue-wide feasibility and broader integrati
 Current implementation includes all 22 shared skill packages in the architecture backlog,
 including `test-workflows`, with opt-in Pi installation. Extension-backed tools include the three
 path guards, `prefer-fewer-comments`, `no-new-documents`, `cleanup-git`, both issue workflow packages, `commit`, `enable-desktop-notification`, and the cloud interview
-with its standalone relay. The hosted Pi migration/application are deployed; real Pi project/user
+with its standalone relay, plus native gotcha reporting. The hosted Pi migration/application are deployed; real Pi project/user
 journeys pass against local and production boards. Remaining extensions and runtime integrations remain proposed.
 
 Follow-up preparation now provides a [real Pi JSON/RPC E2E environment](../tests/e2e/README.md),
@@ -14,7 +14,7 @@ verified against installed Pi 1.2.0. The investigation results below predate tha
 the first tool has a workflow journey and the shared-skill batch has native discovery/invocation
 checks. The feasibility tables below describe original port requirements; consult the architecture
 backlog for current shipped status. The three path guards, comment budgets, document draft approval, Git cleanup
-inventory, both issue workflow packages, cloud interview, session commits and desktop notifications ship; remaining extensions, runtime,
+inventory, both issue workflow packages, cloud interview, session commits, desktop notifications and gotcha reports ship; remaining extensions, runtime,
 and Aboard remain proposed.
 
 ## Executive conclusion
@@ -33,7 +33,7 @@ Recommendations:
 
 **The original investigation delivered research, mirrored references, and synchronization wiring.**
 Follow-up work added `--platform pi` skill installation and the first tool's E2E journeys.
-The three Pi path guards, comment budgets, document drafts, Git cleanup, both issue workflows, cloud interviews, session commits and desktop notifications are implemented; remaining extensions, persistent runtime, and Aboard are proposed. Feasible below describes
+The three Pi path guards, comment budgets, document drafts, Git cleanup, both issue workflows, cloud interviews, session commits, desktop notifications and gotcha reports are implemented; remaining extensions, persistent runtime, and Aboard are proposed. Feasible below describes
 the research assessment; consult the architecture's implementation status for shipped slices.
 
 ## Scope and evidence
@@ -182,7 +182,7 @@ Effort is relative implementation complexity: **low**, **medium**, **high**. It 
 | [`handoff-grilling`](../harness/productivity/handoff-grilling/harness.toml) | Yes / S | Same detailed design conversation handoff; obey temporary-file and secret-redaction rules. | Low / 1 |
 | [`mid-prompt-skills`](../harness/productivity/mid-prompt-skills/harness.toml) | Yes / E | Pi's native skill expansion checks a leading `/skill:` command. Implement later `/skill:name` mentions through `input` transform, using the resolved discovered skill set; skip fences, already expanded entries and unknown names. Preserve request text/images and avoid command recursion or double expansion. Support `/name` aliases only if deliberately registered. | Medium / 1 |
 | [`next-decision`](../harness/productivity/next-decision/harness.toml) | Yes / S | Same forward-looking decision rounds, recommendation and explicit wait. | Low / 1 |
-| [`report-gotchas`](../harness/productivity/report-gotchas/harness.toml) | Yes / E | Existing CLI, queue and Discord worker transfer. `tool_result` binds shell submission receipts to Pi session/cwd; extend provider labels instead of treating every non-ChatGPT report as Claude. Preserve receipt idempotency, no duplicate reports and configured-webhook behavior. | Low–medium / 1 |
+| [`report-gotchas`](../harness/productivity/report-gotchas/harness.toml) | Shipped / E | 1.2.0 uses native structured `report_gotchas` submission, shared Python queue/worker and explicit Pi labels. Durable session-wide deduplication and serialized delivery survive reload/resume/tree changes; native retry makes zero inference requests. See the [implementation decision and acceptance boundary](PI-ARCHITECTURE.md#shipped-gotcha-reports). | Low–medium / 1 |
 | [`setup-command-aliases`](../harness/productivity/setup-command-aliases/harness.toml) | Yes / S | Same shell configuration preservation and activation workflow, including a future Pi wrapper alias. | Low / 1 |
 | [`setup-text-replacements`](../harness/productivity/setup-text-replacements/harness.toml) | Yes on Windows / S | Same AutoHotkey edit/reload. Keep Windows-only scope; a Pi provider does not make this cross-platform. | Low / 1 |
 | [`stop-overthinking`](../harness/productivity/stop-overthinking/harness.toml) | Yes / S | Same concise practical-decision skill. | Low / 1 |

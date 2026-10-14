@@ -6,7 +6,7 @@ Harness is a catalogue and installer for small, independently selectable agent s
 
 Pi supports 22 shared skill packages, installed into its native skills directory, plus native
 extensions for path guards, comment budgets, document drafts, issue workflows, Git cleanup,
-cloud interviews, session commits, and desktop notifications.
+cloud interviews, session commits, desktop notifications, and Discord gotcha reports.
 The [architecture and initial tool scope](docs/PI-ARCHITECTURE.md) track
 shipped skills and the remaining extension and runtime ports.
 
@@ -248,7 +248,7 @@ Custom roles use Harness's native background or visible-terminal launch path. Ab
 
 - **`writing-adrs`**: Creates architectural decision records and updates existing records in place when agreed decisions change. It records settled decisions, binding values, terse rules, accepted trade-offs, and ADR cross-references in a refactor-resistant format.
 
-- **`report-gotchas`**: Near the end of complicated implementation work, records meaningful caveats, failed checks, unfinished work, or required human action in a configured Discord channel. It does nothing when there is nothing noteworthy to report. Configure its webhook with `harness-report-gotchas configure`.
+- **`report-gotchas`**: Near the end of complicated implementation work, records meaningful caveats, failed checks, unfinished work, or required human action in a configured Discord channel. It does nothing when there is nothing noteworthy to report. Configure its webhook with `harness-report-gotchas configure`. On Pi, install with `harness install report-gotchas --platform pi` and reload/approve the resources. The shared skill uses a native `report_gotchas` tool that binds reports to the actual Pi session and queues delivery asynchronously. Identical Markdown is deduplicated across reload, resume, and tree navigation; forks and new sessions have separate identities. `/report-gotchas-retry` retries queued delivery without inference. Queue acceptance is durable, but does not mean Discord has received the report.
 
 ### Hooks
 

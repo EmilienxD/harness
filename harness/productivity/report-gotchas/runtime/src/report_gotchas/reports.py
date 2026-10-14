@@ -5,7 +5,9 @@ from __future__ import annotations
 import json
 import os
 import subprocess
+import time
 import uuid
+from contextlib import contextmanager
 from dataclasses import asdict, dataclass, replace
 from datetime import datetime, timezone
 from pathlib import Path
@@ -62,9 +64,69 @@ def _queue_path(receipt: str) -> Path:
 
 def _write_json(destination: Path, value: dict[str, Any]) -> None:
     destination.parent.mkdir(parents=True, exist_ok=True)
-    temporary = destination.with_suffix(".tmp")
+    temporary = destination.with_suffix(f".{uuid.uuid4().hex}.tmp")
     temporary.write_text(json.dumps(value, ensure_ascii=False), encoding="utf-8")
     temporary.replace(destination)
+
+
+@contextmanager
+def receipt_lock(receipt: str, *, operation: str, timeout: float = 10):
+    """OS-owned locks survive process crashes without stale lock-file recovery."""
+    _draft_path(receipt)
+    root = state_dir() / "locks"
+    root.mkdir(parents=True, exist_ok=True)
+    with (root / f"{receipt}.{operation}.lock").open("a+b") as stream:
+        if stream.tell() == 0:
+            stream.write(b"\0")
+            stream.flush()
+        deadline = time.monotonic() + timeout
+        while True:
+            stream.seek(0)
+            try:
+                if os.name == "nt":
+                    import msvcrt
+                    msvcrt.locking(stream.fileno(), msvcrt.LK_NBLCK, 1)
+                else:
+                    import fcntl
+                    fcntl.flock(stream.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                break
+            except OSError:
+                if time.monotonic() >= deadline:
+                    raise ReportError("report is busy; retry later") from None
+                time.sleep(0.05)
+        try:
+            yield
+        finally:
+            stream.seek(0)
+            if os.name == "nt":
+                msvcrt.locking(stream.fileno(), msvcrt.LK_UNLCK, 1)
+            else:
+                fcntl.flock(stream.fileno(), fcntl.LOCK_UN)
+
+
+def submit_pi(message: str, session_id: str, cwd: Path) -> tuple[str, bool]:
+    """Bind at submission, deduplicating identical Markdown across the whole Pi session."""
+    message = message.replace("\r\n", "\n").strip()
+    if not message:
+        raise ReportError("report message is empty")
+    if not session_id:
+        raise ReportError("Pi session identity is unavailable")
+    identity = json.dumps(["pi", session_id, message], ensure_ascii=False)
+    receipt = uuid.uuid5(uuid.NAMESPACE_URL, identity).hex
+    accepted = state_dir() / "submitted" / f"{receipt}.json"
+    with receipt_lock(receipt, operation="submit"):
+        if accepted.exists():
+            return receipt, True
+        # Recover a crash after queue publication but before the acceptance marker.
+        duplicate = _queue_path(receipt).exists()
+        if not duplicate:
+            save_queued(QueuedReport(
+                receipt=receipt, message=message, session_id=session_id, provider="pi",
+                cwd=str(cwd.resolve()), reported_at=datetime.now(timezone.utc).isoformat(timespec="seconds"),
+                git=_git(cwd),
+            ))
+        _write_json(accepted, {"version": 1, "receipt": receipt, "provider": "pi", "session_id": session_id})
+        return receipt, duplicate
 
 
 def submit(message: str) -> str:
