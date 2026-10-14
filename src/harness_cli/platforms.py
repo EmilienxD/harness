@@ -1,4 +1,4 @@
-"""Platform adapters for Claude Code and ChatGPT install layouts.
+"""Platform adapters for Claude Code, ChatGPT, and Pi install layouts.
 
 The rest of the installer deals in logical destination roots and native JSON
 fragments.  This module is the only place that knows where a platform stores
@@ -8,6 +8,7 @@ those things or which placeholders it supports.
 from __future__ import annotations
 
 import copy
+import os
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
@@ -18,6 +19,7 @@ from harness_cli import settings_merge
 class Platform(str, Enum):
     CLAUDE = "claude"
     CHATGPT = "chatgpt"
+    PI = "pi"
 
     @classmethod
     def parse(cls, value: "Platform | str") -> "Platform":
@@ -30,6 +32,8 @@ class Platform(str, Enum):
 
 
 DESTINATION_ROOTS = frozenset({"platform", "skills", "hooks", "workspace"})
+AVAILABLE_PLATFORMS = tuple(Platform)
+DEFAULT_PLATFORMS = (Platform.CLAUDE, Platform.CHATGPT)
 
 
 @dataclass(frozen=True)
@@ -43,6 +47,12 @@ class PlatformAdapter:
     config_name: str
     supports_local_config: bool
     restart_guidance: str
+
+    def user_scope_root(self) -> Path:
+        return Path.home().resolve()
+
+    def destination_boundary(self, scope_root: Path, is_user: bool, root: str) -> Path:
+        return scope_root
 
     def platform_root(self, scope_root: Path, is_user: bool) -> Path:
         return scope_root / (self.user_platform_dir if is_user else self.project_platform_dir)
@@ -122,6 +132,28 @@ class ChatGPTAdapter(PlatformAdapter):
         return values
 
 
+class PiAdapter(PlatformAdapter):
+    """Pi-owned skills; user receipt identity follows the effective agent directory."""
+
+    def user_scope_root(self) -> Path:
+        configured = os.environ.get("PI_CODING_AGENT_DIR")
+        return (Path(configured).expanduser() if configured else Path.home() / ".pi" / "agent").resolve()
+
+    def destination_root(self, scope_root: Path, is_user: bool, root: str) -> Path:
+        if is_user and root == "workspace":
+            raise ValueError("Pi user workspace payloads are not supported yet")
+        return super().destination_root(scope_root, is_user, root)
+
+    def prepare_config(self, base: dict, fragment: dict) -> dict:
+        if fragment:
+            raise ValueError("Pi configuration fragments are not supported yet")
+        return super().prepare_config(base, fragment)
+
+    def merge_config(self, base: dict, fragment: dict) -> dict:
+        self.prepare_config(base, fragment)
+        return copy.deepcopy(base)
+
+
 ADAPTERS: dict[Platform, PlatformAdapter] = {
     Platform.CLAUDE: ClaudeAdapter(
         platform=Platform.CLAUDE,
@@ -144,6 +176,17 @@ ADAPTERS: dict[Platform, PlatformAdapter] = {
         config_name="hooks.json",
         supports_local_config=False,
         restart_guidance="Restart ChatGPT to pick up the changes and review any new hook definitions.",
+    ),
+    Platform.PI: PiAdapter(
+        platform=Platform.PI,
+        product_name="Pi",
+        project_platform_dir=".pi",
+        user_platform_dir="",
+        project_skills_dir=".pi/skills",
+        user_skills_dir="skills",
+        config_name="settings.json",
+        supports_local_config=False,
+        restart_guidance="Run /reload in Pi (or restart it) and approve the project's resources when prompted.",
     ),
 }
 

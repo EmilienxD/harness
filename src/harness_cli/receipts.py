@@ -45,8 +45,11 @@ def installation_lock(path: Path | None = None, *, timeout: float = 60) -> Itera
         raise ValueError(f"could not acquire Harness installer lock {lock_path}: {exc}") from exc
 
 
-def installation_id(scope_root: Path, platform: str) -> str:
-    identity = f"{scope_root.resolve()}\0{platform}".encode("utf-8")
+def installation_id(scope_root: Path, platform: str, scope: str | None = None) -> str:
+    identity_text = f"{scope_root.resolve()}\0{platform}"
+    if scope is not None:
+        identity_text += f"\0{scope}"
+    identity = identity_text.encode("utf-8")
     return hashlib.sha256(identity).hexdigest()[:20]
 
 
@@ -107,8 +110,8 @@ class ReceiptStore:
                     raise ValueError(f"invalid Harness receipt store at {selected}")
         return cls(selected, data)
 
-    def installation(self, scope_root: Path, platform: str, create: bool = False) -> dict[str, Any]:
-        key = installation_id(scope_root, platform)
+    def installation(self, scope_root: Path, platform: str, create: bool = False, *, scope: str | None = None) -> dict[str, Any]:
+        key = installation_id(scope_root, platform, scope)
         installations = self.data["installations"]
         if create:
             return installations.setdefault(
@@ -116,6 +119,7 @@ class ReceiptStore:
                 {
                     "scopeRoot": str(scope_root.resolve()),
                     "platform": platform,
+                    **({"scope": scope} if scope is not None else {}),
                     "packages": {},
                 },
             )

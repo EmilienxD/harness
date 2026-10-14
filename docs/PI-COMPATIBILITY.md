@@ -1,8 +1,14 @@
 # Pi provider investigation and integration report
 
-The [architecture proposal](PI-ARCHITECTURE.md) records the requested 35-package scope,
-recommended implementation order, and provider boundaries. This report retains the complete
-catalogue feasibility assessment. Pi support remains proposed.
+The [Pi architecture proposal](PI-ARCHITECTURE.md) extends this investigation with the user's
+requested 35-package backlog and concrete provider boundaries. It owns first-release scope and
+sequencing; this report retains catalogue-wide feasibility and broader integration considerations.
+Current implementation starts with `flush-out-useless-tests` 1.1.0 and opt-in Pi skill installation;
+the remaining tool and runtime integrations remain proposed.
+
+Follow-up preparation now provides a [real Pi JSON/RPC E2E environment](../tests/e2e/README.md),
+verified against installed Pi 1.2.0. The investigation results below predate that bootstrap;
+the first tool now has real installer/CLI journeys, while other tools, runtime, and Aboard remain proposed.
 
 ## Executive conclusion
 
@@ -18,9 +24,10 @@ Recommendations:
 4. Do not install `redirect-subagents` on Pi: there is no built-in Claude `Agent` tool to redirect. Offer Harness delegation instead.
 5. Keep `usage-limit-wait` conditional on the selected model service and a verified quota/reset reader. There is no documented universal Pi subscription-window API.
 
-**This investigation delivers research, mirrored upstream references, and synchronization
-wiring. Pi installation, extensions, runtime, and Aboard support remain proposed.** Feasibility
-means supported by inspected documentation, not an integration already executed successfully.
+**The original investigation delivered research, mirrored references, and synchronization wiring.**
+Follow-up work added `--platform pi` skill installation and the first tool's E2E journeys.
+Pi extensions, persistent runtime, and Aboard remain unimplemented. Feasible below describes
+the research assessment; consult the architecture's implementation status for shipped slices.
 
 ## Scope and evidence
 

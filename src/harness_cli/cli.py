@@ -19,12 +19,12 @@ from harness_cli.installer import (
 )
 from harness_cli.installer_cli import UsageError, run as run_installer_command
 from harness_cli.manifest import ManifestError, SupportStatus, Tool, discover
-from harness_cli.platforms import Platform, get_adapter
+from harness_cli.platforms import AVAILABLE_PLATFORMS, DEFAULT_PLATFORMS, Platform, get_adapter
 from harness_cli.receipts import ReceiptStore, installation_lock, package_ownership
 from harness_cli.tui import Line, MenuOption, TerminalUI, terminal_keys
 
 
-PLATFORMS = (Platform.CLAUDE, Platform.CHATGPT)
+PLATFORMS = AVAILABLE_PLATFORMS
 
 
 class HarnessArgumentParser(argparse.ArgumentParser):
@@ -61,7 +61,7 @@ def _category_rank(tool: Tool) -> tuple[int, str]:
 def _tool_options(
     tools: list[Tool],
     installed: set[str],
-    platforms: tuple[Platform, ...] = PLATFORMS,
+    platforms: tuple[Platform, ...] = DEFAULT_PLATFORMS,
 ) -> list[MenuOption]:
     return [
         MenuOption(
@@ -252,7 +252,7 @@ def catalogue_menu(*, local: Path | None = None, root: Path | None = None) -> in
         provider_selection = ui.multiselect(
             "Select providers",
             _provider_options(),
-            selected={0, 1},
+            selected={index for index, platform in enumerate(PLATFORMS) if platform in DEFAULT_PLATFORMS},
             required=True,
             searchable=False,
         )
@@ -483,7 +483,7 @@ def build_parser() -> argparse.ArgumentParser:
     install.add_argument("--all", action="store_true", help="install every supported package")
     install.add_argument(
         "--platform", action="append", choices=[item.value for item in PLATFORMS],
-        help="target platform; repeat to select several (default: both)",
+        help="target platform; repeat to select several (default: Claude Code and ChatGPT)",
     )
     install.add_argument(
         "--scope", choices=("project", "user"), default="project",
@@ -513,7 +513,7 @@ def build_parser() -> argparse.ArgumentParser:
     uninstall.add_argument("--all", action="store_true", help="remove every selected or retained package")
     uninstall.add_argument(
         "--platform", action="append", choices=[item.value for item in PLATFORMS],
-        help="target platform; repeat to select several (default: both)",
+        help="target platform; repeat to select several (default: Claude Code and ChatGPT)",
     )
     uninstall.add_argument(
         "--scope", choices=("project", "user"), default="project",
@@ -529,7 +529,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     upgrade.add_argument(
         "--platform", action="append", choices=[item.value for item in PLATFORMS],
-        help="target platform; repeat to select several (default: both)",
+        help="target platform; repeat to select several (default: Claude Code and ChatGPT)",
     )
     upgrade.add_argument(
         "--scope", choices=("project", "user"), default="project",
@@ -555,7 +555,7 @@ def build_parser() -> argparse.ArgumentParser:
     list_parser.add_argument("--installed", action="store_true", help="show only installed packages")
     list_parser.add_argument(
         "--platform", action="append", choices=[item.value for item in PLATFORMS],
-        help="target platform; repeat to select several (default: both)",
+        help="target platform; repeat to select several (default: Claude Code and ChatGPT)",
     )
     list_parser.add_argument(
         "--scope", choices=("project", "user"), default="project",

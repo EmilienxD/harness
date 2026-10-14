@@ -174,7 +174,7 @@ def test_catalogue_asks_for_skill_installation_mode(monkeypatch):
     assert applied == [(Platform.CLAUDE, "symlink"), (Platform.CHATGPT, "symlink")]
 
 
-def test_catalogue_uses_the_skills_style_flow_with_only_claude_and_chatgpt(monkeypatch):
+def test_catalogue_offers_pi_and_keeps_the_default_claude_chatgpt_flow(monkeypatch):
     aboard = discover()["aboard"]
     auto = discover()["auto"]
     events = []
@@ -242,12 +242,13 @@ def test_catalogue_uses_the_skills_style_flow_with_only_claude_and_chatgpt(monke
         ("outro", "Done!  Review installed packages before use."),
     ]
     provider_event = events[1]
-    assert provider_event[2] == ["Claude Code", "ChatGPT"]
+    assert provider_event[2] == ["Claude Code", "ChatGPT", "Pi"]
     package_event = events[3]
     assert package_event[2] == ["aboard"]
     assert [(option.label, option.detail) for option in cli._provider_options()] == [
         ("Claude Code", ""),
         ("ChatGPT", ""),
+        ("Pi", ""),
     ]
     assert reconciled == {
         Platform.CLAUDE: {"aboard"},

@@ -1,5 +1,5 @@
 name = "flush-out-useless-tests"
-version = "1.0.2"
+version = "1.1.0"
 description = "Audits passing tests in up to 35 test files and proposes cleanup for approval"
 docs = "https://github.com/EmilienxD/harness/blob/main/harness/building/flush-out-useless-tests/SKILL.md"
 
@@ -7,6 +7,9 @@ docs = "https://github.com/EmilienxD/harness/blob/main/harness/building/flush-ou
 status = "supported"
 
 [platforms.chatgpt]
+status = "supported"
+
+[platforms.pi]
 status = "supported"
 
 [[files]]

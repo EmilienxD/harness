@@ -72,11 +72,18 @@ class Target:
 
     @classmethod
     def for_user(cls, platform: Platform | str = Platform.CLAUDE) -> "Target":
-        return cls(Path.home().resolve(), get_adapter(platform), True)
+        adapter = get_adapter(platform)
+        return cls(adapter.user_scope_root(), adapter, True)
 
     @property
     def platform(self) -> Platform:
         return self.adapter.platform
+
+    def installation(self, store: ReceiptStore, *, create: bool = False) -> dict[str, Any]:
+        if self.platform is Platform.PI and self.is_user:
+            # A project rooted at the agent directory has different payload paths.
+            return store.installation(self.scope_root, self.platform.value, create, scope="user")
+        return store.installation(self.scope_root, self.platform.value, create)
 
     @property
     def install_root(self) -> Path:
@@ -92,8 +99,11 @@ class Target:
 
     def destination_path(self, root: str, dest: str) -> Path:
         destination_root = self.adapter.destination_root(self.scope_root, self.is_user, root)
+        boundary = self.adapter.destination_boundary(self.scope_root, self.is_user, root)
+        if destination_root != boundary and boundary not in destination_root.parents:
+            raise InstallError(f"destination root escapes its declared boundary: {destination_root}")
         current = destination_root
-        while current != self.scope_root:
+        while current != boundary:
             if current.is_symlink():
                 raise InstallError(f"refusing to install through symlinked directory {current}")
             current = current.parent
@@ -326,7 +336,7 @@ class CatalogueInstaller:
         self.store = store or ReceiptStore.load()
         if skill_mode not in (None, "copy", "symlink"):
             raise ValueError(f"invalid skill installation mode: {skill_mode}")
-        receipts = self.store.installation(target.scope_root, target.platform.value).get("packages", {})
+        receipts = target.installation(self.store).get("packages", {})
         self.skill_mode = skill_mode or (
             "symlink" if any(receipt.get("skillMode") == "symlink" for receipt in receipts.values())
             else "copy"
@@ -390,7 +400,7 @@ class CatalogueInstaller:
 
     @property
     def installation(self) -> dict[str, Any]:
-        return self.store.installation(self.target.scope_root, self.target.platform.value, create=True)
+        return self.target.installation(self.store, create=True)
 
     def _payloads(self, tool: Tool) -> list[ExpandedFile]:
         scope = "user" if self.target.is_user else "project"
@@ -1319,4 +1329,4 @@ def reconcile_targets(
 
 def installed_packages(target: Target, store: ReceiptStore | None = None) -> dict[str, dict[str, Any]]:
     selected = store or ReceiptStore.load()
-    return selected.installation(target.scope_root, target.platform.value).get("packages", {})
+    return target.installation(selected).get("packages", {})

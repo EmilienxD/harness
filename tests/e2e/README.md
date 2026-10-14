@@ -18,12 +18,19 @@ npm ci
 npm run check
 npm run e2e:pi
 npm run test:pi
+npm run e2e:flush-out-useless-tests
 ```
 
 `e2e:pi` runs the real JSON and RPC smoke journeys. `test:pi` additionally verifies zero-inference
 extension commands, reload, exact persisted-session resume, native project skill discovery,
 provider-error classification, abort, redacted diagnostics, and cleanup. The complete `npm test`
 suite includes these Pi checks and also requires the installed Claude Code and Codex CLIs.
+
+`e2e:flush-out-useless-tests` installs the real local catalogue package through Harness, then
+runs project JSON/RPC and user RPC journeys. It checks a real Node test baseline, native skill
+discovery, no edits before scripted approval, exact cleanup and passing verification, dry-run,
+repeat install, agent-directory receipt separation, and cross-provider uninstall preservation.
+Run `uv sync` in the repository first; the installer helper uses that environment offline.
 
 Each fixture creates its own external temporary directory:
 
@@ -61,6 +68,7 @@ warming are disabled. Trust is never persisted for an unrelated project.
 | [`core/pi.ts`](core/pi.ts) | Isolated configuration/environment, CLI compatibility, JSON launcher, RPC client, LF framing, deadlines, semantic completion, process-tree cleanup. |
 | [`core/pi-fixture.ts`](core/pi-fixture.ts) | Own the external root, server, workspace, RPC children, and teardown. |
 | [`core/pi-scenario.ts`](core/pi-scenario.ts) | Linear native-tool scenario derived from full call/result history; stable IDs and structural validation. |
+| [`core/installer.ts`](core/installer.ts) | Run the real local Harness installer offline, with target and receipt state inside a fixture. |
 | [`tools/pi-smoke/`](tools/pi-smoke/) | Executable example exercising the real provider boundary. Its probe extension is test-only. |
 | [`test/pi.test.ts`](test/pi.test.ts) | Public-boundary checks against real Pi, not mocks of its event handlers. |
 
@@ -151,6 +159,8 @@ model/history shapes, tool identities, and ordering. Preserve the unknown-histor
 when changing a scenario.
 
 The Pi smoke proves the test environment, not catalogue-tool support or a security sandbox.
+The first tool's journey proves installer/native skill integration and a scripted approval flow;
+it does not evaluate unscripted model judgment or turn a skill's instructions into an enforced guard.
 Tool-specific policies still need their own real journeys. The current bootstrap was executed on
 Windows with Pi 1.2.0; POSIX, Pi TUI, browser/UI, MCP/codemode, production runtime, and Aboard
 provider parity need their applicable additional journeys. GitHub-backed tools should use the

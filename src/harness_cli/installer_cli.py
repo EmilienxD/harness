@@ -20,12 +20,12 @@ from harness_cli.installer import (
 )
 from harness_cli.git_warnings import symlink_worktree_warning
 from harness_cli.manifest import ManifestError, SupportStatus, Tool, discover
-from harness_cli.platforms import Platform
+from harness_cli.platforms import AVAILABLE_PLATFORMS, DEFAULT_PLATFORMS, Platform
 from harness_cli.receipts import ReceiptStore, installation_lock, package_ownership
 
 
 SCHEMA_VERSION = 1
-PLATFORMS = (Platform.CLAUDE, Platform.CHATGPT)
+PLATFORMS = AVAILABLE_PLATFORMS
 
 
 class UsageError(Exception):
@@ -33,7 +33,7 @@ class UsageError(Exception):
 
 
 def _selected_platforms(args: Namespace) -> tuple[Platform, ...]:
-    selected = args.platform or [platform.value for platform in PLATFORMS]
+    selected = args.platform or [platform.value for platform in DEFAULT_PLATFORMS]
     return tuple(Platform.parse(value) for value in dict.fromkeys(selected))
 
 

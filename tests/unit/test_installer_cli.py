@@ -326,6 +326,7 @@ def test_info_json_exposes_dependency_and_platform_contract(capsys):
     assert package["platforms"] == {
         "claude": {"status": "supported"},
         "chatgpt": {"status": "supported"},
+        "pi": {"status": "unsupported", "reason": "No support is declared."},
     }
     assert package["dependencies"] == [
         {"name": "prototype", "constraint": ">=1.1.0,<2.0.0", "lifecycle": "shared"},

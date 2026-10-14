@@ -1,14 +1,23 @@
 # Pi provider architecture proposal
 
-Status: **proposed; documentation preparation only**. Pi is the planned third Harness provider.
-Its installer target, tool mappings, extensions, runtime, Aboard, and hosted integration are
-not implemented by this proposal. The [compatibility report](PI-COMPATIBILITY.md) provides
-catalogue-wide feasibility and official API evidence.
+Status: **first skill implemented; remaining provider architecture proposed**. Pi is an opt-in
+catalogue target for `flush-out-useless-tests` 1.1.0. Shared skill installation works at project
+and user scope; extensions, persistent runtime, Aboard, and hosted Grill integrations are pending.
+This proposal defines the implementation boundaries and first release scope.
+The [compatibility report](PI-COMPATIBILITY.md) retains the catalogue-wide feasibility assessment.
 
-The design uses the [official reference mirror](PI-REFERENCES/README.md), examined at upstream
+The API basis is the [local official reference mirror](PI-REFERENCES/README.md), examined at upstream
 revision `47fc5f38ec18d56fe64abd41a2dcf9e5170a3dcf` (`@earendil-works/pi-coding-agent` 1.2.0).
-This is a design baseline, not runtime certification. Verify the installed exports and CLI
-before implementation; rolling mirror refreshes do not widen runtime support automatically.
+This is a design baseline, not runtime certification. Before implementation, verify the installed
+Pi exports and CLI against that baseline and record the version used for acceptance checks.
+Rolling reference refreshes do not widen the supported runtime range automatically.
+
+The [Pi E2E implementation guide](../tests/e2e/README.md) describes the implemented JSON/RPC
+fixture, which reuses the fake OpenAI Responses endpoint and isolated Pi configuration. It was
+verified against installed Pi 1.2.0. The first tool journey installs the actual catalogue package,
+runs its native skill in JSON/RPC, verifies a real passing test baseline and approved cleanup,
+and checks receipt-driven removal. Inference is scripted; these checks certify integration,
+not the quality of an unscripted model's audit judgments.
 
 ## First release scope
 
@@ -24,11 +33,11 @@ prerequisites must land before their dependent packages.
 
 **Skill** means reuse the shared instructions/scripts/CLI with Pi mappings and any required
 portability edits. **Extension** means a native Pi entry point plus existing package cores;
-it can also include shared skills. Every row is planned; no Pi package support is declared yet.
+it can also include shared skills. Only the first row is implemented; the remaining rows are planned.
 
 | Priority | Package | Route | Completion requirement beyond installer support |
 | --- | --- | --- | --- |
-| 1 | `flush-out-useless-tests` | Skill | Preserve scoped test audit and the existing approval workflow. |
+| 1 | `flush-out-useless-tests` | Skill | Implemented in 1.1.0. Project JSON/RPC and user RPC journeys verify installation, audit, approved cleanup, and removal. |
 | 2 | `tdd` | Skill | Preserve behavior-focused red/green work and supporting references. |
 | 3 | `test-workflows` | Skill | Install the existing CLI; retain explicit status, execution evidence, and confirmation. |
 | 4 | `resolving-merge-conflicts` | Skill | Preserve merge/rebase intent and project verification. |
@@ -94,10 +103,12 @@ independent and avoids moving workflow behavior into an application dependency.
 
 ## Installer and package layout
 
-Add `Platform.PI` and a Pi adapter in [platforms.py](../src/harness_cli/platforms.py),
-centralize the provider registry, and keep available platforms separate from default targets.
-Pi should be opt-in; omitted `--platform` retains Claude Code and ChatGPT. Add an explicit
-logical `extensions` destination when implementing native extensions.
+The [platform adapters](../src/harness_cli/platforms.py) now provide `Platform.PI`, `PiAdapter`,
+and centralized available/default provider sets consumed by both installer entry points.
+An explicit logical `extensions` destination remains part of the extension foundation.
+Available platforms are separate from default targets: Pi is opt-in, and omitted
+`--platform` retains the existing Claude/ChatGPT behavior. The interactive menu offers Pi
+without adding it to an existing installation's selections automatically.
 
 | Logical destination | Project installation | User installation |
 | --- | --- | --- |
@@ -111,12 +122,18 @@ logical `extensions` destination when implementing native extensions.
 [Configuration](PI-REFERENCES/docs/configuration.md). User Harness state retains its existing
 `HARNESS_STATE_DIR` semantics; the Pi environment variable changes Pi resources only.
 
-Extend [`Target.destination_path`](../src/harness_cli/installer.py) with checked containment
-boundaries for custom agent directories outside the home. Pi receipt identity must distinguish
-effective agent directories and user/project scope, and retain installed paths for removal.
-Changing `PI_CODING_AGENT_DIR` must select another installation without redirecting removal
-of the original. Preserve existing Claude/ChatGPT receipt identities. Implement shared-user
-workspace ownership and native settings reconciliation before advertising guard payloads.
+[`Target.destination_path`](../src/harness_cli/installer.py) now checks declared containment
+boundaries before ancestor traversal. The Pi user scope root is its resolved agent directory,
+so custom directories outside the home have distinct receipt identities. Changing
+`PI_CODING_AGENT_DIR` selects another installation rather than redirecting removal of the original;
+the first tool journey verifies that separation. A Pi user receipt also records a user-scope
+namespace, keeping it separate from a project rooted in the same agent directory.
+Claude/ChatGPT receipt identities are unchanged.
+
+The table describes the intended full layout. The current slice supports skill payloads without
+configuration fragments. Pi user `workspace` payloads and configuration fragments explicitly
+fail until shared-workspace ownership and native settings reconciliation are implemented;
+those paths must not be advertised as ready for guard packages.
 
 Source packages retain their root-level shared skill/core files and shallow `pi/` overlays:
 
@@ -340,4 +357,5 @@ headless transport; adopting it must not silently replace the visible-terminal p
 
 These future adapters consume the same event/identity contracts without making the initial
 35 packages depend on their implementation. The compatibility report retains their detailed
-feasibility and broader release gates. Provider adapters, catalogue declarations, service migrations, deployment, and release remain pending.
+feasibility and broader release gates. The first skill and installer slice are implemented in
+the checkout; the remaining adapters, service migrations, deployment, and release remain pending.

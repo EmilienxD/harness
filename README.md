@@ -4,6 +4,9 @@
 
 Harness is a catalogue and installer for small, independently selectable agent skills, hooks, command-line tools, and the optional Aboard VS Code extension. It supports Claude Code and ChatGPT without making you adopt an all-or-nothing workflow.
 
+Pi support starts with `flush-out-useless-tests`, installed into Pi's native skills directory.
+The [architecture and initial tool scope](docs/PI-ARCHITECTURE.md) track the remaining ports.
+
 The project is built around deliberate control. Most skills run only when you invoke them. Hooks act at narrow, visible lifecycle boundaries, with editable policies where configuration is needed. Aboard keeps delegated and automated work in visible terminals that you can inspect, stop, and resume.
 
 ## Installation
@@ -14,7 +17,7 @@ Run the latest version of the ephemeral installer:
 uvx --from "git+https://github.com/EmilienxD/harness" harness
 ```
 
-The interactive catalogue asks for Claude Code and/or ChatGPT, project or user scope, and the packages you want. Rerun it to add, upgrade, or remove selections. Existing selections start checked, dependencies are handled automatically, user-edited starter files are preserved, and the final plan is shown before anything changes. Removing a selection retains reusable dependencies as independent selections; dependencies declared as coupled components are removed when nothing else requires them. When a package would land on a file Harness does not own, the installer lists those files and asks whether to overwrite them or abandon the installation; approved files become Harness-owned and are removed again on uninstall. A machine-level product a package installs — a `uv` tool or a VS Code extension — gets the same treatment: if one is already present and no Harness receipt accounts for it, the installer names it and asks whether to take ownership, which replaces it with the pinned version and removes it again on uninstall.
+The interactive catalogue asks for Claude Code, ChatGPT, and/or Pi, project or user scope, and the packages you want. Rerun it to add, upgrade, or remove selections. Existing selections start checked, dependencies are handled automatically, user-edited starter files are preserved, and the final plan is shown before anything changes. Removing a selection retains reusable dependencies as independent selections; dependencies declared as coupled components are removed when nothing else requires them. When a package would land on a file Harness does not own, the installer lists those files and asks whether to overwrite them or abandon the installation; approved files become Harness-owned and are removed again on uninstall. A machine-level product a package installs — a `uv` tool or a VS Code extension — gets the same treatment: if one is already present and no Harness receipt accounts for it, the installer names it and asks whether to take ownership, which replaces it with the pinned version and removes it again on uninstall.
 
 When selected packages include skills for Claude Code, the catalogue asks whether to copy the skills or install them in `.agents/skills` and symlink each `.claude/skills/<name>` directory to its counterpart. Copy is the default for a new installation; later runs remember the chosen mode. Non-interactive `install` and `upgrade` accept `--skill-mode copy|symlink` to choose or change it. Hooks and other platform-specific files still use their own provider directories.
 
@@ -45,11 +48,11 @@ uvx --from "git+https://github.com/EmilienxD/harness" harness upgrade
 uvx --from "git+https://github.com/EmilienxD/harness" harness uninstall commit
 ```
 
-Commands default to project scope in the current directory and both platforms. Use `--scope user`, `--root <path>`, or repeat `--platform` to narrow the target. Every mutating command supports `--dry-run`; every installer command supports `--json`. `install` and `upgrade` fail rather than replace files Harness does not own; rerun them with `--overwrite` to take those files over, and with `--adopt` to take over host products installed outside Harness. Run `harness --help` for the complete CLI.
+Commands default to project scope in the current directory and Claude Code plus ChatGPT. Select `--platform pi` explicitly for Pi-supported packages. Use `--scope user`, `--root <path>`, or repeat `--platform` to narrow the target. Every mutating command supports `--dry-run`; every installer command supports `--json`. `install` and `upgrade` fail rather than replace files Harness does not own; rerun them with `--overwrite` to take those files over, and with `--adopt` to take over host products installed outside Harness. Run `harness --help` for the complete CLI.
 
 ## Reference
 
-Claude Code invokes a skill as `/skill-name`; ChatGPT uses `$skill-name`. The exceptions are hook-backed commands such as `/commit`, whose prompt is intercepted before a model call.
+Claude Code invokes a skill as `/skill-name`; ChatGPT uses `$skill-name`; Pi uses `/skill:skill-name` for its supported skills. The exceptions are hook-backed commands such as `/commit`, whose prompt is intercepted before a model call.
 
 **User-invoked** skills run only when you explicitly ask for them. **Model-invoked** skills may also be selected automatically when their description fits the work. Harness strongly favors the first group: you decide when a workflow starts, when a draft is published, and when another agent is launched.
 
@@ -355,6 +358,31 @@ The access cookie is marked `Secure` whenever the request arrives over HTTPS, so
 
 ## Development
 
+### Provider research and reference documentation
+
+Pi is an opt-in install target for **`flush-out-useless-tests`**. Project installs use `.pi/skills`;
+user installs use `~/.pi/agent/skills` or the configured `PI_CODING_AGENT_DIR`. Omitted `--platform`
+continues to select Claude Code and ChatGPT. Pi extensions and persistent runtime are pending.
+The [Pi architecture proposal](docs/PI-ARCHITECTURE.md) records the requested 35-package backlog
+in priority order: 22 packages primarily reuse shared skills and 13 need native extensions.
+It defines provider-owned install roots, receipt ownership, a versioned bridge to existing Python
+cores, explicit commands, branch-aware session state, hosted answer delivery, and acceptance gates.
+Persistent subagents, `/ship`, and the full Aboard adapter follow the initial tool rollout.
+
+The [Pi compatibility report](docs/PI-COMPATIBILITY.md) supplies catalogue-wide feasibility and
+API evidence. [Pi's official references and key extension examples](docs/PI-REFERENCES/README.md)
+include 50 mirrored upstream files alongside Claude Code and ChatGPT, refreshed by the daily/manual
+documentation workflow. The mirror tracks upstream; supported runtime versions will require
+separate verification.
+
+Refresh all provider reference sets locally:
+
+```bash
+uv run python scripts/update_references.py docs/CLAUDE-REFERENCES docs/CHATGPT-REFERENCES docs/PI-REFERENCES
+```
+
+### Installer and catalogue
+
 For the Python installer and catalogue:
 
 ```bash
@@ -391,7 +419,15 @@ for `--local` when trying these unpushed changes:
 uvx --no-cache --from "$checkout" harness --local "$checkout" install ship cleanup-git --root "C:\path\to\project"
 ```
 
-The shared deterministic E2E core uses the real Claude Code or ChatGPT CLI and replaces only model inference with an authenticated loopback endpoint. Tool journeys live under `tests/e2e/`; Aboard-specific journeys stay under `apps/aboard/test/e2e/`.
+The shared deterministic E2E core uses the real Claude Code, ChatGPT, and Pi CLIs and replaces only model inference with an authenticated loopback endpoint. Tool journeys live under `tests/e2e/`; Aboard-specific journeys stay under `apps/aboard/test/e2e/`.
+
+Pi's headless E2E environment is ready for tool implementation. It runs the installed Pi CLI in
+JSON and RPC modes against the shared fake OpenAI Responses endpoint, with isolated agent
+configuration and project settings. From `tests/e2e/`, run `npm run e2e:pi` for the smoke journeys
+or `npm run test:pi` for the Pi acceptance checks. See the [E2E implementation guide](tests/e2e/README.md)
+for staging real tool payloads, session control, diagnostics, and cleanup. The first tool journey
+uses the real catalogue installation of `flush-out-useless-tests`; persistent runtime
+support is still pending.
 
 ```bash
 cd tests/e2e

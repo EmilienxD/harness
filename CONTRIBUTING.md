@@ -51,7 +51,7 @@ documented in the `harness-e2e` skill.
 
 - Keep installer commands (`install`, `uninstall`, `upgrade`, `list`, and `info`) separate from the
   persistent session runtime (`run`, `ask`, `reply`, and `resume`).
-- Keep platform-specific path mapping inside the Claude and ChatGPT adapters.
+- Keep platform-specific path mapping inside the Claude, ChatGPT, and Pi adapters.
 - Preserve receipt-first removal and never overwrite a user-edited starter file.
 - Keep Aboard's source, npm build, VSIX, version history, and release tags independent from the
   Python package.
