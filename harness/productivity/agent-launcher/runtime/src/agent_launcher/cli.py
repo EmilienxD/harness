@@ -35,6 +35,8 @@ def _find_config(start: Path | None = None) -> Path | None:
         candidate = directory / CONFIG_RELATIVE_PATH
         if candidate.is_file():
             return candidate
+        if (directory / ".git").exists():
+            break
     return None
 
 
@@ -128,13 +130,14 @@ def _load_configuration(
 
 def _configured(
     start: Path | None = None,
-) -> tuple[Path | None, Mapping[str, tuple[str, ...]], LaunchConfiguration]:
+) -> tuple[Path, Mapping[str, tuple[str, ...]], LaunchConfiguration]:
     path = _find_config(start)
     if path is None:
-        return (
-            None,
-            COMMANDS,
-            LaunchConfiguration(claude=LaunchOptions(), chatgpt=LaunchOptions()),
+        raise ConfigurationError(
+            f"agent-launcher is not enabled for {start or Path.cwd()}: "
+            f"no {CONFIG_RELATIVE_PATH.as_posix()} found in this project. "
+            "Install agent-launcher with project scope or run "
+            "cch --hns-init / cxh --hns-init at the project root."
         )
     commands, configuration = _load_configuration(path)
     return path, commands, configuration

@@ -144,7 +144,7 @@ Claude Code invokes a skill as `/skill-name`; ChatGPT uses `$skill-name`; Pi use
 
 - **`setup-text-replacements`**: Adds or updates system-wide AutoHotkey text replacements and reloads the startup script. Windows only.
 
-- **`agent-launcher`**: Installs `cch` and `cxh`, project-configurable wrappers for launching Claude Code and ChatGPT/Codex. A starter `.harness/agent-launcher/` configuration can add a Claude system prompt, provider settings, and standard-library Python extensions; the Claude-only `extend-claude-system-prompt` skill helps maintain and validate that prompt. This package is not required for Pi.
+- **`agent-launcher`**: Installs `cch` and `cxh` for your user, with launch access enabled per project by `.harness/agent-launcher/config.py`. Both commands refuse to launch without that configuration. They work from project subdirectories, choosing the nearest configuration without searching above the nearest Git root (including worktrees). Install with project scope to create the starter configuration, or run `cch --hns-init` / `cxh --hns-init` at the project root. The configuration can add a Claude system prompt, provider settings, and standard-library Python extensions; the Claude-only `extend-claude-system-prompt` skill helps maintain and validate that prompt. This package is not required for Pi.
 
 - **`decisions`**: Reviews decisions already made during the current conversation and reports only important choices that remain low-confidence, together with the strongest alternative. If no meaningful uncertainty remains, it says so.
 

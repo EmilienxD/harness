@@ -62,9 +62,24 @@ def config(
 
 
 @pytest.mark.parametrize(("provider", "_entrypoint", "executable"), PROVIDERS)
-def test_absent_configuration_launches_provider_unchanged(
+@pytest.mark.parametrize("arguments", [[], ["--help"], ["--hns-render"], ["--hns-render-settings"]])
+def test_absent_configuration_refuses_to_launch(
+    tmp_path, monkeypatch, provider, _entrypoint, executable, arguments
+):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(
+        "agent_launcher.cli._run_child", lambda _argv: pytest.fail("provider launched without configuration")
+    )
+
+    with pytest.raises(ConfigurationError, match="agent-launcher is not enabled"):
+        main(arguments, provider=provider)
+
+
+@pytest.mark.parametrize(("provider", "_entrypoint", "executable"), PROVIDERS)
+def test_empty_configuration_launches_provider_unchanged(
     tmp_path, monkeypatch, provider, _entrypoint, executable
 ):
+    write_config(tmp_path, config())
     monkeypatch.chdir(tmp_path)
     seen = []
     monkeypatch.setattr("agent_launcher.cli._run_child", lambda argv: seen.extend(argv) or 17)
@@ -75,9 +90,54 @@ def test_absent_configuration_launches_provider_unchanged(
     assert render(provider=provider) == ""
 
 
+@pytest.mark.parametrize(("provider", "_entrypoint", "_executable"), PROVIDERS)
+@pytest.mark.parametrize("git_marker", ["directory", "file"])
+def test_unconfigured_repository_does_not_inherit_parent_configuration(
+    tmp_path, monkeypatch, provider, _entrypoint, _executable, git_marker
+):
+    write_config(tmp_path, "raise RuntimeError('parent configuration must not be imported')\n")
+    project = tmp_path / "project"
+    nested = project / "src"
+    nested.mkdir(parents=True)
+    marker = project / ".git"
+    if git_marker == "directory":
+        marker.mkdir()
+    else:
+        marker.write_text("gitdir: elsewhere\n", encoding="utf-8")
+    monkeypatch.chdir(nested)
+    monkeypatch.setattr(
+        "agent_launcher.cli._run_child", lambda _argv: pytest.fail("unconfigured repository launched")
+    )
+
+    with pytest.raises(ConfigurationError, match="agent-launcher is not enabled"):
+        main([], provider=provider)
+
+
+@pytest.mark.parametrize(("provider", "_entrypoint", "executable"), PROVIDERS)
+@pytest.mark.parametrize("git_marker", ["directory", "file"])
+def test_configuration_at_repository_root_enables_subdirectory_launches(
+    tmp_path, monkeypatch, provider, _entrypoint, executable, git_marker
+):
+    write_config(tmp_path, config())
+    marker = tmp_path / ".git"
+    if git_marker == "directory":
+        marker.mkdir()
+    else:
+        marker.write_text("gitdir: elsewhere\n", encoding="utf-8")
+    nested = tmp_path / "src"
+    nested.mkdir()
+    monkeypatch.chdir(nested)
+    seen = []
+    monkeypatch.setattr("agent_launcher.cli._run_child", lambda argv: seen.extend(argv) or 17)
+
+    assert main([], provider=provider) == 17
+    assert seen == [executable]
+
+
 @pytest.mark.parametrize(("provider", "_entrypoint", "executable"), PROVIDERS)
 @pytest.mark.parametrize("command", [[], ["resume", "conversation"], ["exec", "resume", "conversation"]])
 def test_launcher_normalizes_codex_file_references(tmp_path, monkeypatch, provider, _entrypoint, executable, command):
+    write_config(tmp_path, config())
     monkeypatch.chdir(tmp_path)
     seen = []
     monkeypatch.setattr("agent_launcher.cli._run_child", lambda argv: seen.extend(argv) or 0)
@@ -101,6 +161,7 @@ def test_launcher_normalizes_codex_file_references(tmp_path, monkeypatch, provid
     ["mcp", "add", "server", "--", "@scripts/server.py"],
 ])
 def test_launcher_preserves_codex_option_values_and_nonprompt_operands(tmp_path, monkeypatch, arguments):
+    write_config(tmp_path, config())
     monkeypatch.chdir(tmp_path)
     seen = []
     monkeypatch.setattr("agent_launcher.cli._run_child", lambda argv: seen.extend(argv) or 0)
@@ -111,6 +172,7 @@ def test_launcher_preserves_codex_option_values_and_nonprompt_operands(tmp_path,
 
 @pytest.mark.parametrize("option", ["--dangerously-bypass-hook-trust", "--json", "--strict-config"])
 def test_launcher_converts_prompt_after_options_without_separator(tmp_path, monkeypatch, option):
+    write_config(tmp_path, config())
     monkeypatch.chdir(tmp_path)
     seen = []
     monkeypatch.setattr("agent_launcher.cli._run_child", lambda argv: seen.extend(argv) or 0)
@@ -486,6 +548,7 @@ def test_process_inherits_streams_and_propagates_exit_code(tmp_path, provider, _
 
 @pytest.mark.skipif(sys.platform != "win32", reason="Windows command shim behavior")
 def test_chatgpt_launch_resolves_cmd_shim_from_path(tmp_path, monkeypatch):
+    write_config(tmp_path, config())
     shim = tmp_path / "codex.cmd"
     shim.write_text("@exit /b 23\n", encoding="utf-8")
     monkeypatch.chdir(tmp_path)
@@ -496,6 +559,7 @@ def test_chatgpt_launch_resolves_cmd_shim_from_path(tmp_path, monkeypatch):
 
 @pytest.mark.parametrize(("provider", "_entrypoint", "_executable"), PROVIDERS)
 def test_signals_are_forwarded_for_each_provider(tmp_path, monkeypatch, provider, _entrypoint, _executable):
+    write_config(tmp_path, config())
     monkeypatch.chdir(tmp_path)
     installed, sent = {}, []
 
@@ -519,6 +583,7 @@ def test_signals_are_forwarded_for_each_provider(tmp_path, monkeypatch, provider
 
 
 def test_unsupported_child_signal_does_not_crash_launcher(tmp_path, monkeypatch):
+    write_config(tmp_path, config())
     monkeypatch.chdir(tmp_path)
     installed = {}
 
