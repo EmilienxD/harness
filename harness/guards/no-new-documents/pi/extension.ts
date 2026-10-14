@@ -1,8 +1,24 @@
-import { dirname, join } from "node:path";
+import { homedir } from "node:os";
+import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { requestPython } from "../../hooks/pi-support/bridge.ts";
 
 const helper = join(dirname(dirname(dirname(fileURLToPath(import.meta.url)))), "hooks", "no_new_documents_pi.py");
+
+// Match Pi 1.2.0's tools/path-utils resolveToCwd and utils/paths normalizePath.
+// These helpers are private; importing them would couple installs to Pi's layout.
+function writePath(input: string, cwd: string): string {
+  let path = input.replace(/[\u00a0\u2000-\u200a\u202f\u205f\u3000]/g, " ");
+  if (path.startsWith("@")) path = path.slice(1);
+  if (process.platform === "win32" && path.startsWith("/") && !path.startsWith("//") && !path.includes("\\")) {
+    const drive = /^\/(?:mnt\/|cygdrive\/)?([a-z])(?:\/(.*))?$/i.exec(path);
+    if (drive) path = `${drive[1].toUpperCase()}:\\${(drive[2] ?? "").replaceAll("/", "\\")}`;
+  }
+  if (path === "~") path = homedir();
+  else if (path.startsWith("~/") || (process.platform === "win32" && path.startsWith("~\\"))) path = join(homedir(), path.slice(2));
+  else if (path.startsWith("file://")) path = fileURLToPath(path);
+  return resolve(cwd, path);
+}
 
 export default function (pi: any) {
   let controller = new AbortController();
@@ -56,7 +72,10 @@ export default function (pi: any) {
   pi.on("tool_call", async (event: any, ctx: any) => {
     if (!["write", "bash", "powershell"].includes(event.toolName)) return;
     try {
-      const result = await request("guard", ctx, { tool: event.toolName, input: event.input });
+      // Normalize only the policy input. Mutating the actual tool input could
+      // apply Pi's @ or Unicode normalization twice to a literal filename.
+      const input = event.toolName === "write" ? { ...event.input, path: writePath(event.input.path, ctx.cwd) } : event.input;
+      const result = await request("guard", ctx, { tool: event.toolName, input });
       if (typeof result.block !== "boolean" || typeof result.message !== "string") throw new Error("Invalid document guard response");
       if (result.block) return { block: true, reason: result.message };
     } catch {

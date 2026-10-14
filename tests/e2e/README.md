@@ -221,6 +221,12 @@ allowed existing-document edits, mirrored drafts, quoted paths, zero-inference a
 no overwrite, competing publication, malformed policy, escaping paths, reload/resume/tree notices,
 starter preservation and receipt-driven removal. Other extensions' direct I/O and arbitrary scripts
 remain outside the guardrail; native commands are also callable by trusted extensions.
+The two native-path journeys verify `@`, tilde, file URL and Unicode-space expansion plus Windows
+MSYS/WSL/Cygwin paths and casing, aliases into docs, docs links outside the project and linked
+draft rejection. Both installation scopes deny twelve creations on Windows and preserve exact
+native write/edit and approved bytes. The complete gate has seven journeys; commands add zero
+inference requests. See the [implementation decision and source evidence](../../docs/PI-ARCHITECTURE.md#shipped-document-cleanup-and-test-workflow-slice)
+for the event-guard choice and coverage boundary.
 
 `test:pi-cleanup-git` verifies project JSON and user RPC invocation through native skill expansion.
 Inventory collection performs only local Git and fake paginated GitHub reads. The scripted model

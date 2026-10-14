@@ -8,7 +8,7 @@ export default function (pi: any) {
     name: "documents_probe", label: "Documents probe", description: "Exercise nested document writes",
     parameters: Type.Object({}),
     execute: async (_id: string, _args: unknown, _signal: unknown, _update: unknown, ctx: any) => {
-      const denied = await ctx.executeTool("write", { path: "docs/nested/new.md", content: "forbidden\n" });
+      const denied = await ctx.executeTool("write", { path: "@docs/nested/new.md", content: "forbidden\n" });
       const draft = await ctx.executeTool("write", { path: ".harness/doc-drafts/docs/nested/new.md", content: "nested content\n" });
       await writeFile(join(ctx.cwd, "nested-result.json"), JSON.stringify({ denied: denied.isError, draft: draft.isError }));
       return { content: [{ type: "text", text: "Nested probe complete." }] };

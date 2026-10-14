@@ -13,6 +13,8 @@ The starter protects `**/docs/**`. Patterns use gitignore-style `*`, `?`, and `*
 
 For Pi, add `--platform pi`. Its user-scope starter lives at `<PI_CODING_AGENT_DIR>/hooks/no-new-documents.toml`, defaulting to `~/.pi/agent/hooks/no-new-documents.toml`. Home and project policies also apply. The extension guards native writes and recognized literal shell creations, including nested tool calls; arbitrary scripts and other extensions' direct filesystem access remain outside this guardrail.
 
+Native writes follow Pi's `@`, tilde, file URL, Unicode-space and Windows shell-path expansion. Logical and resolved paths both retain protection, and draft writes reject linked ancestors. Malformed policy or an unavailable Python helper blocks covered calls. Existing documents remain editable.
+
 Review the draft, then run `/approve-doc-draft docs/arch/plan.md` or `/reject-doc-draft docs/arch/plan.md` in Claude Code or Pi; use `$approve-doc-draft` or `$reject-doc-draft` in ChatGPT. With no path, these commands list drafts; a directory handles its pending drafts together. Quote paths containing spaces. Approval never overwrites an existing target. To request changes, tell the agent what to revise in the draft.
 
 ## When to use it

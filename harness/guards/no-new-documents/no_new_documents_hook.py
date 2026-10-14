@@ -234,7 +234,7 @@ def _prepare_drafts(root: Path) -> None:
         pass
 
 
-def _deny(path: str, root: Path) -> None:
+def draft_guidance(path: str, root: Path, provider: str) -> str:
     draft = f"{DRAFTS_DIR.as_posix()}/{path}"
     try:
         _prepare_drafts(root)
@@ -245,8 +245,8 @@ def _deny(path: str, root: Path) -> None:
         if (root / draft).exists()
         else ""
     )
-    prefix = COMMAND_PREFIX[PROVIDER]
-    reason = (
+    prefix = COMMAND_PREFIX[provider]
+    return (
         f"Creating the new document `{path}` requires the user's approval. Write it as a "
         f"draft at `{draft}` instead. {existing}Never move or copy the draft into place "
         "yourself, and do not create the document at another path. Continue any other work. "
@@ -255,13 +255,49 @@ def _deny(path: str, root: Path) -> None:
         f"`{prefix}reject-doc-draft {path}`, or reply with feedback for you to apply to "
         "the draft."
     )
+
+
+def _deny(path: str, root: Path) -> None:
     print(json.dumps({
         "hookSpecificOutput": {
             "hookEventName": "PreToolUse",
             "permissionDecision": "deny",
-            "permissionDecisionReason": reason,
+            "permissionDecisionReason": draft_guidance(path, root, PROVIDER),
         }
     }))
+
+
+def new_document(
+    candidates: list[str], root: Path, patterns: tuple[re.Pattern[str], ...], *, strict_paths: bool = False,
+) -> str | None:
+    """Return a protected creation target using one already parsed policy snapshot.
+
+    Pi checks logical and real paths: an alias into docs and a docs link out of
+    the project both retain protection. Linked draft paths cannot escape review.
+    Legacy hook matching stays unchanged unless strict_paths is requested.
+    """
+    for file_path in candidates:
+        candidate = Path(file_path) if Path(file_path).is_absolute() else root / file_path
+        resolved = _relative_parts(file_path, root)
+        paths = [resolved] if resolved is not None else []
+        if strict_paths:
+            try:
+                logical = tuple(Path(os.path.abspath(candidate)).relative_to(root).parts)
+            except ValueError:
+                logical = None
+            if logical is not None and Path(*logical[:len(DRAFTS_DIR.parts)]) == DRAFTS_DIR:
+                if not _safe_child(candidate, root):
+                    raise ValueError("draft path must not traverse symbolic links or junctions")
+                continue
+            if logical is not None:
+                paths.insert(0, logical)
+        paths = [parts for parts in paths if Path(*parts[:len(DRAFTS_DIR.parts)]) != DRAFTS_DIR]
+        if not paths or candidate.exists():
+            continue
+        for parts in paths:
+            if _is_protected(parts, patterns):
+                return "/".join(parts)
+    return None
 
 
 def guard_tool(payload: dict[str, Any]) -> int:
@@ -289,14 +325,9 @@ def guard_tool(payload: dict[str, Any]) -> int:
         patterns = _configuration(root)
     except (OSError, UnicodeError, tomllib.TOMLDecodeError, ValueError):
         return 0
-    for file_path in candidates:
-        parts = _relative_parts(file_path, root)
-        if parts is None or parts[:len(DRAFTS_DIR.parts)] == DRAFTS_DIR.parts:
-            continue
-        candidate = Path(file_path) if Path(file_path).is_absolute() else root / file_path
-        if not candidate.exists() and _is_protected(parts, patterns):
-            _deny("/".join(parts), root)
-            break
+    path = new_document(candidates, root, patterns)
+    if path is not None:
+        _deny(path, root)
     return 0
 
 

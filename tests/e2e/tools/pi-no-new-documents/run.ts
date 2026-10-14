@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { existsSync } from "node:fs";
 import { access, mkdir, readFile, readdir, rename, symlink, unlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import { pathToFileURL } from "node:url";
 import { setTimeout as delay } from "node:timers/promises";
 import { findHarnessRoot, runFixtureInstaller } from "../../core/installer.js";
 import { createPiFixture } from "../../core/pi-fixture.js";
@@ -183,5 +184,72 @@ export async function runPiDocumentsSafetyJourney() {
     assert.equal(await readFile(join(drafts, "docs/auto.md"), "utf8"), "requires user command\n");
     assert.equal(fixture.assertions().inferenceRequests, 6);
     assert.equal(fixture.assertions().unexpectedRequests, 0);
+  } finally { await fixture.close(); }
+}
+
+export async function runPiDocumentsPathsJourney(scope: "project" | "user") {
+  const marker = "[E2E:pi-documents-native-paths]";
+  let selected: ReturnType<typeof createPiToolScenario> | undefined;
+  const fixture = await createPiFixture({ scenarioCatalogHash: "pi-documents-native-paths-v1", transition: (request) => {
+    assert.ok(selected, "path scenario must be prepared before inference");
+    return selected.transition(request);
+  } });
+  try {
+    const project = fixture.workspace.projectRoot;
+    const outside = join(fixture.root, "outside");
+    const drafts = join(project, ".harness/doc-drafts");
+    await runFixtureInstaller(fixture.workspace, "install", ["no-new-documents"], { scope });
+    await mkdir(join(project, "docs"));
+    await mkdir(outside);
+    await writeFile(join(project, "docs/existing.md"), "before\n");
+    const linkType = process.platform === "win32" ? "junction" : "dir";
+    await symlink(join(project, "docs"), join(project, "alias"), linkType);
+    await symlink(outside, join(project, "docs/external"), linkType);
+    await mkdir(drafts, { recursive: true });
+    await symlink(outside, join(drafts, "linked"), linkType);
+    const denied = [
+      { path: "@docs/at.md", actual: join(project, "docs/at.md") },
+      { path: "@./docs/dot.md", actual: join(project, "docs/dot.md") },
+      { path: "docs/space\u202fname.md", actual: join(project, "docs/space name.md") },
+      { path: "~/../project/docs/home.md", actual: join(project, "docs/home.md") },
+      { path: pathToFileURL(join(project, "docs/url.md")).href, actual: join(project, "docs/url.md") },
+      { path: "alias/alias.md", actual: join(project, "docs/alias.md") },
+      { path: "docs/external/logical.md", actual: join(outside, "logical.md") },
+      { path: ".harness/doc-drafts/linked/escape.md", actual: join(outside, "escape.md") },
+    ];
+    if (process.platform === "win32") {
+      denied.push({ path: "DOCS/case.md", actual: join(project, "docs/case.md") });
+      const absolute = project.replaceAll("\\", "/");
+      const drive = absolute[0]!.toLowerCase();
+      for (const prefix of ["", "mnt/", "cygdrive/"]) {
+        const name = `${prefix.replace("/", "") || "msys"}.md`;
+        denied.push({ path: `/${prefix}${drive}${absolute.slice(2)}/docs/${name}`, actual: join(project, "docs", name) });
+      }
+    }
+    selected = createPiToolScenario({ name: "pi-documents-native-paths", marker, steps: [
+      ...denied.map(({ path }, index) => ({ checkpoint: `deny-path-${index}`, tool: "write", input: { path, content: "forbidden\n" } })),
+      { checkpoint: "alias-existing-write", tool: "write", input: { path: "@docs/existing.md", content: "after\n" } },
+      { checkpoint: "alias-existing-edit", tool: "edit", input: { path: "@docs/existing.md", oldText: "after", newText: "edited" } },
+      { checkpoint: "alias-unprotected-write", tool: "write", input: { path: "@ordinary.txt", content: "ordinary\n" } },
+      { checkpoint: "single-at-expansion", tool: "write", input: { path: "@@literal.txt", content: "literal\n" } },
+      { checkpoint: "alias-draft-write", tool: "write", input: { path: "@.harness/doc-drafts/docs/approved.md", content: "reviewed\n" } },
+    ] });
+    const run = await fixture.runJson({ prompt: marker });
+    assert.equal(run.status, "success");
+    assert.deepEqual(run.toolExecutions.map((tool) => tool.isError), [...denied.map(() => true), false, false, false, false, false]);
+    for (const { actual } of denied) assert.equal(existsSync(actual), false);
+    assert.equal(await readFile(join(project, "docs/existing.md"), "utf8"), "edited\n");
+    assert.equal(await readFile(join(project, "ordinary.txt"), "utf8"), "ordinary\n");
+    assert.equal(await readFile(join(project, "@literal.txt"), "utf8"), "literal\n");
+    assert.equal(existsSync(join(project, "literal.txt")), false);
+    assert.equal(await readFile(join(drafts, "docs/approved.md"), "utf8"), "reviewed\n");
+    assert.equal(await readFile(join(drafts, ".gitignore"), "utf8"), "*\n");
+    const rpc = fixture.rpc();
+    assert.equal((await rpc.prompt("/approve-doc-draft docs/approved.md")).status, "handled");
+    assert.equal(await readFile(join(project, "docs/approved.md"), "utf8"), "reviewed\n");
+    assert.equal(existsSync(join(drafts, "docs/approved.md")), false);
+    assert.equal(fixture.assertions().inferenceRequests, denied.length + 6);
+    assert.equal(fixture.assertions().unexpectedRequests, 0);
+    return { version: fixture.version, scope, deniedPaths: denied.length, inferenceRequests: fixture.assertions().inferenceRequests };
   } finally { await fixture.close(); }
 }

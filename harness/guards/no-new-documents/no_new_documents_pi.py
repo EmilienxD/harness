@@ -1,31 +1,36 @@
 """Native Pi transport; the shared hook owns draft policy and commands."""
 from __future__ import annotations
 
-from contextlib import redirect_stdout
-from io import StringIO
 import json
+import os
 from pathlib import Path
+import re
 import sys
 
 import no_new_documents_hook as core
 
 
 def request(payload: dict) -> dict:
+    if payload.get("version") != 1:
+        raise ValueError("unsupported Pi document protocol")
     root = Path(payload["cwd"]).resolve()
     operation = payload["operation"]
     if operation == "guard":
-        core.PROVIDER = core.PI
-        core._configuration(root)  # A broken installed policy must not silently disable Pi protection.
+        # Parse once, fail closed, and use that same snapshot for the decision.
+        patterns = core._configuration(root)
+        if os.name == "nt":
+            patterns = tuple(re.compile(pattern.pattern, re.IGNORECASE) for pattern in patterns)
         tool = payload["tool"]
         inputs = payload.get("input") or {}
-        names = {"write": "Write", "bash": "Bash", "powershell": "PowerShell"}
-        mapped = {"file_path": inputs.get("path")} if tool == "write" else inputs
-        output = StringIO()
-        with redirect_stdout(output):
-            core.guard_tool({"cwd": str(root), "tool_name": names.get(tool), "tool_input": mapped})
-        result = json.loads(output.getvalue()) if output.getvalue() else {}
-        reason = result.get("hookSpecificOutput", {}).get("permissionDecisionReason", "")
-        return {"version": 1, "block": bool(reason), "message": reason}
+        if tool == "write":
+            candidates = [inputs["path"]]
+        elif tool in {"bash", "powershell"}:
+            candidates = core._shell_candidates(inputs["command"], root)
+        else:
+            raise ValueError("unsupported document tool")
+        target = core.new_document(candidates, root, patterns, strict_paths=True)
+        return {"version": 1, "block": target is not None,
+                "message": core.draft_guidance(target, root, core.PI) if target is not None else ""}
     if operation == "pending":
         return {"version": 1, "message": core._pending_notice(root) or ""}
     if operation in {"approve", "reject"}:

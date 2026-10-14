@@ -445,7 +445,7 @@ survives branch changes. Missing skills, invalid repositories and transport fail
 before inference; informational missing facts remain visible in the inventory. Approval and immediate
 live-state checks remain the shared skill's model-driven workflow, not an automatic deletion policy.
 
-`no-new-documents` 3.1.0 uses the same bridge with package-local native tool and command translation.
+`no-new-documents` 3.2.0 uses the same bridge with package-local native tool and command translation.
 It denies native writes and recognized literal shell creations in protected paths, including nested
 calls, while allowing draft mirrors and existing-document edits. Malformed policy or transport failure
 blocks covered calls. Native approval/rejection and their `/skill:` forms make zero inference requests.
@@ -455,6 +455,44 @@ Native custom messages persist outcomes on the active branch; current pending dr
 from disk before model turns. Pi user policy starters live beside the installed hooks; shared home and
 project policies also apply. Arbitrary scripts, third-party mutators, trusted extension command dispatch
 and direct extension I/O remain outside the protection boundary.
+
+The enforcement choice is a `tool_call` handler rather than replacing native tools. The
+[extension contract](PI-REFERENCES/docs/extensions.md#work-with-events) makes denial apply before
+execution, including nested `ctx.executeTool()` calls. This composes with the read/edit guards
+and leaves Pi's native tool schemas, mutation queues, rendering and other tool adapters intact.
+An override would own the same tool name as remote-filesystem or other tool extensions without
+providing OS isolation. Post-execution rollback cannot guarantee zero mutation, and filesystem
+watchers observe creations too late. Strong script restrictions require an OS/container boundary;
+the [security reference](PI-REFERENCES/docs/security.md) explicitly gives extensions the Pi
+process's permissions. Trusted extensions can also change input after a guard has checked it.
+
+Native policy input must resolve to the same target as Pi's write. The installed 1.2.0
+`dist/core/tools/path-utils.js` and `dist/utils/paths.js` were checked against upstream
+[`resolveToCwd`](https://github.com/earendil-works/pi/blob/47fc5f38ec18d56fe64abd41a2dcf9e5170a3dcf/packages/coding-agent/src/core/tools/path-utils.ts)
+and [`normalizePath`](https://github.com/earendil-works/pi/blob/47fc5f38ec18d56fe64abd41a2dcf9e5170a3dcf/packages/coding-agent/src/utils/paths.ts).
+The extension handles one leading `@`, Unicode spaces, tilde, file URLs, and Windows
+MSYS/WSL/Cygwin drive paths before sending an absolute policy path. These helpers are private
+Pi APIs, so the small translation stays local with real-CLI coverage instead of importing
+private package files. Only the policy copy is normalized; rewriting tool input would apply
+normalization twice and change literal filenames such as `@@literal.txt`. Recheck this boundary
+when widening the tested Pi version range.
+
+The shared Python core accepts parsed policy and returns creation targets and draft guidance
+directly; Pi does not fabricate a Claude hook event or decode hook stdout. One policy snapshot
+serves the entire decision, so a second read cannot silently turn a broken policy into an allow.
+Pi matches both logical and resolved paths, with case-insensitive patterns on Windows. A link
+into protected docs and a protected docs directory linked outside the project both retain
+protection. Linked draft ancestors are denied. Existing documents remain editable; concurrent
+external deletion or replacement between a check and tool execution is outside this guardrail.
+Approval still checks source/destination containment and uses exclusive publication.
+
+The headless acceptance gate runs actual catalogue project/user installations through Pi 1.2.0
+JSON/RPC and the fake Codex Responses API. Seven journeys cover native path aliases (twelve
+denials per scope on Windows), nested aliased writes, existing native write/edit, ordinary files,
+safe drafts, linked draft paths, deterministic commands, collision/racing publication, malformed
+policy, missing helper, reload/resume/tree ancestry, starter preservation and coupled removal.
+They assert denied filesystem effects and exact inference counts; command execution adds zero
+requests. POSIX branches are present but this acceptance run was on Windows.
 
 The three `test:pi-*` journeys documented in [the E2E guide](../tests/e2e/README.md#pi-document-drafts-git-cleanup-and-test-workflows)
 install real catalogue payloads at project/user scope and exercise Pi 1.2.0 JSON/RPC on Windows against

@@ -266,6 +266,8 @@ On Pi, install with `harness install no-new-documents --platform pi`, then resta
 The same slash commands and their `/skill:` forms run without inference. The extension guards native
 `write` and recognized literal shell creations, including nested tool calls. Arbitrary scripts,
 third-party mutators, and filesystem access inside other extensions remain outside this guardrail.
+Native writes use Pi's path expansion (`@`, `~`, file URLs, Unicode spaces and Windows shell paths).
+Protection follows both logical and resolved paths; linked draft directories are rejected.
 Project policies use `.harness/guards/no-new-documents.toml`; Pi user policies start at
 `<PI_CODING_AGENT_DIR>/hooks/no-new-documents.toml` (default `~/.pi/agent/hooks/`). Home and project
 policies also apply. Command outcomes follow the active session branch; pending drafts follow the
