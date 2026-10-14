@@ -113,7 +113,7 @@ def _parse_task_policies(tasks: dict) -> dict[str, TaskPolicy]:
         elif (
             not isinstance(skill, str) or not NAME.fullmatch(skill)
             or skill.endswith("-with-agent")
-            or skill in {"subagents-toolkit", "reply-to-agent", "resume-agent", "ship"}
+            or skill in {"subagents-toolkit", "reply-to-agent", "reply-to-agent-with-previous-message", "resume-agent", "ship"}
         ):
             raise RoleError(f"invalid child skill for task {task!r}")
         if (

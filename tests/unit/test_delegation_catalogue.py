@@ -44,6 +44,7 @@ def test_launch_resume_and_reply_skills_remain_user_only() -> None:
         "work-with-agent", "explore-with-agent", "prototype-with-agent",
         "websearch-with-agent", "brainstorm-with-agent",
         "address-with-agent", "review-with-agent", "reply-to-agent", "resume-agent",
+        "reply-to-agent-with-previous-message",
     ):
         skill = destinations[f"{name}/SKILL.md"]
         _opening, frontmatter, _body = skill.read_text(encoding="utf-8").split("---", 2)

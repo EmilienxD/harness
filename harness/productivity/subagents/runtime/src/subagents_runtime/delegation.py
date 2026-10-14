@@ -731,6 +731,32 @@ def clear_reply_authorization(child_session_id: str) -> bool:
         return changed.rowcount == 1
 
 
+def send_previous_reply(
+    child_session_id: str, message: str, execution_id: str | None = None
+) -> None:
+    """Complete one interactive parent request without arming another model turn."""
+    sessions = _sessions_module()
+    if not message.strip():
+        raise sessions.SessionError("There is no previous assistant message to send to the parent.")
+    with sessions._connect() as connection:
+        connection.execute("BEGIN IMMEDIATE")
+        if execution_id and connection.execute(
+            "SELECT 1 FROM executions WHERE session_id=? AND (id=? OR input_execution_id=?)",
+            (child_session_id, execution_id, execution_id),
+        ).fetchone() is None:
+            raise sessions.SessionError("This execution does not own a parent request; no reply was sent.")
+        row = _active_request(connection, child_session_id, execution_id, interactive=True)
+        if row is None:
+            raise sessions.SessionError("There is no pending interactive parent request; no reply was sent.")
+        request_id = row[0]
+        connection.execute("DELETE FROM reply_authorizations WHERE request_id=?", (request_id,))
+        connection.execute(
+            "UPDATE requests SET state='succeeded',reply=?,reason=NULL,delivery_id=?,"
+            "completed_at=CURRENT_TIMESTAMP WHERE id=?",
+            (message, str(uuid.uuid4()), request_id),
+        )
+
+
 def report_child_stop(
     child_session_id: str,
     message: str,

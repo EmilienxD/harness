@@ -12,6 +12,7 @@ from typing import Any
 from subagents_runtime import sessions
 from subagents_runtime.messages import runtime_message
 from subagents_runtime.roles import find_skill, load_task_policies
+from subagents_runtime.previous_message import PreviousMessageError, read_previous_message
 from subagents_runtime.delegation import (
     arm_reply,
     claim_instructions,
@@ -24,16 +25,18 @@ from subagents_runtime.delegation import (
     process_inbox,
     reconcile_inbox,
     report_child_stop,
+    send_previous_reply,
     wait_parent_delivery,
 )
 
-SKILL_NAME = r"([a-z][a-z0-9-]*-with-agent|reply-to-agent|resume-agent|ship)"
+PREVIOUS_REPLY_SKILL = "reply-to-agent-with-previous-message"
+SKILL_NAME = rf"([a-z][a-z0-9-]*-with-agent|{PREVIOUS_REPLY_SKILL}|reply-to-agent|resume-agent|ship)"
 SHIP_INVOCATION = re.compile(r"(?<!\S)(?:[/$]ship|\[\$ship\]\([^\r\n]+\))(?=\s|$)")
 INVOCATIONS = {
     "claude": re.compile(rf"(?<!\S)/{SKILL_NAME}(?=\s|$)"),
     "chatgpt": re.compile(rf"(?<!\S)\${SKILL_NAME}(?=\s|$)"),
 }
-LINKED_INVOCATION = re.compile(r"\[\$([a-z][a-z0-9-]*-with-agent|reply-to-agent|resume-agent|ship)\]\([^\r\n]+?\)")
+LINKED_INVOCATION = re.compile(rf"\[\${SKILL_NAME}\]\([^\r\n]+?\)")
 STRUCTURED_WRITE_TOOLS = {"Write", "Edit", "MultiEdit", "apply_patch", "ApplyPatch"}
 
 
@@ -60,7 +63,7 @@ def _skill_instructions(session_id: str, skill: str) -> str | None:
 
 
 def _registered_skill(skill: str, cwd: Path, provider: str) -> bool:
-    if skill in {"ship", "reply-to-agent", "resume-agent"}:
+    if skill in {"ship", "reply-to-agent", PREVIOUS_REPLY_SKILL, "resume-agent"}:
         return True
     return skill.endswith("-with-agent") and skill in load_task_policies(cwd, provider)
 
@@ -185,6 +188,25 @@ def _parent_terminal_message() -> str | None:
     return f"Reply sent to the parent. Return to the main agent: {uri}"
 
 
+def _previous_reply(payload: dict[str, Any], session_id: str, provider: str, execution_id: str | None) -> dict[str, Any]:
+    """Consume the command, returning status only to the user, never model context."""
+    try:
+        message = read_previous_message(payload.get("transcript_path"), provider)
+        send_previous_reply(session_id, message, execution_id)
+    except (PreviousMessageError, sessions.SessionError) as exc:
+        reason = f"Error: {exc}"
+    else:
+        reason = "Previous assistant message sent to the parent."
+        if link := _parent_terminal_message():
+            reason += f"\n{link}"
+    response: dict[str, Any] = {"decision": "block", "reason": reason}
+    if provider == "claude" and payload.get("hook_event_name") == "UserPromptSubmit":
+        response["hookSpecificOutput"] = {
+            "hookEventName": "UserPromptSubmit", "suppressOriginalPrompt": True,
+        }
+    return response
+
+
 def handle(
     payload: dict[str, Any], provider: str | None = None
 ) -> dict[str, Any] | None:
@@ -213,6 +235,17 @@ def handle(
         )
     observe_parent_event(session_id, event)
     from subagents_runtime import loop
+    if event in {"UserPromptSubmit", "UserPromptExpansion"}:
+        prompt = payload.get("prompt")
+        command = payload.get("command_name")
+        if command == PREVIOUS_REPLY_SKILL or (
+            isinstance(prompt, str) and any(
+                match.group(1) == PREVIOUS_REPLY_SKILL
+                for pattern in (INVOCATIONS[selected_provider], LINKED_INVOCATION)
+                for match in pattern.finditer(prompt)
+            )
+        ):
+            return _previous_reply(payload, session_id, selected_provider, execution_id)
     loop.observe_event(session_id, event, payload.get("prompt"))
     if event == "SessionStart" and execution_id and (continued or not fresh):
         from subagents_runtime.processes import confirm_startup
@@ -294,6 +327,13 @@ def handle(
             return _context(event, text)
 
     if event == "PreToolUse":
+        tool_input = payload.get("tool_input")
+        if (payload.get("tool_name") == "Skill" and isinstance(tool_input, dict)
+                and tool_input.get("skill") == PREVIOUS_REPLY_SKILL):
+            return {"hookSpecificOutput": {
+                "hookEventName": event, "permissionDecision": "deny",
+                "permissionDecisionReason": "This command is user-invoked only.",
+            }}
         return None
 
     if event == "Interrupt":
@@ -314,6 +354,8 @@ def handle(
             and re.fullmatch(SKILL_NAME, skill)
             and _registered_skill(skill, _role_directory(session_id), selected_provider)
         ):
+            if skill == PREVIOUS_REPLY_SKILL:
+                return None
             if skill == "reply-to-agent":
                 arm_reply(session_id, execution_id)
             else:

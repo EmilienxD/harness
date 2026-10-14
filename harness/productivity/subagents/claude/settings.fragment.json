@@ -2,6 +2,7 @@
   "hooks": {
     "SessionStart": [{"matcher": "startup|resume|compact|clear|fork", "hooks": [{"type": "command", "command": "harness-subagents-hook", "args": ["--claude"]}]}],
     "UserPromptSubmit": [{"hooks": [{"type": "command", "command": "harness-subagents-hook", "args": ["--claude"]}]}],
+    "UserPromptExpansion": [{"matcher": "reply-to-agent-with-previous-message", "hooks": [{"type": "command", "command": "harness-subagents-hook", "args": ["--claude"]}]}],
     "PreToolUse": [{"hooks": [{"type": "command", "command": "harness-subagents-hook", "args": ["--claude"]}]}],
     "PostToolUse": [{"hooks": [{"type": "command", "command": "harness-subagents-hook", "args": ["--claude"]}]}],
     "Stop": [{"hooks": [{"type": "command", "command": "harness-subagents-hook", "args": ["--claude"], "timeout": 86430}]}],
