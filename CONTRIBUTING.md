@@ -18,7 +18,7 @@ uv run pytest
 ```
 
 The shared real-CLI E2E suite additionally requires Node.js 22, npm, Git, and installed Claude Code
-and Codex CLIs:
+and Codex CLIs, plus Pi 1.2.x for its new journeys:
 
 ```powershell
 cd tests/e2e
@@ -26,6 +26,11 @@ npm ci
 npm run check
 npm test
 ```
+
+Pi-only preparation needs Node.js >=22.19.0 and the Pi CLI. Run `npm run e2e:pi` and
+`npm run test:pi` from `tests/e2e/`; [the E2E guide](tests/e2e/README.md) explains the isolated
+agent configuration and how to stage a tool's real payload. Acceptance should exercise the CLI
+and observable effects; unit tests that mirror an implementation are insufficient evidence.
 
 Aboard has its own npm boundary:
 

@@ -8,7 +8,7 @@ description: Operate, diagnose, or extend Harness's deterministic real-CLI E2E i
 
 **# Harness deterministic E2E**
 
-Harness owns the reusable E2E core. It replaces only model inference and deliberately retains the installed Claude Code or Codex CLI, real tools, hooks, permissions, process lifecycle, and filesystem effects. App adapters provide their own scenarios and external fixtures.
+Harness owns the reusable E2E core. It replaces only model inference and deliberately retains the installed Claude Code, Codex, or Pi CLI, real tools, hooks/extensions, permissions, process lifecycle, and filesystem effects. App adapters provide their own scenarios and external fixtures.
 
 Do not change production behavior or APIs to satisfy a harness-only test. Keep generated configuration, transcripts, diagnostics, fixture checkouts, and credentials outside the repository.
 
@@ -23,6 +23,10 @@ Read the implementation at the boundary being changed:
 * `tests/e2e/core/claude.ts`: Claude CLI compatibility, provider isolation, bounded launch, and stream-json parsing.
 
 * `tests/e2e/core/codex.ts`: Codex CLI compatibility, deterministic `CODEX_HOME`, bounded launch, and redaction.
+
+* `tests/e2e/core/openai-server.ts`: shared authenticated loopback Responses transport for Codex and Pi.
+
+* `tests/e2e/core/pi.ts`, `pi-fixture.ts`, and `pi-scenario.ts`: real Pi JSON/RPC launch, isolated agent configuration, semantic settlement, owned teardown, and history-derived native-tool scenarios. Read `tests/e2e/README.md` before adding a Pi journey or changing its isolation, commands, sessions, or transport.
 
 * `tests/e2e/core/path.ts`: cross-platform path containment.
 
@@ -86,6 +90,11 @@ npm run check
 npm test
 
 npm run e2e:on-edit-block
+
+# Real Pi JSON/RPC environment and public-boundary checks:
+npm run e2e:pi
+
+npm run test:pi
 ```
 
 `npm test` currently includes the real `on-edit-block` journey: it reads the target, observes one hook denial carrying the required guide, retries the edit, and verifies exact final bytes.
@@ -94,7 +103,7 @@ npm run e2e:on-edit-block
 
 Inspect redacted structural diagnostics, endpoint checkpoints, process exit, and exact fixture bytes first. Do not inspect or publish retained transcripts unless the task explicitly requires transcript analysis. Preserve an unexpected-history test proving deterministic redacted rejection.
 
-Use checked-in official references under `docs/CLAUDE-REFERENCES/` and `docs/CHATGPT-REFERENCES/` when changing CLI flags, hooks, settings, sessions, sandboxing, or gateway behavior.
+Use checked-in official references under `docs/CLAUDE-REFERENCES/`, `docs/CHATGPT-REFERENCES/`, and `docs/PI-REFERENCES/` when changing CLI flags, hooks/extensions, settings, sessions, sandboxing, or gateway behavior. Pi custom endpoints belong in the fixture's isolated agent-directory `models.json`; project `.pi/settings.json` selects that provider/model. Keep personal Pi configuration untouched.
 
 **## Verification scope**
 

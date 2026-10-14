@@ -44,10 +44,19 @@ export async function startFakeOpenAiServer(options: {
   const observations: Record<string, unknown>[] = [];
   const checkpoints = new Set<string>();
   let unexpectedRequests = 0;
+  let inferenceRequests = 0;
   let sequence = 0;
+  const pending = new Set<Promise<void>>();
+  let diagnosticsFailed = false;
   await persist(options.diagnosticsPath, observations);
 
-  const server = createServer(async (request, response) => {
+  const server = createServer((request, response) => {
+    const task = handleRequest(request, response);
+    pending.add(task);
+    void task.catch(() => { diagnosticsFailed = true; }).finally(() => pending.delete(task));
+  });
+
+  async function handleRequest(request: IncomingMessage, response: ServerResponse): Promise<void> {
     const url = new URL(request.url ?? "/", "http://127.0.0.1");
     let raw: Buffer = Buffer.alloc(0);
     let body: OpenAiResponsesRequest | undefined;
@@ -60,6 +69,7 @@ export async function startFakeOpenAiServer(options: {
       }
       raw = await readBody(request);
       body = parseRequest(JSON.parse(raw.toString("utf8")) as unknown);
+      inferenceRequests += 1;
       const result = await options.transition(body);
       checkpoints.add(result.checkpoint);
       writeResponse(response, body.model, raw, result.output);
@@ -72,7 +82,7 @@ export async function startFakeOpenAiServer(options: {
       observations.push(observation(request, url, raw, body, sessionSalt, ++sequence, 400, "rejected", null, null, diagnostic));
     }
     await persist(options.diagnosticsPath, observations);
-  });
+  }
 
   await new Promise<void>((resolve, reject) => {
     server.once("error", reject);
@@ -82,9 +92,13 @@ export async function startFakeOpenAiServer(options: {
   return {
     baseUrl: `http://127.0.0.1:${address.port}/v1`,
     authToken,
-    assertions: () => ({ checkpoints: [...checkpoints], unexpectedRequests, observations: [...observations] }),
+    assertions: () => ({ checkpoints: [...checkpoints], unexpectedRequests, inferenceRequests, observations: [...observations] }),
     close: async () => {
-      await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+      const closed = new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+      server.closeAllConnections();
+      await closed;
+      await Promise.all([...pending]);
+      if (diagnosticsFailed) throw new Error("OpenAI E2E structural diagnostics could not be persisted");
       await persist(options.diagnosticsPath, observations);
     },
   };
