@@ -1,9 +1,9 @@
 # Pi provider architecture proposal
 
-Status: **22 shared skill packages, three path-guard extensions, comment budgets, document draft approval, Git cleanup inventory, two issue workflow extensions and the cloud interview extension implemented; remaining extensions and runtime architecture proposed**.
+Status: **22 shared skill packages, three path-guard extensions, comment budgets, document draft approval, Git cleanup inventory, two issue workflow extensions, cloud interviews, session commits and desktop notifications implemented; remaining extensions and runtime architecture proposed**.
 Pi is an opt-in catalogue target for all 22 skill-led packages below. Shared skill installation
 works at project and user scope; three path guards, comment budgets, document draft approval, Git cleanup inventory,
-both issue workflow packages, and the cloud interview ship. The hosted Pi migration/app are deployed
+both issue workflow packages, cloud interviews, session commits and desktop notifications ship. The hosted Pi migration/app are deployed
 and verified against the production board. Remaining extensions, persistent runtime, and Aboard are pending.
 This proposal defines the implementation boundaries and first release scope.
 The [compatibility report](PI-COMPATIBILITY.md) retains the catalogue-wide feasibility assessment.
@@ -76,9 +76,9 @@ it can also include shared skills. Rows marked implemented ship the stated Pi re
 | 29 | `issue-readers` | Extension | Implemented in 1.6.0. Prepare complete paginated `address-this` / `review-this` context through the issue graph before native skill expansion; preparation errors stop inference. |
 | 30 | `issue-writers` | Extension | Implemented in 2.3.0. Supply native session draft paths for the four drafting/spec skills; intercept the fifth (`publish-issues`) through a native command with existing locks and ordering, without inference. |
 | 31 | `cleanup-git` | Extension | Implemented. Inject the existing read-only inventory before native skill expansion; keep approval and live-state checks before cleanup. |
-| 32 | `enable-desktop-notification` | Extension | Persist per-session opt-in and notify once at final settlement using the existing OS notifier. |
+| 32 | `enable-desktop-notification` | Extension | Implemented in 1.1.0. Native zero-inference enable/disable, session-persistent opt-in and one final-settlement notification through the shared OS notifier. |
 | 33 | `report-gotchas` | Extension | Reuse CLI/queue/worker; bind receipts to Pi identity and preserve idempotent reporting. |
-| 34 | `commit` | Extension | Reuse staging/Git/message generation; attribute successful writes to the active Pi session branch. |
+| 34 | `commit` | Extension | Implemented in 1.7.0. Native zero-inference command, shared staging/Git/message generation and verified successful-write attribution on the active Pi session branch; uncertain ownership stops before staging. |
 | 35 | `grill-me-in-cloud` | Extension | Implemented in 2.2.0. Shared publication/assets/outbox core, native round preparation and standalone persisted-message answer relay. Additive hosted contract/migration deployed; real Pi project/user journeys pass against local and production services. |
 
 That is **22 skill-led packages and 13 extension-backed packages**. These are routes, not effort
@@ -424,6 +424,92 @@ a test contract. Include Windows/POSIX paths, discovery collisions, failed/abort
 and parallel calls, session fork/reload/compaction, unknown tools, and protocol/cancellation errors.
 Keep Claude/ChatGPT regression checks passing.
 
+## Shipped session commits
+
+`commit` 1.7.0 registers `/commit` and intercepts `/skill:commit` before skill expansion.
+Both reuse the existing Python flag parsing, staging, Git commit, dry-run and explicitly
+requested Gemini message generation. Pi passes native active-branch user/assistant context
+to the shared message builder directly; it does not fabricate a Claude transcript. Ordinary
+commands, usage errors and dry runs create zero Pi inference requests. `--ai` still uses its
+one explicitly requested direct Gemini request; it does not start a Pi agent turn.
+
+Research covered the mirrored [extension events](PI-REFERENCES/src/core/extensions/types.ts),
+[native session tree](PI-REFERENCES/docs/session-format.md), the installed Pi 1.2.0 tool pipeline
+and native path normalization, and the pinned upstream
+[file mutation queue](https://github.com/earendil-works/pi/blob/47fc5f38ec18d56fe64abd41a2dcf9e5170a3dcf/packages/coding-agent/src/core/tools/file-mutation-queue.ts).
+Pi's queue protects native mutations, but `tool_call` and `tool_result` snapshots happen
+outside it. This integration deliberately uses events and refuses overlapping same-file
+observations rather than replacing native tool definitions: it composes with installed
+comment budgets and other native overrides. Nested calls pass through the same events.
+
+The Python adapter hashes bounded regular files before/after native `write`/`edit`, inventories
+shell Git effects, and limits shell ownership to recognizable literal write targets from the
+shared parser (plus literal PowerShell deletion). Successful native `write` observations must
+also match the hash of the tool's requested UTF-8 content. Preexisting dirty bytes, failed calls with partial effects, unresolved or extra
+shell effects, overlapping shell/native observations and incomplete helper evidence produce
+uncertainty receipts. An unchanged failed or denied call creates no successful-write ownership.
+Denied calls skip `tool_result`, so execution-end also clears pending observations.
+
+Non-context custom receipts hold paths, fingerprints and Git baseline evidence, bound to the
+native session ID. Ownership is reconstructed from `getBranch()`, so abandoned tree branches
+cannot authorize staging. Reload/exact resume retain it; fork/new identities exclude inherited
+receipts. Observed Git baseline changes and successful commands clear prior ownership. Current
+HEAD and file fingerprints must still match at invocation; a conflicting existing index entry
+on an owned path stops the command. Unrelated staged files are preserved by path-scoped commits.
+Merges require whole-index semantics and are refused. Empty or uncertain ownership never reaches
+the legacy stage-all fallback.
+
+After staging, record the exact owned index entries. Failed message generation or Git commit
+preserves those entries and allows an explicit-message retry only while their fingerprints
+still match. User changes to that index invalidate retry authority. Recheck HEAD, owned file
+contents, worktree/index equality and the captured index entries immediately before Git commit,
+including after the potentially slow AI request. Native narrative is bounded before transport
+and is sent only for `--ai`, so long conversational history does not obstruct local commands.
+
+The adapter supports bounded local regular files and observed native/shell operations. Symlink
+targets, arbitrary custom mutators and extension I/O need explicit adapters. Event attribution
+is evidence about observed operations, not OS isolation: independent processes can still mutate
+the working tree. Keep Git hooks and external writers under the same operational control as an
+ordinary Git commit. Files over the snapshot limit or unreadable evidence stop automatic
+attribution instead of weakening it. `pi-support` supplies bounded, cancellable interpreter
+transport; no persistent worker or file-content receipt is introduced.
+
+Acceptance runs all four project/user and JSON/RPC combinations on installed Windows Pi 1.2.0,
+plus nested/lifecycle and direct-message-generation journeys. It checks real Git/index effects,
+literal filenames, denied/failed calls, shell deletion, active ancestry, fork identity, partial
+staging, helper outages, observed Git baseline changes, and working-tree/index changes arriving
+during AI generation. Gemini inference is replaced by a separate authenticated loopback fixture;
+Pi uses the shared fake Responses endpoint. See [the E2E guide](../tests/e2e/README.md#pi-commits-and-desktop-notifications).
+
+## Shipped desktop notifications
+
+`enable-desktop-notification` 1.1.0 registers a native command and consumes the explicit
+`/skill:enable-desktop-notification` spelling before expansion. Enable, disable, invalid
+arguments and backend errors finish without a Pi inference request. The extension uses
+`pi-support` 1.1.0's bounded, cancellable interpreter transport to call a small Python adapter
+over the existing `desktop_notification.py`; OS delivery remains shared with Claude/Codex.
+
+Research used the mirrored [event declarations](PI-REFERENCES/src/core/extensions/types.ts),
+[extension lifecycle](PI-REFERENCES/docs/extensions.md), [session format](PI-REFERENCES/docs/session-format.md)
+and the installed Pi 1.2.0 `agent-session.js` and extension runner. The pinned
+[upstream session implementation](https://github.com/earendil-works/pi/blob/47fc5f38ec18d56fe64abd41a2dcf9e5170a3dcf/packages/coding-agent/src/core/agent-session.ts)
+confirms that settlement handlers are awaited before the external settlement event. `agent_end`
+can precede retries or queued continuation; terminal escape sequences also pollute headless
+protocol output. Native OS delivery at `agent_settled` fits both JSON/RPC and interactive sessions.
+
+The preference is a non-context custom entry bound to the native session ID. Unlike commit
+ownership, it belongs to the whole session: reconstruct it from `getEntries()`, so navigating
+to an earlier tree node cannot undo the user's enable/disable choice. A fork copies historical
+entries but changes the session ID, so inherited opt-in does not enable a new session. Reload
+and exact resume preserve the setting without an external session registry.
+
+Each agent activity sends at most one notification after final settlement. The title uses
+the current native session name, falling back to its ID; the body uses the final assistant
+text, with explicit failed/aborted status. Deterministic commands do not start agent activity
+and do not notify. A failed delivery adds a visible diagnostic without another model turn.
+Session replacement/shutdown cancels pending transport. Native backend availability is checked
+before opt-in; successful submission does not certify that OS settings display the notification.
+
 ## Later provider consumers
 
 Persistent `run`, `ask`, `reply`, `resume`, and `watch` remain in the independently packaged
@@ -443,7 +529,7 @@ These future adapters consume the same event/identity contracts without making t
 35 packages depend on their implementation. The compatibility report retains their detailed
 feasibility and broader release gates. All 22 shared skill packages and the installer slice are implemented
 in the checkout; the three path guards, document draft approval, Git cleanup inventory, both issue
-workflow packages, and cloud interview also ship. The hosted Pi migration and application are deployed
+workflow packages, cloud interview, session commits and desktop notifications also ship. The hosted Pi migration and application are deployed
 and verified. Remaining adapters remain proposed.
 
 ## Shipped path-guard slice

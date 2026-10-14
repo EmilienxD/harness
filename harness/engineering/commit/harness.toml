@@ -1,7 +1,8 @@
 name = "commit"
-version = "1.6.7"
-description = "Zero-model-call /commit — stages and commits via native prompt hooks"
+version = "1.7.0"
+description = "Zero-model-turn /commit with native Pi branch attribution and shared Git/message generation"
 requires = ["git"]
+dependencies = [{ name = "pi-support", version = ">=1.1.0,<2.0.0", lifecycle = "coupled", platforms = ["pi"] }]
 docs = "https://github.com/EmilienxD/harness/blob/main/README.md#user-invoked-skills"
 
 # Project-local credentials used by `--ai` stay outside version control.
@@ -14,6 +15,21 @@ fragment = "claude/settings.fragment.json"
 [platforms.chatgpt]
 status = "supported"
 fragment = "chatgpt/hooks.fragment.json"
+
+[platforms.pi]
+status = "supported"
+
+[[files]]
+src = "pi/extension.ts"
+dest = "harness-commit/index.ts"
+root = "extensions"
+platforms = ["pi"]
+
+[[files]]
+src = "commit_pi.py"
+dest = "commit_pi.py"
+root = "hooks"
+platforms = ["pi"]
 
 [[files]]
 src = "commit_hook.py"

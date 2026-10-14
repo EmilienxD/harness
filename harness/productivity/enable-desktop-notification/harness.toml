@@ -1,5 +1,5 @@
 name = "enable-desktop-notification"
-version = "1.0.1"
+version = "1.1.0"
 description = "Enable desktop notifications for final responses in the current session without a model call"
 docs = "https://github.com/EmilienxD/harness/blob/main/README.md#user-invoked-skills"
 
@@ -11,11 +11,33 @@ fragment = "claude/settings.fragment.json"
 status = "supported"
 fragment = "chatgpt/hooks.fragment.json"
 
+[platforms.pi]
+status = "supported"
+
+[[dependencies]]
+name = "pi-support"
+version = ">=1.1.0,<2.0.0"
+platforms = ["pi"]
+lifecycle = "coupled"
+
+[[files]]
+src = "pi/extension.ts"
+dest = "harness-enable-desktop-notification/index.ts"
+root = "extensions"
+platforms = ["pi"]
+
+[[files]]
+src = "desktop_notification_pi.py"
+dest = "desktop_notification_pi.py"
+root = "hooks"
+platforms = ["pi"]
+
 [[files]]
 src = "enable_desktop_notification_hook.py"
 dest = "enable_desktop_notification_hook.py"
 root = "hooks"
 executable = true
+platforms = ["claude", "chatgpt"]
 
 [[files]]
 src = "desktop_notification.py"

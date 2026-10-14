@@ -1,0 +1,43 @@
+// Test-only native lifecycle/nested orchestration. Production owns attribution.
+import { writeFile } from "node:fs/promises";
+import { join } from "node:path";
+import { Type } from "typebox";
+export default function (pi: any) {
+  pi.on("tool_call", (event: any) => {
+    if (event.toolName === "write" && event.input.path === "denied.txt") return { block: true, reason: "Fixture denial" };
+  });
+  pi.registerTool({ name: "commit_probe", label: "Commit probe", description: "Exercise native nested writes",
+    parameters: Type.Object({ mode: Type.String() }),
+    execute: async (_id: any, input: any, _signal: any, _update: any, ctx: any) => {
+      if (input.mode === "overlap") await Promise.all([
+        ctx.executeTool("write", { path: "owned.txt", content: "one\n" }),
+        ctx.executeTool("write", { path: "owned.txt", content: "two\n" }),
+      ]);
+      else {
+        await ctx.executeTool("write", { path: "denied.txt", content: "denied\n" });
+        await ctx.executeTool("edit", { path: "absent.txt", edits: [{ oldText: "before", newText: "after" }] });
+        await ctx.executeTool("write", { path: "nested.txt", content: "nested\n" });
+      }
+      return { content: [{ type: "text", text: "Nested operations complete" }] };
+    },
+  });
+  pi.registerCommand("commit-anchor", { handler: () => pi.appendEntry("commit-anchor", {}) });
+  pi.registerCommand("commit-reload", { handler: async (_: any, ctx: any) => ctx.reload() });
+  pi.registerCommand("commit-new", { handler: async (_: any, ctx: any) => ctx.newSession() });
+  pi.registerCommand("commit-fork", { handler: async (_: any, ctx: any) => {
+    const entry = ctx.sessionManager.getBranch().find((e: any) => e.type === "message" && e.message.role === "user");
+    await ctx.fork(entry.id, { position: "at" });
+  } });
+  pi.registerCommand("commit-back", { handler: async (_: any, ctx: any) => {
+    const entry = ctx.sessionManager.getBranch().find((e: any) => e.type === "custom" && e.customType === "commit-anchor");
+    await ctx.navigateTree(entry.id, { summarize: false });
+  } });
+  pi.registerCommand("commit-inspect", { handler: async (_: any, ctx: any) => {
+    const records = ctx.sessionManager.getBranch().filter((e: any) => e.type === "custom" && e.customType === "harness-commit-v1");
+    await writeFile(join(ctx.cwd, ".harness", "inspect.json"), JSON.stringify({
+      nested: records.some((e: any) => e.data.parentCallId),
+      writes: records.flatMap((e: any) => e.data.receipts).filter((e: any) => e.kind === "write").length,
+      sessionFile: ctx.sessionManager.getSessionFile(),
+    }));
+  } });
+}

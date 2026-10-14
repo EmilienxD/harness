@@ -1294,6 +1294,7 @@ def _build_prompt(
     staged: bool,
     transcript_path: str,
     guidance: str,
+    session_context: str | None = None,
 ) -> tuple[str, dict[str, Any]]:
     """Assemble the user-content half of the request; returns (text, stats)."""
     budget = prompt_budget()
@@ -1310,7 +1311,8 @@ def _build_prompt(
     summary = collect_file_summary(repo_root, targets, staged)
     raw_diff = collect_diff(repo_root, targets, staged)
     diff = trim_diff(raw_diff, budget.diff)
-    context = collect_session_context(transcript_path, repo_root, budget.context)
+    context = (collect_session_context(transcript_path, repo_root, budget.context)
+               if session_context is None else redact(_budget_events(session_context.splitlines(), budget.context)))
 
     sections = []
     if guidance:
@@ -1430,6 +1432,7 @@ def generate_commit_message(
     staged: bool,
     transcript_path: str,
     guidance: str,
+    session_context: str | None = None,
 ) -> AiMessage:
     """
     One Gemini call. Raises AiError with something the user can act on;
@@ -1459,7 +1462,7 @@ def generate_commit_message(
         )
 
     prompt, stats = _build_prompt(
-        repo_root, targets, staged, transcript_path, guidance
+        repo_root, targets, staged, transcript_path, guidance, session_context
     )
 
     payload = {
@@ -1542,6 +1545,7 @@ def build_dry_run_report(
     repo_root: str,
     scan: WriteScan | None,
     flags: Flags,
+    session_context: str | None = None,
 ) -> str:
     """
     Describe exactly what a real `/commit` would do, running every
@@ -1670,7 +1674,7 @@ def build_dry_run_report(
         return "\n".join(out)
 
     try:
-        ai = generate_commit_message(repo_root, targets, False, transcript_path, message)
+        ai = generate_commit_message(repo_root, targets, False, transcript_path, message, session_context)
     except AiError as exc:
         out.append("Failed to generate commit message:")
         out.append("")
@@ -1763,13 +1767,14 @@ def _force_utf8_output() -> None:
 
 CLAUDE = "claude"
 CHATGPT = "chatgpt"
+PI = "pi"
 
 # Set by `main` from argv, before anything reads it.
 PROVIDER = CLAUDE
 
-PRODUCT = {CLAUDE: "Claude Code", CHATGPT: "ChatGPT"}
+PRODUCT = {CLAUDE: "Claude Code", CHATGPT: "ChatGPT", PI: "Pi"}
 # How the commit trailer and the staging report name whoever did the writing.
-AUTHOR = {CLAUDE: "Claude", CHATGPT: "ChatGPT"}
+AUTHOR = {CLAUDE: "Claude", CHATGPT: "ChatGPT", PI: "Pi"}
 
 USAGE = (
     "Usage: /commit [--dry] [--ai] <message>\n"
@@ -1808,6 +1813,9 @@ def commit(
     message: str,
     widened_reason: str,
     cleanup: Callable[[], None] | None = None,
+    session_context: str | None = None,
+    before_commit: Callable[[], None] | None = None,
+    after_stage: Callable[[], None] | None = None,
 ) -> None:
     """Stage what the agent wrote, commit it, and report. Never returns."""
     session_id = str(payload.get("session_id") or "unknown")
@@ -1816,7 +1824,7 @@ def commit(
     if flags.dry:
         finish(
             build_dry_run_report(
-                message, session_id, transcript, repo_root, scan, flags
+                message, session_id, transcript, repo_root, scan, flags, session_context
             )
         )
 
@@ -1839,6 +1847,8 @@ def commit(
 
     if add_result.returncode != 0:
         finish(f"git add failed:\n{add_result.stderr}")
+    if after_stage is not None:
+        after_stage()
 
     scope = ["--", *targets] if targets and not in_merge(repo_root) else []
     staged = run(["git", "diff", "--cached", "--name-only", *scope], repo_root)
@@ -1849,7 +1859,7 @@ def commit(
     if flags.use_ai:
         try:
             ai = generate_commit_message(
-                repo_root, targets if scope else [], True, transcript, message
+                repo_root, targets if scope else [], True, transcript, message, session_context
             )
         except AiError as exc:
             finish(
@@ -1859,6 +1869,8 @@ def commit(
             )
         message, body = ai.subject, ai.body
 
+    if before_commit is not None:
+        before_commit()
     commit_args = ["git", "commit", "-m", message]
     if body:
         commit_args += ["-m", body]

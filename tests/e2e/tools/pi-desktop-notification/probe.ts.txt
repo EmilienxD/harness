@@ -1,0 +1,29 @@
+// Test-only lifecycle orchestration. Production extension owns notification state/delivery.
+import { appendFile, readFile } from "node:fs/promises";
+import { join } from "node:path";
+
+export default function (pi: any) {
+  let continueOnce = false;
+  pi.registerCommand("notify-name", { handler: () => pi.setSessionName('A Unicode session 雪 <&> "title"') });
+  pi.registerCommand("notify-anchor", { handler: () => pi.appendEntry("notify-anchor", {}) });
+  pi.registerCommand("notify-reload", { handler: async (_: string, ctx: any) => ctx.reload() });
+  pi.registerCommand("notify-continue", { handler: () => { continueOnce = true; } });
+  pi.registerCommand("notify-back", { handler: async (_: string, ctx: any) => {
+    const anchor = ctx.sessionManager.getEntries().find((entry: any) => entry.type === "custom" && entry.customType === "notify-anchor");
+    await ctx.navigateTree(anchor.id, { summarize: false });
+  } });
+  pi.registerCommand("notify-fork", { handler: async (_: string, ctx: any) => {
+    const user = ctx.sessionManager.getBranch().find((entry: any) => entry.type === "message" && entry.message.role === "user");
+    await ctx.fork(user.id);
+  } });
+  pi.on("agent_end", async (_: unknown, ctx: any) => {
+    let count = 0;
+    try { count = (await readFile(process.env.HARNESS_E2E_NOTIFY_CAPTURE!, "utf8")).trim().split("\n").filter(Boolean).length; } catch {}
+    await appendFile(join(ctx.cwd, "notification-boundaries.jsonl"), JSON.stringify({ count }) + "\n");
+  });
+  pi.on("agent_before_settle", () => {
+    if (!continueOnce) return;
+    continueOnce = false;
+    return { entries: [{ type: "custom_message", customType: "notify-continuation", content: "Complete the continuation acceptance fixture.", display: false }], continue: true };
+  });
+}

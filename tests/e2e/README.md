@@ -25,6 +25,8 @@ npm run test:pi-issues
 npm run test:pi-no-new-documents
 npm run test:pi-cleanup-git
 npm run test:pi-test-workflows
+npm run test:pi-commit
+npm run test:pi-desktop-notification
 npm run e2e:flush-out-useless-tests
 ```
 
@@ -180,6 +182,34 @@ provider parity need their applicable additional journeys. GitHub-backed tools s
 existing disposable fixture rules from the `harness-e2e` skill. Supply any scoped external-fixture
 credentials explicitly for that journey; keep model-service credentials excluded. Do not reset
 shared remote state to prepare a local Pi smoke run.
+
+## Pi commits and desktop notifications
+
+`test:pi-commit` installs the actual `commit` package and exercises the native command through
+Pi headless JSON/RPC against the fake Responses API shared with Codex. Acceptance inspects real
+Git HEAD, commit paths/trailer and index contents, active-branch receipts and exact inference
+counts. It covers dry runs, command/skill aliases, successful native and shell changes, uncertain
+attribution, preexisting work, unrelated staging, reload/resume/tree/fork identity, merge refusal,
+literal filenames, failed shell effects and dependency removal. The separate authenticated loopback
+Gemini fixture verifies direct AI generation, failed-generation explicit-message recovery, and
+working-tree/index changes arriving during generation. All four project/user × JSON/RPC combinations run.
+Pi's event attribution conservatively refuses overlapping same-path/shell calls and unrecognized
+mutators; passing this fixture does not certify arbitrary extension I/O.
+
+`test:pi-desktop-notification` runs project/user installs with real Pi, the installed Python
+adapter and the shared OS notifier. Its recording executable replaces only the native desktop
+submission boundary (Windows `powershell.exe`, macOS `osascript`, Linux `notify-send`) inside the
+isolated fixture PATH. Notification text stays in the fixture and is deleted at teardown; journey
+output contains structural counts only. Assertions cover zero-inference enable/disable and skill
+alias, Unicode title/body, two `agent_end` events with just one final notification, backend failure,
+reload/tree preferences, new/fork isolation, exact JSON resume, helper outage and coupled removal.
+A separate real-provider failure/abort journey verifies one explicit status notification each.
+
+Acceptance was run on Windows with Pi 1.2.0. Run `npm run e2e:pi-desktop-notification -- --native`
+for an explicit real-desktop smoke through the installed Pi package. The existing Windows notifier
+successfully submitted a toast without the recording backend, and the user confirmed visible
+delivery. POSIX desktop services and the interactive Pi TUI remain outside this headless gate. `--ai` requires its own explicitly
+requested Gemini service; command integration uses fake inference, never paid Pi inference.
 
 ## Pi path guards
 

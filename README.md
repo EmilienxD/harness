@@ -4,8 +4,9 @@
 
 Harness is a catalogue and installer for small, independently selectable agent skills, hooks, command-line tools, and the optional Aboard VS Code extension. It supports Claude Code and ChatGPT without making you adopt an all-or-nothing workflow.
 
-Pi supports `flush-out-useless-tests` and 20 shared skill packages, installed into its native
-skills directory, plus the `on-read-reminder`, `on-edit-reminder`, and `on-edit-block` extensions.
+Pi supports 22 shared skill packages, installed into its native skills directory, plus native
+extensions for path guards, comment budgets, document drafts, issue workflows, Git cleanup,
+cloud interviews, session commits, and desktop notifications.
 The [architecture and initial tool scope](docs/PI-ARCHITECTURE.md) track
 shipped skills and the remaining extension and runtime ports.
 
@@ -57,7 +58,7 @@ Pi-compatible shared packages are `tdd`, `resolving-merge-conflicts`,
 `read-all-adrs`, `writing-adrs`, `writing-for-agents`, `zoom-out`, `prototype`,
 `lavish`, `handoff`, `handoff-grilling`, `todo-hitl`, `decisions`, `next-decision`,
 `stop-overthinking`, `setup-command-aliases`, and `setup-text-replacements`, plus
-`flush-out-useless-tests`. For example, run `uv run harness install tdd audit --platform pi`
+`flush-out-useless-tests` and `test-workflows`. For example, run `uv run harness install tdd audit --platform pi`
 from this checkout, then invoke `/skill:tdd` or `/skill:audit` in Pi. `todo-hitl` installs
 `/skill:mark-as-todo-hitl` and `/skill:address-todo-hitl`.
 Project skills live in `.pi/skills`; user skills live in `~/.pi/agent/skills`, or the agent
@@ -99,7 +100,7 @@ separate integration. See the [policy and Pi coverage](docs/user/tools/guards/pr
 
 ## Reference
 
-Claude Code invokes a skill as `/skill-name`; ChatGPT uses `$skill-name`; Pi uses `/skill:skill-name` for its supported skills. The exceptions are hook-backed commands such as `/commit`, whose prompt is intercepted before a model call.
+Claude Code invokes a skill as `/skill-name`; ChatGPT uses `$skill-name`; Pi uses `/skill:skill-name` for its supported skills. Deterministic commands such as `/commit` are consumed by hooks or native Pi commands before a model call.
 
 **User-invoked** skills run only when you explicitly ask for them. **Model-invoked** skills may also be selected automatically when their description fits the work. Harness strongly favors the first group: you decide when a workflow starts, when a draft is published, and when another agent is launched.
 
@@ -133,7 +134,9 @@ Claude Code invokes a skill as `/skill-name`; ChatGPT uses `$skill-name`; Pi use
 
 - **`commit`**: `/commit <message>` stages the files changed by the current session and commits them without another model call. Add `--dry` to preview or `--ai` to generate a message through a direct Gemini request. Everything except `--ai` is local and needs no API key. For `--ai`, set `GEMINI_API_KEY` (or `GOOGLE_API_KEY`), or put `{"version": 1, "commit": {"geminiApiKey": "your-key"}}` in the gitignored `.harness/config.local.json`. The user-level `~/.harness/config.json` (or `$HARNESS_STATE_DIR/config.json`) can hold the same section for every repository. Do not put the key in committed `.harness/config.json`.
 
-- **`enable-desktop-notification`**: `/enable-desktop-notification` enables desktop notifications for the current Claude Code or Codex session without a model call. Each completed turn displays the beginning of the session title (Claude's `aiTitle` or Codex's saved thread name, with the session ID as fallback) and a preview of the final response. The setting survives session resume; other sessions stay off. Add `--disable` to turn it off. Codex also accepts `$enable-desktop-notification`. Uses native Windows PowerShell toasts, macOS `osascript`, or Linux `notify-send` (install it if missing); a local desktop notification service and enabled OS notifications are required. State lives under `~/.harness/desktop-notification/` or `$HARNESS_STATE_DIR/desktop-notification/`.
+  Install for Pi with `uv run harness install commit --platform pi`, then `/reload` and approve the resources. `/commit` and `/skill:commit` run the same native command. Pi records successful native `write`/`edit` and observed shell changes on the active session branch, verifies file contents again before staging, and adds a `Pi-session` trailer. Reload and exact session resume retain attribution; tree navigation uses only active ancestry, and a new or forked session starts with no ownership. It refuses uncertain attribution, preexisting changes in an edited file, conflicting staging on an owned file, and merges. Unrelated staged files stay staged. Failed AI generation preserves the command's staged files; retry with `/commit <message>` while that index remains unchanged. It never falls back to staging every dirty file. Custom tools and arbitrary extension I/O need explicit attribution support; use ordinary Git for changes the extension cannot safely own.
+
+- **`enable-desktop-notification`**: `/enable-desktop-notification` enables desktop notifications for the current Claude Code, Codex, or Pi session without a model call. Each completed turn displays the beginning of the session title (Claude's `aiTitle`, Codex's saved thread name, or Pi's native session name, with the session ID as fallback) and a preview of the final response. The setting survives session resume; other sessions stay off. Add `--disable` to turn it off. Codex also accepts `$enable-desktop-notification`; Pi also accepts `/skill:enable-desktop-notification`. Uses native Windows PowerShell toasts, macOS `osascript`, or Linux `notify-send` (install it if missing); a local desktop notification service and enabled OS notifications are required. Claude/Codex state lives under `~/.harness/desktop-notification/` or `$HARNESS_STATE_DIR/desktop-notification/`. Pi stores its preference in the native session, across tree navigation and reload, and starts new/forked sessions disabled. Pi notifies once at final settlement, after automatic continuations; errors and aborts get explicit status text. Delivery failures leave the turn complete and display a diagnostic. Install with `uv run harness install enable-desktop-notification --platform pi`, then `/reload` and approve the resources.
 
 - **`todo-hitl`**: `mark-as-todo-hitl` leaves a focused `TODO(HITL)` for work that needs a human decision; `address-todo-hitl` investigates the highest-priority marker, agrees on a resolution with you, and then implements it.
 

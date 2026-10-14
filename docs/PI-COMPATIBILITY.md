@@ -5,7 +5,7 @@ requested 35-package backlog and concrete provider boundaries. It owns first-rel
 sequencing; this report retains catalogue-wide feasibility and broader integration considerations.
 Current implementation includes all 22 shared skill packages in the architecture backlog,
 including `test-workflows`, with opt-in Pi installation. Extension-backed tools include the three
-path guards, `prefer-fewer-comments`, `no-new-documents`, `cleanup-git`, both issue workflow packages, and the cloud interview
+path guards, `prefer-fewer-comments`, `no-new-documents`, `cleanup-git`, both issue workflow packages, `commit`, `enable-desktop-notification`, and the cloud interview
 with its standalone relay. The hosted Pi migration/application are deployed; real Pi project/user
 journeys pass against local and production boards. Remaining extensions and runtime integrations remain proposed.
 
@@ -14,7 +14,7 @@ verified against installed Pi 1.2.0. The investigation results below predate tha
 the first tool has a workflow journey and the shared-skill batch has native discovery/invocation
 checks. The feasibility tables below describe original port requirements; consult the architecture
 backlog for current shipped status. The three path guards, comment budgets, document draft approval, Git cleanup
-inventory, both issue workflow packages, and cloud interview ship; remaining extensions, runtime,
+inventory, both issue workflow packages, cloud interview, session commits and desktop notifications ship; remaining extensions, runtime,
 and Aboard remain proposed.
 
 ## Executive conclusion
@@ -33,7 +33,7 @@ Recommendations:
 
 **The original investigation delivered research, mirrored references, and synchronization wiring.**
 Follow-up work added `--platform pi` skill installation and the first tool's E2E journeys.
-The three Pi path guards, comment budgets, document drafts, Git cleanup, both issue workflows and cloud interviews are implemented; remaining extensions, persistent runtime, and Aboard are proposed. Feasible below describes
+The three Pi path guards, comment budgets, document drafts, Git cleanup, both issue workflows, cloud interviews, session commits and desktop notifications are implemented; remaining extensions, persistent runtime, and Aboard are proposed. Feasible below describes
 the research assessment; consult the architecture's implementation status for shipped slices.
 
 ## Scope and evidence
