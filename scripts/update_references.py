@@ -15,6 +15,26 @@ REFERENCE_PATTERN = re.compile(
     re.MULTILINE,
 )
 
+PI_SOURCE_ROOT = "https://raw.githubusercontent.com/earendil-works/pi/main"
+PI_AGENT_ROOT = f"{PI_SOURCE_ROOT}/packages/coding-agent"
+
+# Keep upstream-relative paths so documentation links within the mirror work.
+PI_DOCS = (
+    "index", "quickstart", "cli", "usage", "configuration", "settings",
+    "skills", "extensions", "packages", "prompt-templates", "slash-commands",
+    "sessions", "session-format", "compaction", "message-types", "json",
+    "rpc", "rpc-commands", "rpc-extension-ui", "sdk", "cli-integration",
+    "providers", "models", "custom-provider", "virtual-models",
+    "environment-variables", "security", "containerization", "mcp", "codemode",
+    "how-pi-works", "windows", "terminal-setup", "tui",
+)
+PI_EXAMPLES = (
+    "README.md", "confirm-destructive.ts", "protected-paths.ts",
+    "permission-gate.ts", "tool-override.ts", "input-transform.ts", "notify.ts",
+    "handoff.ts", "session-name.ts", "subagent/README.md", "subagent/index.ts",
+    "subagent/agents.ts",
+)
+
 REFERENCE_SETS = {
     "CLAUDE-REFERENCES": (
         ("settings.md", "settings.md", "https://code.claude.com/docs/en/settings.md"),
@@ -25,6 +45,17 @@ REFERENCE_SETS = {
             "tools-reference.md",
             "https://code.claude.com/docs/en/tools-reference.md",
         ),
+    ),
+    "PI-REFERENCES": (
+        ("Pi coding agent", "upstream-README.md", f"{PI_AGENT_ROOT}/README.md"),
+        ("Package metadata", "package.json", f"{PI_AGENT_ROOT}/package.json"),
+        ("License", "LICENSE", f"{PI_SOURCE_ROOT}/LICENSE"),
+        *((f"{name}.md", f"docs/{name}.md", f"{PI_AGENT_ROOT}/docs/{name}.md")
+          for name in PI_DOCS),
+        *((f"examples/{name}", f"examples/extensions/{name}",
+           f"{PI_AGENT_ROOT}/examples/extensions/{name}") for name in PI_EXAMPLES),
+        ("Extension API types", "src/core/extensions/types.ts",
+         f"{PI_AGENT_ROOT}/src/core/extensions/types.ts"),
     ),
     "CHATGPT-REFERENCES": (
         ("build-skills.md", "build-skills.md", "https://learn.chatgpt.com/docs/build-skills.md"),

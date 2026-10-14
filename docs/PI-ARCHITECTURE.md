@@ -1,0 +1,343 @@
+# Pi provider architecture proposal
+
+Status: **proposed; documentation preparation only**. Pi is the planned third Harness provider.
+Its installer target, tool mappings, extensions, runtime, Aboard, and hosted integration are
+not implemented by this proposal. The [compatibility report](PI-COMPATIBILITY.md) provides
+catalogue-wide feasibility and official API evidence.
+
+The design uses the [official reference mirror](PI-REFERENCES/README.md), examined at upstream
+revision `47fc5f38ec18d56fe64abd41a2dcf9e5170a3dcf` (`@earendil-works/pi-coding-agent` 1.2.0).
+This is a design baseline, not runtime certification. Verify the installed exports and CLI
+before implementation; rolling mirror refreshes do not widen runtime support automatically.
+
+## First release scope
+
+The following **35 packages** are the requested backlog, sorted by recommended implementation
+priority. The original list defined scope, not priority. Complete the shared skill ports first,
+then build the extension bridge through `command-guard` and port dependent integrations; commit
+attribution and hosted grilling follow because they have the largest state/service requirements.
+Within each group, favor core development workflows before optional ergonomics. Shared
+prerequisites must land before their dependent packages.
+
+"Lavish Prototype" maps to the existing `lavish` and `prototype` packages; "Git cleanup",
+"next decisions", and "HITL TODOs" map to `cleanup-git`, `next-decision`, and `todo-hitl`.
+
+**Skill** means reuse the shared instructions/scripts/CLI with Pi mappings and any required
+portability edits. **Extension** means a native Pi entry point plus existing package cores;
+it can also include shared skills. Every row is planned; no Pi package support is declared yet.
+
+| Priority | Package | Route | Completion requirement beyond installer support |
+| --- | --- | --- | --- |
+| 1 | `flush-out-useless-tests` | Skill | Preserve scoped test audit and the existing approval workflow. |
+| 2 | `tdd` | Skill | Preserve behavior-focused red/green work and supporting references. |
+| 3 | `test-workflows` | Skill | Install the existing CLI; retain explicit status, execution evidence, and confirmation. |
+| 4 | `resolving-merge-conflicts` | Skill | Preserve merge/rebase intent and project verification. |
+| 5 | `setup-git-worktree-maker` | Skill | Copy necessary project Pi resources while keeping personal credentials and sessions outside worktrees. |
+| 6 | `audit` | Skill | Support the single-session audit; explicit explorer delegation waits for the later runtime adapter. |
+| 7 | `grill-me` | Skill | Preserve frontier questions and explicit user decisions. |
+| 8 | `breakdown-help-wanted-issue` | Skill | Preserve clarification and authenticated GitHub lookup. |
+| 9 | `read-all-adrs` | Skill | Read the full ADR inventory with honest context limits. |
+| 10 | `writing-adrs` | Skill | Preserve decision-document conventions and supporting references. |
+| 11 | `writing-for-agents` | Skill | Add Pi invocation/discovery/frontmatter mechanics to its shared reference when the payload ships. |
+| 12 | `zoom-out` | Skill | Reuse abstraction mapping and codebase navigation. |
+| 13 | `prototype` | Skill | Preserve throwaway branch and interactive-only workflow; verify UI with actually available tools. |
+| 14 | `lavish` | Skill | Make argument handling portable; retain the existing Lavish CLI and external review requirements. |
+| 15 | `handoff` | Skill | Preserve temporary output and secret redaction. |
+| 16 | `handoff-grilling` | Skill | Preserve design-tree handoff and temporary output. |
+| 17 | `todo-hitl` | Skill | Support both `mark-as-todo-hitl` and `address-todo-hitl`, retaining agreement before remediation. |
+| 18 | `decisions` | Skill | Reuse retrospective decision review over available conversation context. |
+| 19 | `next-decision` | Skill | Preserve recommendations and the wait for explicit decisions. |
+| 20 | `stop-overthinking` | Skill | Reuse the practical-decision workflow. |
+| 21 | `setup-command-aliases` | Skill | Preserve shell configuration and activation; document any Pi alias explicitly. |
+| 22 | `setup-text-replacements` | Skill | Preserve AutoHotkey edit/reload behavior and Windows-only scope. |
+| 23 | `command-guard` | Extension | Evaluate `bash` / `powershell` with existing Python TOML/regex rules; malformed policy blocks commands. |
+| 24 | `on-read-reminder` | Extension | Match successful reads and recognized shell reads; record partial reads accurately. |
+| 25 | `on-edit-reminder` | Extension | After a successful edit, supply matching guidance with existing cooldown and deduplication behavior. |
+| 26 | `on-edit-block` | Extension | Block matching writes until required guidance was successfully read or delivered on the active branch. |
+| 27 | `prefer-fewer-comments` | Extension | Reuse scanning/budgets/exemptions; examine newly introduced comments only. |
+| 28 | `no-new-documents` | Extension | Preserve draft mirrors, pending notices, user approval, and no-overwrite approval commands. |
+| 29 | `issue-readers` | Extension | Prepare complete `address-this` / `review-this` context through the existing issue graph and CLI. |
+| 30 | `issue-writers` | Extension | Supply session draft paths for all five skills; publish through a native command with existing locks and ordering. |
+| 31 | `cleanup-git` | Extension | Inject the existing read-only inventory; keep approval and live-state checks before cleanup. |
+| 32 | `enable-desktop-notification` | Extension | Persist per-session opt-in and notify once at final settlement using the existing OS notifier. |
+| 33 | `report-gotchas` | Extension | Reuse CLI/queue/worker; bind receipts to Pi identity and preserve idempotent reporting. |
+| 34 | `commit` | Extension | Reuse staging/Git/message generation; attribute successful writes to the active Pi session branch. |
+| 35 | `grill-me-in-cloud` | Extension | Prepare/publish rounds and deliver queued answers; extend hosted provider contracts and database constraints. |
+
+That is **22 skill-led packages and 13 extension-backed packages**. These are routes, not effort
+estimates: commit and hosted grilling have substantially larger state/integration requirements.
+
+The first release does not require `subagents`, `ship`, `aboard`, `auto`, `agent-launcher`,
+`mid-prompt-skills`, quota waiting, or archived packages. Keep those as future consumers of the
+same provider boundaries. Tools requiring browser/search integrations must report missing
+capabilities; choosing Pi or a model service does not supply those tools automatically.
+
+## Architecture boundaries
+
+```mermaid
+flowchart TD
+    Catalogue[Harness catalogue and Python installer] --> Adapter[Pi platform adapter and ownership receipts]
+    Adapter --> Skills[Shared skills in Pi skills root]
+    Adapter --> Entries[Selected package extension entry points]
+    Adapter --> Helpers[Existing Python package cores]
+    Entries --> Support[Versioned Pi support bridge]
+    Support --> Helpers
+    Support --> State[Branch-aware session event receipts]
+    Entries --> Hosted[Hosted Grill protocol and answer relay]
+    Future[Later persistent runtime and Aboard adapters] -.-> Support
+```
+
+The installer owns file placement, dependencies, reconciliation, and receipts. A Pi extension owns
+native event/command translation. Existing package cores own policy parsing and deterministic
+operations. Model-driven workflows remain shared skills. This keeps each catalogue selection
+independent and avoids moving workflow behavior into an application dependency.
+
+## Installer and package layout
+
+Add `Platform.PI` and a Pi adapter in [platforms.py](../src/harness_cli/platforms.py),
+centralize the provider registry, and keep available platforms separate from default targets.
+Pi should be opt-in; omitted `--platform` retains Claude Code and ChatGPT. Add an explicit
+logical `extensions` destination when implementing native extensions.
+
+| Logical destination | Project installation | User installation |
+| --- | --- | --- |
+| `platform` | `<project>/.pi` | `<agent-dir>` |
+| `skills` | `.pi/skills` | `<agent-dir>/skills` |
+| `extensions` | `.pi/extensions` | `<agent-dir>/extensions` |
+| `hooks` (Python/support files) | `.pi/hooks` | `<agent-dir>/hooks` |
+| `workspace` (shared policies) | `<project>/.harness/...` | Existing user Harness configuration paths |
+
+`<agent-dir>` defaults to `~/.pi/agent` and respects `PI_CODING_AGENT_DIR`, as documented in
+[Configuration](PI-REFERENCES/docs/configuration.md). User Harness state retains its existing
+`HARNESS_STATE_DIR` semantics; the Pi environment variable changes Pi resources only.
+
+Extend [`Target.destination_path`](../src/harness_cli/installer.py) with checked containment
+boundaries for custom agent directories outside the home. Pi receipt identity must distinguish
+effective agent directories and user/project scope, and retain installed paths for removal.
+Changing `PI_CODING_AGENT_DIR` must select another installation without redirecting removal
+of the original. Preserve existing Claude/ChatGPT receipt identities. Implement shared-user
+workspace ownership and native settings reconciliation before advertising guard payloads.
+
+Source packages retain their root-level shared skill/core files and shallow `pi/` overlays:
+
+```text
+harness/<category>/<tool>/
+├── harness.toml
+├── SKILL.md or <skill>/SKILL.md
+├── <tool>_hook.py and support modules
+├── claude/ and chatgpt/ where needed
+└── pi/
+    └── extension.ts
+
+Installed Pi resources:
+.pi/skills/<skill>/SKILL.md
+.pi/extensions/harness-<tool>/index.ts
+.pi/hooks/<tool>_hook.py
+.pi/hooks/pi-support/<bridge modules>
+```
+
+The file mappings install the entry point as `index.ts`; source overlays never appear inside
+installed skills. Python helpers and bridge modules stay outside extension auto-discovery.
+Map only each skill's shared files, excluding ChatGPT metadata. Prefer Pi-owned copies in
+`.pi/skills`; Pi also discovers `.agents/skills`, so test native name collisions with ChatGPT
+and Claude symlink installations. Use startup diagnostics to identify the selected skill source.
+Do not silently disable the user's own shared skill discovery.
+
+Use conventional resource directories for the first release; most packages need no Pi settings
+fragment. Before adding fragments, move configuration addition/shared-removal accounting behind
+the adapter: `installer.py` currently calls `settings_merge.additions` and `remove_shared`
+directly. Pi settings resource filters and package objects need native identity semantics, not
+Claude hook-array reconciliation. Preserve unrelated resource filters, models, tools, and settings.
+Harness must not own Pi authentication, trust decisions, native sessions, or unrelated extensions.
+[Pi Packages](PI-REFERENCES/docs/packages.md) remain an optional later distribution format;
+Harness continues to own the files it installs rather than introducing a second installer owner.
+
+Pi itself is an external prerequisite for this release. The current host-action schema supports
+pinned Python tools and VSIXs; adding npm/CLI ownership would be a separate design change.
+
+## Shared Pi support and Python reuse
+
+Propose a non-selectable `harness/extension/pi-support` package with versioned transport,
+event normalization, command routing, session identity, and receipt utilities. It has no tool
+policies, automatic workflow selection, model-service defaults, or background services of its own.
+Each selected extension imports the installed support modules and registers its own behavior.
+Skills without extension behavior do not depend on it.
+
+Extend [manifest dependencies](../src/harness_cli/manifest.py) and catalogue resolution with an
+optional platform filter. Extension packages declare a version-constrained, Pi-only, coupled
+dependency on `pi-support`; existing dependencies without a filter retain their behavior.
+Multiple Pi packages share one receipt-owned copy, removed when its last dependent is removed.
+This avoids requiring the bridge for Claude/ChatGPT and avoids one bridge copy per package.
+
+Start with bounded subprocess calls per relevant event. Choose Python through the installer's
+existing interpreter resolution and record the launch argv; send requests as UTF-8 JSON on stdin,
+parse one versioned JSON response, and keep diagnostics on stderr. Propagate cancellation,
+timeouts, output limits, and exit/protocol errors. Never build shell commands from prompt text.
+A persistent worker can follow measured latency evidence; it is not required for initial support.
+
+Reuse Python parsing, regexes, shell detection, Git/GitHub logic, publishing, and notification
+code. Extract callable core functions where a current hook mixes those operations with provider
+I/O. Retain existing hook entry points for Claude/ChatGPT. Pi passes normalized operations into
+the cores instead of fabricating Claude transcripts or emulating the entire hook protocol.
+
+The proposed bridge request carries protocol version, operation, cwd, provider `pi`, session
+ID/file, active branch anchor, tool-call/parent-call IDs where present, native tool name/input,
+and observed outcome. Responses distinguish allow/block, model guidance, deterministic command
+output, and diagnostics. Individual cores receive only the fields they need. Successful command
+output does not imply a request to start a model turn.
+
+## Event handling and state
+
+The mapping below follows [Extensions](PI-REFERENCES/docs/extensions.md) and the exported
+[API types](PI-REFERENCES/src/core/extensions/types.ts). It is the proposed Harness adapter
+contract, with failure behavior exercised before a package is advertised as supported.
+
+| Boundary | Pi API | Harness responsibility |
+| --- | --- | --- |
+| Bind/recover identity | `session_start` | Rebind on startup/reload/new/resume/fork; rebuild branch state. |
+| Change active ancestry | `session_tree` | Rebuild permissions/attribution and invalidate stale pending context after tree navigation. |
+| Prepare a workflow | `input` / `before_agent_start` | Supply context for the actual explicit invocation once. |
+| Deterministic user command | `registerCommand` | Execute the core and display status with no agent inference turn. |
+| Deny a model tool operation | `tool_call` | Normalize native schemas and block before execution. |
+| Record outcome / append guidance | `tool_result` | Attribute observed changes; deliver informational guidance after success. |
+| Persist branch-local metadata | `appendEntry` / session manager | Record receipts and reconstruct only the active ancestry. |
+| Refresh compacted context | `session_compact` / next-run preparation | Restore required package context with deduplication. |
+| Continue for actionable feedback, later | `agent_before_settle` | Require concrete new context and bounded continuation. |
+| Notify final completion | `agent_settled` | Notify once; do not mistake `agent_end` for final completion. |
+| Release resources | `session_shutdown` | Abort pending transport and release timers/listeners idempotently. |
+
+Factories register behavior only. Start session resources at session start or on demand and
+dispose them on shutdown. Preserve original tool content, details, usage, and error status;
+when returning replaced `content`, explicitly preserve `structuredContent` for additive guidance.
+Read/edit reminders must not convert a successful operation into an error.
+
+Session JSONL is a tree ([Session format](PI-REFERENCES/docs/session-format.md)). Identity is
+the provider plus native session ID and exact saved file, with an active branch anchor for
+state reconstruction. Terminal PID is execution identity only. Successful-read receipts include
+the delivered range and guidance identity; an attempted or partial read never proves a complete
+guide was read. Keep current package-specific delivery/cooldown behavior explicit.
+
+Record events directly, including nested tool calls. Pi's nested execution passes through tool
+events but does not create transcript tool entries; its bounded `nestedCalls` summary can omit
+arguments. It is insufficient as the sole source for commit attribution or read permissions.
+Persist minimal branch-linked receipts for successful reads/writes and command consumption,
+with call IDs for deduplication. After reload, recover from receipts on the active ancestry;
+abandoned branches do not authorize edits or contribute a previous-message selection.
+
+Commit additionally needs a conservative attribution ledger: observed successful file changes,
+per-call pre/post evidence where needed, and already committed changes. Account for recognized
+shell writes, failed commands with partial mutations, parallel calls, nested calls, prior commits,
+and external changes. A successful shell exit alone does not identify all files it changed.
+Preserve existing-index protection; incomplete attribution must stop the automated commit and
+report the uncertainty for user resolution, never stage every dirty file. Branch changes do not
+rewind the working tree, so verify current file/index evidence against branch receipts.
+
+## Commands and explicit skill invocation
+
+Shared workflows use Pi's native `/skill:name arguments`. Pi appends arguments to the request;
+Claude substitutions such as `$ARGUMENTS`, fork semantics, and tool permissions need explicit
+portability treatment. Preserve `disable-model-invocation: true` for user-only skills.
+`enableSkillCommands` controls interactive discovery, not whether a manually entered command
+can execute ([Skills](PI-REFERENCES/docs/skills.md)).
+
+Register native `/commit`, `/publish-issues`, `/approve-doc-draft`, `/reject-doc-draft`, and
+`/enable-desktop-notification` handlers. Keep existing options and error behavior. These commands
+create no Pi agent inference request; `/commit --ai` may still call its existing explicitly
+requested message-generation service. Measure those requests separately.
+
+Short extension commands dispatch before the ordinary `input` handler. Handle both `/name` and
+`/skill:name` for deterministic commands so direct skill invocation cannot load an interception
+failure body or start an accidental agent turn. For prepared workflows such as issue readers,
+cleanup, and cloud grilling, choose and test one routing path per invocation: resolve the shared
+skill, prepare package context, then submit once. Extension-sent messages only expand commands
+when `expandPromptTemplates` is requested; avoid recursive alias expansion. Test typed input,
+RPC input, extension submission, missing arguments, and errors independently.
+
+Explicit invocation remains the source of workflow authorization. Installation supplies tools
+and guards; it does not start issue publication, Git cleanup, or an interview automatically.
+
+## Hosted grilling without an Aboard dependency
+
+`grill-me-in-cloud` is in the requested release, while the full Pi Aboard adapter is deferred.
+Propose a session-scoped relay owned by the grilling extension, reusing existing hosted delivery
+contracts. It polls/claims queued answers, submits them through Pi's native user-message API,
+and acknowledges only after a correlated, persisted user-message receipt confirms acceptance by
+the bound session. The void return from `sendUserMessage` alone is insufficient confirmation.
+It needs no Harness ask/reply runtime and keeps the real Pi TUI visible.
+
+The relay and a later Aboard relay must compete through the same delivery lease/idempotency
+rules, so both running cannot double-submit an answer. Persist delivery IDs and submission receipts
+before retrying; recover an accepted-but-unacknowledged submission without resending it. Rebind on
+session replacement, invalidate stale round context after branch navigation, cancel polling on
+shutdown, and preserve queued answers on disconnect, failed submission, or loss of ownership.
+Keep current configuration/credentials outside model-facing context.
+
+This requires additive `pi` support in [`protocol/grill/v1/states.json`](../protocol/grill/v1/states.json),
+hosted schemas/API validation, Pi session/title extraction, and a **new** database migration
+widening existing provider constraints. Do not rewrite the initial migration. A publication-only
+port is incomplete: round publication, assets, presence, queued answers, and confirmed delivery
+must pass together. Development and migration preparation precede any separately authorized
+deployment; an older hosted service needs an explicit unsupported-provider error.
+
+## Guard coverage and admission
+
+Pi project trust controls resource loading, and extensions execute with the user's permissions
+([Security](PI-REFERENCES/docs/security.md)). Installing files does not prove a required guard
+loaded. Verify trusted project discovery, bridge readiness, supported native tool schemas, and
+required registrations before a guarded automated launch. Report missing resources in ordinary
+sessions; refuse a Harness launch requiring mandatory restrictions when that evidence is absent.
+Do not silently grant trust or copy authentication state.
+
+Cover native `read`, `edit`, `write`, `bash`, and `powershell` plus recognized search/read paths
+as required by each package. Nested calls require the same decisions as direct calls. New custom
+or MCP mutators require explicit schema adapters; unknown mutation coverage is a reported gap,
+and mandatory-restriction launches reject it. Other extensions can mutate tool inputs after a
+guard handler, so controlled loading/order is also required for those launches.
+
+Guard callbacks do not intercept arbitrary extension filesystem/subprocess operations, and a
+tool list is not OS isolation. Preserve this guardrail boundary in user documentation. Python
+transport/policy failure blocks operations covered by a blocking guard; informational extensions
+retain the tool result and emit a visible diagnostic. Do not describe disabled/unloaded guards
+as enforceable. Strong restriction guarantees need OS/container enforcement.
+
+## Delivery plan and acceptance gates
+
+| Work package | Contents | Completion gate |
+| --- | --- | --- |
+| A. Provider foundation | Registry/default separation, Pi adapter/roots, receipt identity, extension destination, platform-filtered dependencies, prerequisite/trust diagnostics. | Project/user/custom-agent-dir install, upgrade, dry-run, modified-file protection, shared dependencies, and cross-provider removal behave correctly. |
+| B. Shared workflows | The 22 skill-led packages, in backlog order where practical; Lavish argument and skill-mechanics edits. | Actual trusted Pi discovery selects intended files; user-only invocation and scripts/CLI paths work; gaps are explicit. |
+| C. Extension foundation | Versioned bridge, routing, branch receipts, cancellation, result composition, then `command-guard`. | Denied direct/nested calls leave no mutation; malformed policies, unavailable Python, and bridge errors have the specified behavior. |
+| D. Priority integrations | Issue readers/writers, commit, document/read/edit/comment guards, then cleanup, notifications, gotchas. | Session ownership, staging protection, draft approval, success-only guidance, opt-in notifications, and idempotent receipts match existing contracts; deterministic commands make zero Pi inference requests. |
+| E. Hosted interview | Grilling extension, standalone answer relay, hosted additive schema/migration changes. | Publish/answer/reconnect/reload flows work, delivery is acknowledged correctly, and competing relays do not duplicate answers. |
+
+Do not declare all catalogue tools Pi-supported at once. Add `[platforms.pi]` mappings and bump
+each package version when its payload/support actually ships. The proposed `pi-support` package
+and dependency syntax are absent today. Each advertised package needs its own applicable gate;
+passing a skill discovery check does not certify an extension-backed command.
+
+Use existing installer/core unit tests for reconciliation and policy semantics. Real-CLI journeys
+must exercise Pi with isolated agent/config/session directories and authenticated loopback model
+inference; use the `harness-e2e` skill when extending that infrastructure. Assert files/index/GitHub
+effects, event/schema contracts, receipt state, and request counts. Agent prompt wording is not
+a test contract. Include Windows/POSIX paths, discovery collisions, failed/aborted turns, nested
+and parallel calls, session fork/reload/compaction, unknown tools, and protocol/cancellation errors.
+Keep Claude/ChatGPT regression checks passing.
+
+## Later provider consumers
+
+Persistent `run`, `ask`, `reply`, `resume`, and `watch` remain in the independently packaged
+Python session runtime. A later Pi runtime adapter supplies exact launch/resume/fork identity,
+JSON/RPC progress and semantic success parsing, branch-aware previous messages, model selection,
+and interrupted-execution recovery. Harness `provider: pi` identifies the agent host; Pi's own
+model `--provider` identifies a service. Avoid binary Claude/ChatGPT fallbacks and a universal
+Pi model list. Preserve unknown telemetry rather than inventing context percentages.
+
+`ship` follows that runtime adapter, preserving inboxes, wait tokens, bounded feedback, result
+replay, and one implementer per worktree. Aboard follows with a native platform adapter, visible
+terminal binding, prompt receipts, worktree setup, and restriction admission. JSON exit status
+or RPC prompt acceptance alone does not prove a successful completed run. Native Pi RPC is a
+headless transport; adopting it must not silently replace the visible-terminal product.
+
+These future adapters consume the same event/identity contracts without making the initial
+35 packages depend on their implementation. The compatibility report retains their detailed
+feasibility and broader release gates. Provider adapters, catalogue declarations, service migrations, deployment, and release remain pending.

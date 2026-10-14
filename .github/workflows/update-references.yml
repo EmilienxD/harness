@@ -11,7 +11,7 @@ permissions:
 jobs:
   update:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 10
 
     steps:
       - uses: actions/checkout@v4
@@ -25,6 +25,7 @@ jobs:
           python scripts/update_references.py
           docs/CLAUDE-REFERENCES
           docs/CHATGPT-REFERENCES
+          docs/PI-REFERENCES
 
       - name: Commit changes
         run: |
@@ -36,6 +37,6 @@ jobs:
             exit 0
           fi
 
-          git add docs/CLAUDE-REFERENCES docs/CHATGPT-REFERENCES
+          git add docs/CLAUDE-REFERENCES docs/CHATGPT-REFERENCES docs/PI-REFERENCES
           git commit -m "Update documentation references"
           git push
