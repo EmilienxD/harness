@@ -141,4 +141,4 @@ platforms = ["chatgpt"]
 [[actions]]
 type = "uv-tool"
 package = "harness-subagents-runtime"
-source = "git+https://github.com/EmilienxD/harness@d9d0000279f77a0ff57663d91344136956e495b9#subdirectory=harness/productivity/subagents/runtime"
+source = "git+https://github.com/EmilienxD/harness@8fe1743ee19ed3ededb5e7296ca846290225c882#subdirectory=harness/productivity/subagents/runtime"
