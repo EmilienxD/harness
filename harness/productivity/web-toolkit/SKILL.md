@@ -3,9 +3,11 @@ name: web-toolkit
 description: Web search and page reading through the `web-toolkit` CLI for online research, documentation, and current information.
 ---
 
-Run `web-toolkit` through the shell when it fits the user's web tool preference. Tell the user if the command is not installed.
+web-toolkit is a free and local web search CLI. Run `web-toolkit` through the shell when it fits the user's web tool preference. Tell the user if the command is not installed.
 
 `search` prints up to 10 numbered results, each with a title, URL, and snippet. `fetch` prints a page, PDF, or text file as Markdown after a short header. A long page prints its beginning, the later headings with their line numbers, and a `Full text:` path holding the whole page: read or grep that file for the rest instead of fetching again.
+
+Examples:
 
 ```sh
 # Search; put several words in quotes
