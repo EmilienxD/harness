@@ -49,18 +49,18 @@ def invokes_a_hook(text: str, payloads: set[str]) -> bool:
 
 
 def test_every_hook_payload_is_one_provider_neutral_file_named_for_its_tool():
-    """`{tool-name}_hook.py`, at the package root, shared by every provider.
+    """Hook entry scripts live at the package root and are shared by providers.
 
-    A hook selects its provider from the `--claude`/`--chatgpt` flag the
-    installer writes into the settings, so there is never a second copy of a
-    payload -- and never a product name in a payload's path.
+    Runtime modules installed under ``hooks/`` are support files, not hook
+    entry scripts. A script selects its provider from the installer-written
+    flag, so there is never a provider-specific copy of the entry point.
     """
     for tool in discover().values():
         expected = tool.name.replace("-", "_") + "_hook.py"
         sources = hook_sources(tool)
         entry_points = [src for src in sources if src.endswith("_hook.py")]
 
-        for src in sources:
+        for src in entry_points:
             assert "/" not in src, (
                 f"{tool.name}: hook payload '{src}' must live at the package root"
             )
