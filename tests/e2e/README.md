@@ -29,6 +29,7 @@ npm run test:pi-test-workflows
 npm run test:pi-commit
 npm run test:pi-desktop-notification
 npm run test:pi-report-gotchas
+npm run test:pi-web-toolkit
 npm run e2e:flush-out-useless-tests
 ```
 
@@ -212,6 +213,31 @@ for an explicit real-desktop smoke through the installed Pi package. The existin
 successfully submitted a toast without the recording backend, and the user confirmed visible
 delivery. POSIX desktop services and the interactive Pi TUI remain outside this headless gate. `--ai` requires its own explicitly
 requested Gemini service; command integration uses fake inference, never paid Pi inference.
+
+## Pi Web Toolkit
+
+`test:pi-web-toolkit` installs the actual `web-toolkit` package, host CLI and native extension
+in isolated uv directories. Project JSON and user RPC journeys use real Pi 1.2.0 with the
+fake OpenAI Responses API shared with Codex. They verify that no fallback skill is installed
+or discovered and invoke the native tools directly. Local HTTP pages verify fetch, redirects,
+Unicode, saved full text, HTTP error bodies, validation, missing executable handling and
+RPC cancellation. Search runs the real CLI and Chrome DOM extraction/filtering; a fixture
+CDP connection fulfills search navigation with fixed engine HTML and blocks other browser
+requests. This tests the integration without depending on public engine availability.
+Domain-filter journeys verify multiple allowed hosts, case normalization, subdomains,
+blocked-host precedence, unrestricted search, invalid domain inputs and rejected mixed filter
+syntax. They inspect the exact query received by the actual browser in memory only.
+Each journey expects 16 inference requests and zero unexpected requests, checks the offered
+tool schemas and structured outputs, and verifies receipt-driven removal and unchanged settings.
+The CLI arguments include shell metacharacters to verify literal transport.
+For a missing executable, the journey extracts the returned installation command and runs
+the real uv invocation with an empty offline cache and isolated tool directories, verifying
+a clean failure without network access. The scripted missing-CLI session makes no further
+web calls; the once-per-session recovery policy is agent guidance, not model-behavior certification.
+
+Run `npm run e2e:pi-web-toolkit` for the executable journeys. Chrome, Edge or Chromium is
+required. These Windows headless checks cover native integration; public engine availability,
+POSIX and interactive Pi rendering remain separate acceptance boundaries.
 
 ## Pi gotcha reports
 

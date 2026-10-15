@@ -10,6 +10,8 @@
     "e2e:pi": "npm run e2e:pi:build && node dist/tools/pi-smoke/cli.js",
     "test:pi:build": "esbuild test/pi.test.ts --bundle --platform=node --format=cjs --target=node22 --outfile=dist/test/pi.test.js",
     "test:pi": "npm run test:pi:build && node --test dist/test/pi.test.js",
+    "e2e:pi-web-toolkit": "esbuild tools/pi-web-toolkit/cli.ts --bundle --platform=node --format=cjs --target=node22 --outfile=dist/tools/pi-web-toolkit/cli.js && node dist/tools/pi-web-toolkit/cli.js",
+    "test:pi-web-toolkit": "esbuild test/pi-web-toolkit.test.ts --bundle --platform=node --format=cjs --target=node22 --outfile=dist/test/pi-web-toolkit.test.js && node --test dist/test/pi-web-toolkit.test.js",
     "test:pi-shared-skills": "esbuild test/pi-shared-skills.test.ts --bundle --platform=node --format=cjs --target=node22 --outfile=dist/test/pi-shared-skills.test.js && node --test dist/test/pi-shared-skills.test.js",
     "e2e:ship:build": "npm run e2e:subagents:bridge && esbuild tools/ship/cli.ts --bundle --platform=node --format=cjs --target=node22 --outfile=dist/tools/ship/cli.js",
     "e2e:ship": "npm run e2e:ship:build && node dist/tools/ship/cli.js",

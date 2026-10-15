@@ -73,13 +73,14 @@ def test_chatgpt_does_not_create_config_when_absent(tmp_path, installed_actions)
     assert not config.exists()
 
 
-def test_pi_installs_only_the_shared_skill(tmp_path, installed_actions):
+def test_pi_installs_native_extension_without_fallback_skill(tmp_path, installed_actions):
     target, catalogue = installer(tmp_path, Platform.PI)
 
     catalogue.reconcile({"web-toolkit"})
 
     assert sorted(path.relative_to(target.install_root).as_posix() for path in target.install_root.rglob("*") if path.is_file()) == [
-        "skills/web-toolkit/SKILL.md"
+        "extensions/harness-web-toolkit/index.ts"
     ]
     catalogue.reconcile(set())
     assert not (target.install_root / "skills/web-toolkit").exists()
+    assert not (target.install_root / "extensions/harness-web-toolkit").exists()

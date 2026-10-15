@@ -90,6 +90,23 @@ estimates: commit and hosted grilling have substantially larger state/integratio
 35-package backlog. They install the unchanged shared skills at project and user scope;
 native discovery and explicit invocation are verified by the shared-skill batch.
 
+`web-toolkit` additionally ships native `web_search(query)` and `web_fetch(url)` tools in
+1.2.0, alongside its existing host CLI. Version 1.2.1 installs no fallback skill on Pi;
+Claude Code and ChatGPT retain that skill for environments without native web tools. The Pi extension executes
+the CLI with literal argv, a bounded output buffer and deadline, and abort propagation.
+Version 1.3.0 adds native `allowed_domains` and `blocked_domains` arrays, translated to the
+existing CLI's enforced domain filters. Allowed hosts match as alternatives, subdomains are
+included and exclusions take precedence; mixing explicit filters with inline operators is
+rejected before execution. Tool descriptions and native guidelines cover source reading,
+citations, current-date searches, authentication limits and full-text file reuse.
+Version 1.3.2 replaces installer-specific missing-CLI guidance with a direct pinned uv
+installation command and shared agent instructions for one installation attempt followed
+by session-wide unavailability and a one-sentence user notice on failure. This is agent
+workflow guidance, not an extension-enforced ban on later calls.
+Successful and nonzero CLI results carry `{ output, exitCode }` in structured content;
+nonzero exits are tool errors preserving stdout, including HTTP error pages. It has no
+session-state or Python bridge dependency. See the [acceptance journey](../tests/e2e/README.md#pi-web-toolkit).
+
 `redirect-subagents`, `prefer-read-tool`, and `prefer-edit-tool` are Claude-only tools.
 `agent-launcher` is not required for Pi and is excluded from planned Pi ports.
 

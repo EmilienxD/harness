@@ -4,7 +4,7 @@
 
 Harness is a catalogue and installer for small, independently selectable agent skills, hooks, command-line tools, and the optional Aboard VS Code extension. It supports Claude Code and ChatGPT without making you adopt an all-or-nothing workflow.
 
-Pi supports 24 shared skill packages and the `web-toolkit` CLI, installed into its native skills directory, plus native
+Pi supports 24 shared skill packages and Web Toolkit with its CLI and two native web tools, plus native
 extensions for path guards, comment budgets, document drafts, issue workflows, Git cleanup,
 cloud interviews, session commits, desktop notifications, and Discord gotcha reports.
 The [architecture and initial tool scope](docs/PI-ARCHITECTURE.md) track
@@ -391,7 +391,15 @@ Run `test-workflows status` explicitly when verifying changes, as you would run 
 
 Fetch tries plain HTTP with a browser-like fingerprint first. Bot challenges, blocked responses, pages with little text or an empty application root, and every search use one shared headless Chrome: the first command that needs it starts it with a dedicated profile, concurrent commands each work in their own tab, and it closes after 10 idle minutes. Search reads public engine result pages, trying DuckDuckGo, Startpage, Bing, and Google in that order and answering from the first engine whose results match the query. An installed Google Chrome or Microsoft Edge is required (or Chromium; set `WEB_TOOLKIT_BROWSER` to choose an executable). The browser state lives in `~/.harness/web-toolkit/` (or `$HARNESS_STATE_DIR/web-toolkit/`). Chrome runs without its own process sandbox, which cannot start inside agent sandboxes.
 
-Installation adds the CLI and shared skill without changing provider web tools or user configuration. For ChatGPT sandboxed commands, configure network access and writable roots for uv's tool and Python directories and the browser state if needed; the Windows sandbox may otherwise be unable to reach the CLI installation. Pi has no built-in web tool. Search engines throttle bursts of automated queries; a throttled engine is skipped for that search.
+Installation adds the CLI. Claude Code and ChatGPT receive the fallback skill for when native web tools are unavailable. Pi receives only the native `web_search` and `web_fetch` tools, without the fallback skill; restart Pi or reload extensions after installation. `web_search` takes one required string, `query`; `web_fetch` takes one required string, `url`. Both return `{ output: string, exitCode: integer }`, where `output` is the CLI text followed by any stderr. Nonzero exits are tool errors and preserve HTTP error pages. Calls have a 120-second deadline, a 256 KiB output limit, and support cancellation. The extension invokes the CLI directly with literal arguments and uses the current Pi working directory. It requires `web-toolkit` on Pi's PATH and works at project or user scope.
+
+Pi's `web_search` also accepts optional `allowed_domains` and `blocked_domains` arrays, for example `{ "query": "asyncio TaskGroup", "allowed_domains": ["docs.python.org"], "blocked_domains": ["legacy.docs.python.org"] }`. Use bare domain names rather than URLs. Allowed domains match as alternatives, both filters include subdomains, and exclusions win. Empty arrays apply no restriction. Put website filters in these parameters when using them; combining them with inline `site:` operators is rejected to avoid conflicting restrictions. The CLI continues to accept its existing `site:` query syntax.
+
+The native descriptions explain when to search, fetching sources before relying on excerpts, current-date queries, Markdown source citations, and treating retrieved content as untrusted data. Fetch returns document text for the calling agent to analyze, follows redirects, and supports explicit HTTP and private-network URLs. It uses a dedicated browser profile rather than the user's normal browser login; prefer an authenticated service tool or CLI for content requiring sign-in. Long-page files are saved extracted text, not a fetch-response cache.
+
+A missing CLI returns a direct, pinned `uv tool install --force` command. Both native tools instruct the agent to attempt installation at most once per session. If that command fails, cannot run, or leaves the tools unavailable, the agent must treat both tools as unusable for the rest of the session, stop tool and installation retries, and report the limitation to the user in one sentence. Installation is an explicit agent action; the web tools themselves remain read-only.
+
+Provider configuration remains user-owned. For ChatGPT sandboxed commands, configure network access and writable roots for uv's tool and Python directories and the browser state if needed; the Windows sandbox may otherwise be unable to reach the CLI installation. Search engines throttle bursts of automated queries; a throttled engine is skipped for that search.
 
 ## Aboard
 
