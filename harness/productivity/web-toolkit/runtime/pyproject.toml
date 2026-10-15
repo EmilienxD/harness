@@ -1,0 +1,22 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "harness-web-toolkit"
+version = "1.0.0"
+description = "Local web search and page fetching CLI for coding agents"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+dependencies = [
+    "curl_cffi>=0.11,<1.0",
+    "pypdfium2>=4.30,<6.0",
+    "trafilatura>=2.0,<3.0",
+    "websockets>=13.0,<18.0",
+]
+
+[project.scripts]
+web-toolkit = "web_toolkit.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/web_toolkit"]

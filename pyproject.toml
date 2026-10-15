@@ -25,6 +25,10 @@ dev = [
     "pytest>=8.0",
     "PyYAML>=6.0,<7.0",
     "tomlkit>=0.13,<1.0",
+    "curl_cffi>=0.11,<1.0",
+    "pypdfium2>=4.30,<6.0",
+    "trafilatura>=2.0,<3.0",
+    "websockets>=13.0,<18.0",
 ]
 
 [tool.hatch.build.targets.wheel]
@@ -46,4 +50,5 @@ pythonpath = [
     "harness/productivity/subagents/runtime/src",
     "harness/productivity/agent-launcher/runtime/src",
     "harness/productivity/report-gotchas/runtime/src",
+    "harness/productivity/web-toolkit/runtime/src",
 ]

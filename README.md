@@ -4,7 +4,7 @@
 
 Harness is a catalogue and installer for small, independently selectable agent skills, hooks, command-line tools, and the optional Aboard VS Code extension. It supports Claude Code and ChatGPT without making you adopt an all-or-nothing workflow.
 
-Pi supports 24 shared skill packages, installed into its native skills directory, plus native
+Pi supports 24 shared skill packages and the `web-toolkit` CLI, installed into its native skills directory, plus native
 extensions for path guards, comment budgets, document drafts, issue workflows, Git cleanup,
 cloud interviews, session commits, desktop notifications, and Discord gotcha reports.
 The [architecture and initial tool scope](docs/PI-ARCHITECTURE.md) track
@@ -244,6 +244,8 @@ Custom roles use Harness's native background or visible-terminal launch path. Ab
 
 - **`test-workflows`**: Defines Markdown end-to-end checks, with covered-file hashes that tell agents when a capability needs verification again. Its CLI is described below.
 
+- **`web-toolkit`**: Gives Claude Code, ChatGPT, and Pi local web search and page fetching through the `web-toolkit` CLI. Free, keyless, and safe for many concurrent agents. Described below.
+
 - **`tdd`**: Applies behavior-focused test-driven development in vertical red-green slices. It agrees on public test seams first, rejects implementation-coupled or tautological tests, and adds only enough implementation to satisfy one failing test at a time.
 
 - **`writing-for-agents`**: Guides the creation of predictable skills and agent instruction files. It treats invocation pointers, information hierarchy, completion criteria, progressive disclosure, leading words, and pruning as concrete controls over agent behavior and document load.
@@ -382,6 +384,14 @@ covers: ["src/greeting/**/*.py"]
 Run the workflow, then `test-workflows confirm tests/workflow/greeting.md` to automatically create or update the sibling `greeting.manifest.json` with the normalized covered-file hash and generated `verified_files` inventory. Commit both files. Agents write and read the Markdown, including its `covers` patterns; the CLI manages the manifest. A workflow without a manifest is unconfirmed (`stale`). Hashes normalize line endings, so equivalent Windows and Unix checkouts agree. `test-workflows status` reports workflow states and changed covered files in TOON format, including broken mappings whose globs match nothing and malformed workflows or manifests. Add `--json` before or after the command to output JSON instead; this also applies to confirmation and command errors. Exit codes are 0 for all passing, 1 for a stale/broken/invalid workflow, and 2 for a command error. Discovery finds tracked/non-ignored Markdown with `covers` front matter; use `--directory <folder>` or `--root <checkout>` before the subcommand to narrow it.
 
 Run `test-workflows status` explicitly when verifying changes, as you would run unit tests, then run the affected checks and confirm passing ones. Loop implementers run and report; only the Lead stamps their results. Pi installs the same CLI and shared skill; invoke `/skill:test-workflows` to load it explicitly. Confirmation records verification performed by the agent; it does not execute the acceptance steps.
+
+## Web toolkit
+
+`web-toolkit search "<query>"` prints result titles, URLs, and snippets; `web-toolkit fetch <url>` prints a page as Markdown, a PDF as per-page text, and other text formats unchanged, in `--max-chars` windows continued with `--offset`. `web-toolkit --help` and each command's `--help` document every option.
+
+Fetch tries plain HTTP with a browser-like fingerprint first. Bot challenges, blocked responses, JavaScript-only pages, and every search use one shared headless Chrome: the first command that needs it starts it with a dedicated profile, concurrent commands each work in their own tab, and it closes after 10 idle minutes. Search reads public engine result pages, trying DuckDuckGo, Startpage, Bing, and Google in that order and answering from the first engine whose results match the query. An installed Google Chrome or Microsoft Edge is required (or Chromium; set `WEB_TOOLKIT_BROWSER` to choose an executable). The browser state lives in `~/.harness/web-toolkit/` (or `$HARNESS_STATE_DIR/web-toolkit/`). Chrome runs without its own process sandbox, which cannot start inside agent sandboxes.
+
+Installation adds the CLI and shared skill without changing provider web tools or user configuration. For ChatGPT sandboxed commands, configure network access and writable roots for uv's tool and Python directories and the browser state if needed; the Windows sandbox may otherwise be unable to reach the CLI installation. Pi has no built-in web tool. Search engines throttle bursts of automated queries; a throttled engine is skipped for that search.
 
 ## Aboard
 

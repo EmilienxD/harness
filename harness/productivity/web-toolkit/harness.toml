@@ -1,0 +1,29 @@
+name = "web-toolkit"
+version = "1.0.0"
+description = "Local web search and page fetching CLI"
+docs = "https://github.com/EmilienxD/harness/blob/main/README.md#web-toolkit"
+
+[platforms.claude]
+status = "supported"
+
+[platforms.chatgpt]
+status = "supported"
+
+[platforms.pi]
+status = "supported"
+
+[[files]]
+src = "SKILL.md"
+dest = "web-toolkit/SKILL.md"
+root = "skills"
+
+[[files]]
+src = "chatgpt/openai.yaml"
+dest = "web-toolkit/agents/openai.yaml"
+root = "skills"
+platforms = ["chatgpt"]
+
+[[actions]]
+type = "uv-tool"
+package = "harness-web-toolkit"
+source = "git+https://github.com/EmilienxD/harness@428208d2cf70526242a7fed048f0f90a3bdc843e#subdirectory=harness/productivity/web-toolkit/runtime"
