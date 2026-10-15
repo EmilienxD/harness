@@ -1,3 +1,4 @@
+import { chatGptEffort, type RequestedEffort } from "../platform/effort.js";
 import { tmpdir } from "node:os";
 import { isAbsolute, join, resolve } from "node:path";
 
@@ -13,7 +14,7 @@ import { codexHookConfigArguments } from "./hooks.js";
 
 export const DEFAULT_CHATGPT_COMMAND = ["codex"] as const;
 
-export const CHATGPT_EFFORTS = ["minimal", "low", "medium", "high", "xhigh"] as const;
+export const CHATGPT_EFFORTS = ["none", "minimal", "low", "medium", "high", "xhigh", "max", "ultra"] as const;
 export type ChatGptEffort = (typeof CHATGPT_EFFORTS)[number];
 
 export const CHATGPT_WEB_SEARCH_MODES = ["disabled", "cached", "indexed", "live"] as const;
@@ -96,7 +97,7 @@ function planChatGptSession(request: PlatformLaunchRequest | PlatformResumeReque
         contents: `${JSON.stringify({ denySubagents: subagentsDenied, denyCommands }, null, 2)}\n`,
       }
     : undefined;
-  const policy = launchPolicy(configuration, request.difficulty, request.modelOverride);
+  const policy = launchPolicy(configuration, request.difficulty, request.modelOverride, request.effortOverride);
   const permissionProfile = readOnlyFiles.length === 0
     ? []
     : permissionProfileArguments(readOnlyFiles, explore, worker ? request.writableRoots ?? [] : []);
@@ -224,10 +225,12 @@ function launchPolicy(
   configuration: ChatGptLaunchConfiguration,
   difficulty: IssueDifficulty | undefined,
   modelOverride: string | undefined,
+  effortOverride: RequestedEffort | undefined,
 ): { readonly model: string | undefined; readonly effort: ChatGptEffort | undefined } {
   const tier = chatGptDifficultyLaunchPolicy(difficulty);
   const model = modelOverride ?? (configuration.declaredModel === BY_DIFFICULTY ? tier.model : configuration.declaredModel);
-  const effort = configuration.declaredEffort === BY_DIFFICULTY ? tier.effort : configuration.declaredEffort;
+  const requestedEffort = effortOverride ?? (configuration.declaredEffort === BY_DIFFICULTY ? tier.effort : configuration.declaredEffort);
+  const effort = chatGptEffort(model, requestedEffort);
   if (model !== undefined && (model.trim().length === 0 || CLAUDE_MODELS.has(model))) {
     throw new LaunchPlanError("invalid-model", `Model is not valid for platform chatgpt: ${JSON.stringify(model)}`);
   }

@@ -1,3 +1,4 @@
+import type { RequestedEffort } from "./effort.js";
 import { createHash } from "node:crypto";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -88,6 +89,7 @@ export interface PlatformLaunchRequest {
   readonly model?: string | undefined;
   /** Explicit child selection, ahead of the configured launch profile. */
   readonly modelOverride?: string | undefined;
+  readonly effortOverride?: RequestedEffort | undefined;
   readonly effort?: EffortLevel | undefined;
   readonly difficulty?: IssueDifficulty | undefined;
   readonly command?: readonly string[] | undefined;

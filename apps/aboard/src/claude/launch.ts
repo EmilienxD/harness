@@ -1,3 +1,4 @@
+import { claudeEffort, type RequestedEffort } from "../platform/effort.js";
 
 import type { LaunchRestrictions, WriteCapability } from "../domain/capability.js";
 import {
@@ -73,16 +74,17 @@ interface ResolvedLaunchPolicy {
 
 function launchPolicy(
   declared: { readonly declaredModel?: string | undefined; readonly declaredEffort?: DeclaredEffort | undefined },
-  request: { readonly model?: string | undefined; readonly modelOverride?: string | undefined; readonly effort?: EffortLevel | undefined; readonly difficulty?: IssueDifficulty | undefined },
+  request: { readonly model?: string | undefined; readonly modelOverride?: string | undefined; readonly effortOverride?: RequestedEffort | undefined; readonly effort?: EffortLevel | undefined; readonly difficulty?: IssueDifficulty | undefined },
 ): ResolvedLaunchPolicy {
   const tier = difficultyLaunchPolicy(request.difficulty);
   const declaredModel = declared.declaredModel === BY_DIFFICULTY ? tier.model : declared.declaredModel;
   const declaredEffort = declared.declaredEffort === BY_DIFFICULTY ? tier.effort : declared.declaredEffort;
+  const model = request.modelOverride ?? declaredModel ?? request.model;
   return {
     declaredModel,
     declaredEffort,
-    model: request.modelOverride ?? declaredModel ?? request.model,
-    effort: declaredEffort ?? request.effort,
+    model,
+    effort: claudeEffort(model, request.effortOverride ?? declaredEffort ?? request.effort),
   };
 }
 

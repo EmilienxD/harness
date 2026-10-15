@@ -53,7 +53,8 @@ def test_array_commands_are_argv_and_preserve_token_contents():
 @pytest.mark.parametrize("provider, model", [("claude", "claude-opus-5-5"), ("chatgpt", "gpt-6.1-sol")])
 @pytest.mark.parametrize("mode", ["interactive", "auto"])
 @pytest.mark.parametrize("explicit", [False, True])
-def test_delegated_model_overrides_only_when_requested(tmp_path, monkeypatch, provider, model, mode, explicit):
+@pytest.mark.parametrize("effort", [None, "ultra"])
+def test_delegated_model_overrides_only_when_requested(tmp_path, monkeypatch, provider, model, mode, explicit, effort):
     from subagents_runtime.delegation import enable_delegation, process_inbox
 
     launches = []
@@ -69,6 +70,8 @@ def test_delegated_model_overrides_only_when_requested(tmp_path, monkeypatch, pr
     sessions.register_observed("parent", tmp_path, provider)
     inbox = enable_delegation("parent", "work-with-agent").inbox
     model_field = f"model: {model}\n" if explicit else ""
+    if effort is not None:
+        model_field += f"effort: {effort}\n"
     (inbox / "work.md").write_text(f"---\ntask: general\nmode: {mode}\n{model_field}---\nWork.", encoding="utf-8")
 
     [result] = process_inbox("parent", launch=sessions.launch_delegated)
@@ -78,9 +81,10 @@ def test_delegated_model_overrides_only_when_requested(tmp_path, monkeypatch, pr
     assert argv.count("--model") == 1
     assert argv[argv.index("--model") + 1] == (model if explicit else "sonnet" if provider == "claude" else "gpt-5.6-luna")
     if provider == "claude":
-        assert argv[argv.index("--effort") + 1] == "high"
+        assert argv[argv.index("--effort") + 1] == ("max" if effort else "high")
     else:
-        assert 'model_reasoning_effort="high"' in argv
+        effective = ("ultra" if explicit else "max") if effort else "high"
+        assert f'model_reasoning_effort="{effective}"' in argv
 
 
 @pytest.mark.parametrize("provider, model", [("claude", "claude-opus-5-5"), ("chatgpt", "gpt-6.1-sol")])
@@ -117,7 +121,8 @@ def test_delegated_resume_retains_explicit_model(tmp_path, monkeypatch, provider
 
 
 @pytest.mark.parametrize("model", [None, "gpt-6.1-sol"])
-def test_delegated_launch_prefers_the_scoped_aboard_endpoint(tmp_path, monkeypatch, model):
+@pytest.mark.parametrize("effort", [None, "ultra"])
+def test_delegated_launch_prefers_the_scoped_aboard_endpoint(tmp_path, monkeypatch, model, effort):
     monkeypatch.setenv("HARNESS_STATE_DIR",str(tmp_path / "state"))
     project = tmp_path / "project"
     project.mkdir()
@@ -135,13 +140,15 @@ def test_delegated_launch_prefers_the_scoped_aboard_endpoint(tmp_path, monkeypat
 
     monkeypatch.setattr(sessions.urllib.request, "urlopen", urlopen)
     monkeypatch.setattr(sessions, "_visible_terminal", lambda *_args: pytest.fail("native fallback used"))
-    request = type("Request", (), {"task": "prototype", "provider": "chatgpt", "mode": "auto", "prompt": "Build it.", "model": model})()
+    request = type("Request", (), {"task": "prototype", "provider": "chatgpt", "mode": "auto", "prompt": "Build it.", "model": model, "effort": effort})()
     assert sessions._launch_through_aboard(request, "request", project) == "aboard-child"
     assert captured["authorization"] == "Bearer scoped-secret"
     assert captured["body"]["requestId"] == "request"
     assert captured["body"]["cwd"] == str(project.resolve())
     assert captured["body"].get("model") == model
     assert ("model" in captured["body"]) == (model is not None)
+    assert captured["body"].get("effort") == effort
+    assert ("effort" in captured["body"]) == (effort is not None)
 
 
 def test_existing_database_keeps_children_when_model_selection_is_added(tmp_path, monkeypatch):
@@ -400,9 +407,9 @@ def test_standalone_claude_delegation_profile_applies_tool_denials():
     ("provider", "profile"),
     [
         ("claude", {"model": "gpt-5.6-sol"}),
-        ("claude", {"effort": "minimal"}),
+        ("claude", {"effort": "invalid"}),
         ("chatgpt", {"model": "opus"}),
-        ("chatgpt", {"effort": "max"}),
+        ("chatgpt", {"effort": "invalid"}),
     ],
 )
 def test_standalone_delegation_profiles_reject_provider_invalid_values(

@@ -43,13 +43,15 @@ def test_resume_refuses_live_provider_without_birth_identity_even_if_supervisor_
 
 
 @pytest.mark.parametrize("model", [None, "claude-opus-5-5"])
-@pytest.mark.parametrize("changed", [False, True])
-def test_recovery_retries_a_definitively_unspawned_reservation_with_original_identities(tmp_path, monkeypatch, model, changed):
+@pytest.mark.parametrize("effort", [None, "xhigh"])
+@pytest.mark.parametrize("changed", [None, "model", "effort"])
+def test_recovery_retries_a_definitively_unspawned_reservation_with_original_identities(tmp_path, monkeypatch, model, effort, changed):
     monkeypatch.setenv("HARNESS_STATE_DIR", str(tmp_path / "state"))
     sessions.register_observed("parent", tmp_path, "claude")
     inbox = enable_delegation("parent", "work-with-agent").inbox
     model_field = f"model: {model}\n" if model is not None else ""
-    (inbox / "task.md").write_text(f"---\ntask: general\nmode: auto\n{model_field}---\nTask.", encoding="utf-8")
+    effort_field = f"effort: {effort}\n" if effort is not None else ""
+    (inbox / "task.md").write_text(f"---\ntask: general\nmode: auto\n{model_field}{effort_field}---\nTask.", encoding="utf-8")
     def crash_before_spawn(*_):
         raise KeyboardInterrupt()
     with pytest.raises(KeyboardInterrupt):
@@ -59,9 +61,11 @@ def test_recovery_retries_a_definitively_unspawned_reservation_with_original_ide
         connection.execute("UPDATE executions SET reservation_pid=2147483647,reservation_birth='dead'")
     started = []
     if changed:
-        (inbox / "task.md.running").write_text("---\ntask: general\nmode: auto\nmodel: claude-sonnet-5-5\n---\nTask.", encoding="utf-8")
+        changed_model = "model: claude-sonnet-5-5\n" if changed == "model" else model_field
+        changed_effort = "effort: low\n" if changed == "effort" else effort_field
+        (inbox / "task.md.running").write_text(f"---\ntask: general\nmode: auto\n{changed_model}{changed_effort}---\nTask.", encoding="utf-8")
     def adapter(request, identity, number, cwd):
-        started.append((identity, number, cwd, request.model))
+        started.append((identity, number, cwd, request.model, request.effort))
         return child_id
     [recovered] = process_inbox("parent", launch=adapter)
     if changed:
@@ -70,7 +74,7 @@ def test_recovery_retries_a_definitively_unspawned_reservation_with_original_ide
         assert started == []
     else:
         assert recovered.status == "launched" and recovered.child_session_id == child_id
-        assert started == [(request_id, 1, tmp_path.resolve(), model)]
+        assert started == [(request_id, 1, tmp_path.resolve(), model, effort)]
     assert not list(inbox.iterdir())
 
 
@@ -1272,3 +1276,50 @@ def test_headless_provider_does_not_open_a_windows_console(tmp_path, monkeypatch
     processes.supervise(execution, specification)
 
     assert launches[0][1].get("creationflags") == subprocess.CREATE_NO_WINDOW
+
+
+@pytest.mark.parametrize("live", [False, True])
+def test_continuation_recovers_requested_effort(tmp_path, monkeypatch, live):
+    from subagents_runtime import processes
+
+    monkeypatch.setenv("HARNESS_STATE_DIR", str(tmp_path / "state"))
+    sessions.register_observed("parent", tmp_path, "chatgpt")
+    inbox = enable_delegation("parent", "work-with-agent").inbox
+    (inbox / "work.md").write_text("---\ntask: general\nmode: auto\neffort: ultra\n---\nWork.", encoding="utf-8")
+    [first] = process_inbox("parent", launch=lambda *_: "provider-child")
+    assert first.status == "launched", first.reason
+    with sessions._connect() as connection:
+        assert connection.execute("SELECT effort FROM sessions WHERE id=?", (first.child_session_id,)).fetchone() == ("ultra",)
+        connection.execute("UPDATE executions SET state='exited' WHERE request_id=?", (first.request_id,))
+        connection.execute("UPDATE requests SET state='succeeded' WHERE id=?", (first.request_id,))
+        if live:
+            connection.execute("UPDATE executions SET state='running',provider_pid=?,provider_birth=? WHERE request_id=?", (os.getpid(), processes.birth_identity(os.getpid()), first.request_id))
+    (inbox / "continue.md").write_text("---\nresume: agent-1\n---\nContinue.", encoding="utf-8")
+    efforts = []
+    [continued] = process_inbox("parent", launch=lambda request, *_: efforts.append(request.effort) or "continued-provider")
+    assert continued.status == "launched", continued.reason
+    assert efforts == ["ultra"]
+
+
+@pytest.mark.parametrize("schema_version", [6, 7])
+def test_effort_migration_preserves_existing_children(tmp_path, monkeypatch, schema_version):
+    monkeypatch.setenv("HARNESS_STATE_DIR", str(tmp_path / "state"))
+    sessions.register_observed("parent", tmp_path, "claude")
+    inbox = enable_delegation("parent", "work-with-agent").inbox
+    (inbox / "old.md").write_text("---\ntask: general\nmode: auto\n---\nWork.", encoding="utf-8")
+    [first] = process_inbox("parent", launch=lambda *_: "provider-child")
+    assert first.status == "launched", first.reason
+    with sessions._connect() as connection:
+        connection.execute("ALTER TABLE sessions DROP COLUMN effort")
+        if schema_version == 6:
+            connection.execute("ALTER TABLE sessions DROP COLUMN model")
+        connection.execute(f"PRAGMA user_version={schema_version}")
+    (inbox / "new.md").write_text("---\ntask: general\nmode: auto\neffort: high\n---\nWork.", encoding="utf-8")
+    efforts = []
+    [second] = process_inbox("parent", launch=lambda request, *_: efforts.append(request.effort) or "provider-new")
+    assert second.status == "launched", second.reason
+    assert efforts == ["high"]
+    assert sessions.resolve_session("agent-1", "parent") == first.child_session_id
+    with sessions._connect() as connection:
+        assert connection.execute("SELECT effort FROM sessions WHERE id=?", (first.child_session_id,)).fetchone() == (None,)
+        assert connection.execute("SELECT effort FROM sessions WHERE id=?", (second.child_session_id,)).fetchone() == ("high",)

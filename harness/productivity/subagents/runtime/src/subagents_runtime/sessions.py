@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Any
 
 from subagents_runtime.messages import runtime_message
+from subagents_runtime.effort import EFFORT_LEVELS, resolve_effort
 
 
 class SessionError(RuntimeError):
@@ -26,8 +27,6 @@ from subagents_runtime.storage import connect as _connect
 from subagents_runtime.storage import state_dir
 
 _CLAUDE_MODELS = frozenset({"haiku", "sonnet", "opus"})
-_CLAUDE_EFFORTS = frozenset({"low", "medium", "high", "xhigh", "max"})
-_CHATGPT_EFFORTS = frozenset({"minimal", "low", "medium", "high", "xhigh"})
 DIFFICULTIES = ("routine", "basic", "advanced", "expert")
 _DIFFICULTY_PROFILES = {
     "claude": (("haiku", "medium"), ("sonnet", "high"), ("opus", "medium"), ("opus", "high")),
@@ -168,6 +167,7 @@ def _provider_command(config: dict[str, Any], provider: str) -> list[str]:
 def delegation_profile_arguments(
     config: dict[str, Any], provider: str, task: str, *, difficulty: str | None = None,
     model_override: str | None = None,
+    effort_override: str | None = None,
 ) -> list[str]:
     """Resolve one manual task without coupling it to another launch profile."""
     providers = config.get("providers", {})
@@ -196,6 +196,8 @@ def delegation_profile_arguments(
             effort = routed_effort
     if model_override is not None:
         model = model_override
+    if effort_override is not None:
+        effort = effort_override
     model = None if model == "inherit" else model
     effort = None if effort == "inherit" else effort
     model_invalid = (
@@ -217,12 +219,13 @@ def delegation_profile_arguments(
     effort_invalid = effort is not None and (
         not isinstance(effort, str)
         or effort
-        not in (_CLAUDE_EFFORTS if provider == "claude" else _CHATGPT_EFFORTS)
+        not in EFFORT_LEVELS
     )
     if effort_invalid:
         raise SessionError(
             f"providers.{provider}.delegations.{task}.effort is not valid for {provider}"
         )
+    effort = resolve_effort(provider, model, effort)
     arguments: list[str] = []
     if provider == "claude":
         denied_tools = selected.get("deniedTools", [])
@@ -572,6 +575,7 @@ def launch_delegated(request, request_id: str, agent_number: int, cwd: Path) -> 
                 launch_options=delegation_profile_arguments(
                     launch_config, request.provider, request.task, difficulty=getattr(request, "difficulty", None),
                     model_override=getattr(request, "model", None),
+                    effort_override=getattr(request, "effort", None),
                 ),
             ),
         ]
@@ -605,6 +609,7 @@ def launch_delegated(request, request_id: str, agent_number: int, cwd: Path) -> 
             launch_options=delegation_profile_arguments(
                 launch_config, request.provider, request.task, difficulty=getattr(request, "difficulty", None),
                 model_override=getattr(request, "model", None),
+                effort_override=getattr(request, "effort", None),
             ),
         )
     )
@@ -798,6 +803,7 @@ def _launch_through_aboard(request, request_id: str, cwd: Path) -> str | None:
             "provider": request.provider,
             "mode": request.mode,
             **({"model": request.model} if getattr(request, "model", None) is not None else {}),
+            **({"effort": request.effort} if getattr(request, "effort", None) is not None else {}),
             "prompt": request.prompt,
             "cwd": str(cwd.resolve()),
             **({"difficulty": request.difficulty} if getattr(request, "difficulty", None) else {}),

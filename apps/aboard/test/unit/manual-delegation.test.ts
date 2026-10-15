@@ -24,6 +24,27 @@ test("manual delegation forwards an explicit model and omits it otherwise", asyn
   }
 });
 
+test("manual delegation accepts every effort level and rejects invalid levels", async () => {
+  const received: Record<string, unknown>[] = [];
+  const handler = createDelegationRoutes({ launch: async (request) => {
+    received.push(request as unknown as Record<string, unknown>);
+    return { agentId: "agent", sessionId: "child", terminalId: "terminal" };
+  } });
+  for (const effort of [undefined, "none", "minimal", "low", "medium", "high", "xhigh", "max", "ultra", "invalid", 2, null]) {
+    const response = await handler({
+      method: "POST", url: new URL("http://localhost/delegations"), headers: {}, signal: new AbortController().signal,
+      body: { requestId: `effort-${effort}`, task: "general", provider: "chatgpt", mode: "interactive", prompt: "Work.", cwd: "C:\\work",
+        ...(effort === undefined ? {} : { effort }) },
+    });
+    if (effort === "invalid" || effort === 2 || effort === null) assert.equal(response.status, 400);
+    else {
+      assert.equal(response.status, 201);
+      assert.equal(received.at(-1)?.effort, effort);
+      assert.equal(Object.hasOwn(received.at(-1)!, "effort"), effort !== undefined);
+    }
+  }
+});
+
 test("loop delegation retains runtime ownership and difficulty without a worker skill", async () => {
   const launches: unknown[] = [];
   const handler = createDelegationRoutes({ launch: async (request) => {

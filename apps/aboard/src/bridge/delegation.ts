@@ -1,3 +1,4 @@
+import type { RequestedEffort } from "../platform/effort.js";
 import type { AgentPlatform, AgentPlatformId, ConfiguredLaunch, EffortLevel, PromptSpillStore, ResolvedPrompt, SessionWrapperLayout, ShellKind, TerminalController } from "../platform/agent-platform.js";
 import { delimiter, dirname } from "node:path";
 import { existsSync } from "node:fs";
@@ -45,6 +46,7 @@ export interface LaunchIsolation {
 
 export interface DelegationLaunchInput {
   readonly model?: string;
+  readonly effort?: RequestedEffort;
   readonly forkSessionId?: SessionId;
   readonly harnessStateDirectory?: string;
   readonly harnessRuntimePath?: string;
@@ -93,6 +95,7 @@ export interface AutomatedLaunchOutcome {
 
 export interface ReopenTarget {
   readonly model?: string;
+  readonly effort?: RequestedEffort;
   readonly harnessStateDirectory?: string;
   readonly harnessRuntimePath?: string;
   readonly harnessSessionId?: string;
@@ -307,6 +310,7 @@ export class DelegationCoordinator {
       ...(target.autoRunRestricted === true ? { autoRunRestricted: true as const } : {}),
       ...(isAutoRunWorkerType(target.type) && target.chromeEnabled === true ? { chrome: true } : {}),
       configuration: configured.settings,
+      ...(target.effort === undefined ? {} : { effortOverride: target.effort }),
       ...(target.model === undefined ? {} : { modelOverride: target.model }),
       runtimeDirectory: this.options.runtimeDirectory ?? (this.options.wrapper === undefined ? undefined : dirname(dirname(this.options.wrapper.lockPathFor(target.agentId)))),
       ...(this.options.promptRoot === undefined ? {} : { promptRoot: this.options.promptRoot }),
@@ -531,6 +535,7 @@ export class DelegationCoordinator {
       ...(origin === "auto-run" ? { autoRunRestricted: true as const } : {}),
       ...(isAutoRunWorkerType(agentType) && input.chrome === true ? { chrome: true } : {}),
       configuration: configured.settings,
+      ...(input.effort === undefined ? {} : { effortOverride: input.effort }),
       ...(input.model === undefined ? {} : { modelOverride: input.model }),
       runtimeDirectory: this.options.runtimeDirectory ?? (this.options.wrapper === undefined ? undefined : dirname(dirname(this.options.wrapper.lockPathFor(agentId)))),
       ...(this.options.promptRoot === undefined ? {} : { promptRoot: this.options.promptRoot }),

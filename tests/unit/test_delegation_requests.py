@@ -54,7 +54,7 @@ def test_published_schemas_describe_the_implemented_contracts() -> None:
     modes = {mode for policy in policies.values() for mode in policy.modes}
 
     # The prompt is the Markdown body, so it is never a frontmatter key.
-    assert set(request["properties"]) == {"task", "provider", "mode", "model", "root", "resume", "cwd", "difficulty", "prompt-file"}
+    assert set(request["properties"]) == {"task", "provider", "mode", "model", "effort", "root", "resume", "cwd", "difficulty", "prompt-file"}
     assert request["oneOf"][0]["required"] == ["task", "mode"]
     assert request["properties"]["task"]["type"] == "string"
     assert set(request["properties"]["mode"]["enum"]) == modes
@@ -82,6 +82,18 @@ def test_codex_is_an_alias_of_chatgpt(tmp_path: Path) -> None:
     )
 
     assert parsed.provider == "chatgpt"
+    assert parsed.model is None
+    assert parsed.effort is None
+
+
+@pytest.mark.parametrize("effort", ["none", "minimal", "low", "medium", "high", "xhigh", "max", "ultra"])
+def test_request_accepts_effort_independently_of_model(tmp_path: Path, effort: str) -> None:
+    inbox = tmp_path / "inbox"
+    request = write_request(inbox, "work.md", f"---\ntask: general\nmode: auto\neffort: {effort}\n---\nWork.")
+
+    parsed = parse_request_file(request, inbox, parent_provider="claude")
+
+    assert parsed.effort == effort
     assert parsed.model is None
 
 
@@ -126,6 +138,12 @@ def test_root_resolves_from_parent_directory(tmp_path: Path) -> None:
         ("request.md", "---\ntask: general\nmode: auto\nmodel: 123\n---\nbody", "scalar string"),
         ("request.md", "---\ntask: general\nmode: auto\nmodel: [gpt-6.1-sol]\n---\nbody", "scalar string"),
         ("request.md", "---\ntask: general\nmode: auto\nmodel: ' '\n---\nbody", "scalar string"),
+        ("request.md", "---\ntask: general\nmode: auto\neffort: null\n---\nbody", "scalar string"),
+        ("request.md", "---\ntask: general\nmode: auto\neffort: 123\n---\nbody", "scalar string"),
+        ("request.md", "---\ntask: general\nmode: auto\neffort: [high]\n---\nbody", "scalar string"),
+        ("request.md", "---\ntask: general\nmode: auto\neffort: ' '\n---\nbody", "scalar string"),
+        ("request.md", "---\ntask: general\nmode: auto\neffort: invalid\n---\nbody", "unsupported effort"),
+        ("request.md", "---\nresume: agent-1\neffort: high\n---\nbody", "resume requires only"),
         ("request.md", "---\ntask: general\nmode: auto\nroot: missing\n---\nbody", "existing directory"),
         ("request.md", "---\ntask: general\nmode: auto\nroot: null\n---\nbody", "scalar string"),
         ("request.md", "---\ntask: general\nmode: auto\nroute: ../worktree\n---\nbody", "unsupported frontmatter"),

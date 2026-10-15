@@ -47,8 +47,19 @@ class FakeTerminalHost implements TerminalHost {
   public onDidCloseTerminal(): { dispose(): void } { return { dispose: () => undefined }; }
 }
 
-for (const provider of ["claude", "chatgpt"] as const) {
-  test(`manual ${provider} launch and reopen retain the requested model over the configured profile`, async () => {
+for (const [provider, model, effort, expected] of [
+  ["claude", "claude-opus-5-5", undefined, undefined],
+  ["chatgpt", "gpt-6.1-sol", undefined, "high"],
+  ["claude", "claude-opus-5-5", "low", "low"],
+  ["chatgpt", "gpt-6.1-sol", "low", "low"],
+  ["claude", "claude-opus-5-5", "ultra", "max"],
+  ["chatgpt", "gpt-6.1-sol", "ultra", "ultra"],
+  ["chatgpt", "gpt-6-luna", "ultra", "max"],
+  ["chatgpt", "gpt-5.6-terra", "none", "low"],
+  ["claude", "claude-sonnet-4-6", "xhigh", "high"],
+  ["claude", "claude-haiku-4-5", "high", undefined],
+] as const) {
+  test(`manual ${model} launch and reopen resolve effort ${effort ?? "profile"} to ${expected ?? "native default"}`, async () => {
     const host = new FakeTerminalHost();
     const platform: AgentPlatform = provider === "claude"
       ? new ClaudeAgentPlatform({ lifecycleAssets: { settings: "hooks.json", script: "hook.py" },
@@ -67,17 +78,17 @@ for (const provider of ["claude", "chatgpt"] as const) {
       platforms: new Map([[provider, platform]]), prompts: { resolve: async () => undefined },
       spills: { prepare: async () => undefined, write: async () => "unused" }, shell: "powershell",
       agentIdFactory: () => `agent-${number + 1}` as AgentId });
-    const model = provider === "claude" ? "claude-opus-5-5" : "gpt-6.1-sol";
 
-    await coordinator.launchManual({ type: "general", description: "Work", model }, "interactive");
+    await coordinator.launchManual({ type: "general", description: "Work", model, ...(effort === undefined ? {} : { effort }) }, "interactive");
     await coordinator.reopen({ platform: provider, agentId: "reopened" as AgentId, type: "general", delegationTask: "general",
-      sessionId: "af817a6c-cd41-41e2-a4db-44d3f43cd560" as SessionId, model });
+      sessionId: "af817a6c-cd41-41e2-a4db-44d3f43cd560" as SessionId, model, ...(effort === undefined ? {} : { effort }) });
 
     for (const terminal of host.terminals) {
       const command = terminal.sent.at(-1) ?? "";
       assert.match(command, new RegExp(`--model '?${model.replaceAll(".", "\\.")}'?`, "u"));
-      if (provider === "chatgpt") assert.match(command, /model_reasoning_effort.*high/u);
-      else assert.ok(!command.includes("--effort"));
+      if (provider === "chatgpt") assert.match(command, new RegExp(`model_reasoning_effort.*${expected}`, "u"));
+      else if (expected === undefined) assert.ok(!command.includes("--effort"));
+      else assert.match(command, new RegExp(`--effort ${expected}`, "u"));
     }
     assert.equal(host.terminals.length, 2);
   });

@@ -22,6 +22,7 @@ task: <registered task>    # Required. Selects a built-in or custom task (see be
 mode: auto|interactive    # Required. Spawn the subagent in a headless or visible terminal.
 provider: claude|chatgpt|codex    # Optional. Defaults to this conversation's provider. `codex` is an alias of chatgpt.
 model: <model id>         # Optional. Include only when the user explicitly requests a particular model.
+effort: none|minimal|low|medium|high|xhigh|max|ultra    # Optional. Include only when the user requests an effort level.
 root: <directory path>    # Optional. Include only when the user explicitly requests another root.
 ---
 
@@ -37,6 +38,10 @@ Use the requested model's exact ID for the selected provider from this list:
 - Claude`claude-fable-5-1`, `claude-opus-5-5`, `claude-opus-5`, `claude-sonnet-5-5`, `claude-haiku-5-5`
 
 If the requested model is absent, tell the user the list needs updating before launching with that model. An explicit model overrides the task default.
+
+## Effort selection
+
+Include `effort` when the user requests an effort level for the subagent; otherwise omit it to retain the task profile and provider defaults. Use the requested level from the launch schema independently of `model`.
 
 ## Root selection
 
@@ -113,7 +118,7 @@ The user wants to understand why configuration precedence differs between the tw
 
 In real requests, include all details the subagent needs to act.
 
-Agents have stable identifiers (e.g. `agent-1`, `agent-2`). Continue any subagent at any time with exclusive resume frontmatter and a nonempty next message; it keeps its task, provider, model, mode, directory, and id:
+Agents have stable identifiers (e.g. `agent-1`, `agent-2`). Continue any subagent at any time with exclusive resume frontmatter and a nonempty next message; it keeps its task, provider, model, effort, mode, directory, and id:
 
 ```markdown
 ---

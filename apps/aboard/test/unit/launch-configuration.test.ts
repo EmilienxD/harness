@@ -225,7 +225,7 @@ test("config.json selects a read-only ChatGPT explore session and still refuses 
     /autoRun\.explore\.model is not valid for platform chatgpt/u,
   );
   assert.throws(
-    () => parseLaunchFile(providerFile("chatgpt", { autoRun: { explore: { effort: "max" } } })),
+    () => parseLaunchFile(providerFile("chatgpt", { autoRun: { explore: { effort: "invalid" } } })),
     /autoRun\.explore\.effort is not valid for platform chatgpt/u,
   );
 });
@@ -279,7 +279,7 @@ test("a ChatGPT address profile is configurable independently of Claude routing"
     /autoRun\.address\.model is not valid for platform chatgpt/u,
   );
   assert.throws(
-    () => parseLaunchFile(providerFile("chatgpt", { autoRun: { address: { effort: "max" } } })),
+    () => parseLaunchFile(providerFile("chatgpt", { autoRun: { address: { effort: "invalid" } } })),
     /autoRun\.address\.effort is not valid for platform chatgpt/u,
   );
   assert.throws(

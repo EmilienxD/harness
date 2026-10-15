@@ -31,7 +31,7 @@ export class ChatGptAgentPlatform implements AgentPlatform {
     promptDelivery: ["none", "inline", "spilled"],
     lifecycle: ["start", "stop", "end", "compaction"],
     models: [],
-    reasoningEfforts: ["minimal", "low", "medium", "high", "xhigh"],
+    reasoningEfforts: ["none", "minimal", "low", "medium", "high", "xhigh", "max", "ultra"],
   };
   public readonly lifecycleAssets: PlatformLifecycleAssets;
   readonly #commandProbe: ChatGptCommandProbe;

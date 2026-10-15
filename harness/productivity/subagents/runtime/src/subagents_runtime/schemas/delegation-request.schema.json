@@ -31,6 +31,19 @@
       "minLength": 1,
       "description": "Explicit model ID, supplied only when the user requests a particular model. Omit to retain the task's launch profile and native defaults."
     },
+    "effort": {
+      "enum": [
+        "none",
+        "minimal",
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max",
+        "ultra"
+      ],
+      "description": "Requested reasoning effort. Omit to retain the launch profile and native defaults. The runtime silently selects the nearest level supported by the model."
+    },
     "root": {
       "type": "string",
       "minLength": 1,
@@ -111,6 +124,11 @@
           {
             "required": [
               "prompt-file"
+            ]
+          },
+          {
+            "required": [
+              "effort"
             ]
           }
         ]
