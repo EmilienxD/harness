@@ -19,6 +19,7 @@ from urllib.parse import parse_qs, quote_plus, urlsplit
 from web_toolkit import browser, download
 
 SEARCH_TIMEOUT = 12
+LIMIT = 10
 EMPTY_AFTER_LOAD = 3.0
 STOPWORDS = {"the", "and", "for", "from", "with", "how", "what", "why", "when", "where", "who", "does", "are", "you", "your", "can", "not"}
 
@@ -102,7 +103,7 @@ def _google(url: str) -> str | None:
     return None
 
 
-# Dictionary order is the default fallback order, most reliable first.
+# Engines are tried in this order, most reliable first.
 ENGINES: dict[str, Engine] = {
     engine.name: engine
     for engine in (
@@ -156,14 +157,16 @@ def _matches(url: str, domains: list[str]) -> bool:
     return any(host == domain or host.endswith(f".{domain}") for domain in domains)
 
 
-def _query(query: str, sites: list[str], excluded: list[str]) -> str:
-    parts = [query]
-    if len(sites) == 1:
-        parts.append(f"site:{sites[0]}")
-    elif sites:
-        parts.append("(" + " OR ".join(f"site:{site}" for site in sites) + ")")
-    parts.extend(f"-site:{site}" for site in excluded)
-    return " ".join(parts)
+def _domain(value: str) -> str:
+    return value.strip().lower().split("://", 1)[-1].split("/", 1)[0]
+
+
+def _filters(query: str) -> tuple[list[str], list[str]]:
+    """The domains a query's site: operators allow and its -site: operators exclude."""
+    sites, excluded = [], []
+    for negated, value in re.findall(r"(?:^|[\s(])(-?)site:([^\s()]+)", query, flags=re.IGNORECASE):
+        (excluded if negated else sites).append(_domain(value))
+    return sites, excluded
 
 
 def _clean(engine: Engine, raw: list[dict], sites: list[str], excluded: list[str]) -> list[Result]:
@@ -225,15 +228,14 @@ def _run(tab: browser.Tab, engine: Engine, query: str, sites: list[str], exclude
     return ("ok", previous) if previous and _relevant(query, previous) else ("timed out", [])
 
 
-def search(
-    query: str, engines: list[str], limit: int, sites: list[str], excluded: list[str]
-) -> tuple[str | None, list[Result], list[tuple[str, str]]]:
-    """Return the answering engine, its results, and why earlier engines were skipped."""
+def search(query: str) -> tuple[list[Result], list[tuple[str, str]]]:
+    """Return the first answering engine's results, and why each engine failed when none answers."""
+    sites, excluded = _filters(query)
     failures: list[tuple[str, str]] = []
     with browser.tab() as tab:
-        for name in engines:
-            status, results = _run(tab, ENGINES[name], _query(query, sites, excluded), sites, excluded)
+        for engine in ENGINES.values():
+            status, results = _run(tab, engine, query, sites, excluded)
             if results:
-                return name, results[:limit], failures
-            failures.append((name, status))
-    return None, [], failures
+                return results[:LIMIT], []
+            failures.append((engine.name, status))
+    return [], failures

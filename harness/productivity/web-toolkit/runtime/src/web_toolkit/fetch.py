@@ -22,7 +22,9 @@ CHALLENGE_TITLE = re.compile(
     r"just a moment|attention required|checking your browser|please wait|verif|prove your humanity|security check",
     re.IGNORECASE,
 )
-SHELL_TEXT_LIMIT = 300
+SHELL_TEXT_LIMIT = 1500
+# An application root that scripts fill in after load.
+EMPTY_MOUNT = re.compile(r'<div id="(?:root|app|__next|__nuxt|svelte)"[^>]*>\s*</div>', re.IGNORECASE)
 
 
 class FetchError(Exception):
@@ -45,8 +47,8 @@ class _Html:
     html: str
     content: extract.Content
 
-    def page(self, raw: bool, note: str | None = None) -> Page:
-        return Page(self.url, self.status, self.content.title, self.html if raw else self.content.text, note)
+    def page(self, note: str | None = None) -> Page:
+        return Page(self.url, self.status, self.content.title, self.content.text, note)
 
 
 def _needs_browser(document: _Html) -> bool:
@@ -55,7 +57,9 @@ def _needs_browser(document: _Html) -> bool:
     if document.status is not None and document.status >= 400:
         # A browser would receive the same error page.
         return False
-    # Client-rendered applications ship scripts and almost no text.
+    # Client-rendered applications ship scripts and little text, or an empty application root.
+    if EMPTY_MOUNT.search(document.html):
+        return True
     return len(document.content.text) < SHELL_TEXT_LIMIT and "<script" in document.html.lower()
 
 
@@ -83,16 +87,14 @@ def _render(url: str) -> _Html:
     return _Html(location, status, html, extract.html_to_markdown(html, location))
 
 
-def fetch(url: str, *, use_browser: bool = False, raw: bool = False) -> Page:
+def fetch(url: str) -> Page:
     if not re.match(r"^[a-zA-Z][a-zA-Z0-9+.-]*://", url):
         url = f"https://{url}"
-    if use_browser:
-        return _render(url).page(raw)
     try:
         response = download.get(url)
     except Exception as exc:
         try:
-            return _render(url).page(raw)
+            return _render(url).page()
         except (browser.BrowserError, FetchError) as browser_exc:
             raise FetchError(f"{exc}; browser fallback failed: {browser_exc}") from exc
     note = "The body exceeded 25 MB and was truncated." if response.truncated else None
@@ -105,10 +107,10 @@ def fetch(url: str, *, use_browser: bool = False, raw: bool = False) -> Page:
     html = extract.decode(response.body, response.charset)
     document = _Html(response.url, response.status, html, extract.html_to_markdown(html, response.url))
     if not _needs_browser(document):
-        return document.page(raw, note)
+        return document.page(note)
     try:
         rendered = _render(response.url)
     except (browser.BrowserError, FetchError) as exc:
-        return document.page(raw, f"The page may be incomplete; browser rendering failed: {exc}")
+        return document.page(f"The page may be incomplete; browser rendering failed: {exc}")
     better = response.status != 200 or len(rendered.content.text) >= len(document.content.text)
-    return rendered.page(raw) if better else document.page(raw, note)
+    return rendered.page() if better else document.page(note)

@@ -11,7 +11,7 @@ import pytest
 
 from web_toolkit import search
 from web_toolkit.extract import html_to_markdown
-from web_toolkit.search import ENGINES, Result, _relevant
+from web_toolkit.search import ENGINES, Result, _filters, _relevant
 
 RUNTIME = Path(__file__).resolve().parents[2] / "harness/productivity/web-toolkit/runtime/src"
 
@@ -55,6 +55,12 @@ vec.push(1);</code></pre><a class="test-arrow" href="https://play.rust-lang.org/
 <dialog><h1>Block user</h1><p>Prevent this user from interacting with your repositories.</p></dialog>
 </article></main></body></html>"""
 
+SECTIONS = "".join(
+    f"<h2>Section {n}</h2><p>{'Paragraph text about streaming responses and migration steps. ' * 30}</p>"
+    for n in range(1, 13)
+)
+LONG = f"<!doctype html><html><head><title>Guide</title></head><body><main><article><h1>Guide</h1>{SECTIONS}</article></main></body></html>"
+
 CHALLENGE = """<!doctype html><html><head><title>Just a moment...</title></head><body>
 <p>Checking your browser before accessing the site.</p><script src="/cdn-cgi/challenge-platform/x.js"></script>
 </body></html>"""
@@ -84,6 +90,7 @@ def pdf(text: str) -> bytes:
 
 ROUTES = {
     "/article": (200, "text/html; charset=utf-8", ARTICLE.encode()),
+    "/long": (200, "text/html; charset=utf-8", LONG.encode()),
     "/data.json": (200, "application/json", b'{"name": "web-toolkit", "tags": ["fetch"]}'),
     "/paper.pdf": (200, "application/pdf", pdf("Attention is all you need")),
     "/missing": (404, "text/plain", b"no such page"),
@@ -179,24 +186,30 @@ def test_callouts_tab_panels_and_icon_cells_survive_while_hidden_page_furniture_
         assert hidden not in body
 
 
-def test_long_content_is_read_in_windows(server, tmp_path):
-    _, full, _ = web("fetch", f"{server}/article", "--max-chars", "0", tmp_path=tmp_path)
-    total = len(split(full)[1])
+def test_short_pages_print_whole_without_saving(server, tmp_path):
+    _, out, _ = web("fetch", f"{server}/article", tmp_path=tmp_path)
 
-    _, first, _ = web("fetch", f"{server}/article", "--max-chars", "100", tmp_path=tmp_path)
-    _, rest, _ = web("fetch", f"{server}/article", "--offset", "100", "--max-chars", "0", tmp_path=tmp_path)
-
-    first_header, first_body = split(first)
-    assert first_header["Content"] == f"characters 0-100 of {total}; continue with --offset 100"
-    assert split(rest)[0]["Content"] == f"characters 100-{total} of {total}"
-    assert first_body + split(rest)[1] == split(full)[1]
+    assert "Full text" not in split(out)[0]
+    assert not (tmp_path / "state/web-toolkit/pages").exists()
 
 
-def test_raw_prints_the_html_source(server, tmp_path):
-    code, out, _ = web("fetch", f"{server}/article", "--raw", "--max-chars", "0", tmp_path=tmp_path)
+def test_long_pages_print_their_start_and_save_the_full_text_with_an_outline(server, tmp_path):
+    code, out, _ = web("fetch", f"{server}/long", tmp_path=tmp_path)
 
     assert code == 0
-    assert split(out)[1] == ARTICLE
+    header, body = split(out)
+    path = Path(header["Full text"].split(" (", 1)[0])
+    saved = path.read_text(encoding="utf-8")
+    lines = saved.split("\n")
+    assert path.parent == tmp_path / "state/web-toolkit/pages"
+    assert len(saved) > len(body) and "## Section 12" in saved
+    shown, _, outline = body.partition("\n\n[Truncated")
+    assert saved.startswith(shown)
+    assert "## Section 12" not in shown
+    # Each outline entry names a later heading at its line in the saved file.
+    entries = [line.strip().split(": ", 1) for line in outline.splitlines()[1:]]
+    assert entries and entries[-1][1] == "## Section 12"
+    assert all(lines[int(number) - 1] == heading for number, heading in entries)
 
 
 def test_pdf_text_is_extracted_per_page(server, tmp_path):
@@ -257,6 +270,14 @@ def test_search_without_a_browser_fails_with_a_reason(tmp_path):
 
     assert (code, out) == (1, "")
     assert "WEB_TOOLKIT_BROWSER" in err
+
+
+def test_site_operators_in_the_query_become_domain_filters():
+    assert _filters("tokio select site:docs.rs") == (["docs.rs"], [])
+    assert _filters("uv install (site:github.com OR site:https://Astral.sh/docs) -site:pypi.org") == (
+        ["github.com", "astral.sh"], ["pypi.org"],
+    )
+    assert _filters("parasite:foo website:bar") == ([], [])
 
 
 def test_unrelated_engine_results_do_not_answer_the_query():
