@@ -26,4 +26,4 @@ platforms = ["chatgpt"]
 [[actions]]
 type = "uv-tool"
 package = "harness-web-toolkit"
-source = "git+https://github.com/EmilienxD/harness@db1b74f676d2046a6054ee69fe8c1458e89c99b6#subdirectory=harness/productivity/web-toolkit/runtime"
+source = "git+https://github.com/EmilienxD/harness@617f66049cb5441d4edeaea31733c1525b98261c#subdirectory=harness/productivity/web-toolkit/runtime"
