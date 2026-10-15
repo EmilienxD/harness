@@ -1,5 +1,5 @@
 name = "web-toolkit"
-version = "1.0.0"
+version = "1.0.1"
 description = "Local web search and page fetching CLI"
 docs = "https://github.com/EmilienxD/harness/blob/main/README.md#web-toolkit"
 
@@ -26,4 +26,4 @@ platforms = ["chatgpt"]
 [[actions]]
 type = "uv-tool"
 package = "harness-web-toolkit"
-source = "git+https://github.com/EmilienxD/harness@428208d2cf70526242a7fed048f0f90a3bdc843e#subdirectory=harness/productivity/web-toolkit/runtime"
+source = "git+https://github.com/EmilienxD/harness@f960ac591b86fb17857c41aed5b9a8e8452c35d9#subdirectory=harness/productivity/web-toolkit/runtime"
