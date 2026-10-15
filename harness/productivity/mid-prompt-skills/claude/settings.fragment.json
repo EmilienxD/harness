@@ -1,16 +1,5 @@
 {
   "hooks": {
-    "UserPromptExpansion": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "${PYTHON}",
-            "args": ["${CLAUDE_DIR}/hooks/mid_prompt_skills_hook.py", "--claude"]
-          }
-        ]
-      }
-    ],
     "UserPromptSubmit": [
       {
         "hooks": [

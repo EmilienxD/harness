@@ -3,7 +3,6 @@ import io
 import json
 import re
 import sys
-import tempfile
 from pathlib import Path
 
 import pytest
@@ -23,8 +22,6 @@ def env(tmp_path, monkeypatch):
     config.mkdir()
     monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(config))
     monkeypatch.delenv("CLAUDE_PROJECT_DIR", raising=False)
-    monkeypatch.setattr(tempfile, "tempdir", str(tmp_path / "tmp"))
-    (tmp_path / "tmp").mkdir()
     monkeypatch.setattr(hook, "MANAGED_ROOTS", ())
     return {"config": config, "project": project}
 
@@ -56,13 +53,6 @@ def run(payload, provider="claude"):
 def submit(env, prompt, session="s1"):
     return run({
         "hook_event_name": "UserPromptSubmit", "session_id": session, "cwd": str(env["project"]), "prompt": prompt,
-    })
-
-
-def expansion(env, prompt, name, args, session="s1"):
-    return run({
-        "hook_event_name": "UserPromptExpansion", "session_id": session, "cwd": str(env["project"]),
-        "expansion_type": "slash_command", "command_name": name, "command_args": args, "prompt": prompt,
     })
 
 
@@ -143,46 +133,32 @@ def test_chatgpt_package_installs_the_hook_and_fragment():
     assert command.endswith('mid_prompt_skills_hook.py" --chatgpt')
 
 
-def test_skills_claude_code_expanded_are_not_injected_again(env):
+def test_leading_skill_is_left_to_native_expansion_before_expansion_event(env):
     skill(env["project"], "lead", "LEAD-BODY")
     skill(env["project"], "tail", "TAIL-BODY")
     prompt = "/lead first /tail second"
 
-    assert expansion(env, prompt, "lead", "first /tail second") == {}
     text = context(submit(env, prompt))
 
     assert "LEAD-BODY" not in text
     assert "TAIL-BODY\n\nARGUMENTS: second" in text
 
 
-def test_only_the_expanded_occurrence_of_a_repeated_skill_is_skipped(env):
+def test_only_the_leading_occurrence_of_a_repeated_skill_is_skipped(env):
     skill(env["project"], "probe", "PROBE-BODY")
     prompt = "/probe first. Later /probe second"
 
-    expansion(env, prompt, "probe", "first. Later /probe second")
     text = context(submit(env, prompt))
 
     assert "ARGUMENTS: second" in text
     assert "ARGUMENTS: first" not in text
 
 
-def test_an_expansion_recorded_for_another_prompt_does_not_suppress_injection(env):
+@pytest.mark.parametrize("prefix", ["", " ", "\n\t"])
+def test_leading_skill_alone_adds_no_context(env, prefix):
     skill(env["project"], "probe", "PROBE-BODY")
 
-    expansion(env, "/probe earlier", "probe", "earlier")
-    text = context(submit(env, "Now /probe later"))
-
-    assert "ARGUMENTS: later" in text
-
-
-def test_expansions_are_scoped_to_their_session(env):
-    skill(env["project"], "probe", "PROBE-BODY")
-    prompt = "/probe same"
-
-    expansion(env, prompt, "probe", "same", session="other")
-    text = context(submit(env, prompt, session="s1"))
-
-    assert "ARGUMENTS: same" in text
+    assert submit(env, prefix + "/probe native arguments") == {}
 
 
 def test_arguments_end_at_the_line_or_the_next_skill(env):

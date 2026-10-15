@@ -37,10 +37,9 @@ export async function runMidPromptSkillsJourney(): Promise<MidPromptSkillsJourne
       await mkdir(join(claudeRoot, "skills", name), { recursive: true });
       await writeFile(join(claudeRoot, "skills", name, "SKILL.md"), `---\ndescription: ${name}\ndisable-model-invocation: true\n---\n${body}\n`, "utf8");
     }
-    const handler = { type: "command", command: await pythonCommand(), args: [hookPath, "--claude"] };
-    await writeFile(join(claudeRoot, "settings.json"), `${JSON.stringify({ hooks: {
-      UserPromptExpansion: [{ hooks: [handler] }], UserPromptSubmit: [{ hooks: [handler] }],
-    } }, null, 2)}\n`, "utf8");
+    const fragment = await readFile(join(harnessRoot, "harness", "productivity", "mid-prompt-skills", "claude", "settings.fragment.json"), "utf8");
+    const settings = JSON.parse(fragment.replaceAll("${PYTHON}", await pythonCommand()).replaceAll("${CLAUDE_DIR}", claudeRoot.replaceAll("\\", "/")));
+    await writeFile(join(claudeRoot, "settings.json"), `${JSON.stringify(settings, null, 2)}\n`, "utf8");
     await writeFile(join(configRoot, "settings.json"), "{}\n", "utf8");
 
     server = await startFakeAnthropicServer({ repoRoot: projectRoot, diagnosticsPath, scenarioCatalogHash, parseRequest, transition });

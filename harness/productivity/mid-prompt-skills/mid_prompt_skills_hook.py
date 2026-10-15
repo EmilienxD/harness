@@ -6,7 +6,6 @@ import os
 import re
 import shlex
 import sys
-import tempfile
 from pathlib import Path
 
 
@@ -204,43 +203,9 @@ def render_chatgpt(name: str, path: Path) -> str:
     )
 
 
-def expansions_file(session: str) -> Path:
-    safe = re.sub(r"[^A-Za-z0-9_-]", "_", session)
-    return Path(tempfile.gettempdir()) / f"harness_mid_prompt_skills_{safe}.jsonl"
-
-
-def record_expansion(payload: dict) -> None:
-    """Claude Code fires this before UserPromptSubmit for every skill it expands itself."""
-    name, prompt = payload.get("command_name"), payload.get("prompt")
-    if isinstance(name, str) and isinstance(prompt, str):
-        with expansions_file(payload["session_id"]).open("a", encoding="utf-8") as stream:
-            stream.write(json.dumps({"prompt": prompt, "name": name}) + "\n")
-
-
-def take_expansions(session: str, prompt: str) -> list[str]:
-    path = expansions_file(session)
-    try:
-        lines = path.read_text(encoding="utf-8").splitlines()
-        path.unlink()
-    except OSError:
-        return []
-    names = []
-    for line in lines:
-        try:
-            record = json.loads(line)
-        except ValueError:
-            continue
-        if isinstance(record, dict) and record.get("prompt") == prompt and isinstance(record.get("name"), str):
-            names.append(record["name"])
-    return names
-
-
 def handle(payload: dict, provider: str = "claude") -> dict | None:
     event, session = payload.get("hook_event_name"), payload.get("session_id")
     if not isinstance(session, str) or not session:
-        return None
-    if event == "UserPromptExpansion":
-        record_expansion(payload)
         return None
     prompt = payload.get("prompt")
     if event != "UserPromptSubmit" or not isinstance(prompt, str):
@@ -262,22 +227,20 @@ def handle(payload: dict, provider: str = "claude") -> dict | None:
             "Follow their complete instructions before acting."
         )
         return {"hookSpecificOutput": {"hookEventName": "UserPromptSubmit", "additionalContext": "\n\n".join([header, *blocks])}}
-    expanded = take_expansions(session, prompt)
     cwd = Path(payload.get("cwd") or os.getcwd())
     project = Path(os.environ.get("CLAUDE_PROJECT_DIR") or cwd)
     fences = [fence.span() for fence in FENCE.finditer(prompt)]
+    # Native leading invocations expand after UserPromptSubmit, so leave them to Claude.
     found = [
         (match, find_skill(match.group(1), cwd)) for match in INVOCATION.finditer(prompt)
-        if not any(start <= match.start() < end for start, end in fences)
+        if prompt[:match.start()].strip()
+        and not any(start <= match.start() < end for start, end in fences)
     ]
     found = [(match, path) for match, path in found if path is not None]
     overrides = skill_overrides(project) if found else {}
     blocks = []
     for index, (match, path) in enumerate(found):
         name = match.group(1)
-        if name in expanded:
-            expanded.remove(name)
-            continue
         # Arguments run to the next skill or the end of the line, so a skill cannot absorb the following lines.
         end = found[index + 1][0].start() if index + 1 < len(found) else len(prompt)
         line_end = prompt.find("\n", match.end())
