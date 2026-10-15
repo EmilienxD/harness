@@ -385,6 +385,42 @@ Run the workflow, then `test-workflows confirm tests/workflow/greeting.md` to au
 
 Run `test-workflows status` explicitly when verifying changes, as you would run unit tests, then run the affected checks and confirm passing ones. Loop implementers run and report; only the Lead stamps their results. Pi installs the same CLI and shared skill; invoke `/skill:test-workflows` to load it explicitly. Confirmation records verification performed by the agent; it does not execute the acceptance steps.
 
+## Background shell
+
+`background-shell` is a Pi-only tool that extends the existing `bash` and Windows
+`powershell` tools with `run_in_background`. Install it into another project from this checkout:
+
+```powershell
+uv run harness install background-shell --platform pi --root C:\Projects\YourProject
+```
+
+For all your projects, use `--scope user` instead of `--root`. Restart Pi or run `/reload`.
+The installer places one extension in the selected Pi configuration; it leaves agent instructions
+and settings unchanged. No npm package, tmux, WSL, or PowerShell 7 installation is required.
+Bash uses Pi's configured Bash executable and command prefix. PowerShell uses Pi's native
+Windows shell resolver, including Windows PowerShell when PowerShell 7 is unavailable.
+
+Ask Pi: "Run the test suite in the background, continue the review, and inspect the result
+when it finishes." The shell tool itself exposes the option and its usage guidance.
+Ordinary commands remain in the foreground. Background calls return a job ID immediately;
+completion delivers the actual exit status, elapsed time, and recent output and wakes an idle
+agent. Quiet commands keep running. `timeout`, when supplied, is a termination deadline in seconds.
+The optional Windows `powershell` tool follows your existing tool selection; installing this
+package does not switch Bash commands to PowerShell syntax.
+
+`shell_job` lists jobs, reads status or recent output, and cancels a job with its process tree.
+It retains the last 8 KiB of decoded output and the first 16 MiB in a private temporary log,
+with truncation reported explicitly. At most eight jobs run concurrently and 64 job receipts
+are retained. Running jobs and their logs belong to the live Pi session: reload, session changes,
+tree navigation, and graceful shutdown cancel them and clear the logs. They do not survive a
+Pi restart. Keep Pi open to receive completion notifications.
+
+The existing command guard still checks `bash` and `powershell` before launch, including nested
+calls. A background launch result is a job receipt; hooks that infer completed filesystem work
+from a shell tool's immediate result cannot use that receipt as evidence of a finished mutation.
+Use native edit/write tools for work requiring those outcome-based guards or attribution.
+Install one owner of each shell tool; other extensions that replace Bash or PowerShell can conflict.
+
 ## Web toolkit
 
 `web-toolkit search "<query>"` prints up to 10 result titles, URLs, and snippets; `site:` and `-site:` operators in the query are enforced as domain filters. `web-toolkit fetch <url>` prints a page as Markdown, a PDF as per-page text, and other text formats unchanged. Pages over 10,000 characters print their beginning and an outline of later headings with line numbers, and save the full text under `~/.harness/web-toolkit/pages/` for the agent to read or grep; saved pages are removed after a day. Neither command takes options.

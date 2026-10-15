@@ -30,6 +30,7 @@ npm run test:pi-commit
 npm run test:pi-desktop-notification
 npm run test:pi-report-gotchas
 npm run test:pi-web-toolkit
+npm run test:pi-background-shell
 npm run e2e:flush-out-useless-tests
 ```
 
@@ -77,6 +78,23 @@ credentials, selectors, proxies, and cloud credentials are excluded. Launches us
 disable telemetry/version checks/MCP and unrelated built-in extensions, and trust only the
 generated project through process-local `--approve`. Automatic compaction, retries, and cache
 warming are disabled. Trust is never persisted for an unrelated project.
+
+## Pi background shell
+
+`npm run test:pi-background-shell` installs the actual `background-shell` catalogue payload at
+project and user scope and launches real Pi RPC sessions. The project Bash journey includes a
+26-second command with no output, proving launch returns while work continues and silence does
+not end the job. A second prompt succeeds while it runs. A completion notification then wakes
+the agent, whose real `write` tool saves the observed exit status and output to a fixture receipt.
+The inference server routes from call/result history and completion data, without polling jobs
+or using prompt wording assertions. Windows user-scope acceptance also exercises native PowerShell.
+
+Further cases cover nonzero native exit codes, explicit termination deadlines, large output and
+log limits, command-guard denial before launch, invalid arguments, process-tree cancellation,
+reload, tree-navigation, session-switch and shutdown cleanup, nested execution and guard denial,
+exact inference counts, unchanged project settings/instructions, and
+receipt-driven uninstall. All provider traffic stays on the authenticated fake loopback endpoint.
+`npm run e2e:pi-background-shell` is the corresponding CLI journey.
 
 ## Reusable boundaries
 

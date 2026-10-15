@@ -1,5 +1,12 @@
 # Pi provider investigation and integration report
 
+`background-shell` now ships as a Pi-only productivity package. It extends native Bash and
+Windows PowerShell with managed background jobs and automatic completion delivery, without
+project instruction changes or an external terminal multiplexer. Foreground execution remains
+available; running jobs are limited to the live session. The real RPC acceptance journey covers
+both shells, project/user installation, completion wakeups, failure, deadlines, cancellation,
+command-guard denial, and cleanup. See the root README's Background shell section.
+
 The [Pi architecture proposal](PI-ARCHITECTURE.md) extends this investigation with the user's
 requested 35-package backlog and concrete provider boundaries. It owns first-release scope and
 sequencing; this report retains catalogue-wide feasibility and broader integration considerations.

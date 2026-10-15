@@ -107,6 +107,17 @@ Successful and nonzero CLI results carry `{ output, exitCode }` in structured co
 nonzero exits are tool errors preserving stdout, including HTTP error pages. It has no
 session-state or Python bridge dependency. See the [acceptance journey](../tests/e2e/README.md#pi-web-toolkit).
 
+`background-shell` additionally ships a Pi-only native extension in
+`harness/productivity/background-shell/`. It overrides `bash` and Windows `powershell` with
+an explicit `run_in_background` parameter, reuses Pi's native shell resolution and execution,
+and owns bounded job receipts/logs, cancellation, and automatic completion messages.
+It has no npm or shared Python dependency and installs through ordinary extension file mappings,
+without instruction or configuration fragments. Background jobs are scoped to the live session;
+reload, tree navigation, session changes, and shutdown cancel jobs and discard logs.
+Command guards still evaluate the original shell call; background receipts are not completed
+filesystem-outcome evidence for path guards or commit attribution. See the real RPC acceptance
+journey in `tests/e2e/tools/pi-background-shell/`.
+
 `redirect-subagents`, `prefer-read-tool`, and `prefer-edit-tool` are Claude-only tools.
 `agent-launcher` is not required for Pi and is excluded from planned Pi ports.
 

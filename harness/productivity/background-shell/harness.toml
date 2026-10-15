@@ -1,0 +1,21 @@
+name = "background-shell"
+version = "1.0.0"
+description = "Pi Bash and PowerShell background commands with automatic completion notifications"
+docs = "https://github.com/EmilienxD/harness/blob/main/README.md#background-shell"
+
+[platforms.claude]
+status = "unsupported"
+reason = "Extends Pi's native shell tools only."
+
+[platforms.chatgpt]
+status = "unsupported"
+reason = "Extends Pi's native shell tools only."
+
+[platforms.pi]
+status = "supported"
+
+[[files]]
+src = "pi/extension.ts"
+dest = "harness-background-shell/index.ts"
+root = "extensions"
+platforms = ["pi"]

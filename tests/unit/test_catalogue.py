@@ -1378,6 +1378,7 @@ def test_every_catalogue_manifest_loads():
         "building": {"flush-out-useless-tests", "issue-readers", "issue-writers", "ship", "tdd", "test-workflows"},
         "shipping": {"setup-help"},
         "productivity": {
+            "background-shell",
             "enable-desktop-notification",
             "agent-launcher", "caveman", "cleanup-git", "setup-command-aliases", "handoff", "handoff-grilling", "mid-prompt-skills", "decisions", "report-gotchas", "subagents", "next-decision",
             "setup-text-replacements", "todo-hitl", "writing-for-agents", "stop-overthinking", "zoom-out",
