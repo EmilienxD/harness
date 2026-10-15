@@ -34,7 +34,7 @@ Include `model` only when the user explicitly requests a particular model for th
 
 Use the requested model's exact ID for the selected provider from this list:
 - ChatGPT/Codex: `gpt-6.1-sol`, `gpt-6-astra`, `gpt-6-sol`, `gpt-6-luna`, `gpt-5.6-sol`, `gpt-5.6-terra`, `gpt-5.6-luna`
-- Claude`claude-fable-5-1`, `claude-opus-5-5`, `claude-opus-5`, `claude-sonnet-5-5`, `claude-haiku-5-5` |
+- Claude`claude-fable-5-1`, `claude-opus-5-5`, `claude-opus-5`, `claude-sonnet-5-5`, `claude-haiku-5-5`
 
 If the requested model is absent, tell the user the list needs updating before launching with that model. An explicit model overrides the task default.
 
