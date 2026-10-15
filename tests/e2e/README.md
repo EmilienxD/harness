@@ -264,15 +264,16 @@ the Windows headless integration, not Pi TUI, POSIX or real Discord service acce
 ## Pi path guards
 
 `test:pi-path-guards` installs the real `on-read-reminder`, `on-edit-reminder`, and
-`on-edit-block` catalogue payloads with their coupled `pi-support` dependency. It exercises
-headless JSON/RPC and project/user installations through the fake Responses endpoint. Assertions
+`on-edit-block` catalogue payloads with their coupled `pi-path-guards` and `pi-transport`
+dependencies. It exercises headless JSON/RPC and project/user installations through the fake
+Responses endpoint. Assertions
 cover original tool output, additive guidance, cooldown, failed calls, complete and partial reads,
 denied mutation effects, shell reads, nested native calls, reload/tree ancestry, exact bytes,
 inference counts, starter preservation, and removal of the last dependent's bridge. Test-only
 probe commands orchestrate lifecycle changes without inference; production guards decide policy.
 
-`test:pi-command-guard` installs the real `command-guard` 2.2.0 payload with its coupled
-`pi-support` dependency. It runs the installed Pi 1.2.0 JSON/RPC CLI at project and user scopes
+`test:pi-command-guard` installs the real `command-guard` 2.2.1 payload with its coupled
+`pi-transport` dependency. It runs the installed Pi 1.2.0 JSON/RPC CLI at project and user scopes
 through the fake Responses endpoint: a safe native `bash`/`powershell` call runs and writes its
 file, while a configured dangerous command is denied with no side effect. A malformed policy
 denies every command, matching the hook's fail-closed behavior. Assertions cover dry-run bridge
@@ -282,7 +283,7 @@ shared Python core owns policy parsing; the extension only translates native eve
 
 ## Pi comment budgets
 
-`test:pi-prefer-fewer-comments` installs actual `prefer-fewer-comments` 2.3.0 and its coupled
+`test:pi-prefer-fewer-comments` installs actual `prefer-fewer-comments` 2.3.1 and its coupled
 bridge at project/user scopes and runs the installed Pi 1.2.0 JSON/RPC CLI against the fake
 Responses endpoint shared with Codex. Four scope/mode journeys verify unchanged overwrites,
 inline code changes, new adjacent comment lines, full multiline lexical context, template strings,

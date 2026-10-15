@@ -421,11 +421,14 @@ def test_provider_and_scope_prompts_define_the_install_target(monkeypatch):
 
 def test_catalogue_rows_are_grouped_by_category_in_reading_order():
     tools = discover()
-    ordered = sorted(tools.values(), key=lambda tool: (cli._category_rank(tool), tool.name))
+    ordered = sorted(
+        (tool for tool in tools.values() if tool.selectable),
+        key=lambda tool: (cli._category_rank(tool), tool.name),
+    )
     categories = list(dict.fromkeys(cli._category(tool) for tool in ordered))
 
     assert categories[0] == "planning"
-    assert categories[-1] == "extension"
+    assert categories[-1] == "vscode"
 
 
 def test_catalogue_only_labels_unsupported_selected_providers():
@@ -1385,7 +1388,8 @@ def test_every_catalogue_manifest_loads():
             "prefer-edit-tool", "prefer-fewer-comments", "prefer-read-tool",
             "redirect-subagents", "usage-limit-wait",
         },
-        "extension": {"aboard", "auto", "pi-support"},
+        "vscode": {"aboard", "auto"},
+        "internal": {"pi-transport", "pi-path-guards", "pi-issue-workflows"},
     }
     actual_categories = {}
     catalogue_root = next(parent for parent in tools["aboard"].root.parents if parent.name == "harness")

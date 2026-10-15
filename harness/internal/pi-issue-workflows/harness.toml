@@ -1,0 +1,22 @@
+name = "pi-issue-workflows"
+version = "1.0.0"
+description = "Internal Pi issue workflow routing and publication"
+selectable = false
+dependencies = [{ name = "pi-transport", version = ">=1.0.0,<2.0.0", lifecycle = "coupled", platforms = ["pi"] }]
+
+[platforms.claude]
+status = "unsupported"
+reason = "Internal support for native Pi extensions only."
+
+[platforms.chatgpt]
+status = "unsupported"
+reason = "Internal support for native Pi extensions only."
+
+[platforms.pi]
+status = "supported"
+
+[[files]]
+src = "workflows.ts"
+dest = "pi-issue-workflows/workflows.ts"
+root = "hooks"
+platforms = ["pi"]

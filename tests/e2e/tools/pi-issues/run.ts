@@ -62,7 +62,7 @@ export async function runPiIssueReaders(scope: "project" | "user", mode: "json" 
     await runFixtureInstaller(fixture.workspace, "uninstall", ["issue-readers"], { scope });
     // User-owned starter bodies survive receipt removal.
     await access(join(platform, "skills", "address-this", "SKILL.md"));
-    await assert.rejects(access(join(platform, "hooks", "pi-support", "workflows.ts")));
+    await assert.rejects(access(join(platform, "hooks", "pi-issue-workflows", "workflows.ts")));
     assert.equal(fixture.assertions().unexpectedRequests, 0);
     return { version: fixture.version, scope, mode, inferenceRequests: before };
   } finally { await fixture.close(); }
@@ -133,9 +133,9 @@ export async function runPiIssueWriters(scope: "project" | "user") {
     assert.equal((await rpc.prompt("/skill:draft-issues fixture")).status, "handled");
     assert.equal(fixture.assertions().inferenceRequests, 5);
     await runFixtureInstaller(fixture.workspace, "uninstall", ["issue-writers"], { scope });
-    await access(join(platform, "hooks", "pi-support", "workflows.ts"));
+    await access(join(platform, "hooks", "pi-issue-workflows", "workflows.ts"));
     await runFixtureInstaller(fixture.workspace, "uninstall", ["issue-readers"], { scope });
-    await assert.rejects(access(join(platform, "hooks", "pi-support", "workflows.ts")));
+    await assert.rejects(access(join(platform, "hooks", "pi-issue-workflows", "workflows.ts")));
     assert.equal(fixture.assertions().unexpectedRequests, 0);
     return { version: fixture.version, scope, inferenceRequests: 5 };
   } finally { await fixture.close(); }

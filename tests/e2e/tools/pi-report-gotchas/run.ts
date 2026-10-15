@@ -191,7 +191,7 @@ export async function runPiGotchasJourney(scope: "project" | "user", mode: "json
     await runFixtureInstaller(fixture.workspace, "uninstall", [TOOL], { scope });
     await assert.rejects(access(skill)); await assert.rejects(access(helper));
     await assert.rejects(access(join(platform, "extensions", "harness-report-gotchas", "index.ts")));
-    await assert.rejects(access(join(platform, "hooks", "pi-support", "bridge.ts")));
+    await assert.rejects(access(join(platform, "hooks", "pi-transport", "transport.ts")));
     await assert.rejects(access(join(bin, process.platform === "win32" ? "harness-report-gotchas.exe" : "harness-report-gotchas")));
     assert.equal((await files(submitted)).length, 5);
     assert.equal(await readFile(join(project, ".pi", "settings.json"), "utf8"), settings);

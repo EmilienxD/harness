@@ -184,7 +184,9 @@ Installed Pi resources:
 .pi/skills/<skill>/SKILL.md
 .pi/extensions/harness-<tool>/index.ts
 .pi/hooks/<tool>_hook.py
-.pi/hooks/pi-support/<bridge modules>
+.pi/hooks/pi-transport/transport.ts
+.pi/hooks/pi-path-guards/path_guards.ts and path_guards.py
+.pi/hooks/pi-issue-workflows/workflows.ts
 ```
 
 The file mappings install the entry point as `index.ts`; source overlays never appear inside
@@ -208,16 +210,25 @@ pinned Python tools and VSIXs; adding npm/CLI ownership would be a separate desi
 
 ## Shared Pi support and Python reuse
 
-The path guards ship a non-selectable `harness/extension/pi-support` package with versioned transport,
-event normalization and branch receipt utilities for these three guards. Issue workflow input routing and native publication also ship; broader provider support remains proposed. Package cores own the TOML policies.
-Each selected extension imports the installed support modules and registers its own behavior.
-Skills without extension behavior do not depend on it.
+Shared Pi helpers live in three non-selectable packages under `harness/internal/`:
+
+- `pi-transport` owns bounded Python subprocess requests, cancellation and protocol validation.
+  Callers supply the helper script explicitly.
+- `pi-path-guards` depends on transport and owns native event translation, branch-local receipts
+  and Python evaluation shared by the three path guards. Each tool retains its Python policy core.
+- `pi-issue-workflows` depends on transport and owns input routing, preparation and publication
+  integration shared by `issue-readers` and `issue-writers`.
+
+Other Python-backed Pi tools depend directly on transport. Tool-specific entry points, helpers,
+and policy cores stay in their respective packages. Each selected extension imports only its
+required support modules and registers its own behavior. Skills without executable behavior
+need no internal dependency. `harness/vscode/` is reserved for Aboard's VS Code integration.
 
 The installer filters [manifest dependencies](../src/harness_cli/manifest.py) by their optional
-platform list before catalogue resolution and receipt accounting. Extension packages declare a version-constrained, Pi-only, coupled
-dependency on `pi-support`; existing dependencies without a filter retain their behavior.
-Multiple Pi packages share one receipt-owned copy, removed when its last dependent is removed.
-This avoids requiring the bridge for Claude/ChatGPT and avoids one bridge copy per package.
+platform list before catalogue resolution and receipt accounting. These dependencies are
+version-constrained, Pi-only and coupled. Multiple tools share one receipt-owned copy of each
+required helper package, removed when its last dependent is removed. Existing dependencies
+without a platform filter retain their behavior.
 
 Start with bounded subprocess calls per relevant event. Choose Python through the installer's
 existing interpreter resolution and record the launch argv; send requests as UTF-8 JSON on stdin,
@@ -333,7 +344,7 @@ deployment; an older hosted service needs an explicit unsupported-provider error
 
 ### Shipped comment-budget implementation
 
-`prefer-fewer-comments` 2.3.0 uses **native tool definitions with injected filesystem
+`prefer-fewer-comments` 2.3.1 uses **native tool definitions with injected filesystem
 operations**, rather than `tool_call`/`tool_result` disk snapshots. Research covered the
 mirrored [extension contract](PI-REFERENCES/docs/extensions.md#custom-tools),
 [override example](PI-REFERENCES/examples/extensions/tool-override.ts),
@@ -438,7 +449,7 @@ as enforceable. Strong restriction guarantees need OS/container enforcement.
 | E. Hosted interview | Grilling extension, standalone answer relay, hosted additive schema/migration changes. | Publish/answer/reconnect/reload flows work, delivery is acknowledged correctly, and competing relays do not duplicate answers. |
 
 Do not declare all catalogue tools Pi-supported at once. Add `[platforms.pi]` mappings and bump
-each package version when its payload/support actually ships. The shared `pi-support` package
+each package version when its payload/support actually ships. The shared internal Pi helper packages
 and platform-filtered dependencies are implemented. Each advertised package needs its own applicable gate;
 passing a skill discovery check does not certify an extension-backed command.
 
@@ -452,7 +463,7 @@ Keep Claude/ChatGPT regression checks passing.
 
 ## Shipped session commits
 
-`commit` 1.7.0 registers `/commit` and intercepts `/skill:commit` before skill expansion.
+`commit` 1.7.1 registers `/commit` and intercepts `/skill:commit` before skill expansion.
 Both reuse the existing Python flag parsing, staging, Git commit, dry-run and explicitly
 requested Gemini message generation. Pi passes native active-branch user/assistant context
 to the shared message builder directly; it does not fabricate a Claude transcript. Ordinary
@@ -497,7 +508,7 @@ targets, arbitrary custom mutators and extension I/O need explicit adapters. Eve
 is evidence about observed operations, not OS isolation: independent processes can still mutate
 the working tree. Keep Git hooks and external writers under the same operational control as an
 ordinary Git commit. Files over the snapshot limit or unreadable evidence stop automatic
-attribution instead of weakening it. `pi-support` supplies bounded, cancellable interpreter
+attribution instead of weakening it. `pi-transport` supplies bounded, cancellable interpreter
 transport; no persistent worker or file-content receipt is introduced.
 
 Acceptance runs all four project/user and JSON/RPC combinations on installed Windows Pi 1.2.0,
@@ -509,10 +520,10 @@ Pi uses the shared fake Responses endpoint. See [the E2E guide](../tests/e2e/REA
 
 ## Shipped desktop notifications
 
-`enable-desktop-notification` 1.1.0 registers a native command and consumes the explicit
+`enable-desktop-notification` 1.1.1 registers a native command and consumes the explicit
 `/skill:enable-desktop-notification` spelling before expansion. Enable, disable, invalid
 arguments and backend errors finish without a Pi inference request. The extension uses
-`pi-support` 1.1.0's bounded, cancellable interpreter transport to call a small Python adapter
+`pi-transport` 1.0.0's bounded, cancellable interpreter transport to call a small Python adapter
 over the existing `desktop_notification.py`; OS delivery remains shared with Claude/Codex.
 
 Research used the mirrored [event declarations](PI-REFERENCES/src/core/extensions/types.ts),
@@ -538,10 +549,10 @@ before opt-in; successful submission does not certify that OS settings display t
 
 ## Shipped gotcha reports
 
-`report-gotchas` 1.2.0 installs its shared model-invoked skill and a native `report_gotchas`
+`report-gotchas` 1.2.1 installs its shared model-invoked skill and a native `report_gotchas`
 tool, plus `/report-gotchas-retry`. The existing host CLI remains responsible for webhook
 configuration. The extension and receipt-owned copy of the shared Python runtime install at
-both scopes, with the coupled `pi-support` transport. The Pi worker explicitly loads this
+both scopes, with the coupled `pi-transport` transport. The Pi worker explicitly loads this
 installed runtime, so the older independently pinned configuration CLI does not select Pi's
 submission/delivery implementation. Pi reads the shared webhook configuration, then keeps its
 queue, deduplication markers and locks under the state directory's `pi/` namespace. Legacy
@@ -616,9 +627,10 @@ and verified. Remaining adapters remain proposed.
 
 ## Shipped path-guard slice
 
-`on-read-reminder`, `on-edit-reminder`, and `on-edit-block` 2.2.0 use `pi-support` 1.0.0
-through a Pi-only coupled dependency. The bridge imports each package's existing Python parser
-and message builders. It selects the same uv/Python preference as the installer and records
+`on-read-reminder`, `on-edit-reminder`, and `on-edit-block` 2.2.1 use `pi-path-guards` 1.0.0
+and its `pi-transport` dependency through Pi-only coupled dependencies. The guard helper imports
+each package's existing Python parser and message builders. Transport selects the same uv/Python
+preference as the installer and records
 launch argv in session receipts. Subprocess requests and responses are versioned JSON, bounded
 at 2 MiB and ten seconds, with cancellation on session replacement/shutdown. Guard transport
 errors deny native edits; reminder errors append diagnostics while preserving successful results.
@@ -642,8 +654,9 @@ bridge/event contracts above remain the proposal for later consumers.
 
 ## Shipped issue workflow slice
 
-`issue-readers` 1.6.0 and `issue-writers` 2.3.0 depend on `pi-support` 1.1.0 for
-bounded, cancellable Python calls. Native input interception runs before `/skill:` expansion;
+`issue-readers` 1.6.1 and `issue-writers` 2.3.1 depend on `pi-issue-workflows` 1.0.0
+and its `pi-transport` dependency for routing and bounded, cancellable Python calls.
+Native input interception runs before `/skill:` expansion;
 short slash aliases expand through the selected native skill too. The extension checks that
 the skill is available, preserves images, and stops workflow preparation during another active
 turn. Context travels with the actual input rather than mutable pending state. Session replacement,
@@ -683,14 +696,14 @@ Pi's native skill format already supplies the required context; an extension wou
 boundary. Status compares covered-file hashes, actual workflow execution supplies evidence, and explicit
 confirmation records a passing run. Failed execution leaves the earlier manifest stale.
 
-`cleanup-git` 1.2.0 uses a Pi-only coupled `pi-support` dependency and package-local input adapter.
+`cleanup-git` 1.2.1 uses a Pi-only coupled `pi-transport` dependency and package-local input adapter.
 Both `/cleanup-git` and `/skill:cleanup-git` collect the shared read-only Git/GitHub inventory before
 native skill expansion, preserving arguments and images in one submission. No mutable pending inventory
 survives branch changes. Missing skills, invalid repositories and transport failures stop the invocation
 before inference; informational missing facts remain visible in the inventory. Approval and immediate
 live-state checks remain the shared skill's model-driven workflow, not an automatic deletion policy.
 
-`no-new-documents` 3.2.0 uses the same bridge with package-local native tool and command translation.
+`no-new-documents` 3.2.1 uses the same bridge with package-local native tool and command translation.
 It denies native writes and recognized literal shell creations in protected paths, including nested
 calls, while allowing draft mirrors and existing-document edits. Malformed policy or transport failure
 blocks covered calls. Native approval/rejection and their `/skill:` forms make zero inference requests.
@@ -747,8 +760,8 @@ scripted inference; they do not certify unscripted model judgments or POSIX/TUI 
 
 ## Shipped cloud interview slice
 
-`grill-me-in-cloud` 2.2.0 installs the shared skill/publisher, a small Python adapter,
-and a native extension/relay, with a Pi-only coupled `pi-support` dependency. Project and
+`grill-me-in-cloud` 2.2.1 installs the shared skill/publisher, a small Python adapter,
+and a native extension/relay, with a Pi-only coupled `pi-transport` dependency. Project and
 user installation remain independent of Aboard. The implementation was verified on Windows
 with installed Pi 1.2.0, including the actual local Grill app, Supabase database and private
 Storage uploads. On 2026-10-14 the additive migration was applied to the production database

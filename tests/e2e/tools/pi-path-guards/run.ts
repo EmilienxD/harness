@@ -32,7 +32,7 @@ export async function runPiPathGuardJourney(packageName: PathGuard, mode: "json"
     await writeFile(join(project, "target.txt"), "before\n");
     await writeFile(join(project, "guide.md"), "Follow project conventions: café, 中文, 😀.\n");
     await runFixtureInstaller(fixture.workspace, "install", [packageName], { scope, dryRun: true });
-    assert.equal(existsSync(join(project, ".pi", "hooks", "pi-support")), false);
+    assert.equal(existsSync(join(project, ".pi", "hooks", "pi-transport")), false);
     await runFixtureInstaller(fixture.workspace, "install", [packageName], { scope });
     await runFixtureInstaller(fixture.workspace, "install", [packageName], { scope });
     const platformRoot = scope === "project" ? join(project, ".pi") : fixture.workspace.agentDir;
@@ -52,7 +52,7 @@ export async function runPiPathGuardJourney(packageName: PathGuard, mode: "json"
     if (packageName === "on-read-reminder") assert.equal((ends[0]!.result as { structuredContent: unknown }).structuredContent, "before\n");
     await runFixtureInstaller(fixture.workspace, "uninstall", [packageName], { scope });
     await assert.rejects(access(join(platformRoot, "extensions", `harness-${packageName}`, "index.ts")));
-    await assert.rejects(access(join(platformRoot, "hooks", "pi-support", "bridge.ts")));
+    await assert.rejects(access(join(platformRoot, "hooks", "pi-transport", "transport.ts")));
     assert.equal(await readFile(policy, "utf8"), 'version = 1\n[[rules]]\npatterns = ["target.txt"]\nrequire = ["guide.md"]\n');
     return { version: fixture.version, mode, scope, package: packageName, inferenceRequests: steps.length + 1, status: run.status };
   } finally { await fixture.close(); }
@@ -124,9 +124,9 @@ export async function runPiGuardStateJourney() {
     assert.equal(fixture.assertions().unexpectedRequests, 0);
     // A coupled bridge survives removal of one dependent, then disappears with the last one.
     await runFixtureInstaller(fixture.workspace, "uninstall", ["on-edit-block"]);
-    await access(join(project, ".pi", "hooks", "pi-support", "bridge.ts"));
+    await access(join(project, ".pi", "hooks", "pi-transport", "transport.ts"));
     await runFixtureInstaller(fixture.workspace, "uninstall", ["on-edit-reminder", "on-read-reminder"]);
-    await assert.rejects(access(join(project, ".pi", "hooks", "pi-support", "bridge.ts")));
+    await assert.rejects(access(join(project, ".pi", "hooks", "pi-transport", "transport.ts")));
   } finally { await fixture.close(); }
 }
 

@@ -1,9 +1,9 @@
 name = "on-read-reminder"
-version = "2.2.0"
+version = "2.2.1"
 description = "PostToolUse hook that reminds the agent to read key files when it reads paths matching gitignore-style patterns"
 docs = "https://github.com/EmilienxD/harness/blob/main/README.md#hooks"
 
-dependencies = [{ name = "pi-support", version = ">=1.0.0,<2.0.0", lifecycle = "coupled", platforms = ["pi"] }]
+dependencies = [{ name = "pi-path-guards", version = ">=1.0.0,<2.0.0", lifecycle = "coupled", platforms = ["pi"] }]
 
 [platforms.pi]
 status = "supported"

@@ -1,6 +1,6 @@
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { requestPython } from "../../hooks/pi-support/bridge.ts";
+import { requestPython } from "../../hooks/pi-transport/transport.ts";
 
 const STATE = "harness-desktop-notification-v1";
 const helper = join(dirname(dirname(dirname(fileURLToPath(import.meta.url)))), "hooks", "desktop_notification_pi.py");

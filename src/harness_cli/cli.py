@@ -41,7 +41,7 @@ CATEGORY_ORDER = (
     "shipping",
     "productivity",
     "guards",
-    "extension",
+    "vscode",
 )
 
 

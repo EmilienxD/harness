@@ -22,6 +22,9 @@ operations distinct from the persistent-session commands `run`, `ask`, `reply`, 
   packaged persistent Python runtime.
 - `harness/<category>/<tool>/`: installable packages. User-facing documentation is centralized in the root
   `README.md`; inspect a platform `SKILL.md` only when implementation details are needed.
+- `harness/vscode/`: Aboard's VS Code installer package and its coupled Auto Run integration.
+- `harness/internal/`: non-selectable shared dependencies. Pi transport, path guards, and issue
+  workflows are separate packages; tool-specific entry points and policy cores stay with their tools.
 - `apps/aboard/`: the sole documentation exception, with its own user-facing `README.md` and local `AGENTS.md`
   navigation map.
 - `tests/unit/`: installer, catalogue, platform, settings, receipt, and session tests.

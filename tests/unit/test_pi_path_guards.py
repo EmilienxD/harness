@@ -22,7 +22,7 @@ def load(path):
 
 @pytest.fixture
 def guard(tmp_path, monkeypatch):
-    module = load(ROOT / "harness/extension/pi-support/path_guards.py")
+    module = load(ROOT / "harness/internal/pi-path-guards/path_guards.py")
     monkeypatch.setattr(module, "core", lambda package: load(
         ROOT / "harness/guards" / package / (package.replace("-", "_") + "_hook.py")
     ))
@@ -80,13 +80,13 @@ def test_edit_reminder_deduplicates_invalid_policy_diagnostics(guard, tmp_path):
 
 
 @pytest.mark.parametrize("platform", [Platform.CLAUDE, Platform.PI])
-def test_pi_support_dependency_is_filtered_and_coupled(tmp_path, platform):
+def test_pi_guard_dependencies_are_filtered_and_coupled(tmp_path, platform):
     installer = CatalogueInstaller(discover(), Target.for_project(tmp_path / "project", platform), ReceiptStore.load(tmp_path / "receipts.json"))
     installer.reconcile(set(PACKAGES))
-    expected = set(PACKAGES) | ({"pi-support"} if platform is Platform.PI else set())
+    expected = set(PACKAGES) | ({"pi-path-guards", "pi-transport"} if platform is Platform.PI else set())
     assert set(installer.installation["packages"]) == expected
     installer.reconcile({"on-edit-block"})
-    assert set(installer.installation["packages"]) == {"on-edit-block"} | ({"pi-support"} if platform is Platform.PI else set())
+    assert set(installer.installation["packages"]) == {"on-edit-block"} | ({"pi-path-guards", "pi-transport"} if platform is Platform.PI else set())
     installer.reconcile(set())
     assert installer.installation["packages"] == {}
 

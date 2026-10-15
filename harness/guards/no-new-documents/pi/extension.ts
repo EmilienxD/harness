@@ -1,7 +1,7 @@
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { requestPython } from "../../hooks/pi-support/bridge.ts";
+import { requestPython } from "../../hooks/pi-transport/transport.ts";
 
 const helper = join(dirname(dirname(dirname(fileURLToPath(import.meta.url)))), "hooks", "no_new_documents_pi.py");
 

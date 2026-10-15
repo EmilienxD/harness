@@ -1,0 +1,21 @@
+name = "pi-transport"
+version = "1.0.0"
+description = "Internal Pi Python subprocess transport"
+selectable = false
+
+[platforms.claude]
+status = "unsupported"
+reason = "Internal support for native Pi extensions only."
+
+[platforms.chatgpt]
+status = "unsupported"
+reason = "Internal support for native Pi extensions only."
+
+[platforms.pi]
+status = "supported"
+
+[[files]]
+src = "transport.ts"
+dest = "pi-transport/transport.ts"
+root = "hooks"
+platforms = ["pi"]

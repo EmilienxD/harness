@@ -1,7 +1,7 @@
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { existsSync } from "node:fs";
-import { requestPython } from "../../hooks/pi-support/bridge.ts";
+import { requestPython } from "../../hooks/pi-transport/transport.ts";
 import { GrillRelay, RECEIPT } from "../../hooks/grill-cloud/relay.ts";
 
 const hooks = join(dirname(fileURLToPath(import.meta.url)), "../../hooks");

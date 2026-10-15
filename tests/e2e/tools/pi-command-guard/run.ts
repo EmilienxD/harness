@@ -44,7 +44,7 @@ export async function runPiCommandGuardJourney(mode: "json" | "rpc", scope: "pro
     const project = fixture.workspace.projectRoot;
     await enableShell(project, shell);
     await runFixtureInstaller(fixture.workspace, "install", ["command-guard"], { scope, dryRun: true });
-    assert.equal(existsSync(join(project, ".pi", "hooks", "pi-support")), false);
+    assert.equal(existsSync(join(project, ".pi", "hooks", "pi-transport")), false);
     await runFixtureInstaller(fixture.workspace, "install", ["command-guard"], { scope });
     // Reinstall must preserve the policy below and stay idempotent.
     await runFixtureInstaller(fixture.workspace, "install", ["command-guard"], { scope });
@@ -65,7 +65,7 @@ export async function runPiCommandGuardJourney(mode: "json" | "rpc", scope: "pro
     await runFixtureInstaller(fixture.workspace, "uninstall", ["command-guard"], { scope });
     await assert.rejects(access(join(platformRoot, "extensions", "harness-command-guard", "index.ts")));
     await assert.rejects(access(join(platformRoot, "hooks", "command_guard_pi.py")));
-    await assert.rejects(access(join(platformRoot, "hooks", "pi-support", "bridge.ts")));
+    await assert.rejects(access(join(platformRoot, "hooks", "pi-transport", "transport.ts")));
     assert.equal(await readFile(policy, "utf8"), POLICY);
     return { version: fixture.version, mode, scope, status: run.status, inferenceRequests: steps.length + 1 };
   } finally {

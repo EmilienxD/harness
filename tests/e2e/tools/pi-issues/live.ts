@@ -118,7 +118,7 @@ export async function runLivePiIssues(scope: "project" | "user") {
     assert.equal(fixture.assertions().inferenceRequests, 7);
     assert.equal(fixture.assertions().unexpectedRequests, 0);
     await runFixtureInstaller(fixture.workspace, "uninstall", ["issue-writers", "issue-readers"], { scope });
-    await assert.rejects(access(join(platform, "hooks", "pi-support", "workflows.ts")));
+    await assert.rejects(access(join(platform, "hooks", "pi-issue-workflows", "workflows.ts")));
     return { version: fixture.version, scope, repository: REPOSITORY, publishedIssues: [parentNumber, childNumber], inferenceRequests: 7, publishInferenceRequests: 0 };
   } finally {
     try {

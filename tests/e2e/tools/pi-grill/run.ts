@@ -217,7 +217,7 @@ export async function runPiGrill(options: { scope: "project" | "user"; mode?: "r
     await receiver.close();
     await runFixtureInstaller(fixture.workspace, "uninstall", ["grill-me-in-cloud"], { scope: options.scope });
     await assert.rejects(access(join(platform, "extensions", "harness-grill-me-in-cloud", "index.ts")));
-    await assert.rejects(access(join(platform, "hooks", "pi-support", "bridge.ts")));
+    await assert.rejects(access(join(platform, "hooks", "pi-transport", "transport.ts")));
     assert.equal(fixture.assertions().unexpectedRequests, 0);
     return { version: fixture.version, scope: options.scope, mode: options.mode ?? "rpc", inferenceRequests: 5 + offset, hosted: board ? "fault-fixture" : new URL(origin).hostname };
   } finally {

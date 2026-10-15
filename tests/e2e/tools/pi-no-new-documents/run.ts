@@ -88,10 +88,10 @@ export async function runPiDocumentsJourney(mode: "json" | "rpc", scope: "projec
     await runFixtureInstaller(fixture.workspace, "uninstall", ["no-new-documents"], { scope });
     await assert.rejects(access(join(platformRoot, "extensions/harness-no-new-documents/index.ts")));
     if (composition) {
-      await access(join(platformRoot, "hooks/pi-support/bridge.ts"));
+      await access(join(platformRoot, "hooks/pi-transport/transport.ts"));
       await runFixtureInstaller(fixture.workspace, "uninstall", ["cleanup-git"], { scope });
     }
-    await assert.rejects(access(join(platformRoot, "hooks/pi-support/bridge.ts")));
+    await assert.rejects(access(join(platformRoot, "hooks/pi-transport/transport.ts")));
     assert.equal(await readFile(policy, "utf8"), customPolicy);
     return { version: fixture.version, mode, scope, inferenceRequests: fixture.assertions().inferenceRequests };
   } finally { await fixture.close(); }

@@ -1,7 +1,8 @@
-name = "pi-support"
-version = "1.1.0"
-description = "Internal Pi event transport, issue workflows and branch-local path guard receipts"
+name = "pi-path-guards"
+version = "1.0.0"
+description = "Internal Pi path-guard event handling and branch-local receipts"
 selectable = false
+dependencies = [{ name = "pi-transport", version = ">=1.0.0,<2.0.0", lifecycle = "coupled", platforms = ["pi"] }]
 
 [platforms.claude]
 status = "unsupported"
@@ -15,19 +16,13 @@ reason = "Internal support for native Pi extensions only."
 status = "supported"
 
 [[files]]
-src = "bridge.ts"
-dest = "pi-support/bridge.ts"
+src = "path_guards.ts"
+dest = "pi-path-guards/path_guards.ts"
 root = "hooks"
 platforms = ["pi"]
 
 [[files]]
 src = "path_guards.py"
-dest = "pi-support/path_guards.py"
-root = "hooks"
-platforms = ["pi"]
-
-[[files]]
-src = "workflows.ts"
-dest = "pi-support/workflows.ts"
+dest = "pi-path-guards/path_guards.py"
 root = "hooks"
 platforms = ["pi"]

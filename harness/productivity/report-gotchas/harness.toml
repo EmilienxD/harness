@@ -1,5 +1,5 @@
 name = "report-gotchas"
-version = "1.2.0"
+version = "1.2.1"
 description = "Send noteworthy agent handoff gotchas to Discord"
 docs = "https://github.com/EmilienxD/harness/blob/main/README.md#model-invoked-skills"
 requires = ["git"]
@@ -16,8 +16,8 @@ fragment = "chatgpt/hooks.fragment.json"
 status = "supported"
 
 [[dependencies]]
-name = "pi-support"
-version = ">=1.1.0,<2.0.0"
+name = "pi-transport"
+version = ">=1.0.0,<2.0.0"
 platforms = ["pi"]
 lifecycle = "coupled"
 

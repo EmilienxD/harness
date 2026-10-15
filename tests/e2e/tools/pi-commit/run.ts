@@ -108,9 +108,9 @@ export async function runPiCommit(scope: "project" | "user", mode: "json" | "rpc
     assert.equal(await git("rev-parse", "HEAD"), committed);
     await runFixtureInstaller(fixture.workspace, "uninstall", ["commit"], { scope });
     await assert.rejects(readFile(join(platform, "extensions", "harness-commit", "index.ts")));
-    await readFile(join(platform, "hooks", "pi-support", "bridge.ts"));
+    await readFile(join(platform, "hooks", "pi-transport", "transport.ts"));
     await runFixtureInstaller(fixture.workspace, "uninstall", ["prefer-fewer-comments"], { scope });
-    await assert.rejects(readFile(join(platform, "hooks", "pi-support", "bridge.ts")));
+    await assert.rejects(readFile(join(platform, "hooks", "pi-transport", "transport.ts")));
     assert.equal(fixture.assertions().unexpectedRequests, 0);
     return { scope, mode, version: fixture.version, inferenceRequests: 5, isolatedIndex: true, removed: true };
   } finally { await fixture.close(); }

@@ -1,6 +1,6 @@
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { requestPython } from "./bridge.ts";
+import { requestPython } from "../pi-transport/transport.ts";
 
 const hooksRoot = dirname(dirname(fileURLToPath(import.meta.url)));
 

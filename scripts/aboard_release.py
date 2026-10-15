@@ -137,7 +137,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     update = commands.add_parser("update-pin")
     update.add_argument("--version", required=True)
     update.add_argument("--vsix", type=Path, required=True)
-    update.add_argument("--manifest", type=Path, default=Path("harness/extension/aboard/harness.toml"))
+    update.add_argument("--manifest", type=Path, default=Path("harness/vscode/aboard/harness.toml"))
     update.add_argument("--package", type=Path, default=Path("apps/aboard/package.json"))
     verify = commands.add_parser("verify-pins")
     verify.add_argument("--catalogue", type=Path, default=Path("harness"))

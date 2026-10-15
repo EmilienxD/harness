@@ -3,7 +3,7 @@ import { access, mkdir, open, readFile, stat, writeFile } from "node:fs/promises
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createEditToolDefinition, createWriteToolDefinition } from "@earendil-works/pi-coding-agent";
-import { requestPython } from "../../hooks/pi-support/bridge.ts";
+import { requestPython } from "../../hooks/pi-transport/transport.ts";
 
 const RECEIPT = "harness-prefer-fewer-comments-v1";
 const MAX_BYTES = 512 * 1024;

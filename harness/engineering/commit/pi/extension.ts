@@ -2,7 +2,7 @@ import { homedir } from "node:os";
 import { createHash } from "node:crypto";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { requestPython } from "../../hooks/pi-support/bridge.ts";
+import { requestPython } from "../../hooks/pi-transport/transport.ts";
 
 const RECEIPT = "harness-commit-v1";
 const helper = join(dirname(dirname(dirname(fileURLToPath(import.meta.url)))), "hooks", "commit_pi.py");

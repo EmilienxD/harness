@@ -1,4 +1,4 @@
-import { registerPathGuard } from "../../hooks/pi-support/bridge.ts";
+import { registerPathGuard } from "../../hooks/pi-path-guards/path_guards.ts";
 
 export default function (pi: any) {
   registerPathGuard(pi, "on-edit-block");

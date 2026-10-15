@@ -1,5 +1,5 @@
 name = "enable-desktop-notification"
-version = "1.1.0"
+version = "1.1.1"
 description = "Enable desktop notifications for final responses in the current session without a model call"
 docs = "https://github.com/EmilienxD/harness/blob/main/README.md#user-invoked-skills"
 
@@ -15,8 +15,8 @@ fragment = "chatgpt/hooks.fragment.json"
 status = "supported"
 
 [[dependencies]]
-name = "pi-support"
-version = ">=1.1.0,<2.0.0"
+name = "pi-transport"
+version = ">=1.0.0,<2.0.0"
 platforms = ["pi"]
 lifecycle = "coupled"
 

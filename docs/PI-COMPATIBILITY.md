@@ -196,8 +196,8 @@ Effort is relative implementation complexity: **low**, **medium**, **high**. It 
 
 | Package | Useful to Pi? / route | Implementation and parity requirements | Effort / priority |
 | --- | --- | --- | --- |
-| [`aboard`](../harness/extension/aboard/harness.toml) | Yes / P | Add Pi platform/launch/session/preflight/lifecycle/skill adapters, provider config and UI options, managed extension assets, worktree copying and resume support. Preserve visible terminals, leases, authenticated bridge, prompt receipt confirmation and Auto Run commit contracts. Read-only/safety capability checks must precede checkout creation. New VSIX release/pin is required to ship support. | High / 2 |
-| [`auto`](../harness/extension/auto/harness.toml) | Yes / E, Aboard-dependent | Native `/auto` and `/auto --dry` call the existing authenticated Aboard endpoint without a model turn. Retain active-session requirement and explicit error when unavailable. Full workers depend on the Aboard Pi adapter and mandatory restrictions. | Low command; high dependency / 2 |
+| [`aboard`](../harness/vscode/aboard/harness.toml) | Yes / P | Add Pi platform/launch/session/preflight/lifecycle/skill adapters, provider config and UI options, managed extension assets, worktree copying and resume support. Preserve visible terminals, leases, authenticated bridge, prompt receipt confirmation and Auto Run commit contracts. Read-only/safety capability checks must precede checkout creation. New VSIX release/pin is required to ship support. | High / 2 |
+| [`auto`](../harness/vscode/auto/harness.toml) | Yes / E, Aboard-dependent | Native `/auto` and `/auto --dry` call the existing authenticated Aboard endpoint without a model turn. Retain active-session requirement and explicit error when unavailable. Full workers depend on the Aboard Pi adapter and mandatory restrictions. | Low command; high dependency / 2 |
 
 ### Shipping — 1 package
 
