@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "harness-web-toolkit"
-version = "1.0.0"
+version = "1.0.1"
 description = "Local web search and page fetching CLI for coding agents"
 requires-python = ">=3.11"
 license = { text = "MIT" }

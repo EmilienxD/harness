@@ -133,7 +133,7 @@ ENGINES: dict[str, Engine] = {
             """[...document.querySelectorAll('#b_results > li.b_algo')].map(item => {
                  const link = item.querySelector('h2 a');
                  const snippet = item.querySelector('.b_caption p, p[class*="b_lineclamp"], .b_algoSlug');
-                 return link && {title: link.innerText, url: link.href, snippet: snippet ? snippet.innerText : ''};
+                 return link && {title: link.textContent, url: link.href, snippet: snippet ? snippet.textContent : ''};
                }).filter(Boolean)""",
             _bing,
         ),

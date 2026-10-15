@@ -8,7 +8,7 @@ Run `web-toolkit` through the shell when it fits the user's web tool preference.
 - `web-toolkit search "<query>"` prints result titles, URLs, and snippets.
 - `web-toolkit fetch <url>` prints the page as Markdown (PDFs and text formats as text) after a short header.
 
-Read `web-toolkit <command> --help` before using any option beyond these forms: it documents domain filters, engine choice, pagination, browser rendering, and raw HTML.
+Read `web-toolkit <command> --help` before using any option beyond these forms: it documents domain filters, engine choice, search result limits, browser rendering, and raw HTML.
 
 Research loop:
 

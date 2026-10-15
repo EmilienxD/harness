@@ -1,5 +1,5 @@
 name = "web-toolkit"
-version = "1.0.1"
+version = "1.0.3"
 description = "Local web search and page fetching CLI"
 docs = "https://github.com/EmilienxD/harness/blob/main/README.md#web-toolkit"
 
