@@ -11,7 +11,7 @@ The [Pi architecture proposal](PI-ARCHITECTURE.md) extends this investigation wi
 requested 35-package backlog and concrete provider boundaries. It owns first-release scope and
 sequencing; this report retains catalogue-wide feasibility and broader integration considerations.
 Current implementation includes all 22 shared skill packages in the architecture backlog,
-including `test-workflows`, plus `caveman` and `setup-help`, for 24 packages with opt-in Pi
+including `test-workflows`, plus `caveman`, `setup-help`, and `websearch`, for 25 packages with opt-in Pi
 installation. Extension-backed tools include the three
 path guards, `prefer-fewer-comments`, `no-new-documents`, `cleanup-git`, both issue workflow packages, `commit`, `enable-desktop-notification`, and the cloud interview
 with its standalone relay, plus native gotcha reporting and Web Toolkit search/fetch tools. The hosted Pi migration/application are deployed; real Pi project/user
@@ -174,7 +174,7 @@ Effort is relative implementation complexity: **low**, **medium**, **high**. It 
 | [`lavish`](../harness/planning/lavish/harness.toml) | Yes / S with small edit | `npx lavish-axi` artifact/review workflow is independent of Pi. Remove or normalize literal Claude `$ARGUMENTS` handling; do not leave Pi to infer an unreplaced placeholder. Browser review remains external. | Low / 1 |
 | [`prototype`](../harness/planning/prototype/harness.toml) | Yes / S | Same throwaway branch/logic/UI workflow and supporting guides. Available browser tools determine UI verification depth. No automatic prototype delegation: current interactive-only constraint stays. | Low / 1 |
 | [`read-all-adrs`](../harness/planning/read-all-adrs/harness.toml) | Yes / S | Same exhaustive Markdown read. Large ADR inventories still consume model context and may need appropriate context capacity. | Low / 1 |
-| [`websearch`](../harness/planning/websearch/harness.toml) | Yes / S, capability-qualified | Context7 CLI and trusted-source index transfer. Pi's default tools do not include a built-in web-search service; [`web-toolkit`](../harness/productivity/web-toolkit/harness.toml) 1.2.0 supplies native `web_search` and `web_fetch` wrappers over its local CLI. Without a web tool, search is a reported coverage gap. | Low skill; external tool setup / 1 |
+| [`websearch`](../harness/planning/websearch/harness.toml) | Shipped / S, capability-qualified | 1.5.0 installs the shared skill and editable source index at project/user scopes. Uses Context7 and the agent's default web tools; independently selectable [`web-toolkit`](../harness/productivity/web-toolkit/harness.toml) supplies Pi `web_search` and `web_fetch`. Without a web tool, search is a reported coverage gap. Native discovery, explicit invocation, index reads and removal pass real Pi RPC journeys. | Implemented |
 | [`writing-adrs`](../harness/planning/writing-adrs/harness.toml) | Yes / S | Same durable decision-document rules; no native provider behavior required. | Low / 1 |
 
 ### Productivity — 17 packages

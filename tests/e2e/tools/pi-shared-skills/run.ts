@@ -14,7 +14,7 @@ export const SHARED_SKILL_PACKAGES = [
   ["productivity", "handoff"], ["productivity", "handoff-grilling"], ["productivity", "todo-hitl"],
   ["productivity", "decisions"], ["productivity", "next-decision"], ["productivity", "stop-overthinking"],
   ["productivity", "setup-command-aliases"], ["productivity", "setup-text-replacements"],
-  ["productivity", "caveman"], ["shipping", "setup-help"],
+  ["productivity", "caveman"], ["shipping", "setup-help"], ["planning", "websearch"],
 ] as const;
 
 const AUTOMATIC_SKILLS = new Set(["tdd", "resolving-merge-conflicts", "writing-adrs", "writing-for-agents"]);
@@ -43,6 +43,12 @@ export async function runPiSharedSkillsJourney(scope: "project" | "user") {
           assert.equal(hash(bytes), hash(sourceBytes), "Installer changed shared payload bytes");
           // Skill instructions are checked as file bytes above, not matched in model prompts.
           if (file !== "SKILL.md") reads.push({ path: join(destination, file), bytes });
+        }
+        if (packageName === "websearch" && scope === "project") {
+          const path = join(fixture.workspace.projectRoot, ".harness", "websearch", "INDEX.md");
+          const bytes = await readFile(path, "utf8");
+          assert.equal(bytes, await readFile(join(source, "INDEX.md"), "utf8"));
+          reads.push({ path, bytes });
         }
         referenceReads += reads.length;
         scenarios.set(name, sharedSkillScenario(name, reads));

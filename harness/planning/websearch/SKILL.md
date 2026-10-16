@@ -12,9 +12,9 @@ Research the user's query and answer it directly in the end turn message. This i
 
 You may quickly search the codebase when its dependencies, versions, terminology, or implementation details would make the research more accurate.
 
-Before doing any search, read `.harness/websearch/INDEX.md` to get a list of common, known, and validated sources for the project. Use any source that is relevant to the task and fetch it.
+Before doing any search, read `.harness/websearch/INDEX.md` to get a list of common, known, and validated sources for the project. Without a project index, use the user-scope index: `INDEX.md` beside this skill on Pi, or `~/.harness/websearch/INDEX.md` on Claude Code and ChatGPT. Use any source that is relevant to the task and fetch it.
 
-If the user requests you to use specific search tools, use them. Otherwise, default to the Context7 npx CLI and complete the search with the `web-toolkit` CLI when it is installed (see its skill), or your built-in web search otherwise.
+If the user requests you to use specific search tools, use them. Otherwise, default to the Context7 npx CLI and complete the search with your default web search and page-fetching tools. If web tools are unavailable, report the coverage gap and synthesize only from sources you could access.
 
 How to use the Context7 CLI:
 - Resolve a library name to a Context7 library ID: `npx ctx7@latest library <name> [topic]` where `name` is the library name to search for and `topic` is what to look up in the library's documentation.

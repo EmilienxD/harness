@@ -1,8 +1,8 @@
 # Pi provider architecture proposal
 
-Status: **24 shared skill packages, three path-guard extensions, the command guard, comment budgets, document draft approval, Git cleanup inventory, two issue workflow extensions, cloud interviews, session commits, desktop notifications and gotcha reports implemented; remaining extensions and runtime architecture proposed**.
-Pi is an opt-in catalogue target for all 22 skill-led packages below, plus `caveman` and
-`setup-help`. Shared skill installation
+Status: **25 shared skill packages, three path-guard extensions, the command guard, comment budgets, document draft approval, Git cleanup inventory, two issue workflow extensions, cloud interviews, session commits, desktop notifications and gotcha reports implemented; remaining extensions and runtime architecture proposed**.
+Pi is an opt-in catalogue target for all 22 skill-led packages below, plus `caveman`,
+`setup-help`, and `websearch`. Shared skill installation
 works at project and user scope; three path guards, the command guard, comment budgets, document draft approval, Git cleanup inventory,
 both issue workflow packages, cloud interviews, session commits, desktop notifications and gotcha reports ship. The hosted Pi migration/app are deployed
 and verified against the production board. Remaining extensions, persistent runtime, and Aboard are pending.
@@ -23,7 +23,7 @@ and checks receipt-driven removal. Inference is scripted; these checks certify i
 not the quality of an unscripted model's audit judgments.
 
 The shared-skill batch additionally checks native command discovery and explicit invocation
-for all 23 skill entry points in its 22 packages, including `caveman` and `setup-help`, at
+for all 24 skill entry points in its 23 packages, including `caveman`, `setup-help`, and `websearch`, at
 project and user scopes. The real Pi
 parser verifies invocation policy; native tools read installed support files and write
 fixture results, with exact inference counts and receipt-driven removal. These checks certify
@@ -89,6 +89,13 @@ estimates: commit and hosted grilling have substantially larger state/integratio
 `caveman` and `setup-help` additionally ship Pi support in 1.1.0, outside the original
 35-package backlog. They install the unchanged shared skills at project and user scope;
 native discovery and explicit invocation are verified by the shared-skill batch.
+
+`websearch` additionally supports Pi in 1.5.0. It reuses the shared research skill,
+Context7 CLI guidance, and the agent's default web search and page-fetching tools.
+Missing web capabilities are reported rather than assumed. Project
+installs retain the shared workspace index; Pi user installs bundle an editable fallback index
+beside the skill, avoiding unsupported user-workspace mappings. Real shared-skill journeys
+verify native discovery, explicit invocation, index reads, and removal at both scopes.
 
 `web-toolkit` additionally ships native `web_search(query)` and `web_fetch(url)` tools in
 1.2.0, alongside its existing host CLI. Version 1.2.1 installs no fallback skill on Pi;
