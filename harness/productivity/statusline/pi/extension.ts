@@ -1,6 +1,6 @@
 import { basename } from "node:path";
 import { SettingsManager, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { truncateToWidth } from "@earendil-works/pi-tui";
+import { truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 
 // Keep filesystem/model names on one line, without terminal control sequences.
 function plain(value: string): string {
@@ -11,6 +11,11 @@ function plain(value: string): string {
 
 function color(code: number, text: string): string {
   return `\x1b[${code}m${text}\x1b[39m`;
+}
+
+function formatTokens(value: number | null | undefined): string {
+  if (typeof value !== "number" || !Number.isFinite(value) || value < 0) return "?";
+  return value >= 1000 ? `${Math.round(value / 1000)}k` : Math.round(value).toString();
 }
 
 export default function (pi: ExtensionAPI) {
@@ -31,22 +36,27 @@ export default function (pi: ExtensionAPI) {
           const model = plain(ctx.model?.id ?? "no-model");
           const thinking = pi.getThinkingLevel();
           const usage = ctx.getContextUsage();
-          const percent = usage?.percent;
-          const known = typeof percent === "number" && Number.isFinite(percent);
-          const context = known ? Math.round(percent).toString() : "?";
+          const tokens = usage?.tokens;
+          const known = typeof tokens === "number" && Number.isFinite(tokens) && tokens >= 0;
           // Resolve merged settings and model overrides through Pi's own defaults/validation.
           const compaction = SettingsManager.inMemory(pi.getSettings()).getCompactionSettings(ctx.model);
           const window = usage?.contextWindow ?? ctx.model?.contextWindow;
-          const threshold = typeof window === "number" && Number.isFinite(window) && window > 0
-            ? Math.max(0, 100 * (window - compaction.reserveTokens) / window) : undefined;
-          const limit = !compaction.enabled ? "off"
-            : threshold === undefined ? "?" : Math.round(threshold).toString();
-          const label = `${context}/${limit}%`;
+          const total = typeof window === "number" && Number.isFinite(window) && window > 0 ? window : undefined;
+          const threshold = total === undefined ? undefined : Math.max(0, total - compaction.reserveTokens);
+          const limit = !compaction.enabled ? "off" : formatTokens(threshold);
+          const used = formatTokens(tokens);
           // Warn relative to the usable window, not only when the full window is nearly exhausted.
-          const pressure = known ? percent / (compaction.enabled ? threshold ?? 100 : 100) : undefined;
-          const colored = pressure === undefined ? label
-            : color(pressure < 0.5 ? 32 : pressure < 0.75 ? 34 : pressure < 0.9 ? 33 : 31, label);
-          return [truncateToWidth(`${location}  ${provider} ${model} ${thinking}  ${colored}`, Math.max(0, width))];
+          const budget = compaction.enabled ? threshold ?? total : total;
+          const pressure = known && budget !== undefined ? (tokens === 0 ? 0 : tokens / budget) : undefined;
+          const colored = pressure === undefined ? used
+            : color(pressure < 0.5 ? 32 : pressure < 0.75 ? 34 : pressure < 0.9 ? 33 : 31, used);
+          const fields = [provider, thinking, model, `${colored}/${limit}/${formatTokens(total)}`];
+          const line = () => [location, [fields[0], fields[2], fields[1]].filter(Boolean).join(" "), fields[3]]
+            .filter(Boolean).join("  ");
+          const available = Math.max(0, width);
+          // Drop whole fields in priority order before truncating the project/branch.
+          for (let i = 0; i < fields.length && visibleWidth(line()) > available; i++) fields[i] = "";
+          return [truncateToWidth(line(), available)];
         },
       };
     });

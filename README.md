@@ -398,24 +398,28 @@ Run `test-workflows status` explicitly when verifying changes, as you would run 
 `statusline` replaces Pi's footer with exactly one line:
 
 ```text
-harness (main)  openai:gpt-6.1-sol:medium  c:25/65%
+harness (main)  openai gpt-6.1-sol medium  125k/200k/256k
 ```
 
 The project is the current directory's name; the branch comes from Pi's Git watcher.
-The provider, model ID, thinking level, and rounded context-window usage update with Pi's UI.
-`c:25/65%` means 25% of the context window is used and auto-compaction's threshold is
-65%. The threshold is calculated from Pi's effective reserved-token setting and the
-current context window, including per-model overrides; it is not a fixed percentage.
+The provider, model ID, thinking level, and context token counts update with Pi's UI.
+`125k/200k/256k` means 125,000 tokens are used, auto-compaction's threshold is
+200,000 tokens, and the total context window is 256,000 tokens. Counts of 1,000 or more
+are rounded to the nearest thousand with a `k` suffix; smaller counts are shown directly.
+The threshold is calculated from Pi's effective reserved-token setting and the
+current context window, including per-model overrides.
 Pi can also compact on overflow, so this is the normal trigger threshold, not a guarantee.
 Disabled auto-compaction displays `off` instead of the threshold; unavailable values use `?`.
 
-`main` is red; other branches use Pi's theme accent. Project and
-`provider:model:thinking` remain uncolored. Context percentages progress from green
+`main` is red; other branches use Pi's theme accent. Project,
+provider, model, and thinking level remain uncolored. Only the used-token value is colored;
+the separators, compaction threshold, and total remain uncolored. Usage progresses from green
 (below 50% of the compaction threshold), to blue (50–75%), yellow (75–90%), and red
 (90% and above). With auto-compaction disabled or its threshold unknown, colors use
 the full context window instead. Unknown usage remains uncolored.
-Outside Git, the branch parentheses are omitted. Narrow terminals truncate the line.
-No token totals, costs, paths, or extension status rows are added.
+Outside Git, the branch parentheses are omitted. Narrow terminals remove whole fields
+in this order: provider, thinking level, model, context. Only then is the project/branch truncated.
+No costs, paths, or extension status rows are added.
 
 ```powershell
 uv run harness install statusline --platform pi --scope user

@@ -50,32 +50,33 @@ try {
   }));
   let requests = 0;
   session.subscribe((event) => { if (event.type === "agent_start") requests++; });
-  let percent = 41.6;
-  session.getContextUsage = () => ({ tokens: 416, contextWindow: 1000, percent });
+  let tokens = 416;
+  session.getContextUsage = () => ({ tokens, contextWindow: 1000, percent: null });
   session.agent.state.model = { ...session.model, id: "test-model", provider: "openai", reasoning: true };
   session.setThinkingLevel("high");
   const errors = [];
   await session.bindExtensions({ mode: "interactive", uiContext, onError: (e) => errors.push(e) });
   assert.deepEqual(errors, []);
   assert(component, "session_start must install a footer");
-  assert.deepEqual(render(), ["demo (main)  openai:test-model:high  c:42/65%"]);
+  assert.deepEqual(render(), ["demo (main)  openai test-model high  416/650/1k"]);
   assert(component.render(160)[0].includes("\x1b[31m(main)\x1b[39m"));
-  for (const [value, code] of [[0, 32], [32.49, 32], [32.5, 34], [48.74, 34], [48.75, 33], [58.49, 33], [58.5, 31], [100, 31]]) {
-    percent = value;
+  for (const [value, code] of [[0, 32], [324, 32], [325, 34], [487, 34], [488, 33], [584, 33], [585, 31], [1000, 31]]) {
+    tokens = value;
     const raw = component.render(160)[0];
-    assert(raw.includes(`c:\x1b[${code}m${Math.round(value)}/65%\x1b[39m`));
+    assert(raw.endsWith(`\x1b[${code}m${value === 1000 ? "1k" : value}\x1b[39m/650/1k`));
     assert(raw.startsWith("demo "), "project must have no color");
-    assert(raw.includes("\x1b[39m  openai:test-model:high  c:"), "model/thinking must have no color");
+    assert(raw.includes("\x1b[39m  openai test-model high  "), "model/thinking must have no color");
   }
-  percent = 0;
-  assert(render()[0].endsWith("c:0/65%"));
-  for (const unknown of [null, undefined, NaN, Infinity]) {
-    percent = unknown;
-    assert(render()[0].endsWith("c:?/65%"));
-    assert(!component.render(160)[0].split("c:")[1].includes("\x1b["));
+  tokens = 0;
+  assert(render()[0].endsWith("0/650/1k"));
+  for (const unknown of [null, undefined, NaN, Infinity, -1]) {
+    tokens = unknown;
+    assert(render()[0].endsWith("?/650/1k"));
+    assert(!component.render(160)[0].split("high  ")[1].includes("\x1b["));
   }
   session.getContextUsage = () => undefined;
-  assert(render()[0].endsWith("c:?/?%"));
+  session.agent.state.model = { ...session.model, contextWindow: 256000 };
+  assert(render()[0].endsWith("?/256k/256k"));
   branch = "feature/live";
   for (const callback of listeners) callback();
   assert.equal(renders, 1);
@@ -86,18 +87,40 @@ try {
   branch = null;
   session.agent.state.model = { ...session.model, id: "other-model", provider: "anthropic" };
   session.setThinkingLevel("off");
-  assert.deepEqual(render(), ["demo  anthropic:other-model:off  c:?/?%"]);
+  assert.deepEqual(render(), ["demo  anthropic other-model off  ?/256k/256k"]);
   session.getContextUsage = () => ({ tokens: 250, contextWindow: 1000, percent: 25 });
   settings.applyOverrides({ compaction: { modelOverrides: { "anthropic/other-model": { reserveTokens: 200 } } } });
-  assert(render()[0].endsWith("c:25/80%"));
+  assert(render()[0].endsWith("250/800/1k"));
   settings.setCompactionEnabled(false);
-  assert(render()[0].endsWith("c:25/off%"));
+  assert(render()[0].endsWith("250/off/1k"));
+  assert(component.render(160)[0].endsWith("\x1b[32m250\x1b[39m/off/1k"));
   settings.setCompactionEnabled(true);
   settings.applyOverrides({ compaction: { modelOverrides: { "anthropic/other-model": { reserveTokens: 1000 } } } });
-  assert(render()[0].endsWith("c:25/0%"));
+  assert(render()[0].endsWith("250/0/1k"));
+  assert(component.render(160)[0].endsWith("\x1b[31m250\x1b[39m/0/1k"));
+  settings.applyOverrides({ compaction: { modelOverrides: { "anthropic/other-model": { reserveTokens: 56000 } } } });
+  session.getContextUsage = () => ({ tokens: 125000, contextWindow: 256000, percent: null });
+  assert.deepEqual(render(), ["demo  anthropic other-model off  125k/200k/256k"]);
+  const layouts = [
+    "demo  anthropic other-model off  125k/200k/256k",
+    "demo  other-model off  125k/200k/256k",
+    "demo  other-model  125k/200k/256k",
+    "demo  125k/200k/256k",
+    "demo",
+  ];
+  for (let i = 0; i < layouts.length; i++) {
+    assert.equal(strip(component.render(layouts[i].length)[0]), layouts[i]);
+    if (i + 1 < layouts.length) {
+      assert.equal(strip(component.render(layouts[i].length - 1)[0]), layouts[i + 1]);
+    }
+  }
+  for (const [value, expected] of [[0, "0"], [999, "999"], [1000, "1k"], [125499, "125k"], [125500, "126k"]]) {
+    session.getContextUsage = () => ({ tokens: value, contextWindow: 256000, percent: null });
+    assert(render()[0].endsWith(`${expected}/200k/256k`));
+  }
   session.getContextUsage = () => undefined;
   session.agent.state.model = undefined;
-  assert.deepEqual(render(), ["demo  no-provider:no-model:off  c:?/?%"]);
+  assert.deepEqual(render(), ["demo  no-provider no-model off  ?/?/?"]);
   branch = "\x1b[31m你好\x1b[0m\nbranch";
   assert(render()[0].startsWith("demo (你好branch)"));
   for (const width of [0, 1, 2, 10, 25]) {
