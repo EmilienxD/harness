@@ -42,6 +42,7 @@ export interface ActivityUiHost {
 }
 
 export interface NativeUiOptions {
+  readonly suppressLaunchNotifications?: () => boolean;
   readonly runtimeRoot: string;
   readonly port: () => number | undefined;
   readonly fleet: FleetRegistry;
@@ -448,10 +449,9 @@ export function registerNativeFleetUi(context: ExtensionContext, options: Native
 
   const notifications = new FleetNotifications(fleet, {
     warning: (message) => { void window.showWarningMessage(message); },
-    error: (message) => { void window.showErrorMessage(message); },
+    error: (message) => { if (!options.suppressLaunchNotifications?.()) void window.showErrorMessage(message); },
   });
   disposables.push(notifications);
-
   const status = window.createStatusBarItem(undefined, 100);
   status.command = "aboard.focusFleet";
   const render = () => {

@@ -41,6 +41,8 @@ export type { PlatformLaunchRequest, PlatformResumeRequest } from "./launch.js";
 /** Provider boundary used by shared orchestration. */
 export interface AgentPlatform {
   readonly id: AgentPlatformId;
+  readonly displayName?: string;
+  readonly icon?: string;
   readonly capabilities: AgentPlatformCapabilities;
   readonly lifecycleAssets: PlatformLifecycleAssets;
   createSession(): PlatformSessionIdentity;

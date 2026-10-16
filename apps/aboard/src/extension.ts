@@ -1,5 +1,5 @@
 import type { ExtensionContext } from "vscode";
-import { ProgressLocation, RelativePattern, ThemeIcon, TreeItem, TreeItemCollapsibleState, Uri, commands, env, window, workspace } from "vscode";
+import { ProgressLocation, RelativePattern, Uri, commands, env, window, workspace } from "vscode";
 import { randomUUID } from "node:crypto";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
@@ -14,9 +14,15 @@ import { createTerminalRoutes } from "./bridge/terminal-routes.js";
 import { CommandTerminalService, createCommandRoutes, type CommandTerminalId } from "./bridge/command-terminals.js";
 import { createDelegationRoutes, delegationParentSession, readDelegationBinding, resumeInOpenTerminal } from "./bridge/manual-delegation.js";
 import { FileCommandEndpointRegistry, commandEndpointDirectory } from "./bridge/command-endpoint.js";
-import { TerminalController } from "./platform/terminals.js";
+import { TerminalController, type TerminalHandle } from "./platform/terminals.js";
 import type { TerminalId } from "./domain/contracts.js";
-import { createVsCodeTerminalHost } from "./vscode/terminals.js";
+import { initializeAgentLayout, createVsCodeTerminalHost, prepareAgentTerminalGroups } from "./vscode/terminals.js";
+import { AgentWorkspaceFiles, WorkspaceRequestJournal, acquireWorkspaceOwner, acquireOrdinaryWorkspaceOwner, ownerRuntimeDirectory, type WorkspaceOwnerLease } from "./runtime/agent-workspace-owner.js";
+import { WorkspaceBatchLauncher, presentWorkspaceBatchResult, validateWorkspaceLaunchPlan, type WorkspaceLaunchPlan, type WorkspaceLaunchProgress } from "./platform/workspace-launcher.js";
+import { WorkspacePresetStore } from "./domain/workspace-presets.js";
+import { NewWorkspaceLauncher } from "./vscode/workspace-launch.js";
+import { waitForIdleProviderStartup } from "./runtime/idle-startup.js";
+import { WorkspaceStartup } from "./runtime/workspace-startup.js";
 import { spawnCommandRunner } from "./platform/preflight.js";
 import { ClaudeAgentPlatform } from "./claude/platform.js";
 import { ChatGptAgentPlatform } from "./chatgpt/platform.js";
@@ -42,7 +48,7 @@ import {
   readAboardConfiguration,
   type ProjectSettings,
 } from "./configuration.js";
-import { FileActivityStore, FileFleetStore, PersistOnChange } from "./runtime/persistence.js";
+import { AtomicJsonFile, FileActivityStore, FileFleetStore, PersistOnChange } from "./runtime/persistence.js";
 import { ActivityRecorder } from "./runtime/activity-recorder.js";
 import { isInteractiveLaunch, shouldRecordEndedSession, type AgentOutcome } from "./domain/activity.js";
 import { completedCount } from "./domain/run-plan.js";
@@ -59,7 +65,6 @@ import { GitWorkingTreeInspector, WorkerLifecycleReconciler, reportsResult } fro
 import {
   SessionLifecycleService,
   SessionProcessMonitor,
-  SessionStartCancelledError,
   SessionStartupProofs,
   type SessionEndReason,
 } from "./bridge/session-lifecycle.js";
@@ -81,7 +86,7 @@ const SESSION_LIVENESS_POLL_MS = 5_000;
 import { CachingGitClient, ProcessGitClient, type GitClient } from "./git/client.js";
 import { AboardBranchCleanup, ProcessAboardBranchRepository } from "./git/branch-cleanup.js";
 import { registerBranchCleanupCommand } from "./vscode/branch-cleanup.js";
-import { registerLaunchPanel, type LaunchAction } from "./vscode/launch-panel.js";
+import { registerLaunchPanel } from "./vscode/launch-panel.js";
 import { AutoRunEngine } from "./auto/engine.js";
 import { closeSettledAutoRunTerminal } from "./auto/terminal-cleanup.js";
 import { WorktreeRunWorkspaces } from "./auto/worktree.js";
@@ -99,6 +104,7 @@ let bridge: BridgeRuntime | undefined;
 let commandEndpointRegistry: FileCommandEndpointRegistry | undefined;
 let persistence: PersistOnChange | undefined;
 let activeAutoRun: AutoRunEngine | undefined;
+let activeWorkspaceOwnership: WorkspaceOwnerLease | undefined;
 
 function configuration(project: ReadonlyMap<string, unknown>) {
   const scope = workspace.getConfiguration();
@@ -135,6 +141,7 @@ function workerConfigurations(workspaceRoot: string, source: FileLaunchConfigura
 
 /** Exposed so the VS Code integration suite can locate command discovery. */
 export interface AboardExtensionApi {
+  readonly agentWorkspaceStorageRoot: string;
   /** Where `/commands` publishes this window's port and command-scoped token. */
   readonly commandEndpointDirectory: string;
 }
@@ -143,8 +150,36 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
   if ((workspace.workspaceFolders?.length ?? 0) > 1) { void window.showErrorMessage("aboard v1 supports exactly one workspace folder. Open the project in a single-root window."); return undefined; }
   const workspaceRoot = workspace.workspaceFolders?.[0]?.uri.fsPath;
   if (workspaceRoot === undefined) return undefined;
-  const storageRoot = (context.storageUri ?? context.globalStorageUri).fsPath;
+  const workspaceFiles = new AgentWorkspaceFiles(context.globalStorageUri.fsPath);
+  let startupHandoff = workspace.workspaceFile?.scheme === "file" ? await workspaceFiles.read(workspace.workspaceFile.fsPath, workspaceRoot) : undefined;
+  if (startupHandoff !== undefined) {
+    const ownership = await acquireWorkspaceOwner(context.globalStorageUri.fsPath, startupHandoff.ownerId);
+    if (ownership === undefined) startupHandoff = undefined;
+    else activeWorkspaceOwnership = ownership;
+  }
+  const ordinaryOwnership = startupHandoff === undefined ? await acquireOrdinaryWorkspaceOwner(context.globalStorageUri.fsPath, workspaceRoot) : undefined;
+  activeWorkspaceOwnership ??= ordinaryOwnership;
+  const ownerId = startupHandoff?.ownerId ?? ordinaryOwnership!.ownerId;
+  const workspaceStartup = startupHandoff === undefined ? undefined : new WorkspaceStartup(context.globalStorageUri.fsPath, startupHandoff);
+  await workspaceStartup?.opened();
+  const startupStatus = startupHandoff === undefined ? undefined : window.createStatusBarItem();
+  if (startupStatus !== undefined) {
+    startupStatus.text = "$(loading~spin) Starting agent workspace…";
+    startupStatus.tooltip = "Aboard is preparing the workspace and starting its agents.";
+    startupStatus.show();
+    context.subscriptions.push(startupStatus);
+  }
+  const storageRoot = ownerRuntimeDirectory((context.storageUri ?? context.globalStorageUri).fsPath, ownerId);
   const runtime = new RuntimeLayout(storageRoot);
+  const bridgeIdentityStore = new AtomicJsonFile<{ port: number; token: string }>(join(runtime.root, "bridge-identity.json"), (value) => {
+    if (typeof value !== "object" || value === null || !("port" in value) || !("token" in value) || typeof value.port !== "number" || !Number.isInteger(value.port) || value.port < 1 || value.port > 65535 || typeof value.token !== "string" || value.token.length < 16) return undefined;
+    return { port: value.port, token: value.token };
+  });
+  const persistedBridgeIdentity = await bridgeIdentityStore.load();
+  const workspaceJournal = new WorkspaceRequestJournal(join(storageRoot, "workspace-requests"));
+  const workspaceInitializedKey = `aboard.agentWorkspaceInitialized:${ownerId}`;
+  let agentWorkspaceInitialized = context.workspaceState.get<boolean>(workspaceInitializedKey) === true;
+  let workspaceBatchActive = 0;
 
   const output = window.createOutputChannel("aboard");
   context.subscriptions.push(output);
@@ -161,6 +196,7 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
   let lifecycle: WorkerLifecycleReconciler | undefined;
   let sessionLifecycle: SessionLifecycleService | undefined;
   const sessionProofs = new SessionStartupProofs();
+  const startupFailures = new Map<AgentId, string>();
   const scaffoldAssetRoot = join(context.extensionPath, "assets", "scaffold");
   const expectedScaffoldRevision = await scaffoldCatalogRevision(scaffoldAssetRoot);
   let scaffoldState = await readScaffoldState(workspaceRoot, expectedScaffoldRevision).catch(() => "uninitialized" as const);
@@ -240,6 +276,13 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
   const fleetStore = new FileFleetStore(runtime.root, runtimeAdmission);
   const persistedFleet = await fleetStore.load();
   const fleet = persistedFleet === undefined ? new FleetRegistry() : FleetRegistry.restore(persistedFleet);
+  for (const native of window.terminals) {
+    const options = native.creationOptions;
+    if (!("env" in options) || options.env?.ABOARD_RUNTIME_ROOT !== runtime.root) continue;
+    const agentId = options.env.ABOARD_AGENT_ID;
+    const saved = agentId === undefined || agentId === null ? undefined : fleet.get(agentId as AgentId);
+    if (saved !== undefined && isLiveSession(saved) && !isHeadlessExecution(saved.identity.type, saved.executionMode)) terminals.adopt(saved, native, saved.cwd ?? workspaceRoot);
+  }
   // Presence belongs to this project, so the relay lives exactly as long as the
   // project is initialized: an uninitialized workspace neither reports nor polls.
   let grillRelay: GrillCloudRelay | undefined;
@@ -433,7 +476,19 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
   const wrapperLayout = sessionWrapperLayout(runtime.root, join(context.extensionPath, "assets", "runtime", "abd_wrapper.py"));
   // `sessionMonitor` is constructed below, after the settlement callbacks it
   // needs; the observer is only ever called from a launch, long after that.
-  const coordinator = new DelegationCoordinator({ admission: () => initialized, workspaceRoot, promptRoot, fleet, lease, terminals, sessions: { observe: (agentId) => sessionMonitor.observe(agentId) }, onStaleLeaseRecovered: (holder, observation) => { output.appendLine(`Reclaimed the write lease from ${holder.agentId} (held since ${holder.acquiredAt}): terminal ${observation.terminal}, session ${observation.session}.`); void window.showWarningMessage(`aboard reclaimed the write lease from ${holder.agentId}: its terminal and session are both gone.`); }, configurations: launchConfigurations, platforms, prompts: new GitHubDelegationPromptResolver(new PromptResolver({ github })), spills: runtimeFiles, shell: process.platform === "win32" ? "powershell" : "git-bash", maxInlinePromptChars: currentConfiguration.maxInlinePromptChars, agentIdFactory: () => agentIdCounter.next(), startupTimeoutMs: STARTUP_PROOF_TIMEOUT_MS, wrapper: wrapperLayout, lockProbe: lockMarkerLive });
+  const settleFailedStartup = async (agentId: AgentId, error: unknown): Promise<unknown> => {
+    const failure = startupFailures.get(agentId);
+    startupFailures.delete(agentId);
+    if (failure !== undefined) return new Error(failure);
+    if (!(error instanceof Error) || error.name !== "SessionStartTimeoutError") return error;
+    const deadline = Date.now() + 5_000;
+    while (Date.now() < deadline) {
+      if (terminals.liveTerminalForAgent(agentId) === undefined && !lockMarkerLive(wrapperLayout.lockPathFor(agentId))) return error;
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+    return Object.assign(new Error("The original agent has not confirmed shutdown after its startup timeout. Inspect its owner before retrying."), { retrySafe: false });
+  };
+  const coordinator = new DelegationCoordinator({ settleFailedStartup, admission: () => initialized, workspaceRoot, promptRoot, fleet, lease, terminals, sessions: { observe: (agentId) => sessionMonitor.observe(agentId) }, onStaleLeaseRecovered: (holder, observation) => { output.appendLine(`Reclaimed the write lease from ${holder.agentId} (held since ${holder.acquiredAt}): terminal ${observation.terminal}, session ${observation.session}.`); void window.showWarningMessage(`aboard reclaimed the write lease from ${holder.agentId}: its terminal and session are both gone.`); }, configurations: launchConfigurations, platforms, prompts: new GitHubDelegationPromptResolver(new PromptResolver({ github })), spills: runtimeFiles, shell: process.platform === "win32" ? "powershell" : "git-bash", maxInlinePromptChars: currentConfiguration.maxInlinePromptChars, agentIdFactory: () => agentIdCounter.next(), startupTimeoutMs: STARTUP_PROOF_TIMEOUT_MS, awaitIdleStartup: (agentId, terminalId) => waitForIdleProviderStartup(wrapperLayout.lockPathFor(agentId), () => terminals.list().some((terminal) => terminal.terminalId === terminalId && terminal.status === "open"), STARTUP_PROOF_TIMEOUT_MS), wrapper: wrapperLayout, lockProbe: lockMarkerLive });
   lifecycle = new WorkerLifecycleReconciler({
     fleet,
     lease,
@@ -477,6 +532,7 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
       output.appendLine(`Agent ${agentId} exited cleanly before starting a session`);
       return;
     }
+    startupFailures.set(agentId, `The configured agent command ${cause}`);
     output.appendLine(`Launch failed for agent ${agentId} (session ${sessionId}): the configured agent command ${cause}. The terminal holds the error.`);
     // The launch is settled; the proof's timeout must not fire later and kill a
     // terminal whose error message is the whole point of keeping it.
@@ -491,7 +547,7 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
       fleet.remove(agentId, at);
     }
     releaseAbandonedTerminal(agentId);
-    void window.showWarningMessage(`aboard could not start the configured agent: it ${cause}. Check the terminal for the error.`);
+    if (workspaceBatchActive === 0) void window.showWarningMessage(`aboard could not start the configured agent: it ${cause}. Check the terminal for the error.`);
   };
   const sessionMonitor = new SessionProcessMonitor({
     probe: lockMarkerLive,
@@ -633,6 +689,52 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
   await commandEndpoint.clearWorkspace(workspaceRoot).catch(() => undefined);
   commandEndpointRegistry = commandEndpoint;
   context.subscriptions.push({ dispose: () => void commandEndpoint.clear() });
+  const providerChoices = [...platforms.values()].map((platform) => ({ id: platform.id, displayName: platform.displayName ?? platform.id, icon: platform.icon ?? "terminal" }));
+  const presetStore = new WorkspacePresetStore(context.globalState, providerChoices.map((provider) => provider.id), (message) => output.appendLine(`Presets: ${message}`));
+  const shellTerminals = new Map<string, TerminalHandle>();
+  const shellHost = createVsCodeTerminalHost();
+  context.subscriptions.push(shellHost.onDidCloseTerminal((terminal) => {
+    for (const [id, handle] of shellTerminals) if (handle === terminal) shellTerminals.delete(id);
+  }));
+  const batchLauncher = new WorkspaceBatchLauncher({
+    providers: providerChoices.map((provider) => provider.id),
+    initialized: () => agentWorkspaceInitialized,
+    markInitialized: async () => {
+      await context.workspaceState.update(workspaceInitializedKey, true);
+      agentWorkspaceInitialized = true;
+    },
+    initializeLayout: initializeAgentLayout,
+    launch: async (provider, editorPane, onCreated) => {
+      if (provider === "") {
+        const terminalId = randomUUID();
+        const terminal = shellHost.createTerminal({ cwd: workspaceRoot, env: {}, editorPane: editorPane ?? window.tabGroups.activeTabGroup });
+        shellTerminals.set(terminalId, terminal);
+        onCreated();
+        return { terminalId };
+      }
+      return coordinator.launchInteractive({
+        type: "interactive", description: `${provider} interactive`, focus: false,
+        ...(editorPane === undefined ? {} : { editorPane }),
+        configuration: await launchFile.getFor(provider as AgentPlatformId, "interactive"),
+      }, "user", onCreated);
+    },
+    focus: (terminalId) => {
+      try {
+        const shell = shellTerminals.get(terminalId);
+        if (shell) shell.show(false); else terminals.show(terminalId as TerminalId);
+      } catch { /* user closed it while the batch completed */ }
+    },
+  });
+  const launchLocal = async (plan: WorkspaceLaunchPlan, onProgress?: (progress: WorkspaceLaunchProgress) => void, destination: "current" | "new" = "new") => {
+    if (!initialized) throw new Error("Initialize this project before launching an agent workspace");
+    workspaceBatchActive++;
+    try {
+      await prepareAgentTerminalGroups();
+      return await (destination === "new" ? batchLauncher.launch(plan, onProgress) : batchLauncher.launchCurrent(plan, onProgress));
+    }
+    finally { workspaceBatchActive--; }
+  };
+  const workspaceLauncher = new NewWorkspaceLauncher({ projectRoot: workspaceRoot, storageRoot: context.globalStorageUri.fsPath, providers: providerChoices.map((provider) => provider.id), files: workspaceFiles, log: (message) => output.appendLine(message) });
   const bridgeStartup = new RuntimeStartup(runtimeAdmission);
   const startRuntimeBridge = (): Promise<void> => {
     if (!initialized || bridge !== undefined) return Promise.resolve();
@@ -640,7 +742,8 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
     if (!initialized || bridge !== undefined) return;
     const workerHooks = new WorkerHookService(fleet, runtimeFiles);
     bridge = await startBridge({
-    preferredPort: currentConfiguration.bridgePort,
+    preferredPort: persistedBridgeIdentity?.port ?? currentConfiguration.bridgePort,
+    ...(persistedBridgeIdentity === undefined ? {} : { tokenFactory: () => persistedBridgeIdentity.token }),
     handler: combineHandlers(
       createAutoRoutes({
         dryRun: (options) => autoRun.dryRun(options),
@@ -742,6 +845,8 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
     logger: { info: (message) => output.appendLine(message), error: (message) => output.appendLine(`Error: ${message}`) },
     });
     bridgeEnvironment = { port: bridge.port, token: bridge.token };
+    await bridgeIdentityStore.save(bridgeEnvironment);
+    if (persistedBridgeIdentity !== undefined && persistedBridgeIdentity.port !== bridge.port) output.appendLine("The previous owner bridge port is occupied. Existing terminal controls remain available, but their lifecycle hooks require the original port; new sessions use the current bridge.");
     try {
     const published = await commandEndpoint.publish({
       version: 2,
@@ -770,6 +875,7 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
     return autoRun.startPreviewed(preview);
   };
   fleetUi = registerNativeFleetUi(context, {
+    suppressLaunchNotifications: () => workspaceBatchActive > 0,
     runtimeRoot: runtime.root,
     port: () => bridge?.port,
     fleet,
@@ -822,31 +928,33 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
   // Disposed through subscriptions like every other resource; `deactivate` also
   // awaits it so queued writes are flushed on a normal shutdown.
   context.subscriptions.push({ dispose: () => void persistence?.dispose() });
-  const providers = {
-    claude: { label: "Claude", description: "Claude Code", provider: "claude" as const },
-    chatgpt: { label: "ChatGPT", description: "Codex CLI", provider: "chatgpt" as const },
-  };
-  const runAgentOn = async (choice: (typeof providers)[keyof typeof providers]): Promise<void> => {
+  const runAgentOn = async (provider: AgentPlatformId): Promise<void> => {
     if (!requireInitialized()) return;
+    workspaceBatchActive++;
     try {
-      await coordinator.launchInteractive({
-        type: "interactive",
-        description: `${choice.label} interactive`,
-        configuration: await launchFile.getFor(choice.provider, "interactive"),
-      }, "user");
+      await window.withProgress({ location: ProgressLocation.Notification, title: "Starting agent", cancellable: false }, async () => {
+        await prepareAgentTerminalGroups();
+        await coordinator.launchInteractive({
+          type: "interactive", description: `${provider} interactive`,
+          configuration: await launchFile.getFor(provider, "interactive"),
+        }, "user");
+      });
     } catch (error) {
-      if (error instanceof SessionStartCancelledError) return;
-      void window.showErrorMessage(error instanceof Error ? error.message : "Unable to run agent");
-    }
+      if (!(error instanceof Error && error.name === "SessionStartCancelledError")) {
+        void window.showErrorMessage(error instanceof Error ? error.message : "Unable to start the agent");
+      }
+    } finally { workspaceBatchActive--; }
   };
   const runAgent = async (): Promise<void> => {
     if (!requireInitialized()) return;
-    const selected = await window.showQuickPick(Object.values(providers), { placeHolder: "Choose the provider for this agent" });
-    if (selected === undefined) return;
-    await runAgentOn(selected);
+    const selected = await window.showQuickPick(providerChoices.map((provider) => ({ label: `$(${provider.icon}) ${provider.displayName}`, provider: provider.id })), { placeHolder: "Choose the provider for this agent" });
+    if (selected !== undefined) await runAgentOn(selected.provider);
   };
   const reconcileStaleSessions = (): void => {
     const openTerminalIds = new Set(terminals.list().filter((terminal) => terminal.status === "open").map((terminal) => terminal.terminalId));
+    for (const session of fleet.list()) {
+      if (isLiveSession(session) && openTerminalIds.has(session.terminal.terminalId)) sessionMonitor.track({ agentId: session.identity.agentId, sessionId: session.sessionId, lockFile: wrapperLayout.lockPathFor(session.identity.agentId) });
+    }
     const stale = fleet.list().filter((session) => isLiveSession(session) && !openTerminalIds.has(session.terminal.terminalId));
     for (const session of stale) {
       if (isHeadlessExecution(session.identity.type, session.executionMode)) {
@@ -959,22 +1067,24 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
       );
       if (confirmed === "Update") await scaffold();
     }),
-    commands.registerCommand("aboard.runAgent", runAgent),
-    // The rows above the fleet skip the picker: each one already names its provider.
-    commands.registerCommand("aboard.runClaudeCode", () => runAgentOn(providers.claude)),
-    commands.registerCommand("aboard.runCodex", () => runAgentOn(providers.chatgpt)),
-    registerLaunchPanel({
-      registerTreeDataProvider: (viewId, provider) => window.registerTreeDataProvider<LaunchAction>(viewId, {
-        getChildren: (node) => [...provider.getChildren(node)],
-        getTreeItem: (node) => {
-          const row = provider.getTreeItem(node);
-          const item = new TreeItem(row.label, TreeItemCollapsibleState.None);
-          item.iconPath = new ThemeIcon(row.icon);
-          item.contextValue = row.contextValue;
-          item.command = { ...row.command };
-          return item;
-        },
-      }),
+    commands.registerCommand("aboard.runAgent", () => runAgent()),
+    commands.registerCommand("aboard.launchWorkspace", () => commands.executeCommand("aboard.launch.focus")),
+    commands.registerCommand("aboard.runClaudeCode", () => runAgentOn("claude")),
+    commands.registerCommand("aboard.runCodex", () => runAgentOn("chatgpt")),
+    registerLaunchPanel({ registerWebviewViewProvider: (viewId, provider) => window.registerWebviewViewProvider(viewId, provider) }, {
+      store: presetStore, providers: providerChoices,
+      launch: async (request) => {
+        if (!requireInitialized()) return;
+        if (request.destination === "new") { await workspaceLauncher.launch(request); return; }
+        await window.withProgress({ location: ProgressLocation.Notification, title: "Starting terminals in current window", cancellable: false }, async (progress) => {
+          const result = await launchLocal(validateWorkspaceLaunchPlan({ preset: request.preset, empty: false, manual: true }, providerChoices.map((provider) => provider.id)), (state) => {
+            progress.report({ message: `${state.started} of ${state.total} terminals ready${state.failed > 0 ? `, ${state.failed} failed` : ""}` });
+          }, "current");
+          for (const failure of result.failed) output.appendLine(`Current window launch: ${failure.provider}: ${failure.message}`);
+          await presentWorkspaceBatchResult(result, (message) => window.showErrorMessage(message));
+        });
+      },
+      runAgent,
     }),
     registerBranchCleanupCommand({
       registerCommand: (command, callback) => commands.registerCommand(command, async () => {
@@ -1029,7 +1139,22 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
   }
   context.subscriptions.push(settingsWatcher);
   context.subscriptions.push({ dispose: () => void bridge?.stop() });
-  return { commandEndpointDirectory: commandEndpoint.directory };
+  if (startupHandoff !== undefined && initialized && workspaceStartup !== undefined) {
+    const handoff = startupHandoff;
+    // The owner remains autonomous if its source closes. The durable claim prevents replay on reload.
+    void Promise.resolve(window.withProgress({ location: ProgressLocation.Notification, title: "Starting workspace terminals", cancellable: false }, async (progress) => {
+      progress.report({ message: "Preparing the terminal layout…" });
+      let completed = 0;
+      return workspaceStartup.execute(() => workspaceJournal.execute(handoff.requestId, () => launchLocal(validateWorkspaceLaunchPlan(handoff.plan, providerChoices.map((provider) => provider.id)), (state) => {
+        const message = `${state.started} of ${state.total} terminals ready${state.failed > 0 ? `, ${state.failed} failed` : ""}`;
+        progress.report({ message, increment: state.total === 0 ? 0 : (state.started + state.failed - completed) / state.total * 100 });
+        completed = state.started + state.failed;
+        if (startupStatus !== undefined) startupStatus.text = `$(loading~spin) ${message}`;
+      }), handoff.plan));
+    })).catch((error: unknown) => output.appendLine(`Workspace handoff: ${error instanceof Error ? error.message : String(error)}`))
+      .finally(() => startupStatus?.dispose());
+  } else startupStatus?.dispose();
+  return { commandEndpointDirectory: commandEndpoint.directory, agentWorkspaceStorageRoot: context.globalStorageUri.fsPath };
 }
 
 let activeSessionMonitor: SessionProcessMonitor | undefined;
@@ -1049,4 +1174,6 @@ export async function deactivate(): Promise<void> {
   // The published record names a port and a token that both die with the bridge.
   await commandEndpointRegistry?.clear().catch(() => undefined);
   commandEndpointRegistry = undefined;
+  await activeWorkspaceOwnership?.release();
+  activeWorkspaceOwnership = undefined;
 }

@@ -45,6 +45,8 @@ export interface LaunchIsolation {
 }
 
 export interface DelegationLaunchInput {
+  readonly editorPane?: object;
+  readonly focus?: boolean;
   readonly model?: string;
   readonly effort?: RequestedEffort;
   readonly forkSessionId?: SessionId;
@@ -178,6 +180,8 @@ export interface DelegationCoordinatorOptions {
   readonly now?: () => Date;
   readonly maxInlinePromptChars?: number;
   readonly startupTimeoutMs?: number;
+  readonly awaitIdleStartup?: (agentId: AgentId, terminalId: AgentSession["terminal"]["terminalId"]) => Promise<void>;
+  readonly settleFailedStartup?: (agentId: AgentId, error: unknown) => Promise<unknown>;
   readonly wrapper?: SessionWrapperLayout;
   /** Whether a wrapper marker still stands for a live process; a bare file by default. */
   readonly lockProbe?: (lockFile: string) => boolean;
@@ -242,8 +246,8 @@ export class DelegationCoordinator {
     }
   }
 
-  public async launchInteractive(input: DelegationLaunchInput, origin: LaunchOrigin): Promise<InteractiveLaunchHandles> {
-    return this.#launch(input, { mode: "none" }, origin, true, "interactive", origin === "auto-run" ? "auto-run" : "user");
+  public async launchInteractive(input: DelegationLaunchInput, origin: LaunchOrigin, onCreated?: () => void): Promise<InteractiveLaunchHandles> {
+    return this.#launch(origin === "auto-run" ? { ...input, focus: false } : input, { mode: "none" }, origin, true, "interactive", origin === "auto-run" ? "auto-run" : "user", onCreated);
   }
 
   public async launchManual(input: DelegationLaunchInput, mode: "interactive" | "auto" | "loop"): Promise<InteractiveLaunchHandles> {
@@ -509,7 +513,7 @@ export class DelegationCoordinator {
   }
 
 
-  async #launch(input: DelegationLaunchInput, resultDelivery: AgentSession["resultDelivery"], origin: LaunchOrigin, attended: boolean, executionMode: ExecutionMode, promptAuthority: PromptAuthority): Promise<{
+  async #launch(input: DelegationLaunchInput, resultDelivery: AgentSession["resultDelivery"], origin: LaunchOrigin, attended: boolean, executionMode: ExecutionMode, promptAuthority: PromptAuthority, onCreated?: () => void): Promise<{
     readonly agentId: AgentId;
     readonly sessionId: SessionId;
     readonly terminalId: AgentSession["terminal"]["terminalId"];
@@ -580,6 +584,8 @@ export class DelegationCoordinator {
         sessionId,
         agentType,
         provider: platform.id,
+        ...(input.editorPane === undefined ? {} : { editorPane: input.editorPane }),
+        ...(input.focus === undefined ? {} : { focus: input.focus }),
         ...(input.issues === undefined ? {} : { issueNumbers: input.issues }),
         ...(input.completionCommitStartingSha === undefined ? {} : { completionCommitStartingSha: input.completionCommitStartingSha }),
         ...(input.reviewRange === undefined ? {} : { reviewRange: input.reviewRange }),
@@ -614,10 +620,13 @@ export class DelegationCoordinator {
         }, occurredAt);
       });
       terminalStarted = true;
+      onCreated?.();
       if (startupProofRequired) {
         const startup = this.options.terminals.waitForStartup(agentId);
         if (startup === undefined) throw new Error(`No startup proof was armed for runtime-assigned ${platform.id} session ${agentId}`);
         await startup;
+      } else {
+        await this.options.awaitIdleStartup?.(agentId, terminal.terminalId);
       }
       const canonicalSessionId = this.options.fleet.get(agentId)?.sessionId ?? sessionId;
       this.options.fleet.transition(agentId, { status: "running", startedAt: occurredAt }, occurredAt);
@@ -626,7 +635,7 @@ export class DelegationCoordinator {
     } catch (error) {
       this.options.lease.release(agentId, occurredAt, "launch failed");
       if (!terminalStarted) await this.options.spills.remove?.(agentId).catch(() => undefined);
-      throw error;
+      throw terminalStarted && this.options.settleFailedStartup !== undefined ? await this.options.settleFailedStartup(agentId, error) : error;
     }
   }
 

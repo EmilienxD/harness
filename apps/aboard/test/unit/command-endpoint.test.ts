@@ -114,3 +114,25 @@ test("a script can pick its own project out of the directory", async () => {
 
   assert.equal(mine?.port, 4823);
 });
+
+test("two windows on the same project publish independent command endpoints", async () => {
+  const target = await directory();
+  const first = new FileCommandEndpointRegistry({ directory: target, isProcessAlive: () => true });
+  const second = new FileCommandEndpointRegistry({ directory: target, isProcessAlive: () => true });
+  await first.publish(record());
+  const secondPath = await second.publish(record({ port: 5100 }));
+  assert.equal((await readdir(target)).length, 2);
+  await first.clear();
+  await first.clearWorkspace("C:\\work\\project");
+  assert.deepEqual(await readdir(target), [secondPath.slice(target.length + 1)]);
+});
+
+test("late shutdown from an old activation cannot erase the newer endpoint", async () => {
+  const target = await directory();
+  const old = new FileCommandEndpointRegistry({ directory: target, isProcessAlive: () => true });
+  const current = new FileCommandEndpointRegistry({ directory: target, isProcessAlive: () => true });
+  await old.publish(record());
+  const currentPath = await current.publish(record({ port: 5100, activatedAt: "2026-08-22T10:00:00.000Z" }));
+  await old.clear();
+  assert.equal((JSON.parse(await readFile(currentPath, "utf8")) as CommandEndpointRecord).port, 5100);
+});

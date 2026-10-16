@@ -43,6 +43,11 @@
         "category": "Aboard"
       },
       {
+        "command": "aboard.launchWorkspace",
+        "title": "Launch Workspace",
+        "category": "Aboard"
+      },
+      {
         "command": "aboard.runClaudeCode",
         "title": "Run Claude Code",
         "category": "Aboard",
@@ -212,9 +217,10 @@
         },
         {
           "id": "aboard.launch",
-          "name": "Run Agent",
+          "name": "Agent Launcher",
+          "type": "webview",
           "when": "aboard.initialized",
-          "initialSize": 0.3
+          "initialSize": 3
         },
         {
           "id": "aboard.fleet",
@@ -286,6 +292,10 @@
         }
       ],
       "commandPalette": [
+        {
+          "command": "aboard.launchWorkspace",
+          "when": "aboard.initialized"
+        },
         {
           "command": "aboard.initializeProject",
           "when": "!aboard.initialized && !aboard.scaffoldUpdateRequired"
@@ -396,16 +406,6 @@
         }
       ],
       "view/item/context": [
-        {
-          "command": "aboard.runClaudeCode",
-          "when": "viewItem == aboard.launch.claude",
-          "group": "inline@1"
-        },
-        {
-          "command": "aboard.runCodex",
-          "when": "viewItem == aboard.launch.codex",
-          "group": "inline@1"
-        },
         {
           "command": "aboard.focusAgent",
           "when": "viewItem == aboard.agent.interactive"
@@ -603,6 +603,7 @@
     }
   },
   "activationEvents": [
+    "workspaceContains:.abd/scaffold.json",
     "onStartupFinished",
     "onUri"
   ],

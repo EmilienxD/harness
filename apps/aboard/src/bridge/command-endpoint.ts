@@ -1,7 +1,7 @@
 
 import { mkdir, readFile, readdir, rename, rm, writeFile } from "node:fs/promises";
-import { createHash } from "node:crypto";
-import { join } from "node:path";
+import { createHash, randomUUID } from "node:crypto";
+import { join, posix, win32 } from "node:path";
 
 export interface CommandEndpointRecord {
   readonly version: 2;
@@ -34,10 +34,14 @@ export function commandEndpointDirectory(
   return join(state === undefined || state === "" ? join(homeDirectory, ".local", "state") : state, "abd", COMMAND_ENDPOINT_DIRECTORY_NAME);
 }
 
-function recordFileName(workspaceRoot: string): string {
-  const normalized = workspaceRoot.replaceAll("\\", "/").replace(/\/+$/, "");
-  const key = process.platform === "win32" ? normalized.toLowerCase() : normalized;
-  return `${createHash("sha256").update(key, "utf8").digest("hex").slice(0, 32)}.json`;
+export function normalizeProjectPath(workspaceRoot: string, platform: NodeJS.Platform = process.platform): string {
+  const paths = platform === "win32" ? win32 : posix;
+  const normalized = paths.resolve(workspaceRoot).replaceAll("\\", "/").replace(/\/+$/, "");
+  return platform === "win32" ? normalized.toLowerCase() : normalized;
+}
+
+function recordFileName(activationId: string): string {
+  return `${createHash("sha256").update(activationId, "utf8").digest("hex").slice(0, 32)}.json`;
 }
 
 export interface CommandEndpointRegistryOptions {
@@ -60,6 +64,7 @@ export class FileCommandEndpointRegistry {
   readonly #directory: string;
   readonly #isProcessAlive: (pid: number) => boolean;
   #fileName: string | undefined;
+  readonly #activationId = randomUUID();
 
   public constructor(options: CommandEndpointRegistryOptions) {
     this.#directory = options.directory;
@@ -71,7 +76,8 @@ export class FileCommandEndpointRegistry {
   }
 
   public async publish(record: CommandEndpointRecord): Promise<string> {
-    const fileName = recordFileName(record.workspaceRoot);
+    // Each activation owns its record, including across overlapping reloads.
+    const fileName = recordFileName(this.#activationId);
     this.#fileName = fileName;
     const path = join(this.#directory, fileName);
     await mkdir(this.#directory, { recursive: true, mode: 0o700 });
@@ -90,9 +96,10 @@ export class FileCommandEndpointRegistry {
     this.#fileName = undefined;
   }
 
-  /** Removes this workspace's stale activation record without publishing one. */
+  /** Only prune abandoned records. A project can belong to several live windows. */
   public async clearWorkspace(workspaceRoot: string): Promise<void> {
-    await rm(join(this.#directory, recordFileName(workspaceRoot)), { force: true });
+    void workspaceRoot;
+    await this.#pruneAbandoned(this.#fileName ?? "");
   }
 
   async #pruneAbandoned(ownFileName: string): Promise<void> {

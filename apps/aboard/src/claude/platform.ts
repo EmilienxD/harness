@@ -19,6 +19,8 @@ export interface ClaudeAgentPlatformOptions {
 
 export class ClaudeAgentPlatform implements AgentPlatform {
   public readonly id = "claude" as const;
+  public readonly displayName = "Claude Code";
+  public readonly icon = "claude";
   public readonly capabilities: AgentPlatformCapabilities = {
     sessionIdentity: "client-assigned",
     promptDelivery: ["none", "inline", "spilled"],

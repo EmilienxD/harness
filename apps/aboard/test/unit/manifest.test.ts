@@ -4,6 +4,7 @@ import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 
 interface Manifest {
+  activationEvents: readonly string[];
   files: readonly string[];
   contributes: {
     jsonValidation: readonly { fileMatch: string; url: string }[];
@@ -29,6 +30,11 @@ test("launch command, model, effort, and denials live only in .harness/config.js
 
 const manifest = async (): Promise<Manifest> =>
   JSON.parse(await readFile(join(process.cwd(), "package.json"), "utf8")) as Manifest;
+
+test("initialized projects activate Aboard without waiting for unrelated extension startup", async () => {
+  const { activationEvents } = await manifest();
+  assert.ok(activationEvents.includes("workspaceContains:.abd/scaffold.json"));
+});
 
 test("every command except Initialize is gated out of an uninitialized project", async () => {
   const { contributes } = await manifest();
@@ -79,36 +85,25 @@ test("Agent Fleet exposes Run Agent and one shared reopen action", async () => {
   );
 });
 
-test("each provider is launched from its own row above the fleet, not a title icon", async () => {
+test("the unified workspace launcher is a webview above the fleet and retains direct provider commands", async () => {
   const { contributes } = await manifest();
   const commands = new Map(contributes.commands.map((entry) => [entry.command, entry]));
-  for (const [command, label, contextValue] of [
-    ["aboard.runClaudeCode", "Run Claude Code", "aboard.launch.claude"],
-    ["aboard.runCodex", "Run Codex", "aboard.launch.codex"],
+  for (const [command, label] of [
+    ["aboard.runClaudeCode", "Run Claude Code"],
+    ["aboard.runCodex", "Run Codex"],
   ] as const) {
     assert.equal(commands.get(command)?.title, label);
-    // The rows render the labels themselves; a title icon would put the same two
-    // actions in the fleet header as unreadable glyphs.
     assert.equal((contributes.menus["view/title"] ?? []).some((entry) => entry.command === command), false, `${label} must not sit in a view title`);
-    // An inline play button on hover, so the row reads as clickable. It needs an
-    // icon on the command, because an inline action renders nothing else.
-    const inline = (contributes.menus["view/item/context"] ?? []).find((entry) => entry.command === command);
-    assert.equal(inline?.when, `viewItem == ${contextValue}`);
-    assert.match(inline?.group ?? "", /^inline/u);
-    assert.equal(commands.get(command)?.icon, "$(play)");
+    assert.equal((contributes.menus["view/item/context"] ?? []).some((entry) => entry.command === command), false);
   }
+  assert.ok(commands.has("aboard.launchWorkspace"));
+  for (const removed of ["aboard.runAgentInActivePane", "aboard.resumeRemoteAgent"]) assert.equal(commands.has(removed), false);
+  assert.equal(commands.has("aboard.applyAgentLayout"), false, "the launcher cannot reapply layouts");
   const views = contributes.views["aboard"] ?? [];
   const panel = views.find((view) => view.id === "aboard.launch");
-  // A tree view, because a webview view cannot size itself to two rows of content.
-  assert.equal(panel?.type, undefined);
+  assert.equal(panel?.type, "webview");
   assert.equal(panel?.when, "aboard.initialized");
-  assert.ok(views.indexOf(panel!) < views.findIndex((view) => view.id === "aboard.fleet"), "the rows belong above Agent Fleet");
-  // Two rows and a header next to three scrolling trees: without a smaller share
-  // the launcher takes space the fleet needs.
-  const sizes = new Map(views.map((view) => [view.id, view.initialSize]));
-  for (const id of ["aboard.fleet", "aboard.autoRun", "aboard.recentActivity"]) {
-    assert.ok((sizes.get("aboard.launch") ?? 0) < (sizes.get(id) ?? 0), `aboard.launch must start smaller than ${id}`);
-  }
+  assert.ok(views.indexOf(panel!) < views.findIndex((view) => view.id === "aboard.fleet"), "the launcher belongs above Agent Fleet");
 });
 
 test("the launch file has editor validation for the provider schema", async () => {

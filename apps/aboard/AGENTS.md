@@ -62,14 +62,24 @@ endpoint are closed. Mutable runtime state belongs in VS Code storage, not the w
 starts a new process. Resuming into an existing terminal retains that process's configuration.
 Omitted fields use code-owned defaults. `providers.claude` and `providers.chatgpt` are equal,
 independently validated configurations; neither is inferred from the wrapper-friendly `command` array. **Run Agent** asks which provider to launch,
-the Run Agent view above the fleet offers one row per provider that launches the same interactive session
-without the prompt, and `autoRun.provider` selects the Auto Run default and is scaffolded as `claude`. Reopen always uses the
+the Run Agent webview above the fleet edits personal workspace presets, and
+`autoRun.provider` selects the Auto Run default and is scaffolded as `claude`. Reopen always uses the
 provider recorded by the session, even when the Auto Run default changes. Existing processes retain their
 configuration. Interactive, manual-delegation, and Auto Run profiles select model and effort independently.
 Manual delegation keys are `explore`, `prototype`, `websearch`, `brainstorm`, `address`, `review`, and
 `general`; their task identity must survive launch and resume instead of collapsing configuration to the
 runtime `general` identity. Profiles may use `inherit`; Auto Run workers may use `by-difficulty`.
 Platform-specific values must be validated before a terminal is created.
+
+The launcher webview owns personal preset editing; preset definitions live in profile storage and describe
+future launches. Run Agent opens one editor terminal in the current window's active editor group.
+Launch layout offers Current window and New window. Both apply the preset grid and start its terminals
+in their assigned panes. Current window preserves open editors and terminals while applying the grid;
+New window opens the same project and launches once during initialization. Each window manages its own
+fleet and terminals. Startup handoffs carry project, owner,
+and request identities; use the durable request journal before launch effects and keep uncertain requests
+from being replayed. Apply geometry only for an explicit Launch layout request or new-window startup.
+After launch, user rearrangements remain authoritative; Run Agent adds one tab without applying a grid.
 
 Difficulty routing:
 
@@ -140,7 +150,7 @@ Malformed bodies or missing directories return `400`; unknown IDs return `404`; 
 terminal returns `409`.
 
 Each initialized Aboard window publishes a versioned endpoint record containing `host`, `port`,
-`workspaceRoot`, command- and delegation-scoped tokens, `pid`, and `activatedAt` in a per-user directory:
+`workspaceRoot`, scoped command/delegation tokens, `pid`, and `activatedAt` in a per-user directory:
 
 - Windows: `%LOCALAPPDATA%\abd\endpoints`
 - macOS: `~/Library/Application Support/abd/endpoints`
@@ -151,8 +161,8 @@ processes, and re-read after `401`; no record means no open initialized window. 
 details. Aboard-launched processes instead inherit `ABOARD_BRIDGE_PORT` and `ABOARD_BRIDGE_TOKEN`.
 
 The in-memory full token reaches every route. The published command token reaches only `/commands`; the
-delegation token reaches exactly `POST /delegations`. Every other route returns `403`. Endpoint records
-are outside workspaces, permissioned `0600`, and removed on window close.
+delegation token reaches exactly `POST /delegations`. Endpoint records are outside workspaces, permissioned `0600`,
+and each window removes only its own record on close. Runtime state and reconciliation are isolated by owner.
 
 ## Important Constraints
 

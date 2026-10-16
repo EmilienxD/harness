@@ -5,7 +5,7 @@ import type { AutoRunState } from "../auto/engine.js";
 import { formatIssueNumbers } from "../shared/issues.js";
 
 export type FleetTreeNode =
-  { readonly kind: "agent"; readonly session: AgentSession; readonly leaseHolder: boolean }; 
+  { readonly kind: "agent"; readonly session: AgentSession; readonly leaseHolder: boolean };
 
 export interface FleetTreeItem {
   readonly label: string;

@@ -15,10 +15,38 @@ Click a background agent in **Agent Fleet**, or run **Aboard: Watch Background A
 
 ## Visible sessions
 
-Initialize the project once, then use **Run Agent** to choose Claude or ChatGPT and open an empty, attended
-terminal. The **Run Agent** view above the Fleet lists **Run Claude Code** and **Run Codex**; clicking either
-opens the same session with that provider already chosen. Each provider's command, model, and reasoning
-effort come from `.harness/config.json`. Aboard reads
+Initialize the project once, then open **Run Agent** above the Fleet. **Run Agent** adds one Claude Code or
+Codex session as an editor terminal in the current window's active editor group, preserving its layout.
+**Launch layout** starts the agents in the selected preset. Choose **New window** to open the same project
+files in a new window and apply the preset grid once. Choose **Current window** to apply the grid in the
+current window and start terminals in their assigned panes, keeping existing editors and terminals open.
+The default preset has two vertically stacked
+Codex terminals.
+
+Presets describe an initial grid using **Columns** and **Rows**, with up to nine panes. Each pane contains
+terminal tabs. Select a pane to edit its providers; **Empty** opens a regular terminal using your default shell.
+The preset field combines a dropdown with an editable name. **Save** updates the selected preset's name,
+grid, and assignments. **Create** creates a new preset with the edited name and configuration, and is
+enabled when the name differs from the selected preset. **Reset** restores its saved name, grid, and assignments.
+Presets and your preferred selection are stored in extension user/profile storage.
+
+The preset grid is applied once per explicit launch. Afterward, resizing, moving tabs, and merging groups
+are under your control. Use **Run Agent** to add individual agents while keeping that arrangement, or
+**Launch layout** with **Current window** to explicitly launch another preset grid and terminal batch.
+Each window manages its own Fleet.
+
+Launching agents disables automatic terminal group locking in the current workspace settings, so
+new terminal panes can also open files. Groups you lock manually keep their locked state.
+
+Closing a workspace during startup releases the launch controls; a window that never activates expires
+after 15 seconds. Abandoned startup requests do not launch agents if the window opens later. A failed or
+partially successful batch reports one error and keeps any running agents.
+
+Workspace launch shows progress immediately. The new window displays a startup spinner and reports how
+many agents are ready. Preset terminals open without waiting for earlier agents to finish starting.
+
+The **Run Claude Code** and **Run Codex** commands remain direct shortcuts through the same launcher.
+Each provider's command, model, and reasoning effort come from `.harness/config.json`. Aboard reads
 that file whenever a launch, resume, or reopen starts a new process, so existing processes keep their
 configuration while future sessions use your latest choices.
 

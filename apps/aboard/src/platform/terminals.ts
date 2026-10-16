@@ -11,6 +11,7 @@ import {
   isHeadlessExecution,
   isInteractiveAgentType,
   type AgentId,
+  type AgentSession,
   type AgentPlatformId,
   type AgentType,
   type ExecutionMode,
@@ -77,6 +78,8 @@ function codexPasteSettleMs(message: string): number {
 }
 
 export interface TerminalCreationOptions {
+  /** A captured editor group identity, checked again by the native host at creation. */
+  readonly editorPane?: object;
   readonly cwd: string;
   readonly provider?: AgentPlatformId;
   readonly name?: string;
@@ -99,6 +102,7 @@ export interface BridgeTerminalEnvironment {
 }
 
 export interface CreateAboardTerminalRequest {
+  readonly editorPane?: object;
   readonly agentId: AgentId;
   readonly sessionId: SessionId;
   readonly agentType: AgentType;
@@ -229,6 +233,20 @@ export class TerminalController {
     return this.#create(request, beforeCommand);
   }
 
+  /** Reconnect a persisted identity to a terminal VS Code restored, without starting or moving anything. */
+  public adopt(session: AgentSession, handle: TerminalHandle, cwd: string): void {
+    if (handle.exitStatus !== undefined || this.#records.has(session.terminal.terminalId) || this.#terminalIdsByHandle.has(handle)) return;
+    const record: TerminalRecord = {
+      backend: "terminal", provider: session.platform, terminalId: session.terminal.terminalId,
+      agentId: session.identity.agentId, agentType: session.identity.type, sessionId: session.sessionId,
+      name: session.terminal.name, cwd, status: "open", createdAt: session.lifecycle.startedAt,
+      closedAt: null, exitCode: null, handle, killRequested: false,
+      ...(session.issueNumbers === undefined ? {} : { issueNumbers: session.issueNumbers }),
+    };
+    this.#records.set(record.terminalId, record);
+    this.#terminalIdsByHandle.set(handle, record.terminalId);
+  }
+
   #create(
     request: CreateAboardTerminalRequest,
     beforeCommand?: (terminal: TerminalSnapshot) => void,
@@ -273,6 +291,7 @@ export class TerminalController {
     if (request.workerContinuation === true) env.ABOARD_WORKER_CONTINUATION = "1";
 
     const creationOptions: TerminalCreationOptions = {
+      ...(request.editorPane === undefined ? {} : { editorPane: request.editorPane }),
       cwd,
       env,
       ...(request.provider === undefined ? {} : { provider: request.provider }),

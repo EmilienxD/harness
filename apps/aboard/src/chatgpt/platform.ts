@@ -26,6 +26,8 @@ const ENFORCE_CHROME_BACKEND = false;
 
 export class ChatGptAgentPlatform implements AgentPlatform {
   public readonly id = "chatgpt" as const;
+  public readonly displayName = "Codex";
+  public readonly icon = "openai";
   public readonly capabilities: AgentPlatformCapabilities = {
     sessionIdentity: "runtime-assigned",
     promptDelivery: ["none", "inline", "spilled"],
@@ -60,7 +62,7 @@ export class ChatGptAgentPlatform implements AgentPlatform {
     await this.#policyProbe.require(plan.agentType, plan.permissionProfile);
     if (plan.args.includes("--dangerously-bypass-hook-trust") && this.options.approveHooks !== undefined
       && !await this.options.approveHooks()) {
-      throw new Error("ChatGPT requires workspace hook consent for Aboard to observe session startup. Launch again to allow configured hooks.");
+      throw Object.assign(new Error("ChatGPT requires workspace hook consent for Aboard to observe session startup. Launch again to allow configured hooks."), { name: "SessionStartCancelledError" });
     }
     // Dead while ENFORCE_CHROME_BACKEND is false; see the note above it.
     if (ENFORCE_CHROME_BACKEND && plan.chromeRequired === true) await this.#browserProbe.require(plan.agentType);

@@ -94,6 +94,22 @@ test("loop implementers have visible worktree terminals with the loop environmen
   assert.equal(host.created[0]?.options.env.HARNESS_STATE_DIR, "C:\\state");
 });
 
+test("restoring a native terminal adopts its existing process without commands or focus and retains control", () => {
+  const { controller, host, events } = setup();
+  const native = new FakeTerminal();
+  const saved = { platform: "chatgpt", identity: { agentId: agent("restored"), type: "interactive" }, sessionId: session("conversation"), terminal: { terminalId: terminal("persisted-terminal"), name: "Restored" }, lifecycle: { status: "running", startedAt: "2026-07-30T10:00:00.000Z" as IsoTimestamp } } as AgentSession;
+  controller.adopt(saved, native, "C:\\work\\aboard");
+  assert.equal(controller.liveTerminalForAgent(agent("restored")), terminal("persisted-terminal"));
+  assert.equal(host.created.length, 0);
+  assert.equal(native.sent.length, 0);
+  assert.equal(native.shows.length, 0);
+  controller.show(terminal("persisted-terminal"));
+  assert.deepEqual(native.shows, [false]);
+  host.close(native, 0);
+  assert.equal(controller.liveTerminalForAgent(agent("restored")), undefined);
+  assert.equal(events.at(-1)?.type, "terminal-closed");
+});
+
 test("resuming in an open terminal pastes a multiline message and submits it once", async () => {
   const { controller, host } = setup();
   const created = controller.create({ agentId: agent("child"), sessionId: session("conversation"), agentType: "general", executionMode: "interactive" });

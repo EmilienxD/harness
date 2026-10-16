@@ -14,6 +14,8 @@ Use the assigned inbox supplied by the session-start hook for every subagent lau
 
 Write one Markdown file directly in the supplied inbox for each subagent. When the user requests multiple subagents, write their separate request files in parallel; each file launches independently, so never combine multiple subagents in one file. Writing to this inbox will automatically launch the subagent. You will be notified when it completes — do not poll; never sleep, poll, proactively check progress, or run a command to do so. Do other work that doesn't depend on the subagent's result. End your turn to wait for the result of whichever subagent finishes first.
 
+If a subagent launch or continuation fails, report a bug to the user with the available error details and stop without retrying or attempting a workaround.
+
 Launch frontmatter schema (`|` separates enum values):
 
 ```markdown
