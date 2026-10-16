@@ -109,10 +109,29 @@ def _required_string(action: HostAction, key: str) -> str:
     return value
 
 
+def _npm_command() -> list[str]:
+    executable = shutil.which("npm")
+    if not executable:
+        raise HostActionError("managing a Node.js host tool requires npm on PATH")
+    if Path(executable).suffix.lower() in {".cmd", ".bat", ".ps1"}:
+        # Invoke npm's JS entry point directly, avoiding a Windows shell and its quoting rules.
+        cli = Path(executable).parent / "node_modules/npm/bin/npm-cli.js"
+        node = shutil.which("node")
+        if not node or not cli.is_file():
+            raise HostActionError("could not locate node and npm-cli.js beside the npm launcher")
+        return [node, str(cli)]
+    return [executable]
+
+
 def prepare(action: HostAction) -> PreparedAction:
     if action.type == "uv-tool":
         _required_string(action, "source")
         _required_string(action, "package")
+        return PreparedAction(action)
+    if action.type == "npm-tool":
+        _required_string(action, "package")
+        _required_string(action, "version")
+        _npm_command()
         return PreparedAction(action)
     if action.type != "vscode-extension":
         raise HostActionError(f"unsupported host action {action.type}")
@@ -165,6 +184,13 @@ def apply(prepared: PreparedAction) -> None:
         ]
         if Path(_required_string(action, "source")).is_dir():
             command.append("--no-cache")
+    elif action.type == "npm-tool":
+        package = _required_string(action, "package")
+        version = _required_string(action, "version")
+        command = [
+            *_npm_command(), "install", "--global", "--engine-strict",
+            "--no-audit", "--no-fund", f"{package}@{version}",
+        ]
     else:
         executable = _vscode_executable()
         if not executable:
@@ -183,6 +209,8 @@ def describe(action: HostAction) -> str:
     """Name the machine-level product an action manages, for error text."""
     if action.type == "uv-tool":
         return f"uv tool {_required_string(action, 'package')}"
+    if action.type == "npm-tool":
+        return f"npm tool {_required_string(action, 'package')}"
     if action.type == "vscode-extension":
         return f"VS Code extension {_required_string(action, 'extension_id')}"
     raise HostActionError(f"unsupported host action {action.type}")
@@ -207,6 +235,24 @@ def is_installed(action: HostAction) -> bool:
         lines = _listing([executable, "--list-extensions"])
         extension_id = _required_string(action, "extension_id").lower()
         return lines is not None and extension_id in {line.strip().lower() for line in lines}
+    if action.type == "npm-tool":
+        lines = _listing([*_npm_command(), "list", "--global", "--depth=0", "--json"])
+        if lines is None:
+            # npm list fails with ENOENT before the first global install in a new prefix.
+            roots = _listing([*_npm_command(), "root", "--global"])
+            if roots is not None and len(roots) == 1:
+                root = Path(roots[0].strip())
+                if root.is_absolute() and root.name == "node_modules" and not root.exists():
+                    return False
+            raise HostActionError("could not inspect global npm packages; refusing to change ownership")
+        try:
+            inventory = json.loads("\n".join(lines))
+            dependencies = inventory.get("dependencies", {})
+            if not isinstance(dependencies, dict):
+                raise ValueError("dependencies must be an object")
+        except (ValueError, AttributeError) as exc:
+            raise HostActionError("invalid global npm inventory") from exc
+        return _required_string(action, "package") in dependencies
     raise HostActionError(f"unsupported host action {action.type}")
 
 
@@ -221,6 +267,11 @@ def uninstall(action: HostAction) -> None:
         if not executable:
             raise HostActionError("no supported VS Code command found (tried code, code-insiders, codium)")
         command = [executable, "--uninstall-extension", _required_string(action, "extension_id")]
+    elif action.type == "npm-tool":
+        command = [
+            *_npm_command(), "uninstall", "--global", "--no-audit", "--no-fund",
+            _required_string(action, "package"),
+        ]
     else:
         raise HostActionError(f"unsupported host action {action.type}")
     if not is_installed(action):

@@ -114,6 +114,13 @@ Successful and nonzero CLI results carry `{ output, exitCode }` in structured co
 nonzero exits are tool errors preserving stdout, including HTTP error pages. It has no
 session-state or Python bridge dependency. See the [acceptance journey](../tests/e2e/README.md#pi-web-toolkit).
 
+`chrome-devtools` additionally installs the pinned upstream `chrome-devtools-mcp` npm CLI
+and matching `chrome-devtools-cli` skill at project and user scopes. It reuses shell tools,
+without a Pi extension or MCP configuration. The real Pi acceptance journey verifies native
+skill invocation, browser interaction and screenshot effects against a loopback page, exactly
+three inference requests, and cross-provider receipt-driven host removal. Its npm prefix,
+browser profile and daemon identity are isolated from personal installations.
+
 `calm` additionally ships a Pi-only presentation extension in
 `harness/productivity/calm/`. Its `/calm` command persists an agent-directory preference
 without inference. It hides native tool rows and collapsed thinking labels while retaining

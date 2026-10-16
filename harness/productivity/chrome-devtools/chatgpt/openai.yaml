@@ -1,0 +1,3 @@
+interface:
+  display_name: "Chrome DevTools"
+  short_description: "Automate and debug Chrome through the upstream CLI"

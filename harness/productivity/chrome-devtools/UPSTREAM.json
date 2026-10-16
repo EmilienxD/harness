@@ -1,0 +1,25 @@
+{
+  "repository": "https://github.com/ChromeDevTools/chrome-devtools-mcp",
+  "package": "chrome-devtools-mcp",
+  "version": "1.11.0",
+  "revision": "a878bcad39584337e055778353246820deafa7c0",
+  "tarball": "https://registry.npmjs.org/chrome-devtools-mcp/-/chrome-devtools-mcp-1.11.0.tgz",
+  "integrity": "sha512-CytJ/5tnzrS+J/74be2P5aCOsS/mmGRHys/Si+IYC4ucrbnWAmES/dYdxGJjeUCECRcoFUilZAysdjlwqUjXIA==",
+  "license": "Apache-2.0",
+  "files": {
+    "SKILL.md": {
+      "source": "package/skills/chrome-devtools-cli/SKILL.md",
+      "sha256": "6e55a0a67f665c3e0b7774b8652d1bb7a45c4a8f784164eba06b5e7d80f1c5c1"
+    },
+    "references/installation.md": {
+      "source": "package/skills/chrome-devtools-cli/references/installation.md",
+      "sha256": "0a278ca913b8eab8248767f2150120418da48061759e157573c6c7e2664509ec",
+      "upstream_sha256": "e1517c49bfd8f22117fcd2cfb2193e082d0e8d0f96d0675619c346f48a1b6e32",
+      "changes": "Pin the manual npm installation to the catalogue release instead of latest."
+    },
+    "LICENSE": {
+      "source": "package/LICENSE",
+      "sha256": "58d1e17ffe5109a7ae296caafcadfdbe6a7d176f0bc4ab01e12a689b0499d8bd"
+    }
+  }
+}

@@ -252,6 +252,8 @@ Custom roles use Harness's native background or visible-terminal launch path. Ab
 
 - **`web-toolkit`**: Gives Claude Code, ChatGPT, and Pi local web search and page fetching through the `web-toolkit` CLI. Free, keyless, and safe for many concurrent agents. Described below.
 
+- **`chrome-devtools`**: Installs the upstream Chrome DevTools CLI and its model-invoked `chrome-devtools-cli` skill for browser interaction, screenshots, network inspection, and performance debugging. Supports Claude Code, ChatGPT, and Pi. Described below.
+
 - **`tdd`**: Applies behavior-focused test-driven development in vertical red-green slices. It agrees on public test seams first, rejects implementation-coupled or tautological tests, and adds only enough implementation to satisfy one failing test at a time.
 
 - **`writing-for-agents`**: Guides the creation of predictable skills and agent instruction files. It treats invocation pointers, information hierarchy, completion criteria, progressive disclosure, leading words, and pruning as concrete controls over agent behavior and document load.
@@ -471,6 +473,39 @@ calls. A background launch result is a job receipt; hooks that infer completed f
 from a shell tool's immediate result cannot use that receipt as evidence of a finished mutation.
 Use native edit/write tools for work requiring those outcome-based guards or attribution.
 Install one owner of each shell tool; other extensions that replace Bash or PowerShell can conflict.
+
+## Chrome DevTools
+
+```powershell
+uv run harness install chrome-devtools --platform pi
+# Also supports --platform claude or --platform chatgpt, and --scope user.
+```
+
+This optional integration installs Google's `chrome-devtools-mcp` npm package at version
+`1.11.0`, exposing the `chrome-devtools` CLI, and the matching upstream
+`chrome-devtools-cli` skill. Node.js `^20.19.0`, `^22.12.0`, or `>=23`, npm, and Google Chrome
+are required. The CLI is experimental upstream. Harness forwards installation to npm; Google
+maintains the browser implementation. The skill, Apache-2.0 license, and source provenance
+are bundled; its manual installation reference is pinned to the same release.
+
+Invoke `/chrome-devtools-cli` in Claude Code, `$chrome-devtools-cli` in ChatGPT/Codex, or
+`/skill:chrome-devtools-cli` in Pi; the agent can also select the skill for browser work.
+Restart the provider or run `/reload` in Pi to discover it. The skill uses shell commands;
+installation adds no MCP server configuration or native browser tools.
+
+The first browser command starts the upstream daemon, which retains pages across commands.
+Use `chrome-devtools list_pages` to inspect it and `chrome-devtools stop` when finished.
+Browser profiles, daemon state, and upstream telemetry settings remain upstream-owned.
+See the [upstream CLI documentation](https://github.com/ChromeDevTools/chrome-devtools-mcp/blob/a878bcad39584337e055778353246820deafa7c0/docs/cli.md)
+for connection and browser options.
+
+The CLI installs globally through npm even for project-scope skills. A pre-existing npm
+installation is protected by Harness's host-product ownership check; use the menu's adoption
+choice or add `--adopt` to the install command to explicitly transfer it to Harness. Adoption installs the
+pinned version and makes Harness responsible for removal. Installs across providers and projects
+share the host product; the last owning receipt removes it. `harness upgrade` follows the
+catalogue pin rather than npm's `latest`. Stop the daemon before upgrading or uninstalling;
+Harness leaves running browser sessions alone.
 
 ## Web toolkit
 

@@ -30,6 +30,7 @@ npm run test:pi-commit
 npm run test:pi-desktop-notification
 npm run test:pi-report-gotchas
 npm run test:pi-web-toolkit
+npm run test:chrome-devtools
 npm run test:pi-background-shell
 npm run test:pi-calm
 npm run test:pi-mid-prompt-skills
@@ -80,6 +81,20 @@ credentials, selectors, proxies, and cloud credentials are excluded. Launches us
 disable telemetry/version checks/MCP and unrelated built-in extensions, and trust only the
 generated project through process-local `--approve`. Automatic compaction, retries, and cache
 warming are disabled. Trust is never persisted for an unrelated project.
+
+## Chrome DevTools
+
+`npm run test:chrome-devtools` installs the actual catalogue package into an isolated npm
+prefix at both Pi project and user scopes. It uses the pinned upstream CLI, a unique daemon
+session and temporary browser profile, with upstream telemetry/update checks disabled. Requires
+the catalogue's Node.js/npm prerequisites and installed Google Chrome; no personal daemon or
+global npm installation is modified. The real Pi RPC fixture invokes the installed skill,
+reads its bundled installation reference, and uses the native shell to run the browser check.
+A loopback page supplies a button; the CLI discovers its snapshot UID, clicks it, verifies
+the changed heading, and saves a real screenshot. Each scope uses exactly three scripted
+inference requests and no unexpected requests. Dry-run, repeat install, cross-provider host
+sharing, and final receipt-driven npm removal are checked. This certifies integration and
+browser effects, not unscripted agent judgment or arbitrary external websites.
 
 ## Pi mid-prompt skills
 

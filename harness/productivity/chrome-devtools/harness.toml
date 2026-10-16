@@ -1,0 +1,45 @@
+name = "chrome-devtools"
+version = "1.0.0"
+description = "Upstream Chrome DevTools browser automation CLI and skill"
+docs = "https://github.com/EmilienxD/harness/blob/main/README.md#chrome-devtools"
+requires = ["node", "npm"]
+
+[platforms.claude]
+status = "supported"
+
+[platforms.chatgpt]
+status = "supported"
+
+[platforms.pi]
+status = "supported"
+
+[[files]]
+src = "SKILL.md"
+dest = "chrome-devtools-cli/SKILL.md"
+root = "skills"
+
+[[files]]
+src = "references/installation.md"
+dest = "chrome-devtools-cli/references/installation.md"
+root = "skills"
+
+[[files]]
+src = "LICENSE"
+dest = "chrome-devtools-cli/LICENSE"
+root = "skills"
+
+[[files]]
+src = "UPSTREAM.json"
+dest = "chrome-devtools-cli/UPSTREAM.json"
+root = "skills"
+
+[[files]]
+src = "chatgpt/openai.yaml"
+dest = "chrome-devtools-cli/agents/openai.yaml"
+root = "skills"
+platforms = ["chatgpt"]
+
+[[actions]]
+type = "npm-tool"
+package = "chrome-devtools-mcp"
+version = "1.11.0"
