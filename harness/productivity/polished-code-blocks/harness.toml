@@ -1,0 +1,27 @@
+name = "polished-code-blocks"
+version = "1.0.0"
+description = "Render Pi Markdown code blocks with rounded frames, language labels and syntax highlighting"
+docs = "https://github.com/EmilienxD/harness/blob/main/README.md#polished-code-blocks"
+
+[platforms.claude]
+status = "unsupported"
+reason = "Changes Pi's terminal presentation only."
+
+[platforms.chatgpt]
+status = "unsupported"
+reason = "Changes Pi's terminal presentation only."
+
+[platforms.pi]
+status = "supported"
+
+[[files]]
+src = "pi/extension.ts"
+dest = "harness-polished-code-blocks/index.ts"
+root = "extensions"
+platforms = ["pi"]
+
+[[files]]
+src = "pi/renderer.ts"
+dest = "harness-polished-code-blocks/renderer.ts"
+root = "extensions"
+platforms = ["pi"]

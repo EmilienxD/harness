@@ -459,6 +459,36 @@ under its MIT license, with Pi 1.2 renderer compatibility, native PowerShell cov
 the boat animation removed. Remove the earlier standalone `extensions/calm` copy before
 installing this package to avoid loading both versions.
 
+## Polished code blocks
+
+`polished-code-blocks` replaces Pi's literal Markdown code fences with rounded frames,
+a language label, and the active theme's syntax highlighting. Long lines wrap inside
+the frame; nested blocks and streaming responses still use Pi's Markdown parser.
+No line numbers are added. This changes all code blocks rendered by Pi's shared
+Markdown component, not raw tool output, stored messages, or model requests.
+
+```powershell
+uv run harness install polished-code-blocks --platform pi --scope user
+```
+
+Restart Pi or run `/reload`, then run `/code-blocks` (or `/code-blocks demo`) for a
+local preview; press any key to close it. The preview makes no model request and
+adds nothing to the conversation. `/code-blocks off` restores the stock renderer;
+`/code-blocks on` enables frames again. The extension starts enabled on each session
+start or reload; the toggle is not persisted. Very narrow layouts omit the frame.
+
+Verified with the real Pi 1.2.0 extension loader, assistant-message component and
+Markdown renderer, including wrapping, themes, nested blocks and reload. Pi has
+no public standard-code-block renderer hook, so this uses an internal Markdown
+adapter that may need updating after Pi upgrades. It does not replace Calm's tool
+or thinking renderers. To remove it:
+
+```powershell
+uv run harness uninstall polished-code-blocks --platform pi --scope user
+```
+
+Run `/reload` after removal to restore native rendering.
+
 ## Background shell
 
 `background-shell` is a Pi-only tool that extends the existing `bash` and Windows
