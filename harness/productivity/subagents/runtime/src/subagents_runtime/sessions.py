@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import math
 import os
+import re
 import shlex
 import shutil
 import subprocess
@@ -26,6 +27,12 @@ class SessionError(RuntimeError):
 from subagents_runtime.storage import connect as _connect
 from subagents_runtime.storage import state_dir
 
+PROVIDERS = ("claude", "chatgpt", "pi")
+_DEFAULT_COMMANDS = {"claude": "claude", "chatgpt": "codex", "pi": "pi"}
+# Pi spells the lowest and highest Harness levels differently and clamps the rest per model.
+_PI_THINKING = {"none": "off", "ultra": "max"}
+# Providers whose CLI accepts a caller-chosen conversation ID for new sessions and forks.
+_ASSIGNED_IDENTITY = frozenset({"claude", "pi"})
 _CLAUDE_MODELS = frozenset({"haiku", "sonnet", "opus"})
 DIFFICULTIES = ("routine", "basic", "advanced", "expert")
 _DIFFICULTY_PROFILES = {
@@ -93,7 +100,7 @@ def launch_configuration(cwd: Path) -> dict[str, Any]:
             )
         if not isinstance(providers, dict) or any(
             name in providers and not isinstance(providers[name], dict)
-            for name in ("claude", "chatgpt")
+            for name in PROVIDERS
         ):
             raise SessionError(
                 f"Harness configuration {path} providers must contain JSON objects"
@@ -150,9 +157,7 @@ def _command_from_config(config: dict[str, Any], provider: str) -> list[str]:
     setting = f"providers.{provider}.command"
     providers = config.get("providers", {})
     provider_config = providers.get(provider, {}) if isinstance(providers, dict) else {}
-    command = provider_config.get(
-        "command", ["codex"] if provider == "chatgpt" else ["claude"]
-    )
+    command = provider_config.get("command", [_DEFAULT_COMMANDS[provider]])
     command = _command(command, setting)
     executable = Path(command[0]).expanduser()
     if shutil.which(command[0]) is None and not executable.is_file():
@@ -184,6 +189,9 @@ def delegation_profile_arguments(
         model, effort = "gpt-5.6-luna", "low"
     elif provider == "claude" and task == "explore":
         model, effort = "haiku", "low"
+    elif provider == "pi" and task == "explore":
+        # Pi has no universal cheap model; keep the user's native model selection.
+        model, effort = None, "low"
     else:
         model = effort = None
     model = selected.get("model", model)
@@ -191,6 +199,8 @@ def delegation_profile_arguments(
     if difficulty is not None and difficulty not in DIFFICULTIES:
         raise SessionError(f"unsupported difficulty {difficulty!r}")
     if model == "by-difficulty":
+        if provider not in _DIFFICULTY_PROFILES:
+            raise SessionError(f"providers.{provider}.delegations.{task}.model by-difficulty is not supported")
         model, routed_effort = _DIFFICULTY_PROFILES[provider][DIFFICULTIES.index(difficulty or "expert")]
         if "effort" not in selected:
             effort = routed_effort
@@ -246,11 +256,12 @@ def delegation_profile_arguments(
     if model is not None:
         arguments.extend(["--model", model])
     if effort is not None:
-        arguments.extend(
-            ["--effort", effort]
-            if provider == "claude"
-            else ["-c", f"model_reasoning_effort={json.dumps(effort)}"]
-        )
+        if provider == "claude":
+            arguments.extend(["--effort", effort])
+        elif provider == "pi":
+            arguments.extend(["--thinking", _PI_THINKING.get(effort, effort)])
+        else:
+            arguments.extend(["-c", f"model_reasoning_effort={json.dumps(effort)}"])
     return arguments
 
 
@@ -355,7 +366,7 @@ def _register(
             "INSERT INTO sessions(id, provider_session_id, cwd, provider, execution_mode) VALUES (?, ?, ?, ?, ?)",
             (
                 session_id,
-                session_id if provider == "claude" else None,
+                session_id if provider in _ASSIGNED_IDENTITY else None,
                 str(cwd.resolve()),
                 provider,
                 execution_mode,
@@ -369,7 +380,7 @@ def register_observed(
     provider: str,
     execution_mode: str = "interactive",
 ) -> None:
-    if provider not in {"claude", "chatgpt"}:
+    if provider not in PROVIDERS:
         raise SessionError(f"unsupported provider {provider!r}")
     if execution_mode not in {"interactive", "auto", "auto-run", "loop"}:
         raise SessionError(f"unsupported execution mode {execution_mode!r}")
@@ -422,7 +433,7 @@ def launch(prompt: str | None = None, cwd: Path | None = None, *, provider: str)
     session_id = str(uuid.uuid4())
     execution_id = str(uuid.uuid4())
     selected_cwd = (cwd or Path.cwd()).resolve()
-    if prompt and provider == "chatgpt":
+    if prompt and provider != "claude":
         from subagents_runtime.prompt_paths import normalize_file_references
 
         prompt = normalize_file_references(prompt, selected_cwd)
@@ -431,7 +442,7 @@ def launch(prompt: str | None = None, cwd: Path | None = None, *, provider: str)
         *provider_arguments(
             provider,
             "interactive",
-            session_id if provider == "claude" else None,
+            session_id if provider in _ASSIGNED_IDENTITY else None,
             prompt,
         ),
     ]
@@ -485,6 +496,16 @@ def provider_arguments(
                 arguments.extend(["--session-id", fork_id])
         elif conversation:
             arguments.extend(["--resume" if resume else "--session-id", conversation])
+    elif provider == "pi":
+        if mode not in {"interactive", "loop"}:
+            arguments.extend(["--mode", "json"])
+        # --session-id opens the exact session or creates it, so launch and resume share it.
+        if fork:
+            arguments.extend(["--fork", conversation])
+            if fork_id:
+                arguments.extend(["--session-id", fork_id])
+        elif conversation:
+            arguments.extend(["--session-id", conversation])
     elif mode not in {"interactive", "loop"}:
         arguments.extend(["exec"])
         if fork or resume:
@@ -497,6 +518,65 @@ def provider_arguments(
         arguments.append("--")
         arguments.append(prompt)
     return arguments
+
+
+def _pi_alias(model_id: str) -> bool:
+    return model_id.endswith("-latest") or re.search(r"-\d{8}$", model_id) is None
+
+
+def resolve_pi_model(command: list[str], pattern: str, cwd: Path) -> str:
+    """Qualify a model pattern against Pi's authenticated models, as Pi's /model picker does.
+
+    Pi's --model flag searches its whole catalogue, including unauthenticated providers, so a
+    bare name such as "haiku" can select a provider the user never configured. The matching rules
+    mirror Pi's own: an exact provider/id or id first, then a substring preferring aliases.
+    """
+    from subagents_runtime.processes import native_command
+
+    try:
+        listed = subprocess.run(
+            native_command([*command, "--offline", "--list-models"]), cwd=cwd,
+            capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=60,
+            stdin=subprocess.DEVNULL,
+            **({"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}),
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise SessionError(f"could not list Pi models: {exc}") from exc
+    rows = [line.split() for line in listed.stdout.splitlines()[1:] if line.strip()]
+    models = [(row[0], row[1]) for row in rows if len(row) >= 2]
+    if listed.returncode != 0 or not listed.stdout.startswith("provider"):
+        raise SessionError("Pi has no authenticated models; configure one before delegating")
+    reference = pattern.strip().lower()
+    exact = [model for model in models if f"{model[0]}/{model[1]}".lower() == reference]
+    candidates = models
+    if not exact and "/" in reference:
+        provider, _, rest = reference.partition("/")
+        if any(model[0].lower() == provider for model in models):
+            candidates = [model for model in models if model[0].lower() == provider]
+            reference = rest
+    exact = exact or [model for model in candidates if model[1].lower() == reference]
+    if len(exact) > 1:
+        choices = ", ".join(sorted(f"{provider}/{model}" for provider, model in exact))
+        raise SessionError(f"Pi model {pattern!r} is ambiguous: {choices}; request provider/model")
+    if not exact:
+        partial = [model for model in candidates if reference in model[1].lower()]
+        aliases = [model for model in partial if _pi_alias(model[1])]
+        exact = sorted(aliases or partial, key=lambda model: model[1], reverse=True)[:1]
+    if not exact:
+        raise SessionError(f"no authenticated Pi model matches {pattern!r}; run `pi --list-models` to see the configured models")
+    return f"{exact[0][0]}/{exact[0][1]}"
+
+
+def _launch_options(launch_config: dict[str, Any], request, cwd: Path) -> list[str]:
+    options = delegation_profile_arguments(
+        launch_config, request.provider, request.task, difficulty=getattr(request, "difficulty", None),
+        model_override=getattr(request, "model", None),
+        effort_override=getattr(request, "effort", None),
+    )
+    if request.provider == "pi" and "--model" in options:
+        index = options.index("--model") + 1
+        options[index] = resolve_pi_model(_provider_command(launch_config, "pi"), options[index], cwd)
+    return options
 
 
 def launch_delegated(request, request_id: str, agent_number: int, cwd: Path) -> str:
@@ -557,7 +637,7 @@ def launch_delegated(request, request_id: str, agent_number: int, cwd: Path) -> 
     if fork_of:
         # The original session is still open and still owns its provider handle, so a
         # fork starts its own process here and takes over the child's identity.
-        forked = str(uuid.uuid4()) if request.provider == "claude" else None
+        forked = str(uuid.uuid4()) if request.provider in _ASSIGNED_IDENTITY else None
         with _connect() as connection:
             connection.execute(
                 "UPDATE sessions SET provider_session_id=? WHERE id=?", (forked, child_id)
@@ -572,11 +652,7 @@ def launch_delegated(request, request_id: str, agent_number: int, cwd: Path) -> 
                 request.prompt,
                 fork=True,
                 fork_id=forked,
-                launch_options=delegation_profile_arguments(
-                    launch_config, request.provider, request.task, difficulty=getattr(request, "difficulty", None),
-                    model_override=getattr(request, "model", None),
-                    effort_override=getattr(request, "effort", None),
-                ),
+                launch_options=_launch_options(launch_config, request, cwd),
             ),
         ]
         processes.start(
@@ -588,16 +664,22 @@ def launch_delegated(request, request_id: str, agent_number: int, cwd: Path) -> 
         )
         return child_id
     continuing = bool(request.resume)
-    prompt = (
-        request.prompt
-        if continuing or skill is None
-        else f"{'$' if request.provider == 'chatgpt' else '/'}{skill}\n\n{request.prompt}"
-    )
-    if not continuing and request.provider == "claude":
+    if continuing or skill is None:
+        prompt = request.prompt
+    elif request.provider == "pi":
+        # Pi reads the skill name up to the first space; a newline would join it to the prompt.
+        prompt = f"/skill:{skill} {request.prompt}"
+    else:
+        prompt = f"{'$' if request.provider == 'chatgpt' else '/'}{skill}\n\n{request.prompt}"
+    if not continuing and request.provider in _ASSIGNED_IDENTITY:
         conversation = child_id
+        if request.provider == "pi":
+            # The ID is ours before the process starts, so resume never depends on the extension.
+            with _connect() as connection:
+                connection.execute("UPDATE sessions SET provider_session_id=? WHERE id=?", (child_id, child_id))
     launch_config = launch_configuration(cwd)
     command = _provider_command(launch_config, request.provider)
-    if not continuing and request.provider == "claude":
+    if not continuing and request.provider in _ASSIGNED_IDENTITY:
         command.extend(["--name", f"agent-{agent_number}"])
     command.extend(
         provider_arguments(
@@ -606,11 +688,7 @@ def launch_delegated(request, request_id: str, agent_number: int, cwd: Path) -> 
             conversation,
             prompt,
             resume=continuing,
-            launch_options=delegation_profile_arguments(
-                launch_config, request.provider, request.task, difficulty=getattr(request, "difficulty", None),
-                model_override=getattr(request, "model", None),
-                effort_override=getattr(request, "effort", None),
-            ),
+            launch_options=_launch_options(launch_config, request, cwd),
         )
     )
     processes.start(
@@ -923,7 +1001,7 @@ def resume(session_id: str, message: str | None = None) -> None:
             )
         return
     processes.require_exited(session_id)
-    if message and row[2] == "chatgpt":
+    if message and row[2] != "claude":
         from subagents_runtime.prompt_paths import normalize_file_references
 
         message = normalize_file_references(message, Path(row[1]))

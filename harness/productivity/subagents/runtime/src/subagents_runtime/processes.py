@@ -191,6 +191,56 @@ def confirm_startup(execution_id: str, provider_pid: int | None = None) -> None:
                 )
 
 
+STARTUP_SECONDS = 15
+PROVIDER_NAMES = {"claude": "Claude Code", "chatgpt": "Codex", "pi": "Pi"}
+_ANSI = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]")
+
+
+def provider_name(environment: dict[str, str]) -> str:
+    return PROVIDER_NAMES.get(environment.get("HARNESS_PROVIDER", ""), "The provider")
+
+
+def stderr_detail(root: Path, limit: int = 300) -> str | None:
+    """The provider's own last diagnostic line, which usually states why it stopped."""
+    try:
+        with (root / "stderr.log").open("rb") as source:
+            source.seek(0, os.SEEK_END)
+            source.seek(max(0, source.tell() - 8192))
+            text = source.read().decode("utf-8", "replace")
+    except OSError:
+        return None
+    lines = [line.strip() for line in _ANSI.sub("", text).splitlines() if line.strip()]
+    if not lines:
+        return None
+    detail = re.sub(r"[\x00-\x1f\x7f]", " ", lines[-1])
+    return detail if len(detail) <= limit else detail[: limit - 1] + "…"
+
+
+def with_detail(reason: str, detail: str | None) -> str:
+    return f"{reason}: {detail}" if detail and detail not in reason else reason
+
+
+def _startup_failure(execution_id: str, root: Path, name: str) -> str:
+    with connect() as connection:
+        code, recorded = connection.execute(
+            "SELECT e.exit_code,r.reason FROM executions e LEFT JOIN requests r ON r.id=e.request_id WHERE e.id=?",
+            (execution_id,),
+        ).fetchone()
+    # The exit code is committed with the failed state; a supervisor error commits its reason with it.
+    if code is not None:
+        return with_detail(f"{name} exited with code {code}", stderr_detail(root))
+    return recorded or with_detail(f"{name} failed to start", stderr_detail(root))
+
+
+def _unverified_startup(root: Path, name: str, cwd: Path, visible: bool) -> str:
+    if visible:
+        return (
+            f"{name} startup could not be verified: its session did not report within {STARTUP_SECONDS} seconds. "
+            f"Check that subagents is installed for {name} in {cwd}, and accept any trust prompt in the new terminal"
+        )
+    return with_detail(f"{name} startup could not be verified within {STARTUP_SECONDS} seconds", stderr_detail(root))
+
+
 def start(
     execution_id: str,
     argv: list[str],
@@ -238,11 +288,11 @@ def start(
         if visible:
             sessions._visible_terminal(command, environment, cwd)
         else:
+            # DETACHED_PROCESS makes Windows ignore CREATE_NO_WINDOW, so a venv's Python
+            # launcher would give the real interpreter a visible console. A windowless
+            # console of its own still outlives the parent's console.
             options = (
-                {
-                    "creationflags": subprocess.CREATE_NO_WINDOW
-                    | subprocess.DETACHED_PROCESS
-                }
+                {"creationflags": subprocess.CREATE_NO_WINDOW}
                 if os.name == "nt"
                 else {"start_new_session": True}
             )
@@ -269,7 +319,8 @@ def start(
         specification.unlink(missing_ok=True)
         raise
     # Startup is proven by SessionStart or structured provider output, never Popen.
-    deadline = time.monotonic() + 15
+    name = provider_name(environment)
+    deadline = time.monotonic() + STARTUP_SECONDS
     while time.monotonic() < deadline:
         with connect() as connection:
             state = connection.execute(
@@ -278,9 +329,9 @@ def start(
         if state in {"running", "exited"}:
             return
         if state == "failed":
-            raise sessions.SessionError("Provider startup failed")
+            raise sessions.SessionError(_startup_failure(execution_id, root, name))
         time.sleep(0.05)
-    raise sessions.SessionError("Provider startup could not be verified")
+    raise sessions.SessionError(_unverified_startup(root, name, cwd, visible))
 
 
 def native_command(argv: list[str]) -> list[str]:
@@ -309,6 +360,52 @@ def native_command(argv: list[str]) -> list[str]:
     if not selected:
         raise OSError("Node executable is unavailable for provider npm shim")
     return [selected, str(entry), *argv[1:]]
+
+
+class PiRun:
+    """Pi exits zero after failed or aborted responses; settlement and the final message decide."""
+
+    def __init__(self) -> None:
+        self.message: dict | None = None
+        self.settled = False
+        self.aborted = False
+
+    def observe(self, event: dict) -> str | None:
+        """Record one JSON-mode event and return the session ID its header announces."""
+        kind = event.get("type")
+        if kind == "session":
+            return event["id"] if isinstance(event.get("id"), str) and event["id"] else None
+        if kind == "message_end":
+            message = event.get("message")
+            if isinstance(message, dict) and message.get("role") == "assistant":
+                self.message = message
+        elif kind == "agent_settled":
+            self.settled = True
+            self.aborted = event.get("aborted") is True
+        return None
+
+    def outcome(self, code: int) -> tuple[str, bool, str | None]:
+        message = self.message or {}
+        content = message.get("content")
+        text = content if isinstance(content, str) else "".join(
+            block["text"] for block in content or []
+            if isinstance(block, dict) and block.get("type") == "text" and isinstance(block.get("text"), str)
+        )
+        stop = message.get("stopReason")
+        if code != 0:
+            return text, False, f"Pi exited with code {code}"
+        if not self.settled:
+            return text, False, "Pi exited before its run settled"
+        if self.aborted or stop == "aborted":
+            return text, False, "Pi run was aborted"
+        if stop == "error":
+            error = message.get("errorMessage")
+            return text, False, "Pi response failed" + (f": {error}" if isinstance(error, str) and error else "")
+        if stop == "length":
+            return text, False, "Pi response reached the output token limit"
+        if not text.strip():
+            return text, False, "Pi finished without a final response"
+        return text, True, None
 
 
 def supervise(execution_id: str, specification: Path) -> int:
@@ -345,6 +442,7 @@ def supervise(execution_id: str, specification: Path) -> int:
                     (process.pid, birth_identity(process.pid), execution_id),
                 )
             message = ""
+            pi_run = PiRun() if environment.get("HARNESS_PROVIDER") == "pi" else None
             if process.stdout:
                 with (root / "stdout.jsonl").open("wb") as output:
                     for line in process.stdout:
@@ -354,7 +452,12 @@ def supervise(execution_id: str, specification: Path) -> int:
                             event = json.loads(line)
                         except (ValueError, UnicodeError):
                             continue
-                        conversation = event.get("thread_id") or event.get("session_id")
+                        if not isinstance(event, dict):
+                            continue
+                        if pi_run is not None:
+                            conversation = pi_run.observe(event)
+                        else:
+                            conversation = event.get("thread_id") or event.get("session_id")
                         if conversation:
                             with connect() as connection:
                                 connection.execute(
@@ -395,11 +498,20 @@ def supervise(execution_id: str, specification: Path) -> int:
                 execution_id=execution_id,
             )
         else:
+            name = provider_name(environment)
+            if pi_run is not None:
+                message, success, reason = pi_run.outcome(code)
+            else:
+                success = code == 0 and bool(message)
+                reason = None if success else f"{name} exited with code {code}" if code else f"{name} finished without a final response"
+            # Process-level failures leave their cause on stderr, not in the event stream.
+            if not success and (code != 0 or (pi_run is not None and not pi_run.settled)):
+                reason = with_detail(reason, stderr_detail(root))
             report_child_stop(
                 environment["HARNESS_SESSION_ID"],
                 message,
-                success=code == 0 and bool(message),
-                reason=None if code == 0 else f"Provider exit {code}",
+                success=success,
+                reason=reason,
                 execution_id=execution_id,
             )
         return code
@@ -415,8 +527,15 @@ def supervise(execution_id: str, specification: Path) -> int:
                 "UPDATE requests SET state=?,reason=?,delivery_id=CASE WHEN ?='failed' THEN COALESCE(delivery_id,lower(hex(randomblob(16)))) ELSE delivery_id END,completed_at=CASE WHEN ?='failed' THEN CURRENT_TIMESTAMP ELSE NULL END WHERE id=(SELECT request_id FROM executions WHERE id=?) AND state IN ('launching','pending','uncertain')",
                 (state, str(exc), state, state, execution_id),
             )
+            parent = connection.execute(
+                "SELECT r.parent_session_id FROM requests r JOIN executions e ON e.request_id=r.id WHERE e.id=?",
+                (execution_id,),
+            ).fetchone()
         if not uncertain:
+            from subagents_runtime.delegation import signal_parent
             from subagents_runtime.loop import release_expired_after_exit
+
+            signal_parent(parent[0] if parent else None)
 
             release_expired_after_exit(environment["HARNESS_SESSION_ID"])
         return 1

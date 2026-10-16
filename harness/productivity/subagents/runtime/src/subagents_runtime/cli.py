@@ -124,7 +124,7 @@ def build_parser() -> argparse.ArgumentParser:
     run_parser = commands.add_parser(
         "run", help="open an independent visible agent session"
     )
-    run_parser.add_argument("--provider", choices=("claude", "chatgpt"), required=True)
+    run_parser.add_argument("--provider", choices=("claude", "chatgpt", "pi"), required=True)
     run_parser.add_argument("prompt", nargs="*")
     run_parser.set_defaults(func=cmd_run)
     ask_parser = commands.add_parser(

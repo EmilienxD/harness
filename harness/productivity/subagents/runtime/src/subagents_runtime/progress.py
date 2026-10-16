@@ -88,6 +88,32 @@ def event_summary(event: object) -> str | None:
             return "File changes completed"
         if item_type == "plan_update" and done:
             return "Plan updated"
+    return _pi_summary(event)
+
+
+def _pi_summary(event: dict) -> str | None:
+    kind = event.get("type")
+    if kind == "session":
+        return "Provider session started"
+    if kind == "tool_execution_start":
+        data = event.get("args")
+        detail = _short(next((data[key] for key in ("command", "path", "query", "url") if isinstance(data, dict) and isinstance(data.get(key), str)), None))
+        return f"{_short(event.get('toolName')) or 'Tool'} started" + (f": {detail}" if detail else "")
+    if kind == "message_end":
+        message = event.get("message")
+        if not isinstance(message, dict) or message.get("role") != "assistant":
+            return None
+        if message.get("stopReason") == "error":
+            return "Error: " + (_short(message.get("errorMessage")) or "provider error")
+        content = message.get("content")
+        detail = _short("".join(
+            block["text"] for block in content if isinstance(block, dict) and block.get("type") == "text" and isinstance(block.get("text"), str)
+        ) if isinstance(content, list) else content)
+        return f"Agent: {detail}" if detail else None
+    if kind == "auto_retry_start":
+        return "Retrying: " + (_short(event.get("errorMessage")) or "provider error")
+    if kind == "agent_settled":
+        return "Aborted" if event.get("aborted") else "Finished"
     return None
 
 

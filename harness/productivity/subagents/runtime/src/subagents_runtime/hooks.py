@@ -47,6 +47,8 @@ def provider_from_argv(argv: list[str]) -> str | None:
             return "claude"
         if token == "--chatgpt":
             return "chatgpt"
+        if token == "--pi":
+            return "pi"
     return None
 
 
@@ -443,9 +445,13 @@ def handle(
 
 
 def main() -> int:
+    provider = provider_from_argv(sys.argv[1:])
+    if provider == "pi":
+        from subagents_runtime.pi_bridge import main as pi_main
+
+        return pi_main()
     try:
         payload = json.load(sys.stdin)
-        provider = provider_from_argv(sys.argv[1:])
         output = handle(payload, provider) if isinstance(payload, dict) else None
         if output is not None:
             print(json.dumps(output))

@@ -1,6 +1,6 @@
 # Pi provider architecture proposal
 
-Status: **25 shared skill packages, three path-guard extensions, the command guard, comment budgets, document draft approval, Git cleanup inventory, two issue workflow extensions, cloud interviews, session commits, desktop notifications and gotcha reports implemented; remaining extensions and runtime architecture proposed**.
+Status: **25 shared skill packages, three path-guard extensions, the command guard, comment budgets, document draft approval, Git cleanup inventory, two issue workflow extensions, cloud interviews, session commits, desktop notifications, gotcha reports and persistent subagents implemented; remaining extensions proposed**.
 Pi is an opt-in catalogue target for all 22 skill-led packages below, plus `caveman`,
 `setup-help`, and `websearch`. Shared skill installation
 works at project and user scope; three path guards, the command guard, comment budgets, document draft approval, Git cleanup inventory,
@@ -163,8 +163,8 @@ See `tests/e2e/tools/pi-mid-prompt-skills/`.
 `redirect-subagents`, `prefer-read-tool`, and `prefer-edit-tool` are Claude-only tools.
 `agent-launcher` is not required for Pi and is excluded from planned Pi ports.
 
-The first release does not require `subagents`, `ship`, `aboard`, `auto`,
-quota waiting, or archived packages. Keep those as future consumers of the
+The first release does not require `ship`, `aboard`, `auto`,
+quota waiting, or archived packages; `subagents` additionally ships (see below). Keep those as future consumers of the
 same provider boundaries. Tools requiring browser/search integrations must report missing
 capabilities; choosing Pi or a model service does not supply those tools automatically.
 
@@ -659,11 +659,9 @@ delivery and unscripted caveat selection require their own applicable evidence.
 ## Later provider consumers
 
 Persistent `run`, `ask`, `reply`, `resume`, and `watch` remain in the independently packaged
-Python session runtime. A later Pi runtime adapter supplies exact launch/resume/fork identity,
-JSON/RPC progress and semantic success parsing, branch-aware previous messages, model selection,
-and interrupted-execution recovery. Harness `provider: pi` identifies the agent host; Pi's own
-model `--provider` identifies a service. Avoid binary Claude/ChatGPT fallbacks and a universal
-Pi model list. Preserve unknown telemetry rather than inventing context percentages.
+Python session runtime. Its Pi adapter has shipped; see [Shipped persistent subagents](#shipped-persistent-subagents).
+Harness `provider: pi` identifies the agent host; Pi's own model `--provider` identifies a service.
+Context-usage telemetry for Pi remains unimplemented rather than estimated.
 
 `ship` follows that runtime adapter, preserving inboxes, wait tokens, bounded feedback, result
 replay, and one implementer per worktree. Aboard follows with a native platform adapter, visible
@@ -885,3 +883,60 @@ explicit `e2e:pi-grill:live` journey verifies the same successful publication/St
 boundaries against an actual configured service. It checks exact inference counts and deletes
 only its UUID-owned sessions/assets. Scripted inference certifies integration; TUI/browser
 rendering, unscripted design quality and a future Pi Aboard adapter are outside this gate.
+
+## Shipped persistent subagents
+
+`subagents` 2.10.0 (runtime 2.10.0) adds Pi as a provider of the existing Python runtime rather
+than a second orchestrator. Requests, executions, process supervision, delivery claims and replay
+stay in the shared SQLite state; a native extension translates Pi events into versioned
+`harness-subagents-hook --pi` operations through `pi-transport` 1.1.0's bounded `requestCommand`.
+The uv-installed entry point keeps the runtime's PyYAML dependency out of Pi hooks.
+
+Children launch through the CLI process boundary, never the SDK: automatic work runs
+`pi --mode json`, interactive work the terminal UI. Harness assigns the native ID with
+`--session-id` for new sessions and continuations, and `--fork <id> --session-id <new>` when the
+original session is still live, so resume never depends on the extension having loaded. Child
+skills start as `/skill:<name> <prompt>` because Pi reads the skill name up to the first space.
+The supervisor binds the JSON session header and decides success from Pi's events, because the
+exit status ignores failed responses: the run must reach `agent_settled` unaborted, and the last
+assistant message must end without `error`, `aborted` or `length` and contain text. Pi's
+`--model` searches its whole catalogue, including unauthenticated providers, so a bare `haiku`
+selected a Bedrock alias in manual testing. The runtime lists authenticated models with
+`--list-models`, applies Pi's exact-then-alias matching, and launches the qualified
+`provider/model`; unavailable or ambiguous models fail before launch. Effort maps to `--thinking`. Pi has no universal exploration model, so
+`explore` keeps the native model at low thinking. RPC, run pools and the SDK were rejected:
+a JSON run already matches the one-request child lifecycle, and live steering is not required.
+
+Parent wake-up replaces the Claude/Codex Stop-hook wait. The runtime touches a per-parent
+`results-ready` marker whenever a request settles; the extension stats it every 500 ms and rechecks
+the database every 30 seconds. A terminal-UI or RPC parent delivers each claimed batch with
+`pi.sendMessage`: idle parents start a turn, busy parents receive it as steering before their next
+model call, matching PostToolUse delivery. A JSON or print parent, including an automatic child
+that delegated further, waits in `agent_before_settle` and continues once with the result entry.
+A delivery is acknowledged only after its `custom_message` entry carrying the delivery ID is
+persisted; replay after reload or restart acknowledges an already persisted batch without
+resending it. Delivery is session-wide rather than branch-bound, as with Claude/Codex rewinds,
+so tree navigation cannot strand a child result.
+
+Other boundaries: one stable `harness-subagents` system-prompt section carries the inbox, preserving
+prompt caching and surviving compaction. Delegation skills receive their instructions by input
+transformation. Successful native `write`/`edit` results inside the inbox, including nested calls,
+launch requests and append the launch status. `/reply-to-agent-with-previous-message` and its
+`/skill:` spelling send the latest successful assistant text on the active branch without inference.
+Interactive children report at `agent_settled`; a new prompt or failed turn expires an armed reply,
+and quitting cancels an unanswered request. In-process `/new` and `/fork` sessions become unrelated
+conversations. Loop implementers are rejected for Pi. Aboard receives Pi delegations when it is
+running; until Aboard accepts `provider: pi`, those launches are refused rather than silently
+falling back. Headless children load project extensions only in trusted projects, so nested
+delegation from automatic children needs project trust or a user-scope installation.
+
+`npm run test:pi-subagents` installs the real catalogue package with `--local` (the checkout runtime
+as a uv tool) and drives real Pi 1.2.0 on Windows against the fake Responses endpoint. A JSON parent
+launches an automatic Pi child, waits before settlement and integrates its answer; an RPC parent
+launches an interactive child, opened as an RPC session through a visible-terminal stand-in, whose
+previous-message reply makes zero inference requests and starts the idle parent's next turn. Both
+assert exact request counts, durable request state, acknowledged session-persisted delivery, native
+session files and emptied inboxes. Unit tests cover argument construction, JSON success semantics
+through a real supervisor run, discovery roots, bridge operations, delivery replay and the Aboard
+payload. The Pi TUI itself, POSIX, Claude/Codex parents with Pi children through real CLIs, and
+busy-parent steering are outside this gate.

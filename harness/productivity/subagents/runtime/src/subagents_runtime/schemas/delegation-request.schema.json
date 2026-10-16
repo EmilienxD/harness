@@ -16,7 +16,8 @@
       "enum": [
         "claude",
         "chatgpt",
-        "codex"
+        "codex",
+        "pi"
       ]
     },
     "mode": {

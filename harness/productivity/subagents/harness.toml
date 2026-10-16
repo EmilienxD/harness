@@ -1,8 +1,11 @@
 name = "subagents"
-version = "2.9.6"
+version = "2.10.0"
 description = "Persistent conversation delegation with mode-preserving resume"
 docs = "https://github.com/EmilienxD/harness/blob/main/README.md#user-invoked-skills"
-dependencies = ["prototype>=1.1.0,<2.0.0", "websearch>=1.1.0,<2.0.0", "grill-me>=1.0.3,<2.0.0", "issue-readers>=1.0.0,<2.0.0"]
+dependencies = [
+    "prototype>=1.1.0,<2.0.0", "websearch>=1.1.0,<2.0.0", "grill-me>=1.0.3,<2.0.0", "issue-readers>=1.0.0,<2.0.0",
+    { name = "pi-transport", version = ">=1.1.0,<2.0.0", lifecycle = "coupled", platforms = ["pi"] },
+]
 
 [platforms.claude]
 status = "supported"
@@ -11,6 +14,15 @@ fragment = "claude/settings.fragment.json"
 [platforms.chatgpt]
 status = "supported"
 fragment = "chatgpt/hooks.fragment.json"
+
+[platforms.pi]
+status = "supported"
+
+[[files]]
+src = "pi/extension.ts"
+dest = "harness-subagents/index.ts"
+root = "extensions"
+platforms = ["pi"]
 
 [[files]]
 src = "subagents-toolkit/builtin-tasks.yaml"

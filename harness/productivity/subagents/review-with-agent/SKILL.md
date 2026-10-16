@@ -10,12 +10,12 @@ disable-model-invocation: true
 
 Run a subagent with the `review` task.
 
-Invoke the `subagents-toolkit` skill if you don't already have its instructions in your context, then follow its workflow using the conversation inbox supplied by the hook.
+Invoke the `subagents-toolkit` skill if you don't already have its instructions in your context, then follow its workflow using the conversation inbox supplied by the runtime.
 
 Request parameters:
 - task: review
 - mode: interactive or auto (default auto)
-- provider (Optional): claude, chatgpt, or codex (alias of chatgpt)
+- provider (Optional): claude, chatgpt, codex (alias of chatgpt), or pi
 - model (Optional): model ID
 - root (Optional): existing directory or worktree path, only when the user explicitly requests another root
 

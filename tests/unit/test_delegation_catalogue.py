@@ -32,7 +32,7 @@ def test_catalogue_exposes_one_subagents_bundle_and_standalone_companion_skills(
 
 def test_subagents_bundle_depends_on_the_standalone_companion_skills() -> None:
     tools = discover()
-    assert names(tools["subagents"]) == {"prototype", "websearch", "grill-me", "issue-readers"}
+    assert names(tools["subagents"]) == {"prototype", "websearch", "grill-me", "issue-readers", "pi-transport"}
 
 
 def test_launch_resume_and_reply_skills_remain_user_only() -> None:

@@ -39,6 +39,12 @@ BUILTIN_COMMANDS = {
         setup-default-sandbox side skills status statusline stop subagents theme
         title usage vim
     """.split()),
+    # docs/PI-REFERENCES/docs/slash-commands.md and mcp.md. Skills keep their /skill: prefix.
+    "pi": frozenset("""
+        settings model thinking scoped-models login logout llama new resume name
+        session tree fork clone compact import copy export share bug trust reload
+        hotkeys changelog quit mcp
+    """.split()),
 }
 
 # Match whole slash command names, including namespaces. A further slash or

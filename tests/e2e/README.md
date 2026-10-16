@@ -29,6 +29,7 @@ npm run test:pi-test-workflows
 npm run test:pi-commit
 npm run test:pi-desktop-notification
 npm run test:pi-report-gotchas
+npm run test:pi-subagents
 npm run test:pi-web-toolkit
 npm run test:chrome-devtools
 npm run test:pi-background-shell
@@ -333,6 +334,22 @@ so legacy CLI retry cannot race it. Uninstall removes the
 extension/runtime/last coupled bridge and preserves user-owned queue/deduplication history.
 Run `e2e:pi-report-gotchas` for project JSON and user RPC executable journeys. This certifies
 the Windows headless integration, not Pi TUI, POSIX or real Discord service acceptance.
+
+## Pi persistent subagents
+
+`test:pi-subagents` installs the real `subagents` package at project scope with `--local`, so the
+checkout runtime becomes an isolated uv tool entry point exactly as in production. A project
+`.harness/config.json` gives children the same isolated, trusted Pi invocation; the session and agent
+directories are inherited. The auto journey runs a JSON parent that writes an inbox request,
+launches a real `pi --mode json` child under the runtime supervisor, waits in `agent_before_settle`,
+and integrates the answer. The interactive journey runs an RPC parent; `capture-terminal.mjs`
+stands in for the visible terminal and hands the launch specification to the test, which opens the
+child as an RPC session with the runtime's environment. The child's previous-message reply makes
+zero inference requests and the result starts the idle parent's next turn. Each journey asserts
+exactly four inference requests, the succeeded and acknowledged request, one persisted result
+message matching its delivery ID, the child's native session file and no remaining request file.
+This certifies Windows headless integration, not the Pi TUI, POSIX, or Claude/Codex parents with
+Pi children through real CLIs.
 
 ## Pi path guards
 

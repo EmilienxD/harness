@@ -326,13 +326,14 @@ def test_info_json_exposes_dependency_and_platform_contract(capsys):
     assert package["platforms"] == {
         "claude": {"status": "supported"},
         "chatgpt": {"status": "supported"},
-        "pi": {"status": "unsupported", "reason": "No support is declared."},
+        "pi": {"status": "supported"},
     }
     assert package["dependencies"] == [
         {"name": "prototype", "constraint": ">=1.1.0,<2.0.0", "lifecycle": "shared"},
         {"name": "websearch", "constraint": ">=1.1.0,<2.0.0", "lifecycle": "shared"},
         {"name": "grill-me", "constraint": ">=1.0.3,<2.0.0", "lifecycle": "shared"},
         {"name": "issue-readers", "constraint": ">=1.0.0,<2.0.0", "lifecycle": "shared"},
+        {"name": "pi-transport", "constraint": ">=1.1.0,<2.0.0", "lifecycle": "coupled"},
     ]
     assert package["actions"] == ["uv-tool"]
 

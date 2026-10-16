@@ -8,7 +8,7 @@ disable-model-invocation: true
 
 Resume the agent the user asked to resume.
 
-Invoke the `subagents-toolkit` skill if its instructions are not already in the current context, then follow its workflow using the conversation inbox supplied by the hook.
+Invoke the `subagents-toolkit` skill if its instructions are not already in the current context, then follow its workflow using the conversation inbox supplied by the runtime.
 
 Resolve the user-selected `agent-i` where `i` is the id in this parent conversation, and write a fresh request file with only `resume: agent-i` in frontmatter and the nonempty next message as its body.
 

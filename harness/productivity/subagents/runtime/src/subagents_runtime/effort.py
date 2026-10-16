@@ -46,6 +46,9 @@ def resolve_effort(provider: str, model: str | None, effort: str | None) -> str 
     """
     if effort is None:
         return None
+    if provider == "pi":
+        # Pi clamps --thinking to the selected model's capabilities itself.
+        return effort
     supported = _MODEL_EFFORTS.get(model)
     if supported is None and model is not None:
         # Full model IDs can carry dated snapshot suffixes.

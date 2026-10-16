@@ -58,8 +58,21 @@ def project_directories(cwd: Path) -> Iterator[Path]:
             break
 
 
+def pi_agent_directory() -> Path:
+    configured = os.environ.get("PI_CODING_AGENT_DIR")
+    return Path(configured).expanduser() if configured else Path.home() / ".pi" / "agent"
+
+
 def skill_roots(cwd: Path, provider: str) -> Iterator[Path]:
     """Nearest project skills first, stopping at the repository boundary."""
+    if provider == "pi":
+        # Pi reads .pi only in the working directory, and Agent Skills locations up to the repository.
+        yield cwd.resolve() / ".pi" / "skills"
+        for parent in project_directories(cwd):
+            yield parent / ".agents" / "skills"
+        yield pi_agent_directory() / "skills"
+        yield Path.home() / ".agents" / "skills"
+        return
     directory = ".claude" if provider == "claude" else ".agents"
     for parent in project_directories(cwd):
         yield parent / directory / "skills"

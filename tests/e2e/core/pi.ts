@@ -172,6 +172,17 @@ export class PiRpcClient {
     } finally { this.#prompting = false; }
   }
 
+  /** Position for waiting on records that an extension produces without a client command. */
+  get eventCount(): number { return this.#events.length; }
+
+  /** Summarize the next extension-started run that settles after `start`. */
+  async nextRun(start: number, timeoutMs = 30_000): Promise<PiRun> {
+    const begin = await this.#waitFor((event) => event.type === "agent_start", start, timeoutMs);
+    const from = this.#events.indexOf(begin);
+    await this.#waitFor((event) => event.type === "agent_settled", from, timeoutMs);
+    return summarizePiRun(this.#events.slice(from));
+  }
+
   close(): Promise<void> {
     this.#closing ??= (async () => {
       if (!this.#child.stdin.destroyed) this.#child.stdin.end();

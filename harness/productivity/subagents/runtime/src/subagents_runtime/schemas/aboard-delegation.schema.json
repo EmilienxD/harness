@@ -31,7 +31,8 @@
     "provider": {
       "enum": [
         "claude",
-        "chatgpt"
+        "chatgpt",
+        "pi"
       ]
     },
     "mode": {

@@ -14,12 +14,14 @@ from pathlib import Path
 
 import yaml
 
-from subagents_runtime.storage import new_inbox
+from subagents_runtime.storage import new_inbox, state_dir
 from subagents_runtime.effort import EFFORT_LEVELS
 from subagents_runtime.messages import runtime_message
 from subagents_runtime.roles import RoleError, load_task_policies, task_policy
 
-PROVIDERS = frozenset({"claude", "chatgpt"})
+PROVIDERS = frozenset({"claude", "chatgpt", "pi"})
+# Providers without Claude's inline @file expansion receive plain paths.
+PLAIN_FILE_REFERENCES = frozenset({"chatgpt", "pi"})
 # Request frontmatter spells ChatGPT as "chatgpt" or "codex"; both normalize to
 # the canonical provider name before validation, storage, and launch.
 PROVIDER_ALIASES = {"codex": "chatgpt"}
@@ -72,6 +74,22 @@ class ProcessResult:
 class ParentDelivery:
     delivery_id: str
     text: str
+
+
+def results_marker(parent_session_id: str) -> Path:
+    return state_dir() / "runtime" / "sessions" / parent_session_id / "results-ready"
+
+
+def signal_parent(parent_session_id: str | None) -> None:
+    """Wake event-driven parents; the database remains the source of truth."""
+    if not parent_session_id:
+        return
+    marker = results_marker(parent_session_id)
+    try:
+        marker.parent.mkdir(parents=True, exist_ok=True)
+        marker.write_text(uuid.uuid4().hex, encoding="utf-8")
+    except OSError:
+        pass
 
 
 def _canonical_direct_child(path: Path, inbox: Path) -> tuple[Path, Path]:
@@ -185,6 +203,8 @@ def parse_request_file(
     if task == "loop":
         if provider != parent_provider:
             raise RequestFileError("loop implementers must use the Lead's provider")
+        if provider == "pi":
+            raise RequestFileError("loop implementers are not supported for pi")
         if not {"cwd", "prompt-file"} <= keys:
             raise RequestFileError("loop requires cwd and prompt-file")
         if not Path(metadata["cwd"]).is_absolute() or not Path(metadata["cwd"]).is_dir():
@@ -296,7 +316,7 @@ def _finish_launch(request, request_id, execution_id, child_id, number, cwd, pat
     from subagents_runtime.prompt_commands import sanitize_prompt_commands
     sessions = _sessions_module()
     request = replace(request, prompt=sanitize_prompt_commands(request.prompt, request.provider))
-    if request.provider == "chatgpt":
+    if request.provider in PLAIN_FILE_REFERENCES:
         from subagents_runtime.prompt_paths import normalize_file_references
 
         # Hash and retain the original inbox body; adapt only the launch copy,
@@ -362,6 +382,7 @@ def _fail_request(path, request_id, execution_id, child_id, exc, session_id):
                 (execution_id,),
             )
     if not uncertain:
+        signal_parent(session_id)
         path.unlink(missing_ok=True)
         claimed.unlink(missing_ok=True)
         with sessions._connect() as connection:
@@ -409,6 +430,7 @@ def reconcile_inbox(session_id: str, *, launch: Callable | None = None) -> list[
         raise sessions.SessionError("The session inbox is no longer canonical")
     results = []
     retries = []
+    settled_any = False
     for path in delegation.inbox.glob("*.md.running"):
         source = path.name[:-8]
         with sessions._connect() as connection:
@@ -428,10 +450,19 @@ def reconcile_inbox(session_id: str, *, launch: Callable | None = None) -> list[
                 (row[0],),
             ).fetchone()
             if execution and execution[0] in {"failed", "cancelled"}:
-                connection.execute(
+                settled = connection.execute(
                     "UPDATE requests SET state=?,reason=COALESCE(reason,?),delivery_id=COALESCE(delivery_id,?),completed_at=COALESCE(completed_at,CURRENT_TIMESTAMP) WHERE id=? AND state IN ('launching','pending','uncertain')",
-                    (execution[0], "Provider startup failed" if execution[0] == "failed" else "Execution cancelled", str(uuid.uuid4()), row[0]),
+                    (
+                        execution[0],
+                        processes.with_detail(
+                            "Provider startup failed",
+                            processes.stderr_detail(state_dir() / "runtime" / "sessions" / session_id / "executions" / execution[3]),
+                        ) if execution[0] == "failed" else "Execution cancelled",
+                        str(uuid.uuid4()),
+                        row[0],
+                    ),
                 )
+                settled_any = settled_any or bool(settled.rowcount)
             if (
                 row[1] in {"succeeded", "failed", "cancelled"}
                 or execution
@@ -477,6 +508,8 @@ def reconcile_inbox(session_id: str, *, launch: Callable | None = None) -> list[
                         "Startup could not be verified",
                     )
                 )
+    if settled_any:
+        signal_parent(session_id)
     from dataclasses import replace
     for claimed_path, request_id, execution_id, child_id, persisted in retries:
         path = claimed_path.with_name(claimed_path.name[:-8])
@@ -779,6 +812,10 @@ def send_previous_reply(
             "completed_at=CURRENT_TIMESTAMP WHERE id=?",
             (message, str(uuid.uuid4()), request_id),
         )
+        parent = connection.execute(
+            "SELECT parent_session_id FROM requests WHERE id=?", (request_id,)
+        ).fetchone()[0]
+    signal_parent(parent)
 
 
 def report_child_stop(
@@ -828,8 +865,13 @@ def report_child_stop(
             """,
             (state, message if success else None, reason, delivery_id, request_id),
         )
+        parent = connection.execute(
+            "SELECT parent_session_id FROM requests WHERE id=?", (request_id,)
+        ).fetchone()[0]
         connection.commit()
-        return changed.rowcount == 1
+    if changed.rowcount == 1:
+        signal_parent(parent)
+    return changed.rowcount == 1
 
 
 def observe_parent_event(parent_session_id: str, event: str) -> None:
@@ -900,22 +942,31 @@ def claim_instructions(
                 (epoch, sequence, session_id),
             )
         if not session_start:
-            cwd = Path(connection.execute("SELECT cwd FROM sessions WHERE id=?", (session_id,)).fetchone()[0])
+            cwd, provider = connection.execute("SELECT cwd,provider FROM sessions WHERE id=?", (session_id,)).fetchone()
     if session_start:
-        text = (
-            "This session manages subagents via the subagents-toolkit skill. "
-            "If at any time you end up working with this tool, "
-            f"this is your assigned inbox `{inbox}`."
-        )
+        text = session_start_instructions(inbox)
         return f"{text}\n\n{lead_instructions(session_id, inbox)}" if lead else text
     if lead:
         return lead_instructions(session_id, inbox)
+    return delegation_instructions(inbox, Path(cwd), provider)
+
+
+def session_start_instructions(inbox: str | Path) -> str:
+    return (
+        "This session manages subagents via the subagents-toolkit skill. "
+        "If at any time you end up working with this tool, "
+        f"this is your assigned inbox `{inbox}`."
+    )
+
+
+def delegation_instructions(inbox: str | Path, cwd: Path, provider: str) -> str:
     from subagents_runtime.roles import custom_registry_paths
 
     personal_registry, project_registry = custom_registry_paths(cwd)
+    tools = "the write tool" if provider == "pi" else "a structured file-writing tool such as Write or apply_patch"
     return (
         f"Conversation inbox: {inbox}\n"
-        "Write inbox requests with a structured file-writing tool such as Write or apply_patch; "
+        f"Write inbox requests with {tools}; "
         "the write event launches the request automatically.\n"
         f"Custom task registries: project {project_registry}; personal {personal_registry}. "
         "Project entries replace personal definitions by task name. "
@@ -1085,6 +1136,27 @@ def claim_parent_delivery(parent_session_id: str, event: str) -> ParentDelivery 
         text = _format_results(selected, _delegation_status(connection, parent_session_id))
         connection.commit()
         return ParentDelivery(delivery_id, text)
+
+
+def acknowledge_parent_delivery(parent_session_id: str, delivery_id: str) -> bool:
+    """Acknowledge one claimed batch once the parent has durably recorded it."""
+    with _sessions_module()._connect() as connection:
+        connection.execute("BEGIN IMMEDIATE")
+        row = connection.execute(
+            "SELECT claim_sequence FROM requests WHERE parent_session_id=? AND delivery_id=? AND claim_sequence IS NOT NULL",
+            (parent_session_id, delivery_id),
+        ).fetchone()
+        if row is None:
+            connection.rollback()
+            return False
+        sequence = _next_sequence(connection, parent_session_id)
+        connection.execute(
+            "UPDATE requests SET acknowledgement_sequence=?,acknowledged_at=CURRENT_TIMESTAMP "
+            "WHERE parent_session_id=? AND claim_sequence=? AND acknowledgement_sequence IS NULL",
+            (sequence, parent_session_id, row[0]),
+        )
+        connection.commit()
+        return True
 
 
 def has_pending_children(parent_session_id: str) -> bool:
