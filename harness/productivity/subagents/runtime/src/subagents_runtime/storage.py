@@ -8,7 +8,7 @@ import sqlite3
 import uuid
 from pathlib import Path
 
-SCHEMA_VERSION = 8
+SCHEMA_VERSION = 9
 # Lowercase letters and digits without the look-alikes 0/o and 1/i/l.
 INBOX_ALPHABET = "abcdefghjkmnpqrstuvwxyz23456789"
 
@@ -70,6 +70,17 @@ def _migrate(connection):
     try:
         version = connection.execute("PRAGMA user_version").fetchone()[0]
         if version >= SCHEMA_VERSION:
+            connection.commit()
+            return
+        connection.execute("""
+            CREATE TABLE IF NOT EXISTS inbox_activity (
+                session_id TEXT PRIMARY KEY REFERENCES sessions(id),
+                last_seen TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                ended_at TEXT
+            )
+        """)
+        if version == 8:
+            connection.execute(f"PRAGMA user_version={SCHEMA_VERSION}")
             connection.commit()
             return
         if version in range(1, 7) and "model" not in {

@@ -8,6 +8,10 @@ CREATE TABLE sessions (
  UNIQUE(provider, provider_session_id), UNIQUE(parent_session_id, agent_index),
  CHECK((parent_session_id IS NULL) = (agent_index IS NULL)), UNIQUE(id, parent_session_id)
 );
+CREATE TABLE IF NOT EXISTS inbox_activity (
+ session_id TEXT PRIMARY KEY REFERENCES sessions(id),
+ last_seen TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, ended_at TEXT
+);
 CREATE TABLE session_delegation (
  parent_session_id TEXT PRIMARY KEY REFERENCES sessions(id), inbox TEXT NOT NULL UNIQUE,
  enabled_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, context_epoch INTEGER NOT NULL DEFAULT 0,

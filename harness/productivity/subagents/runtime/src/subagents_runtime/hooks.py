@@ -233,6 +233,9 @@ def handle(
         session_id = sessions.bind_observed(
             session_id, cwd, selected_provider, execution_mode
         )
+    from subagents_runtime.inbox_cleanup import observe_activity
+
+    observe_activity(session_id, ended=event == "SessionEnd")
     observe_parent_event(session_id, event)
     from subagents_runtime import loop
     if event in {"UserPromptSubmit", "UserPromptExpansion"}:
@@ -404,6 +407,14 @@ def handle(
             cancelled=event == "SessionEnd",
             execution_id=execution_id,
         )
+        if event == "SessionEnd":
+            from subagents_runtime.inbox_cleanup import cleanup_inboxes
+
+            # Own inbox only; a full sweep is explicit, never on the hook hot path.
+            try:
+                cleanup_inboxes(apply=True, grace_hours=0, session_id=session_id)
+            except OSError as exc:
+                print(f"Inbox cleanup skipped: {exc}", file=sys.stderr)
         parent_terminal_message = (
             _parent_terminal_message()
             if reported and success and execution_mode == "interactive"

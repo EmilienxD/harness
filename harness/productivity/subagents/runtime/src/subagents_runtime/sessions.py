@@ -909,14 +909,10 @@ def resume(session_id: str, message: str | None = None) -> None:
             raise SessionError(
                 "Delegated resume must originate in the owning parent conversation"
             )
-        from subagents_runtime.delegation import process_inbox
+        from subagents_runtime.delegation import ensure_inbox, process_inbox
 
-        with _connect() as connection:
-            inbox = connection.execute(
-                "SELECT inbox FROM session_delegation WHERE parent_session_id=?",
-                (row[4],),
-            ).fetchone()
-        path = Path(inbox[0]) / (uuid.uuid4().hex + ".md")
+        inbox = ensure_inbox(row[4]).inbox
+        path = inbox / (uuid.uuid4().hex + ".md")
         path.write_text(
             f"---\nresume: agent-{row[5]}\n---\n{message}", encoding="utf-8"
         )

@@ -243,6 +243,7 @@ def ensure_inbox(parent_session_id: str) -> DelegationInbox:
     """Assign a persistent inbox without loading or validating task registries."""
     sessions = _sessions_module()
     with sessions._connect() as connection:
+        connection.execute("BEGIN IMMEDIATE")
         row = connection.execute(
             "SELECT provider,cwd FROM sessions WHERE id=?", (parent_session_id,)
         ).fetchone()
@@ -264,7 +265,13 @@ def ensure_inbox(parent_session_id: str) -> DelegationInbox:
                 inbox.rmdir()
         else:
             stored = existing[0]
-            Path(stored).mkdir(parents=True, exist_ok=True)
+            from subagents_runtime.inbox_cleanup import redirected
+
+            path = Path(stored)
+            if path.resolve() != path or (path.exists() and redirected(path)):
+                raise sessions.SessionError("The session inbox is no longer canonical")
+            path.mkdir(parents=True, exist_ok=True)
+        connection.execute("UPDATE inbox_activity SET ended_at=NULL WHERE session_id=?", (parent_session_id,))
     return DelegationInbox(
         parent_session_id, parent_session_id, row[0], Path(row[1]), Path(stored)
     )
@@ -280,7 +287,8 @@ def _load_inbox(session_id: str) -> DelegationInbox:
         raise _sessions_module().SessionError(
             "harness ask requires an enabled session inbox"
         )
-    return DelegationInbox(session_id, session_id, row[0], Path(row[1]), Path(row[2]))
+    # A pruned inbox retains its assignment; restore it before reconciliation or writes.
+    return ensure_inbox(session_id)
 
 
 def _finish_launch(request, request_id, execution_id, child_id, number, cwd, path, launch):
