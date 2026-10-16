@@ -393,6 +393,39 @@ Run the workflow, then `test-workflows confirm tests/workflow/greeting.md` to au
 
 Run `test-workflows status` explicitly when verifying changes, as you would run unit tests, then run the affected checks and confirm passing ones. Loop implementers run and report; only the Lead stamps their results. Pi installs the same CLI and shared skill; invoke `/skill:test-workflows` to load it explicitly. Confirmation records verification performed by the agent; it does not execute the acceptance steps.
 
+## Statusline
+
+`statusline` replaces Pi's footer with exactly one line:
+
+```text
+harness (main)  openai:gpt-6.1-sol:medium  c:25/65%
+```
+
+The project is the current directory's name; the branch comes from Pi's Git watcher.
+The provider, model ID, thinking level, and rounded context-window usage update with Pi's UI.
+`c:25/65%` means 25% of the context window is used and auto-compaction's threshold is
+65%. The threshold is calculated from Pi's effective reserved-token setting and the
+current context window, including per-model overrides; it is not a fixed percentage.
+Pi can also compact on overflow, so this is the normal trigger threshold, not a guarantee.
+Disabled auto-compaction displays `off` instead of the threshold; unavailable values use `?`.
+
+`main` is red; other branches use Pi's theme accent. Project and
+`provider:model:thinking` remain uncolored. Context percentages progress from green
+(below 50% of the compaction threshold), to blue (50–75%), yellow (75–90%), and red
+(90% and above). With auto-compaction disabled or its threshold unknown, colors use
+the full context window instead. Unknown usage remains uncolored.
+Outside Git, the branch parentheses are omitted. Narrow terminals truncate the line.
+No token totals, costs, paths, or extension status rows are added.
+
+```powershell
+uv run harness install statusline --platform pi --scope user
+```
+
+Restart Pi or run `/reload`. Use `--scope project` for a project-only installation.
+This is a Pi-only presentation extension; it does not change model settings or request
+inference. Install only one custom-footer extension at a time, since Pi has one footer
+slot. Verified against Pi 1.2.0's extension loader and footer component API.
+
 ## Calm
 
 `calm` is a Pi-only extension that hides built-in tool output and file diffs. A compact block

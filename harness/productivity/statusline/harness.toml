@@ -1,0 +1,21 @@
+name = "statusline"
+version = "1.2.0"
+description = "Minimal Pi footer with project, branch, provider, model, thinking level, and context usage"
+docs = "https://github.com/EmilienxD/harness/blob/main/README.md#statusline"
+
+[platforms.claude]
+status = "unsupported"
+reason = "Uses Pi's native footer API."
+
+[platforms.chatgpt]
+status = "unsupported"
+reason = "Uses Pi's native footer API."
+
+[platforms.pi]
+status = "supported"
+
+[[files]]
+src = "pi/extension.ts"
+dest = "harness-statusline/index.ts"
+root = "extensions"
+platforms = ["pi"]
