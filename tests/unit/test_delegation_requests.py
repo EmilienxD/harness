@@ -115,6 +115,20 @@ def test_provider_defaults_to_the_parent_provider(tmp_path: Path) -> None:
     assert parsed.root is None
 
 
+@pytest.mark.parametrize("body", [
+    "GET /taxonomy/catalog and GET /taxonomy vocabulary expose readiness.",
+    "Inspect /tmp and /usr for supporting files.",
+])
+def test_request_accepts_slash_paths(tmp_path: Path, body: str) -> None:
+    inbox = tmp_path / "inbox"
+    request = write_request(inbox, "work.md", f"---\ntask: general\nmode: interactive\n---\n{body}")
+
+    parsed = parse_request_file(request, inbox, parent_provider="chatgpt")
+
+    assert parsed.task == "general"
+    assert parsed.mode == "interactive"
+
+
 def test_root_resolves_from_parent_directory(tmp_path: Path) -> None:
     parent = tmp_path / "project"
     root = tmp_path / "worktree"
@@ -126,6 +140,19 @@ def test_root_resolves_from_parent_directory(tmp_path: Path) -> None:
     parsed = parse_request_file(request, inbox, parent_provider="claude", cwd=parent)
 
     assert parsed.root == root.resolve()
+
+
+def test_request_accepts_installed_custom_slash_skill(tmp_path: Path) -> None:
+    project = tmp_path / "project"
+    skill = project / ".agents" / "skills" / "custom-audit" / "SKILL.md"
+    skill.parent.mkdir(parents=True)
+    skill.touch()
+    inbox = tmp_path / "inbox"
+    request = write_request(inbox, "work.md", "---\ntask: general\nmode: auto\n---\nUse /custom-audit for this.")
+
+    parsed = parse_request_file(request, inbox, parent_provider="chatgpt", cwd=project)
+
+    assert parsed.task == "general"
 
 
 @pytest.mark.parametrize(
@@ -155,8 +182,6 @@ def test_root_resolves_from_parent_directory(tmp_path: Path) -> None:
 
         ("request.md", "---\ntask: general\nmode: invalid\n---\nbody", "unsupported mode"),
         ("request.md", "---\ntask: prototype\nmode: auto\n---\nbody", "unsupported mode"),
-        ("request.md", "---\ntask: general\nmode: auto\n---\n$prototype do something else", "plain prompt"),
-        ("request.md", "---\ntask: general\nmode: auto\n---\nPlease use $prototype for this", "plain prompt"),
         ("request.md", "task: general\nmode: auto\nbody", "frontmatter"),
     ],
 )
