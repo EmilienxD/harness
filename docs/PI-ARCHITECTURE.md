@@ -129,11 +129,21 @@ Command guards still evaluate the original shell call; background receipts are n
 filesystem-outcome evidence for path guards or commit attribution. See the real RPC acceptance
 journey in `tests/e2e/tools/pi-background-shell/`.
 
+`mid-prompt-skills` additionally ships a native Pi input extension in 1.2.0, outside the original
+35-package backlog. It loads later `/skill:name` mentions from Pi's resolved resources while
+leaving the leading invocation to native expansion. It deduplicates skills, skips fenced/inline
+code and already expanded blocks, preserves request text/images, and stops before inference if
+a discovered file cannot be read. It adds no aliases or command dispatch and does not recursively
+expand skill bodies. Real Pi 1.2.0 project JSON and user RPC journeys against the fake Responses
+endpoint verify resource precedence, configured and explicit-only skills, exact request counts,
+reference reads/writes, image preservation, failure handling, and receipt-driven removal.
+See `tests/e2e/tools/pi-mid-prompt-skills/`.
+
 `redirect-subagents`, `prefer-read-tool`, and `prefer-edit-tool` are Claude-only tools.
 `agent-launcher` is not required for Pi and is excluded from planned Pi ports.
 
 The first release does not require `subagents`, `ship`, `aboard`, `auto`,
-`mid-prompt-skills`, quota waiting, or archived packages. Keep those as future consumers of the
+quota waiting, or archived packages. Keep those as future consumers of the
 same provider boundaries. Tools requiring browser/search integrations must report missing
 capabilities; choosing Pi or a model service does not supply those tools automatically.
 

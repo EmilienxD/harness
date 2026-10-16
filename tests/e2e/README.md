@@ -31,6 +31,7 @@ npm run test:pi-desktop-notification
 npm run test:pi-report-gotchas
 npm run test:pi-web-toolkit
 npm run test:pi-background-shell
+npm run test:pi-mid-prompt-skills
 npm run e2e:flush-out-useless-tests
 ```
 
@@ -78,6 +79,21 @@ credentials, selectors, proxies, and cloud credentials are excluded. Launches us
 disable telemetry/version checks/MCP and unrelated built-in extensions, and trust only the
 generated project through process-local `--approve`. Automatic compaction, retries, and cache
 warming are disabled. Trust is never persisted for an unrelated project.
+
+## Pi mid-prompt skills
+
+`npm run test:pi-mid-prompt-skills` installs the actual `mid-prompt-skills` catalogue package
+at project and user scope, using real Pi 1.2.0 JSON/RPC against the shared fake Codex Responses
+API. Twelve cases per scope cover later/multiple/stacked invocations, native leading expansion,
+deduplication, fenced and inline code, unclosed fences, unknown names, token boundaries, and
+already expanded resources. Structured skill identities/locations select real reference reads
+and receipt writes; instruction wording is not a prompt contract. Checks also verify configured
+external skills, explicit-only skills with command discovery disabled, native collision precedence,
+image preservation through the real input pipeline, zero-inference unreadable-file handling,
+exact inference counts, repeat/dry-run installation and receipt-driven removal. A final headless
+run verifies later invocations are no longer expanded after uninstall. This certifies loading,
+not unscripted model compliance or sequencing. `e2e:pi-mid-prompt-skills` runs the same journeys
+and prints structural summaries only.
 
 ## Pi background shell
 

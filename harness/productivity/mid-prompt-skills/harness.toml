@@ -1,6 +1,6 @@
 name = "mid-prompt-skills"
-version = "1.1.1"
-description = "Load skills invoked after other prompt text, where Claude Code or ChatGPT leaves them unexpanded"
+version = "1.2.0"
+description = "Load skills invoked after other prompt text in Claude Code, ChatGPT, and Pi"
 docs = "https://github.com/EmilienxD/harness/blob/main/README.md#hooks"
 
 [platforms.claude]
@@ -10,6 +10,15 @@ fragment = "claude/settings.fragment.json"
 [platforms.chatgpt]
 status = "supported"
 fragment = "chatgpt/hooks.fragment.json"
+
+[platforms.pi]
+status = "supported"
+
+[[files]]
+src = "pi/extension.ts"
+dest = "harness-mid-prompt-skills/index.ts"
+root = "extensions"
+platforms = ["pi"]
 
 [[files]]
 src = "mid_prompt_skills_hook.py"
