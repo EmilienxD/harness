@@ -1,6 +1,6 @@
 name = "background-shell"
-version = "1.0.0"
-description = "Pi Bash and PowerShell background commands with automatic completion notifications"
+version = "2.0.0"
+description = "Pi Bash and PowerShell commands with automatic backgrounding and completion notifications"
 docs = "https://github.com/EmilienxD/harness/blob/main/README.md#background-shell"
 
 [platforms.claude]

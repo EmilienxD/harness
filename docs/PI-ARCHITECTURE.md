@@ -111,6 +111,10 @@ session-state or Python bridge dependency. See the [acceptance journey](../tests
 `harness/productivity/background-shell/`. It overrides `bash` and Windows `powershell` with
 an explicit `run_in_background` parameter, reuses Pi's native shell resolution and execution,
 and owns bounded job receipts/logs, cancellation, and automatic completion messages.
+Version 2.0.0 automatically moves foreground commands to the background when their wait limit
+expires (`timeout`, default 120 seconds), preserving the running process and output from launch.
+`execution_timeout` sets an optional hard deadline from launch, including time after handoff;
+explicitly backgrounded commands retain their optional hard `timeout` deadline.
 It has no npm or shared Python dependency and installs through ordinary extension file mappings,
 without instruction or configuration fragments. Background jobs are scoped to the live session;
 reload, tree navigation, session changes, and shutdown cancel jobs and discard logs.

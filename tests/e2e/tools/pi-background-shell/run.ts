@@ -13,7 +13,9 @@ const fs = require('node:fs');
 const cp = require('node:child_process');
 const [mode, duration] = process.argv.slice(2);
 fs.writeFileSync('started-' + mode + '.json', JSON.stringify({pid:process.pid, model:process.env.PI_MODEL, prefix:process.env.HARNESS_BACKGROUND_PREFIX}));
-if (['cancel','shutdown','reload','tree','switch'].includes(mode)) {
+fs.appendFileSync('launches-' + mode, process.pid + '\\n');
+if (mode.startsWith('auto')) console.log('BEFORE:' + process.pid);
+if (['cancel','foreground-cancel','hard-foreground','auto-deadline','shutdown','reload','tree','switch'].includes(mode)) {
   const child = cp.spawn(process.execPath, ['-e', "setTimeout(()=>require('node:fs').writeFileSync('orphan-'+process.argv[1],'bad'),6000)", mode], {stdio:'ignore'});
   fs.writeFileSync('child-' + mode + '.json', JSON.stringify({pid:child.pid}));
 }
@@ -31,15 +33,26 @@ export async function runPiBackgroundShellJourney(scope: "project" | "user", she
   const step = (name: string, ms: number, extra = {}): PiScenarioStep => ({ checkpoint: name, tool: shell, input: { command: command(name, ms), run_in_background: true, ...extra } });
   const routes: Record<string, readonly PiScenarioStep[]> = {
     foreground: [{ checkpoint: "foreground", tool: shell, input: { command: command("foreground", 10) } }],
+    "foreground-failure": [{ checkpoint: "foreground-failure", tool: shell, input: { command: command("failure", 10), timeout: 5 } }],
+    "hard-foreground": [{ checkpoint: "hard-foreground", tool: shell, input: { command: command("hard-foreground", 10000), timeout: 5, execution_timeout: 0.6 } }],
+    "equal-deadlines": [{ checkpoint: "equal-deadlines", tool: shell, input: { command: command("equal-deadlines", 10000), timeout: 0.6, execution_timeout: 0.6 } }],
+    auto: [{ checkpoint: "auto", tool: shell, input: { command: command("auto", 2200), timeout: 0.4 } }],
+    "auto-failure": [{ checkpoint: "auto-failure", tool: shell, input: { command: command("auto-failure", 1500) + "; exit 7", timeout: 0.2 } }],
+    "auto-deadline": [{ checkpoint: "auto-deadline", tool: shell, input: { command: command("auto-deadline", 10000), timeout: 0.2, execution_timeout: 1.2 } }],
+    "background-deadline": [step("background-deadline", 10000, { timeout: 10, execution_timeout: 0.6 })],
     success: [step("success", scope === "project" ? 26000 : 1800)],
     failure: [step("failure", 1200)],
     timeout: [step("timeout", 10000, { timeout: 0.6 })],
     large: [step("large", 1200)],
     denied: [{ checkpoint: "denied", tool: shell, input: { command: command("denied", 10) + " # forbidden-marker", run_in_background: true } }],
     malformed: [{ checkpoint: "invalid-timeout", tool: shell, input: { command: command("invalid", 10), run_in_background: true, timeout: -1 } }],
-    cancel: [step("cancel", 10000)], reload: [step("reload", 10000)], shutdown: [step("shutdown", 10000)],
+    cancel: [{ checkpoint: "cancel", tool: shell, input: { command: command("cancel", 10000), timeout: 0.2 } }],
+    reload: [{ checkpoint: "reload", tool: shell, input: { command: command("reload", 10000), timeout: 0.2 } }], shutdown: [step("shutdown", 10000)],
     tree: [step("tree", 10000)], switch: [step("switch", 10000)],
     nested: [{ checkpoint: "nested-background", tool: "background_nested", input: {} }],
+    "nested-auto": [{ checkpoint: "nested-auto", tool: "background_nested_auto", input: {} }],
+    "foreground-cancel": [{ checkpoint: "foreground-cancel", tool: "background_nested_cancel", input: {} }],
+    "auto-denied": [{ checkpoint: "auto-denied", tool: shell, input: { command: command("auto-denied", 10000) + " # forbidden-marker", timeout: 0.2 } }],
     "nested-denied": [{ checkpoint: "nested-denied", tool: "background_nested_denied", input: {} }],
     "ps-error": [{ checkpoint: "powershell-error", tool: shell,
       input: { command: "Start-Sleep -Milliseconds 1200; Write-Error 'fixture command failed'", run_in_background: true } }],
@@ -73,11 +86,20 @@ export async function runPiBackgroundShellJourney(scope: "project" | "user", she
     export default function(pi) {
       for(const [name,command] of ${JSON.stringify([
         ["background_nested", command("nested", 1500)],
+        ["background_nested_auto", command("nested-auto", 1500)],
+        ["background_nested_cancel", command("foreground-cancel", 10000)],
         ["background_nested_denied", command("nested-denied", 10) + " # forbidden-marker"],
       ])}) pi.registerTool({name,label:name,description:'Fixture nested shell call',parameters:Type.Object({}),
         async execute(_id,_args,signal,_update,ctx){
-          const outcome=await ctx.executeTool(${JSON.stringify(shell)},{command,run_in_background:true},{signal});
-          return {...outcome.result,isError:outcome.isError};
+          const controller=new AbortController();
+          const auto=name==='background_nested_auto';
+          const cancel=name==='background_nested_cancel';
+          const timer=cancel?setTimeout(()=>controller.abort(),1200):undefined;
+          try {
+            const outcome=await ctx.executeTool(${JSON.stringify(shell)},auto?{command,timeout:0.2}:cancel?{command,timeout:5}:{command,run_in_background:true},{signal:auto||cancel?controller.signal:signal});
+            if(auto)controller.abort();
+            return {...outcome.result,isError:outcome.isError};
+          } finally {clearTimeout(timer);}
         }});
       pi.registerCommand('bg-reload', {handler:async(_,ctx)=>ctx.reload()});
       pi.registerCommand('bg-anchor', {handler:()=>pi.appendEntry('bg-anchor',{})});
@@ -88,7 +110,7 @@ export async function runPiBackgroundShellJourney(scope: "project" | "user", she
     }`);
     const settings = join(project, ".pi", "settings.json");
     const config = JSON.parse(await readFile(settings, "utf8"));
-    config.defaultTools = ["read", "write", shell, "shell_job", "background_nested", "background_nested_denied"];
+    config.defaultTools = ["read", "write", shell, "shell_job", "background_nested", "background_nested_auto", "background_nested_cancel", "background_nested_denied"];
     if (shell === "bash") {
       config.shellCommandPrefix = "export HARNESS_BACKGROUND_PREFIX=verified";
     }
@@ -126,12 +148,31 @@ export async function runPiBackgroundShellJourney(scope: "project" | "user", she
     const foregroundEnd = foreground.events.find((event) => event.type === "tool_execution_end")!;
     assert.equal((foregroundEnd.result as { structuredContent: { exit_code: number } }).structuredContent.exit_code, 0);
     assert.equal(await readFile(join(project, "effect-foreground"), "utf8"), "done");
-    for (const mode of ["success", "failure", "timeout", "large", "nested", ...(shell === "powershell" ? ["ps-error"] : [])]) {
-      const launched = await prompt(mode, mode === "nested" ? [false, false] : [false]);
+    assert.ok(foreground.events.some((event) => event.type === "tool_execution_update"), "Foreground output must still stream");
+    await prompt("foreground-cancel", [true, true]); expectedRequests--;
+    assert.equal(existsSync(join(project, "child-foreground-cancel.json")), true, "Cancellation must exercise a running process tree");
+    const failed = await prompt("foreground-failure", [true]);
+    const failedEnd = failed.events.find((event) => event.type === "tool_execution_end")!;
+    assert.equal((failedEnd.result as { structuredContent: { exit_code: number } }).structuredContent.exit_code, 7);
+    for (const mode of ["hard-foreground", "equal-deadlines"]) {
+      const hard = await prompt(mode, [true]);
+      const end = hard.events.find((event) => event.type === "tool_execution_end")!;
+      assert.equal((end.result as { structuredContent?: { id?: string } }).structuredContent?.id, undefined);
+      assert.equal(existsSync(join(project, `effect-${mode}`)), false);
+    }
+    for (const mode of ["auto", "auto-failure", "auto-deadline", "background-deadline", "nested-auto", "success", "failure", "timeout", "large", "nested", ...(shell === "powershell" ? ["ps-error"] : [])]) {
+      const nested = mode === "nested" || mode === "nested-auto";
+      const launched = await prompt(mode, nested ? [false, false] : [false]);
       const launchEnd = launched.events.filter((event) => event.type === "tool_execution_end").at(-1)!;
-      assert.equal(typeof (launchEnd.result as { structuredContent: { id: unknown } }).structuredContent.id, "string");
+      const launch = (launchEnd.result as { structuredContent: { id: string; log_path: string; output: string } }).structuredContent;
+      assert.equal(typeof launch.id, "string");
       // Nested tools are real executions, but only the outer call adds inference history.
-      if (mode === "nested") expectedRequests--;
+      if (nested) expectedRequests--;
+      if (mode === "auto") {
+        assert.equal(existsSync(join(project, "effect-auto")), false, "Automatic handoff must return before the command finishes");
+        assert.equal(existsSync(launch.log_path), true);
+        await prompt("chat", []);
+      }
       if (mode === "success") {
         assert.equal(existsSync(join(project, "effect-success")), false, "Background launch must return before completion");
         await prompt("inspect", [false, false, false]);
@@ -140,9 +181,21 @@ export async function runPiBackgroundShellJourney(scope: "project" | "user", she
       const completionPath = join(project, `completion-${mode}.json`);
       await until(() => existsSync(completionPath), "Background completion did not wake Pi", 40000);
       const completion = JSON.parse(await readFile(completionPath, "utf8"));
-      assert.equal(completion.state, mode === "timeout" ? "timed_out" : ["failure", "ps-error"].includes(mode) ? "failed" : "completed");
-      assert.equal(completion.exit_code, mode === "timeout" ? null : mode === "failure" ? 7 : mode === "ps-error" ? 1 : 0);
-      if (!["timeout", "ps-error"].includes(mode)) assert.ok(completion.output.includes(`RESULT:${mode}:雪`));
+      const timedOut = ["timeout", "auto-deadline", "background-deadline"].includes(mode);
+      assert.equal(completion.state, timedOut ? "timed_out" : ["failure", "auto-failure", "ps-error"].includes(mode) ? "failed" : "completed");
+      assert.equal(completion.exit_code, timedOut ? null : ["failure", "auto-failure"].includes(mode) ? 7 : mode === "ps-error" ? 1 : 0);
+      if (!timedOut && mode !== "ps-error") assert.ok(completion.output.includes(`RESULT:${mode}:雪`));
+      assert.equal(completion.id, launch.id);
+      assert.equal(completion.log_path, launch.log_path);
+      if (mode === "auto") {
+        const started = JSON.parse(await readFile(join(project, "started-auto.json"), "utf8"));
+        assert.equal(await readFile(join(project, "launches-auto"), "utf8"), `${started.pid}\n`, "Handoff must never relaunch the command");
+        const log = await readFile(completion.log_path, "utf8");
+        assert.ok(log.includes(`BEFORE:${started.pid}`));
+        assert.ok(log.includes("RESULT:auto:"));
+        assert.ok(completion.output.startsWith(launch.output));
+      }
+      if (timedOut) assert.equal(existsSync(join(project, `effect-${mode}`)), false);
       if (mode === "success") {
         const started = JSON.parse(await readFile(join(project, "started-success.json"), "utf8"));
         assert.equal(started.model, "pi-e2e");
@@ -158,6 +211,8 @@ export async function runPiBackgroundShellJourney(scope: "project" | "user", she
     }
     await prompt("denied", [true]);
     assert.equal(existsSync(join(project, "started-denied.json")), false);
+    await prompt("auto-denied", [true]);
+    assert.equal(existsSync(join(project, "started-auto-denied.json")), false);
     await prompt("malformed", [true]);
     assert.equal(existsSync(join(project, "started-invalid.json")), false);
     await prompt("nested-denied", [true, true]); expectedRequests--;
@@ -186,7 +241,7 @@ export async function runPiBackgroundShellJourney(scope: "project" | "user", she
     await until(() => existsSync(join(project, "child-shutdown.json")), "Shutdown child never started");
     await rpc.close();
     await delay(6500);
-    for (const mode of ["cancel", "reload", "tree", "switch", "shutdown"]) {
+    for (const mode of ["cancel", "foreground-cancel", "hard-foreground", "auto-deadline", "reload", "tree", "switch", "shutdown"]) {
       assert.equal(existsSync(join(project, `orphan-${mode}`)), false, "Background cleanup left a child alive");
       assert.equal(existsSync(join(project, `effect-${mode}`)), false);
     }
@@ -194,6 +249,9 @@ export async function runPiBackgroundShellJourney(scope: "project" | "user", she
     assert.equal(existsSync(join(project, "completion-shutdown.json")), false);
     assert.equal(existsSync(join(project, "completion-tree.json")), false);
     assert.equal(existsSync(join(project, "completion-switch.json")), false);
+    for (const mode of ["foreground", "foreground-cancel", "foreground-failure", "hard-foreground", "equal-deadlines"]) {
+      assert.equal(existsSync(join(project, `completion-${mode}.json`)), false, "Foreground results must not also send background notifications");
+    }
     assert.equal(await readFile(settings, "utf8"), before);
     assert.equal(await readFile(instruction, "utf8"), "Personal fixture instructions.\n");
     assert.equal(fixture.assertions().unexpectedRequests, 0);

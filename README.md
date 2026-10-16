@@ -402,15 +402,27 @@ Windows shell resolver, including Windows PowerShell when PowerShell 7 is unavai
 
 Ask Pi: "Run the test suite in the background, continue the review, and inspect the result
 when it finishes." The shell tool itself exposes the option and its usage guidance.
-Ordinary commands remain in the foreground. Background calls return a job ID immediately;
-completion delivers the actual exit status, elapsed time, and recent output and wakes an idle
-agent. Quiet commands keep running. `timeout`, when supplied, is a termination deadline in seconds.
+Commands start in the foreground unless `run_in_background: true` requests an immediate job
+receipt. If a foreground command exceeds `timeout` (120 seconds by default), the same process
+continues in the background without restarting. Its result includes the job ID, temporary log
+path, and recent output. Completion delivers the actual exit status, elapsed time, and recent
+output and wakes an idle agent. Quiet commands keep running.
+
+Starting with **2.0.0**, foreground `timeout` is a wait limit, not a termination deadline.
+Use `execution_timeout` for an optional hard deadline in seconds measured from launch; it
+continues counting after automatic backgrounding and terminates the process tree when reached.
+For explicitly backgrounded commands, `timeout` retains its hard-deadline behavior and has no
+default. If both hard deadlines are supplied, the earlier one wins. For example, `timeout: 5,
+execution_timeout: 600` waits up to five seconds in the foreground and permits ten minutes
+of total execution. Cancellation before handoff stops the command; after handoff, use
+`shell_job` to cancel it.
 The optional Windows `powershell` tool follows your existing tool selection; installing this
 package does not switch Bash commands to PowerShell syntax.
 
 `shell_job` lists jobs, reads status or recent output, and cancels a job with its process tree.
 It retains the last 8 KiB of decoded output and the first 16 MiB in a private temporary log,
-with truncation reported explicitly. At most eight jobs run concurrently and 64 job receipts
+with truncation reported explicitly. At most eight shell commands run concurrently (including
+commands waiting in the foreground), and 64 background job receipts
 are retained. Running jobs and their logs belong to the live Pi session: reload, session changes,
 tree navigation, and graceful shutdown cancel them and clear the logs. They do not survive a
 Pi restart. Keep Pi open to receive completion notifications.
