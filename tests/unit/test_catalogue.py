@@ -1379,6 +1379,7 @@ def test_every_catalogue_manifest_loads():
         "shipping": {"setup-help"},
         "productivity": {
             "background-shell",
+            "calm",
             "enable-desktop-notification",
             "agent-launcher", "caveman", "cleanup-git", "setup-command-aliases", "handoff", "handoff-grilling", "mid-prompt-skills", "decisions", "report-gotchas", "subagents", "next-decision",
             "setup-text-replacements", "todo-hitl", "writing-for-agents", "stop-overthinking", "zoom-out",

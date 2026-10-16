@@ -114,6 +114,20 @@ Successful and nonzero CLI results carry `{ output, exitCode }` in structured co
 nonzero exits are tool errors preserving stdout, including HTTP error pages. It has no
 session-state or Python bridge dependency. See the [acceptance journey](../tests/e2e/README.md#pi-web-toolkit).
 
+`calm` additionally ships a Pi-only presentation extension in
+`harness/productivity/calm/`. Its `/calm` command persists an agent-directory preference
+without inference. It hides native tool rows and collapsed thinking labels while retaining
+Pi's normal running indicator. Version 1.2.0 shows the latest requested/executing tool's name
+and command/path in a transient chat block. Version 1.6.0 keeps each displayed call visible
+through execution and for three seconds after its completion, coalesces rapid updates to the latest
+call, and defers request/settlement clearing until that hold elapses. Native tool completion events
+replace the spinner with a green success or red failure dot. Timers never delay tool execution and are cancelled on session
+replacement, reload and shutdown. The local fork preserves the upstream MIT license and carries
+Pi 1.2.0 renderer-copy compatibility plus native PowerShell coverage. Extension and SDK tool
+overrides retain their own display. The real RPC journey verifies command effects, native
+tool execution and exact request counts; component checks verify row hiding, restoration,
+reasoning expansion, image preservation and reload against the installed Pi SDK.
+
 `background-shell` additionally ships a Pi-only native extension in
 `harness/productivity/background-shell/`. It overrides `bash` and Windows `powershell` with
 an explicit `run_in_background` parameter, reuses Pi's native shell resolution and execution,

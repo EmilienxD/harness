@@ -5,6 +5,8 @@
   "scripts": {
     "test:pi-mid-prompt-skills": "esbuild test/pi-mid-prompt-skills.test.ts --bundle --platform=node --format=cjs --target=node22 --outfile=dist/test/pi-mid-prompt-skills.test.js && node --test dist/test/pi-mid-prompt-skills.test.js",
     "e2e:pi-mid-prompt-skills": "esbuild tools/pi-mid-prompt-skills/cli.ts --bundle --platform=node --format=cjs --target=node22 --outfile=dist/tools/pi-mid-prompt-skills/cli.js && node dist/tools/pi-mid-prompt-skills/cli.js",
+    "test:pi-calm": "esbuild test/pi-calm.test.ts --bundle --platform=node --format=cjs --target=node22 --outfile=dist/test/pi-calm.test.js && node --test dist/test/pi-calm.test.js",
+    "e2e:pi-calm": "esbuild tools/pi-calm/cli.ts --bundle --platform=node --format=cjs --target=node22 --outfile=dist/tools/pi-calm/cli.js && node dist/tools/pi-calm/cli.js",
     "test:pi-background-shell": "esbuild test/pi-background-shell.test.ts --bundle --platform=node --format=cjs --target=node22 --outfile=dist/test/pi-background-shell.test.js && node --test dist/test/pi-background-shell.test.js",
     "e2e:pi-background-shell": "esbuild tools/pi-background-shell/cli.ts --bundle --platform=node --format=cjs --target=node22 --outfile=dist/tools/pi-background-shell/cli.js && node dist/tools/pi-background-shell/cli.js",
     "e2e:flush-out-useless-tests:build": "esbuild tools/flush-out-useless-tests/cli.ts --bundle --platform=node --format=cjs --target=node22 --outfile=dist/tools/flush-out-useless-tests/cli.js",

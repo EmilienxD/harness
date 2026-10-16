@@ -31,6 +31,7 @@ npm run test:pi-desktop-notification
 npm run test:pi-report-gotchas
 npm run test:pi-web-toolkit
 npm run test:pi-background-shell
+npm run test:pi-calm
 npm run test:pi-mid-prompt-skills
 npm run e2e:flush-out-useless-tests
 ```
@@ -94,6 +95,23 @@ exact inference counts, repeat/dry-run installation and receipt-driven removal. 
 run verifies later invocations are no longer expanded after uninstall. This certifies loading,
 not unscripted model compliance or sequencing. `e2e:pi-mid-prompt-skills` runs the same journeys
 and prints structural summaries only.
+
+## Pi Calm
+
+`npm run test:pi-calm` installs the actual `calm` package at project and user scope.
+The real Pi RPC journey checks zero-inference `/calm` preference changes, restart persistence,
+native write/read effects, exact inference counts and receipt-driven removal.
+An isolated child loads the installed payload through Pi's real extension loader and checks
+all eight native tool rows through Pi 1.2's renderer merge. It verifies streaming/completed
+row hiding, exact restoration, reasoning expansion, images, custom/SDK override preservation,
+reload and listener disposal. UI calls that replace the native working display fail the check.
+The actual tool-row component renders the latest summary as a transient chat block;
+checks cover streaming arguments, three-second holds after tool completion using a controlled monotonic clock,
+green/red completion dots, long-running calls, coalescing, request/settlement clearing, timer disposal, nested calls, narrow terminals and toggling
+during a run. Changing the working message fails.
+These component checks cover rendering; the RPC journey alone cannot certify terminal display.
+The same checks run with a preinstalled legacy renderer to catch live-upgrade regressions;
+reload must replace drawing code and preserve a single prototype wrapper.
 
 ## Pi background shell
 
