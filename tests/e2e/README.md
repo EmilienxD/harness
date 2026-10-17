@@ -104,6 +104,17 @@ inference requests and no unexpected requests. Dry-run, repeat install, cross-pr
 sharing, and final receipt-driven npm removal are checked. This certifies integration and
 browser effects, not unscripted agent judgment or arbitrary external websites.
 
+## Pi slash command guard
+
+`npm run test:pi-slash-command-guard` installs the actual `slash-command-guard` package
+at project and user scope against Pi 1.2.0. RPC checks unknown commands produce error
+notifications without user messages or inference, including after reload. Native extension
+dispatch and `/clear` remain zero-inference; resolved skills, prompt templates (including
+tab-separated arguments), and normal text with later slashes still reach the fake endpoint.
+JSON mode also rejects unknown input before an agent run. Dry-run, repeat install and
+receipt-driven removal are checked; after removal unknown slash text reaches inference again.
+Each scope makes exactly five expected requests and zero unexpected requests.
+
 ## Pi mid-prompt skills
 
 `npm run test:pi-mid-prompt-skills` installs the actual `mid-prompt-skills` catalogue package

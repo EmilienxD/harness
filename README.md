@@ -271,6 +271,7 @@ Hooks do not need a skill invocation. Select them in the catalogue and restart t
 | Package | Platforms | What it does |
 | --- | --- | --- |
 | `command-guard` | Claude Code, ChatGPT, Pi | Denies shell commands matching an editable dangerous-command policy. It is a guardrail, not a security sandbox. Pi evaluates native `bash`/`powershell` calls against the same policy. |
+| `slash-command-guard` | Pi | Rejects unknown leading slash commands without sending them to the model. |
 | `no-new-documents` | Claude Code, ChatGPT, Pi | Stops agents from creating files in configured documentation directories and has them write a draft for your approval instead. Edits to existing files are allowed. |
 | `on-read-reminder` | Claude Code, Pi | Reminds the agent to read required guidance when it reads paths matching configured patterns. |
 | `on-edit-reminder` | Claude Code, Pi | Lets a matching edit land, then requires the relevant guidance to be read and violations corrected. |
@@ -448,6 +449,21 @@ uv run harness install copy-all --platform pi --scope user
 
 Restart Pi or run `/reload`, then use `/copy-all`.
 No npm installation or build is needed to load it in Pi.
+
+## Slash command guard
+
+`slash-command-guard` reserves a leading `/` for Pi commands. An unknown command such as
+`/typo hello` shows `Command /typo not found.` without adding a user message or making a
+model request. Native commands, extension commands (including `/clear`), resolved
+`/skill:name` invocations, and prompt templates keep their normal behavior. Skills and
+prompt templates can still invoke the model as usual. Slashes later in a normal message
+are unaffected; prefix a slash-leading path with ordinary text when you want to discuss it.
+
+```powershell
+uv run harness install slash-command-guard --platform pi --scope user
+```
+
+Restart Pi or run `/reload` to activate it.
 
 ## Clear alias
 

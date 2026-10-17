@@ -1,0 +1,16 @@
+import { join } from "node:path";
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+
+export default function (pi: ExtensionAPI) {
+  pi.on("resources_discover", (_event, ctx) => ({
+    promptPaths: [join(ctx.cwd, "guard-template.md")],
+  }));
+  pi.registerCommand("guard-probe", {
+    description: "Record successful native extension command dispatch",
+    handler: async () => { pi.appendEntry("guard-probe", { dispatched: true }); },
+  });
+  pi.registerCommand("guard-reload", {
+    description: "Reload the fixture's Pi resources",
+    handler: async (_args, ctx) => { await ctx.reload(); },
+  });
+}

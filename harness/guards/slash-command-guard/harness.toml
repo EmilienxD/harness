@@ -1,0 +1,21 @@
+name = "slash-command-guard"
+version = "1.0.0"
+description = "Reject unknown leading slash commands in Pi before they reach the model"
+docs = "https://github.com/EmilienxD/harness/blob/main/README.md#slash-command-guard"
+
+[platforms.claude]
+status = "unsupported"
+reason = "Uses Pi's native input and command discovery APIs."
+
+[platforms.chatgpt]
+status = "unsupported"
+reason = "Uses Pi's native input and command discovery APIs."
+
+[platforms.pi]
+status = "supported"
+
+[[files]]
+src = "pi/extension.ts"
+dest = "harness-slash-command-guard/index.ts"
+root = "extensions"
+platforms = ["pi"]

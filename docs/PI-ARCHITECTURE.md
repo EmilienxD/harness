@@ -166,6 +166,14 @@ endpoint verify resource precedence, configured and explicit-only skills, exact 
 reference reads/writes, image preservation, failure handling, and receipt-driven removal.
 See `tests/e2e/tools/pi-mid-prompt-skills/`.
 
+`slash-command-guard` additionally ships a Pi-only input extension in 1.0.0, outside the
+original backlog. Native UI and extension commands dispatch before its input handler;
+resolved skills and prompt templates pass through to native expansion. Other slash-leading
+input is handled with a command-not-found notification before inference or message insertion.
+Real Pi 1.2.0 project/user RPC journeys verify zero-inference denial, command dispatch,
+`/clear`, reload, resource expansion, and receipt-driven removal; JSON checks verify no agent
+run for rejected input. See `tests/e2e/tools/pi-slash-command-guard/`.
+
 `redirect-subagents`, `prefer-read-tool`, and `prefer-edit-tool` are Claude-only tools.
 `agent-launcher` is not required for Pi and is excluded from planned Pi ports.
 

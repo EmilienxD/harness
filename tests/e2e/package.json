@@ -3,6 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
+    "test:pi-slash-command-guard": "esbuild test/pi-slash-command-guard.test.ts --bundle --platform=node --format=cjs --target=node22 --outfile=dist/test/pi-slash-command-guard.test.js && node --test dist/test/pi-slash-command-guard.test.js",
     "test:pi-tool-inspector": "esbuild test/pi-tool-inspector.test.ts --bundle --platform=node --format=cjs --target=node22 --outfile=dist/test/pi-tool-inspector.test.js && node --test dist/test/pi-tool-inspector.test.js",
     "test:chrome-devtools": "esbuild test/chrome-devtools.test.ts --bundle --platform=node --format=cjs --target=node22 --outfile=dist/test/chrome-devtools.test.js && node --test dist/test/chrome-devtools.test.js",
     "test:pi-mid-prompt-skills": "esbuild test/pi-mid-prompt-skills.test.ts --bundle --platform=node --format=cjs --target=node22 --outfile=dist/test/pi-mid-prompt-skills.test.js && node --test dist/test/pi-mid-prompt-skills.test.js",
