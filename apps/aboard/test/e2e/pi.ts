@@ -117,9 +117,11 @@ export async function runPiSmoke(): Promise<void> {
     const consumer = join(catalogueRoot, "harness", "fixture", "consumer");
     await mkdir(consumer, { recursive: true });
     await cp(resolve("../../harness/vscode/auto"), join(catalogueRoot, "harness", "vscode", "auto"), { recursive: true });
-    await writeFile(join(consumer, "harness.toml"), 'name = "pi-auto-consumer"\nversion = "1.0.0"\ndescription = "Fixture consumer of internal auto"\ndependencies = ["auto>=1.3.0"]\n[platforms.pi]\nstatus = "supported"\n[[files]]\nsrc = "fixture.txt"\ndest = "fixture.txt"\nroot = "hooks"\n');
+    await writeFile(join(consumer, "harness.toml"), 'name = "pi-auto-consumer"\nversion = "1.0.0"\ndescription = "Fixture consumer of internal auto"\ndependencies = ["auto>=1.3.0"]\n[platforms.pi]\nstatus = "supported"\n[[files]]\nsrc = "fixture.txt"\ndest = "fixture.txt"\nroot = "support"\n');
     await writeFile(join(consumer, "fixture.txt"), "fixture\n");
     await runFixtureInstaller(fixture.workspace, "install", ["pi-auto-consumer"], { catalogueRoot });
+    await assert.rejects(access(join(fixture.workspace.projectRoot, ".pi", "hooks")));
+    await assert.rejects(access(join(fixture.workspace.agentDir, "hooks")));
     const auto = platform.planLaunch({ ...common, agentId: "agent-auto" as AgentId, sessionId: randomUUID() as SessionId, agentType: "general", executionMode: "auto", configuration: configurations.delegationConfigurationFor("pi", "general").settings, prompt: "/auto --dry" });
     await execute(auto);
     assert.equal(fixture.assertions().inferenceRequests, beforeAuto);

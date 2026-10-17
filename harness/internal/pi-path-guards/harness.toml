@@ -1,5 +1,5 @@
 name = "pi-path-guards"
-version = "1.0.0"
+version = "1.0.1"
 description = "Internal Pi path-guard event handling and branch-local receipts"
 selectable = false
 dependencies = [{ name = "pi-transport", version = ">=1.0.0,<2.0.0", lifecycle = "coupled", platforms = ["pi"] }]
@@ -18,11 +18,11 @@ status = "supported"
 [[files]]
 src = "path_guards.ts"
 dest = "pi-path-guards/path_guards.ts"
-root = "hooks"
+root = "support"
 platforms = ["pi"]
 
 [[files]]
 src = "path_guards.py"
 dest = "pi-path-guards/path_guards.py"
-root = "hooks"
+root = "support"
 platforms = ["pi"]

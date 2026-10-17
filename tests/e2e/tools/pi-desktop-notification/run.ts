@@ -125,7 +125,7 @@ export async function runPiNotificationJourney(scope: "project" | "user") {
     assert.equal((await fixture.runJson({ prompt: marker, sessionFile: saved.path })).status, "success");
     assert.equal((await captures(backend.capture)).length, 6);
     assert.equal(fixture.assertions().inferenceRequests, 13);
-    const helper = join(platform, "hooks", "desktop_notification_pi.py");
+    const helper = join(platform, "harness", "desktop_notification_pi.py");
     await rename(helper, helper + ".off");
     const unavailable = await fixture.runJson({ prompt: "/enable-desktop-notification", sessionFile: saved.path });
     assert.deepEqual(unavailable.assistantStopReasons, []);
@@ -136,7 +136,7 @@ export async function runPiNotificationJourney(scope: "project" | "user") {
     assert.equal(fixture.assertions().unexpectedRequests, 0);
     await runFixtureInstaller(fixture.workspace, "uninstall", ["enable-desktop-notification"], { scope });
     await assert.rejects(access(join(platform, "extensions", "harness-enable-desktop-notification", "index.ts")));
-    await assert.rejects(access(join(platform, "hooks", "pi-transport", "transport.ts")));
+    await assert.rejects(access(join(platform, "harness", "pi-transport", "transport.ts")));
     return { version: fixture.version, scope, inferenceRequests: fixture.assertions().inferenceRequests, notifications: 6 };
   } finally { await fixture.close(); }
 }

@@ -1,5 +1,5 @@
 name = "on-edit-reminder"
-version = "2.2.1"
+version = "2.2.2"
 description = "PostToolUse hook that lets edits to files matching gitignore-style patterns land, then makes the agent read the required files and fix what doesn't follow them"
 docs = "https://github.com/EmilienxD/harness/blob/main/README.md#hooks"
 
@@ -16,7 +16,14 @@ fragment = "claude/settings.fragment.json"
 src = "on_edit_reminder_hook.py"
 dest = "on_edit_reminder_hook.py"
 root = "hooks"
-platforms = ["claude", "pi"]
+platforms = ["claude"]
+executable = true
+
+[[files]]
+src = "on_edit_reminder_hook.py"
+dest = "on_edit_reminder_hook.py"
+root = "support"
+platforms = ["pi"]
 executable = true
 
 # Provider-neutral starter policy shared by every installed provider.
@@ -44,7 +51,7 @@ starter = true
 [[files]]
 src = "on-edit-reminder.toml"
 dest = "on-edit-reminder.toml"
-root = "hooks"
+root = "support"
 platforms = ["pi"]
 scopes = ["user"]
 starter = true

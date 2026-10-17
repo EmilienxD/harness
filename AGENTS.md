@@ -63,8 +63,8 @@ Omit empty overlays. Keep manifests and product-neutral documentation at the too
 stores its ChatGPT metadata in `chatgpt/openai.yaml`, with `chatgpt/` beside its associated `SKILL.md`.
 For multi-skill packages, this is `<skill>/chatgpt/openai.yaml`. Manifests map shared skill files and
 metadata explicitly to installed `skills/` destinations, keeping source overlays out of installed
-skill directories. Hook payloads map to `hooks/`. Preserve real internal project trees such as
-`runtime/src/`; never mirror installation roots inside overlays or restore a `targets/` override directory.
+skill directories. Claude/ChatGPT hook payloads map to `hooks`; Pi helpers map to `support`.
+Preserve real internal project trees such as `runtime/src/`; never mirror installation roots inside overlays or restore a `targets/` override directory.
 
 ## Pi Provider Work
 
@@ -75,7 +75,8 @@ outside that scope and `docs/PI-REFERENCES/README.md` to reach the relevant offi
 - Keep proposed support distinct from shipped support in documentation and catalogue declarations.
   Add Pi mappings and bump package versions when the corresponding payload/support ships.
 - Reuse shared skills and Python cores. Put native Pi translation in shallow `pi/` overlays and
-  map executable entry points to `extensions`; Python helpers remain under `hooks`.
+  map executable entry points to `extensions` and Python/TypeScript helpers to `support`
+  (`.pi/harness/` for projects, `<PI_CODING_AGENT_DIR>/harness/` for users).
 - Handle providers explicitly; replace binary Claude/ChatGPT fallbacks when extending a boundary.
 - Reconstruct Pi state from active session ancestry and observed tool outcomes, including nested
   calls. Required guard loading and tool coverage need evidence before a restricted launch.

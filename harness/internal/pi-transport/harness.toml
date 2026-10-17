@@ -1,5 +1,5 @@
 name = "pi-transport"
-version = "1.1.0"
+version = "1.1.1"
 description = "Internal Pi Python subprocess transport"
 selectable = false
 
@@ -17,5 +17,5 @@ status = "supported"
 [[files]]
 src = "transport.ts"
 dest = "pi-transport/transport.ts"
-root = "hooks"
+root = "support"
 platforms = ["pi"]

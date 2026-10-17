@@ -29,7 +29,7 @@ The hook verifies that a required file was read, not that the agent understood o
 For Pi, install with `harness install on-edit-block --platform pi` and run `/reload` or restart Pi.
 Approve the project's resources when Pi requests trust. Project rules use the same
 `.harness/guards/on-edit-block.toml`. User installations keep an editable starter in
-`<Pi agent directory>/hooks/on-edit-block.toml`; shared `~/.harness/guards/` rules and
+`<Pi agent directory>/harness/on-edit-block.toml`; shared `~/.harness/guards/` rules and
 project rules load afterward. Pi requires uv or Python 3.11+ on `PATH`.
 
 Pi blocks native `write`/`edit` until complete guidance was successfully read or fully included in a denial on the active branch. Large guidance stays blocked until read; partial or failed reads cannot authorize edits. Native read ranges accumulate only for the same file contents. Simple complete shell reads can also satisfy guidance when their successful output contains the complete file. Reload and resume recover branch receipts; abandoned branches grant no access. Shell writes and unrelated custom tools need their own controls; nested native calls are covered.

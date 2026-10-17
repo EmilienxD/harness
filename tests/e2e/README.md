@@ -55,6 +55,13 @@ each skill, reads bundled references and the websearch source index with real to
 and receipt-driven removal. Scripted fixture actions certify resource integration;
 they do not evaluate unscripted workflow judgment or external services.
 
+Pi extension entry points install under `extensions/`; their Python helpers, TypeScript support,
+and user policy starters install under `harness/`, outside extension discovery. Command-guard
+journeys check fresh project and user installations create no `hooks/` directory. They also run
+the installed Pi startup warning detector in an isolated subprocess and require zero warnings.
+JSON/RPC suppress interactive deprecation warnings, so silence alone is not evidence. A positive
+control checks the detector recognizes legacy directories at both scopes.
+
 Each fixture creates its own external temporary directory:
 
 ```text

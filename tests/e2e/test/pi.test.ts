@@ -4,8 +4,22 @@ import { join } from "node:path";
 import test from "node:test";
 
 import { createPiFixture } from "../core/pi-fixture.js";
+import { piLegacyDirectoryWarningCount } from "../core/pi-startup.js";
 import { createPiToolScenario } from "../core/pi-scenario.js";
 import { piSmokeScenario, runPiSmokeJourney, stagePiProbe } from "../tools/pi-smoke/run.js";
+
+test("installed Pi startup detects project and user legacy hooks directories", { timeout: 90_000 }, async () => {
+  const fixture = await createPiFixture(piSmokeScenario);
+  try {
+    assert.equal(await piLegacyDirectoryWarningCount(fixture.workspace), 0);
+    await mkdir(join(fixture.workspace.projectRoot, ".pi", "hooks"));
+    assert.equal(await piLegacyDirectoryWarningCount(fixture.workspace), 1);
+    await mkdir(join(fixture.workspace.agentDir, "hooks"));
+    assert.equal(await piLegacyDirectoryWarningCount(fixture.workspace), 2);
+    assert.equal(fixture.assertions().inferenceRequests, 0);
+    assert.equal(fixture.assertions().unexpectedRequests, 0);
+  } finally { await fixture.close(); }
+});
 
 for (const mode of ["json", "rpc"] as const) {
   test(`real Pi ${mode} executes native read/write/edit and honors a project extension denial`, { timeout: 90_000 }, async () => {

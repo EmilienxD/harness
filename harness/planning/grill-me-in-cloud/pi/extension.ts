@@ -1,10 +1,10 @@
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { existsSync } from "node:fs";
-import { requestPython } from "../../hooks/pi-transport/transport.ts";
-import { GrillRelay, RECEIPT } from "../../hooks/grill-cloud/relay.ts";
+import { requestPython } from "../../harness/pi-transport/transport.ts";
+import { GrillRelay, RECEIPT } from "../../harness/grill-cloud/relay.ts";
 
-const hooks = join(dirname(fileURLToPath(import.meta.url)), "../../hooks");
+const support = join(dirname(fileURLToPath(import.meta.url)), "../../harness");
 
 export default function (pi: any) {
   let controller = new AbortController();
@@ -19,7 +19,7 @@ export default function (pi: any) {
       sessionId: ctx.sessionManager.getSessionId(), title: pi.getSessionName() ?? "",
       sessionFile: ctx.sessionManager.getSessionFile(), anchor: ctx.sessionManager.getLeafId(),
       branchIds: ctx.sessionManager.getBranch().map((entry: any) => entry.id),
-    }, signal, join(hooks, "grill_cloud_pi.py"), 120_000);
+    }, signal, join(support, "grill_cloud_pi.py"), 120_000);
     if (signal.aborted) throw new Error("Pi grill cancelled");
     if (typeof result.ok !== "boolean" || typeof result.message !== "string") throw new Error("Pi grill protocol mismatch");
     if (typeof result.source === "string") source = result.source;

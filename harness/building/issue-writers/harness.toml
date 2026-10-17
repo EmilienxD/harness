@@ -1,5 +1,5 @@
 name = "issue-writers"
-version = "2.3.1"
+version = "2.3.2"
 description = "Draft and publish GitHub issues"
 requires = ["git", "gh"]
 docs = "https://github.com/EmilienxD/harness/blob/main/README.md#user-invoked-skills"
@@ -21,12 +21,28 @@ fragment = "chatgpt/hooks.fragment.json"
 src = "issues_core.py"
 dest = "issues_core.py"
 root = "hooks"
+platforms = ["claude", "chatgpt"]
+executable = true
+
+[[files]]
+src = "issues_core.py"
+dest = "issues_core.py"
+root = "support"
+platforms = ["pi"]
 executable = true
 
 [[files]]
 src = "issue_writers_hook.py"
 dest = "issue_writers_hook.py"
 root = "hooks"
+platforms = ["claude", "chatgpt"]
+executable = true
+
+[[files]]
+src = "issue_writers_hook.py"
+dest = "issue_writers_hook.py"
+root = "support"
+platforms = ["pi"]
 executable = true
 
 [[files]]
@@ -83,7 +99,6 @@ dest = "to-spec-draft-issue/agents/openai.yaml"
 root = "skills"
 platforms = ["chatgpt"]
 
-
 [[files]]
 src = "pi/extension.ts"
 dest = "harness-issue-writers/index.ts"
@@ -93,5 +108,5 @@ platforms = ["pi"]
 [[files]]
 src = "issue_writers_pi.py"
 dest = "issue_writers_pi.py"
-root = "hooks"
+root = "support"
 platforms = ["pi"]

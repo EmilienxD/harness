@@ -1,5 +1,5 @@
 name = "auto"
-version = "1.3.0"
+version = "1.3.1"
 description = "Routes /auto and /auto --dry to an active Aboard session"
 selectable = false
 
@@ -24,6 +24,14 @@ platforms = ["pi"]
 src = "auto_hook.py"
 dest = "auto_hook.py"
 root = "hooks"
+platforms = ["claude", "chatgpt"]
+executable = true
+
+[[files]]
+src = "auto_hook.py"
+dest = "auto_hook.py"
+root = "support"
+platforms = ["pi"]
 executable = true
 
 [[files]]

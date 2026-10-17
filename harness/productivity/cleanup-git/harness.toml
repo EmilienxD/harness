@@ -1,5 +1,5 @@
 name = "cleanup-git"
-version = "1.2.1"
+version = "1.2.2"
 description = "Explain every local branch and worktree before confirming cleanup"
 requires = ["git"]
 dependencies = [{ name = "pi-transport", version = ">=1.0.0,<2.0.0", lifecycle = "coupled", platforms = ["pi"] }]
@@ -24,12 +24,28 @@ root = "skills"
 src = "cleanup_git_hook.py"
 dest = "cleanup_git_hook.py"
 root = "hooks"
+platforms = ["claude", "chatgpt"]
+executable = true
+
+[[files]]
+src = "cleanup_git_hook.py"
+dest = "cleanup_git_hook.py"
+root = "support"
+platforms = ["pi"]
 executable = true
 
 [[files]]
 src = "cleanup_git.py"
 dest = "cleanup_git.py"
 root = "hooks"
+platforms = ["claude", "chatgpt"]
+executable = true
+
+[[files]]
+src = "cleanup_git.py"
+dest = "cleanup_git.py"
+root = "support"
+platforms = ["pi"]
 executable = true
 
 [[files]]
@@ -53,5 +69,5 @@ platforms = ["pi"]
 [[files]]
 src = "cleanup_git_pi.py"
 dest = "cleanup_git_pi.py"
-root = "hooks"
+root = "support"
 platforms = ["pi"]

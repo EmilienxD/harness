@@ -3,11 +3,11 @@ import { access, mkdir, open, readFile, stat, writeFile } from "node:fs/promises
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createEditToolDefinition, createWriteToolDefinition } from "@earendil-works/pi-coding-agent";
-import { requestPython } from "../../hooks/pi-transport/transport.ts";
+import { requestPython } from "../../harness/pi-transport/transport.ts";
 
 const RECEIPT = "harness-prefer-fewer-comments-v1";
 const MAX_BYTES = 512 * 1024;
-const helper = join(dirname(dirname(dirname(fileURLToPath(import.meta.url)))), "hooks", "prefer_fewer_comments_pi.py");
+const helper = join(dirname(dirname(dirname(fileURLToPath(import.meta.url)))), "harness", "prefer_fewer_comments_pi.py");
 const diagnostic = "Harness could not check the comment budget; the write succeeded. Check the Python runtime or snapshot size/readability.";
 
 async function snapshot(path: string): Promise<string | undefined> {

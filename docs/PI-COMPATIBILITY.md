@@ -87,6 +87,8 @@ Prefer provider-owned `.pi/skills` installation initially. It avoids making Pi o
 
 Pi auto-loads TypeScript/JavaScript extension entry points, supports multi-file `index.ts` directories, and uses `jiti` for local TypeScript. Native extension commands can complete without calling a model. A Pi adapter can be substantially cleaner than synthesizing a denied prompt merely to execute `/commit`.
 
+Harness installs Pi entry points under `.pi/extensions/` (user scope: `<PI_CODING_AGENT_DIR>/extensions/`) and helper modules under `.pi/harness/` (user scope: `<PI_CODING_AGENT_DIR>/harness/`, default `~/.pi/agent/harness/`). Manifests use the logical `support` destination for Python/TypeScript helpers and user policy starters, keeping them outside extension discovery.
+
 Relevant API mappings:
 
 | Current Harness operation | Pi equivalent | Important distinction |
@@ -243,7 +245,7 @@ Suggested native roots:
 | platform | `.pi` | `~/.pi/agent` |
 | skills | `.pi/skills` | `~/.pi/agent/skills` |
 | Pi extension entry points | `.pi/extensions` | `~/.pi/agent/extensions` |
-| Python helpers, not auto-loaded extensions | `.pi/hooks` or an extension-local support directory | `~/.pi/agent/hooks` or an extension-local support directory |
+| `support` (Python/TypeScript helpers and user policy starters) | `.pi/harness` | `<PI_CODING_AGENT_DIR>/harness` (default `~/.pi/agent/harness`) |
 | shared configuration | `.harness` | `~/.harness` / existing Harness state override |
 
 Use shallow source `pi/` overlays for extension entry points/settings fragments, retaining shared Python cores and skills at package roots. Do not create `targets/`, mirror installed trees into overlays, or copy runtime source trees out of their real packages. Add an explicit extension destination capability or deliberately map extension payloads through the platform root; a generic `/hooks` mapping is not Pi extension discovery.

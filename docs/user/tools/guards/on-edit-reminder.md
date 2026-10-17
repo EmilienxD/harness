@@ -29,7 +29,7 @@ This is feedback to the agent, not an automatic rollback. The initial edit remai
 For Pi, install with `harness install on-edit-reminder --platform pi` and run `/reload` or restart Pi.
 Approve the project's resources when Pi requests trust. Project rules use the same
 `.harness/guards/on-edit-reminder.toml`. User installations keep an editable starter in
-`<Pi agent directory>/hooks/on-edit-reminder.toml`; shared `~/.harness/guards/` rules and
+`<Pi agent directory>/harness/on-edit-reminder.toml`; shared `~/.harness/guards/` rules and
 project rules load afterward. Pi requires uv or Python 3.11+ on `PATH`.
 
 Pi reminds after successful native `write`/`edit`, with a 120-second cooldown per guidance file. A complete successful guidance read on the active branch suppresses further reminders. Failed edits produce no reminder.

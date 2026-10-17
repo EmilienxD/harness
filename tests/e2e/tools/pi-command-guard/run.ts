@@ -4,6 +4,7 @@ import { access, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { runFixtureInstaller } from "../../core/installer.js";
 import { createPiFixture } from "../../core/pi-fixture.js";
+import { piLegacyDirectoryWarningCount } from "../../core/pi-startup.js";
 import { createPiToolScenario, type PiScenarioStep } from "../../core/pi-scenario.js";
 
 const POLICY = 'version = 1\n[[rules]]\nreason = "end-to-end forbidden command"\npatterns = ["forbidden-marker"]\n';
@@ -44,14 +45,18 @@ export async function runPiCommandGuardJourney(mode: "json" | "rpc", scope: "pro
     const project = fixture.workspace.projectRoot;
     await enableShell(project, shell);
     await runFixtureInstaller(fixture.workspace, "install", ["command-guard"], { scope, dryRun: true });
-    assert.equal(existsSync(join(project, ".pi", "hooks", "pi-transport")), false);
+    assert.equal(existsSync(join(project, ".pi", "harness", "pi-transport")), false);
     await runFixtureInstaller(fixture.workspace, "install", ["command-guard"], { scope });
     // Reinstall must preserve the policy below and stay idempotent.
     await runFixtureInstaller(fixture.workspace, "install", ["command-guard"], { scope });
     const platformRoot = scope === "project" ? join(project, ".pi") : fixture.workspace.agentDir;
+    assert.equal(existsSync(join(project, ".pi", "hooks")), false);
+    assert.equal(existsSync(join(fixture.workspace.agentDir, "hooks")), false);
+    await access(join(platformRoot, "harness", "pi-transport", "transport.ts"));
+    assert.equal(await piLegacyDirectoryWarningCount(fixture.workspace), 0);
     const policy = scope === "project"
       ? join(project, ".harness", "guards", "command-guard.toml")
-      : join(platformRoot, "hooks", "command-guard.toml");
+      : join(platformRoot, "harness", "command-guard.toml");
     await writeFile(policy, POLICY);
 
     const run = mode === "json" ? await fixture.runJson({ prompt: marker }) : await fixture.rpc().prompt(marker);
@@ -64,8 +69,8 @@ export async function runPiCommandGuardJourney(mode: "json" | "rpc", scope: "pro
 
     await runFixtureInstaller(fixture.workspace, "uninstall", ["command-guard"], { scope });
     await assert.rejects(access(join(platformRoot, "extensions", "harness-command-guard", "index.ts")));
-    await assert.rejects(access(join(platformRoot, "hooks", "command_guard_pi.py")));
-    await assert.rejects(access(join(platformRoot, "hooks", "pi-transport", "transport.ts")));
+    await assert.rejects(access(join(platformRoot, "harness", "command_guard_pi.py")));
+    await assert.rejects(access(join(platformRoot, "harness", "pi-transport", "transport.ts")));
     assert.equal(await readFile(policy, "utf8"), POLICY);
     return { version: fixture.version, mode, scope, status: run.status, inferenceRequests: steps.length + 1 };
   } finally {

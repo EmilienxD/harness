@@ -1,8 +1,8 @@
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { requestPython } from "../../hooks/pi-transport/transport.ts";
+import { requestPython } from "../../harness/pi-transport/transport.ts";
 
-const helper = join(dirname(dirname(dirname(fileURLToPath(import.meta.url)))), "hooks", "command_guard_pi.py");
+const helper = join(dirname(dirname(dirname(fileURLToPath(import.meta.url)))), "harness", "command_guard_pi.py");
 
 // Native event translation only; the shared Python core owns policy parsing and matching.
 export default function (pi: any) {

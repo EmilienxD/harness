@@ -14,7 +14,7 @@ export async function runPiDocumentsJourney(mode: "json" | "rpc", scope: "projec
   try {
     const project = fixture.workspace.projectRoot;
     const platformRoot = scope === "project" ? join(project, ".pi") : fixture.workspace.agentDir;
-    const policy = scope === "project" ? join(project, ".harness/guards/no-new-documents.toml") : join(platformRoot, "hooks/no-new-documents.toml");
+    const policy = scope === "project" ? join(project, ".harness/guards/no-new-documents.toml") : join(platformRoot, "harness/no-new-documents.toml");
     const draft = (path: string) => join(project, ".harness/doc-drafts", path);
     const shell = process.platform === "win32" ? "powershell" : "bash";
     await writeFile(join(project, ".pi/settings.json"), JSON.stringify({ defaultProvider: "harness-e2e", defaultModel: "pi-e2e", defaultTools: ["read", "write", "edit", shell] }));
@@ -88,10 +88,10 @@ export async function runPiDocumentsJourney(mode: "json" | "rpc", scope: "projec
     await runFixtureInstaller(fixture.workspace, "uninstall", ["no-new-documents"], { scope });
     await assert.rejects(access(join(platformRoot, "extensions/harness-no-new-documents/index.ts")));
     if (composition) {
-      await access(join(platformRoot, "hooks/pi-transport/transport.ts"));
+      await access(join(platformRoot, "harness/pi-transport/transport.ts"));
       await runFixtureInstaller(fixture.workspace, "uninstall", ["cleanup-git"], { scope });
     }
-    await assert.rejects(access(join(platformRoot, "hooks/pi-transport/transport.ts")));
+    await assert.rejects(access(join(platformRoot, "harness/pi-transport/transport.ts")));
     assert.equal(await readFile(policy, "utf8"), customPolicy);
     return { version: fixture.version, mode, scope, inferenceRequests: fixture.assertions().inferenceRequests };
   } finally { await fixture.close(); }
@@ -174,7 +174,7 @@ export async function runPiDocumentsSafetyJourney() {
     assert.equal(outcomeCount, 2);
     assert.equal(fixture.assertions().inferenceRequests, 3);
     // Missing installed transport must deny native calls and consume commands without inference.
-    await unlink(join(project, ".pi/hooks/no_new_documents_pi.py"));
+    await unlink(join(project, ".pi/harness/no_new_documents_pi.py"));
     const unavailable = await fixture.runJson({ prompt: marker });
     assert.equal(unavailable.status, "success");
     assert.deepEqual(unavailable.toolExecutions.map((tool) => tool.isError), [true, true]);

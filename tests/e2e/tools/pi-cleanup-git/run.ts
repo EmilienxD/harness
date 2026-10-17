@@ -140,7 +140,7 @@ else process.exitCode = 2;
     assert.equal((JSON.parse(await readFile(gh.statePath, "utf8")) as { calls: unknown[] }).calls.length, calls.length + 6);
     assert.equal(await git("rev-parse", "changed-later"), changed);
     const requests = fixture.assertions().inferenceRequests;
-    await unlink(join(platform, "hooks", "cleanup_git_pi.py"));
+    await unlink(join(platform, "harness", "cleanup_git_pi.py"));
     assert.equal((await fixture.rpc().prompt(`/skill:cleanup-git ${MARKER}`)).status, "handled");
     assert.equal(fixture.assertions().inferenceRequests, requests);
     await unlink(skill);
@@ -148,7 +148,7 @@ else process.exitCode = 2;
     assert.equal(fixture.assertions().inferenceRequests, requests);
     await runFixtureInstaller(fixture.workspace, "uninstall", ["cleanup-git"], { scope });
     await assert.rejects(access(join(platform, "extensions", "harness-cleanup-git", "index.ts")));
-    await assert.rejects(access(join(platform, "hooks", "pi-transport", "transport.ts")));
+    await assert.rejects(access(join(platform, "harness", "pi-transport", "transport.ts")));
     assert.equal(fixture.assertions().unexpectedRequests, 0);
     return { scope, mode, version: fixture.version, inferenceRequests: requests, readOnlyAudit: true, changedBranchPreserved: true, removed: true };
   } finally { await fixture.close(); }

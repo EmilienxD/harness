@@ -1,5 +1,5 @@
 name = "enable-desktop-notification"
-version = "1.1.1"
+version = "1.1.2"
 description = "Enable desktop notifications for final responses in the current session without a model call"
 docs = "https://github.com/EmilienxD/harness/blob/main/README.md#user-invoked-skills"
 
@@ -29,7 +29,7 @@ platforms = ["pi"]
 [[files]]
 src = "desktop_notification_pi.py"
 dest = "desktop_notification_pi.py"
-root = "hooks"
+root = "support"
 platforms = ["pi"]
 
 [[files]]
@@ -43,6 +43,13 @@ platforms = ["claude", "chatgpt"]
 src = "desktop_notification.py"
 dest = "desktop_notification.py"
 root = "hooks"
+platforms = ["claude", "chatgpt"]
+
+[[files]]
+src = "desktop_notification.py"
+dest = "desktop_notification.py"
+root = "support"
+platforms = ["pi"]
 
 [[files]]
 src = "SKILL.md"

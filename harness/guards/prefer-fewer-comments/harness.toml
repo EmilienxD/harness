@@ -1,5 +1,5 @@
 name = "prefer-fewer-comments"
-version = "2.3.1"
+version = "2.3.2"
 description = "Advisory comment and docstring budgets over newly written commentary, with native Pi mutation snapshots"
 docs = "https://github.com/EmilienxD/harness/blob/main/README.md#hooks"
 
@@ -20,6 +20,14 @@ fragment = "chatgpt/hooks.fragment.json"
 src = "prefer_fewer_comments_hook.py"
 dest = "prefer_fewer_comments_hook.py"
 root = "hooks"
+platforms = ["claude", "chatgpt"]
+executable = true
+
+[[files]]
+src = "prefer_fewer_comments_hook.py"
+dest = "prefer_fewer_comments_hook.py"
+root = "support"
+platforms = ["pi"]
 executable = true
 
 # Budgets and exemptions. All comments as shipped, so the hook runs on its
@@ -35,7 +43,7 @@ platforms = ["claude", "chatgpt"]
 [[files]]
 src = "prefer_fewer_comments_pi.py"
 dest = "prefer_fewer_comments_pi.py"
-root = "hooks"
+root = "support"
 platforms = ["pi"]
 
 [[files]]
@@ -55,7 +63,7 @@ starter = true
 [[files]]
 src = "prefer-fewer-comments.toml"
 dest = "prefer-fewer-comments.toml"
-root = "hooks"
+root = "support"
 platforms = ["pi"]
 scopes = ["user"]
 starter = true

@@ -2,7 +2,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { requestPython } from "../pi-transport/transport.ts";
 
-const hooksRoot = dirname(dirname(fileURLToPath(import.meta.url)));
+const supportRoot = dirname(dirname(fileURLToPath(import.meta.url)));
 
 /** Prepare the actual input, before Pi expands /skill:name. No queued context to leak across branches. */
 export function registerIssueWorkflow(pi: any, packageName: string, skills: string[], publish = false): void {
@@ -15,7 +15,7 @@ export function registerIssueWorkflow(pi: any, packageName: string, skills: stri
     const result = await requestPython({
       version: 1, operation, skill, argument, cwd: ctx.cwd,
       sessionId: ctx.sessionManager.getSessionId(),
-    }, controller.signal, join(hooksRoot, `${packageName.replaceAll("-", "_")}_pi.py`), 120_000);
+    }, controller.signal, join(supportRoot, `${packageName.replaceAll("-", "_")}_pi.py`), 120_000);
     if (typeof result.ok !== "boolean" || typeof result.message !== "string") throw new Error("Pi workflow protocol mismatch");
     return result;
   };

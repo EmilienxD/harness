@@ -1,5 +1,5 @@
 name = "report-gotchas"
-version = "1.2.1"
+version = "1.2.2"
 description = "Send noteworthy agent handoff gotchas to Discord"
 docs = "https://github.com/EmilienxD/harness/blob/main/README.md#model-invoked-skills"
 requires = ["git"]
@@ -30,43 +30,43 @@ platforms = ["pi"]
 [[files]]
 src = "report_gotchas_pi.py"
 dest = "report_gotchas_pi.py"
-root = "hooks"
+root = "support"
 platforms = ["pi"]
 
 [[files]]
 src = "runtime/src/report_gotchas/__init__.py"
 dest = "report_gotchas/__init__.py"
-root = "hooks"
+root = "support"
 platforms = ["pi"]
 
 [[files]]
 src = "runtime/src/report_gotchas/cli.py"
 dest = "report_gotchas/cli.py"
-root = "hooks"
+root = "support"
 platforms = ["pi"]
 
 [[files]]
 src = "runtime/src/report_gotchas/config.py"
 dest = "report_gotchas/config.py"
-root = "hooks"
+root = "support"
 platforms = ["pi"]
 
 [[files]]
 src = "runtime/src/report_gotchas/reports.py"
 dest = "report_gotchas/reports.py"
-root = "hooks"
+root = "support"
 platforms = ["pi"]
 
 [[files]]
 src = "runtime/src/report_gotchas/discord.py"
 dest = "report_gotchas/discord.py"
-root = "hooks"
+root = "support"
 platforms = ["pi"]
 
 [[files]]
 src = "runtime/src/report_gotchas/hooks.py"
 dest = "report_gotchas/hooks.py"
-root = "hooks"
+root = "support"
 platforms = ["pi"]
 
 [[files]]

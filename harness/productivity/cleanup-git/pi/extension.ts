@@ -1,8 +1,8 @@
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { requestPython } from "../../hooks/pi-transport/transport.ts";
+import { requestPython } from "../../harness/pi-transport/transport.ts";
 
-const helper = join(dirname(dirname(dirname(fileURLToPath(import.meta.url)))), "hooks", "cleanup_git_pi.py");
+const helper = join(dirname(dirname(dirname(fileURLToPath(import.meta.url)))), "harness", "cleanup_git_pi.py");
 
 /** Inventory belongs to this exact input; no pending context survives a branch/session change. */
 export default function (pi: any): void {

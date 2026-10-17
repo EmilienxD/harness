@@ -2,10 +2,10 @@ import { homedir } from "node:os";
 import { createHash } from "node:crypto";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { requestPython } from "../../hooks/pi-transport/transport.ts";
+import { requestPython } from "../../harness/pi-transport/transport.ts";
 
 const RECEIPT = "harness-commit-v1";
-const helper = join(dirname(dirname(dirname(fileURLToPath(import.meta.url)))), "hooks", "commit_pi.py");
+const helper = join(dirname(dirname(dirname(fileURLToPath(import.meta.url)))), "harness", "commit_pi.py");
 const mutations = new Set(["write", "edit", "bash", "powershell"]);
 const shells = new Set(["bash", "powershell"]);
 

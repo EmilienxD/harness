@@ -87,8 +87,8 @@ uv run harness install on-read-reminder on-edit-reminder on-edit-block --platfor
 
 Run `/reload` in Pi, approve the project resources, and configure the corresponding
 `.harness/guards/*.toml` policies. The empty starters leave the guards inactive until rules
-are added. Extensions live in `.pi/extensions`; Python helpers live in `.pi/hooks`.
-User installs use the effective Pi agent directory, with policy starters beside the hooks.
+are added. Extensions live in `.pi/extensions`; Python helpers live in `.pi/harness`.
+User installs use the effective Pi agent directory, with policy starters beside the helpers in `harness/`.
 Pi guards require uv or Python 3.11+. They cover native reads/edits/writes, including nested
 calls, and recognized shell reads; shell mutations need separate controls.
 
@@ -293,7 +293,7 @@ third-party mutators, and filesystem access inside other extensions remain outsi
 Native writes use Pi's path expansion (`@`, `~`, file URLs, Unicode spaces and Windows shell paths).
 Protection follows both logical and resolved paths; linked draft directories are rejected.
 Project policies use `.harness/guards/no-new-documents.toml`; Pi user policies start at
-`<PI_CODING_AGENT_DIR>/hooks/no-new-documents.toml` (default `~/.pi/agent/hooks/`). Home and project
+`<PI_CODING_AGENT_DIR>/harness/no-new-documents.toml` (default `~/.pi/agent/harness/`). Home and project
 policies also apply. Command outcomes follow the active session branch; pending drafts follow the
 current filesystem. Quote paths containing spaces.
 

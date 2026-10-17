@@ -24,7 +24,7 @@ Each limit is optional. Ordered path rules can set `exempt = true` and a later, 
 
 ## Pi
 
-Install with `harness install prefer-fewer-comments --platform pi`, then run `/reload` and approve the project resources. The shipped defaults are active immediately. Project policy uses `.harness/guards/prefer-fewer-comments.toml`. A user installation puts its starter in the effective Pi agent directory at `hooks/prefer-fewer-comments.toml`; shared `~/.harness/guards/prefer-fewer-comments.toml` and project overrides take precedence. Pi requires uv or Python 3.11+.
+Install with `harness install prefer-fewer-comments --platform pi`, then run `/reload` and approve the project resources. The shipped defaults are active immediately. Project policy uses `.harness/guards/prefer-fewer-comments.toml`. A user installation puts its starter in the effective Pi agent directory at `harness/prefer-fewer-comments.toml`; shared `~/.harness/guards/prefer-fewer-comments.toml` and project overrides take precedence. Pi requires uv or Python 3.11+.
 
 The extension wraps local native `write` and `edit`, including nested calls. It captures the old contents and the exact written contents inside Pi's file mutation queue, then checks additions after successful execution. Unchanged comment bodies are excluded even when neighboring code changes. Existing line comments are excluded before new adjacent lines are grouped; a changed block comment or docstring is checked as a complete comment. The ratio counts added lines only. Native paths, edit matching, multi-edit input, BOM/line endings, diffs, renderers, and other extensions' tool guards remain intact.
 

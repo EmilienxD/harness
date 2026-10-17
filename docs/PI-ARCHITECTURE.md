@@ -192,7 +192,7 @@ independent and avoids moving workflow behavior into an application dependency.
 
 The [platform adapters](../src/harness_cli/platforms.py) now provide `Platform.PI`, `PiAdapter`,
 and centralized available/default provider sets consumed by both installer entry points.
-The logical `extensions` destination is implemented for Pi at project and user scope.
+The logical `extensions` and `support` destinations are implemented for Pi at project and user scope.
 Available platforms are separate from default targets: Pi is opt-in, and omitted
 `--platform` retains the existing Claude/ChatGPT behavior. The interactive menu offers Pi
 without adding it to an existing installation's selections automatically.
@@ -202,7 +202,7 @@ without adding it to an existing installation's selections automatically.
 | `platform` | `<project>/.pi` | `<agent-dir>` |
 | `skills` | `.pi/skills` | `<agent-dir>/skills` |
 | `extensions` | `.pi/extensions` | `<agent-dir>/extensions` |
-| `hooks` (Python/support files) | `.pi/hooks` | `<agent-dir>/hooks` |
+| `support` (Python/TypeScript helpers and user policy starters) | `.pi/harness` | `<agent-dir>/harness` |
 | `workspace` (shared policies) | `<project>/.harness/...` | Existing user Harness configuration paths |
 
 `<agent-dir>` defaults to `~/.pi/agent` and respects `PI_CODING_AGENT_DIR`, as documented in
@@ -220,7 +220,7 @@ Claude/ChatGPT receipt identities are unchanged.
 The table describes the intended full layout. The current slice supports skill and extension payloads without
 configuration fragments. Pi user `workspace` payloads and configuration fragments explicitly
 fail until shared-workspace ownership and native settings reconciliation are implemented;
-the three path guards use hook-local user starters rather than user workspace mappings.
+the three path guards keep user starters beside helpers rather than using user workspace mappings.
 
 Source packages retain their root-level shared skill/core files and shallow `pi/` overlays:
 
@@ -236,10 +236,10 @@ harness/<category>/<tool>/
 Installed Pi resources:
 .pi/skills/<skill>/SKILL.md
 .pi/extensions/harness-<tool>/index.ts
-.pi/hooks/<tool>_hook.py
-.pi/hooks/pi-transport/transport.ts
-.pi/hooks/pi-path-guards/path_guards.ts and path_guards.py
-.pi/hooks/pi-issue-workflows/workflows.ts
+.pi/harness/<tool>_hook.py
+.pi/harness/pi-transport/transport.ts
+.pi/harness/pi-path-guards/path_guards.ts and path_guards.py
+.pi/harness/pi-issue-workflows/workflows.ts
 ```
 
 The file mappings install the entry point as `index.ts`; source overlays never appear inside
@@ -687,7 +687,8 @@ at 2 MiB and ten seconds, with cancellation on session replacement/shutdown. Gua
 errors deny native edits; reminder errors append diagnostics while preserving successful results.
 Original tool content and structured output are preserved.
 
-User policy starters live beside Python hooks in the effective Pi agent directory. This avoids
+User policy starters live beside Python helpers under `<PI_CODING_AGENT_DIR>/harness/`
+(default `~/.pi/agent/harness/`). This avoids
 adding user workspace ownership to this slice. Shared home and project policies still load later.
 Branch receipts record observed ranges and content digests, complete denial deliveries, and
 reminder times. State comes from active ancestry on every event, including nested calls, so
@@ -761,7 +762,7 @@ blocks covered calls. Native approval/rejection and their `/skill:` forms make z
 Publication uses exclusive hard-link creation followed by draft removal, so an existing destination
 cannot be overwritten by a concurrent approval. Unsupported hard links leave the draft for correction.
 Native custom messages persist outcomes on the active branch; current pending drafts are refreshed
-from disk before model turns. Pi user policy starters live beside the installed hooks; shared home and
+from disk before model turns. Pi user policy starters live beside the installed helpers in `harness/`; shared home and
 project policies also apply. Arbitrary scripts, third-party mutators, trusted extension command dispatch
 and direct extension I/O remain outside the protection boundary.
 
@@ -890,7 +891,7 @@ rendering, unscripted design quality and a future Pi Aboard adapter are outside 
 than a second orchestrator. Requests, executions, process supervision, delivery claims and replay
 stay in the shared SQLite state; a native extension translates Pi events into versioned
 `harness-subagents-hook --pi` operations through `pi-transport` 1.1.0's bounded `requestCommand`.
-The uv-installed entry point keeps the runtime's PyYAML dependency out of Pi hooks.
+The uv-installed entry point keeps the runtime's PyYAML dependency in its managed environment.
 
 Children launch through the CLI process boundary, never the SDK: automatic work runs
 `pi --mode json`, interactive work the terminal UI. Harness assigns the native ID with

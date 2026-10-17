@@ -1,5 +1,5 @@
 name = "command-guard"
-version = "2.2.1"
+version = "2.2.2"
 description = "Cross-platform PreToolUse guard that denies configured dangerous Bash and PowerShell commands"
 docs = "https://github.com/EmilienxD/harness/blob/main/README.md#hooks"
 
@@ -21,13 +21,21 @@ status = "supported"
 src = "command_guard_hook.py"
 dest = "command_guard_hook.py"
 root = "hooks"
+platforms = ["claude", "chatgpt"]
+executable = true
+
+[[files]]
+src = "command_guard_hook.py"
+dest = "command_guard_hook.py"
+root = "support"
+platforms = ["pi"]
 executable = true
 
 # Pi command/event translation reusing the shared core.
 [[files]]
 src = "command_guard_pi.py"
 dest = "command_guard_pi.py"
-root = "hooks"
+root = "support"
 platforms = ["pi"]
 
 [[files]]
@@ -53,11 +61,11 @@ platforms = ["pi"]
 scopes = ["project"]
 starter = true
 
-# Pi user scope keeps the policy beside the installed hook as the bundled default.
+# Pi user scope keeps the policy beside the installed helper as the bundled default.
 [[files]]
 src = "command-guard.toml"
 dest = "command-guard.toml"
-root = "hooks"
+root = "support"
 platforms = ["pi"]
 scopes = ["user"]
 starter = true

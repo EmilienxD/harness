@@ -1,7 +1,7 @@
 import { promises as fs } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, resolve } from "node:path";
-import { requestCommand } from "../../hooks/pi-transport/transport.ts";
+import { requestCommand } from "../../harness/pi-transport/transport.ts";
 
 // The uv-installed runtime owns requests, executions and delivery; this file only translates Pi events.
 const COMMAND = ["harness-subagents-hook", "--pi"];

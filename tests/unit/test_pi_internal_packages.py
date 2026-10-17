@@ -4,8 +4,8 @@ from dataclasses import replace
 import pytest
 
 from harness_cli.installer import CatalogueInstaller, Target
-from harness_cli.manifest import discover
-from harness_cli.platforms import Platform
+from harness_cli.manifest import SupportStatus, discover
+from harness_cli.platforms import Platform, get_adapter
 from harness_cli.receipts import ReceiptStore
 
 
@@ -15,6 +15,71 @@ TRANSPORT_ONLY = {
     "command-guard", "prefer-fewer-comments", "no-new-documents", "commit",
     "cleanup-git", "grill-me-in-cloud", "enable-desktop-notification", "report-gotchas",
 }
+
+
+@pytest.mark.parametrize("scope", ("project", "user"))
+def test_pi_support_destination_and_placeholders(tmp_path, monkeypatch, scope):
+    monkeypatch.setenv("PI_CODING_AGENT_DIR", str(tmp_path / "agent"))
+    target = (
+        Target.for_user(Platform.PI)
+        if scope == "user"
+        else Target.for_project(tmp_path / "project", Platform.PI)
+    )
+    assert target.destination_path("support", "helper.py") == target.install_root / "harness/helper.py"
+    with pytest.raises(ValueError, match="Pi does not support the hooks destination"):
+        target.destination_path("hooks", "helper.py")
+    assert target.adapter.placeholders(target.scope_root, target.is_user) == {
+        "${PLATFORM_DIR}": target.install_root.as_posix(),
+        "${SKILLS_DIR}": (target.install_root / "skills").as_posix(),
+        "${SUPPORT_DIR}": (target.install_root / "harness").as_posix(),
+    }
+
+
+@pytest.mark.parametrize("platform", (Platform.CLAUDE, Platform.CHATGPT))
+def test_hook_providers_keep_their_hook_destination(tmp_path, platform):
+    adapter = get_adapter(platform)
+    assert adapter.destination_root(tmp_path, False, "hooks") == adapter.platform_root(tmp_path, False) / "hooks"
+    assert "${HOOKS_DIR}" in adapter.placeholders(tmp_path, False)
+    with pytest.raises(ValueError, match="unknown destination root"):
+        adapter.destination_root(tmp_path, False, "support")
+
+
+@pytest.mark.parametrize("scope", ("project", "user"))
+def test_fresh_pi_catalogue_installs_without_a_hooks_directory(tmp_path, monkeypatch, scope):
+    # Exercise every supported package, including non-selectable integration payloads,
+    # while leaving machine-wide products and prerequisite probing out of this file test.
+    available = {
+        name: replace(tool, actions=(), requires=())
+        for name, tool in discover().items()
+    }
+    selected = {
+        name for name, tool in available.items()
+        if tool.support_for(Platform.PI).status is SupportStatus.SUPPORTED
+    }
+    monkeypatch.setenv("PI_CODING_AGENT_DIR", str(tmp_path / "agent"))
+    target = (
+        Target.for_user(Platform.PI)
+        if scope == "user"
+        else Target.for_project(tmp_path / "project", Platform.PI)
+    )
+    installer = CatalogueInstaller(available, target, ReceiptStore.load(tmp_path / "receipts.json"))
+
+    installer.reconcile(selected)
+
+    assert selected <= set(installer.installation["packages"])
+    assert not (target.install_root / "hooks").exists()
+    assert (target.install_root / "harness/pi-transport/transport.ts").is_file()
+    assert (target.install_root / "extensions/harness-command-guard/index.ts").is_file()
+    for name in selected:
+        for payload in available[name].expand(Platform.PI, scope):
+            assert payload.root != "hooks", name
+            assert target.destination_path(payload.root, payload.dest).is_file(), (name, payload.dest)
+
+    installer.reconcile(set())
+
+    assert installer.installation["packages"] == {}
+    assert not (target.install_root / "harness/pi-transport").exists()
+    assert not (target.install_root / "hooks").exists()
 
 
 @pytest.mark.parametrize("name", sorted(GUARDS | ISSUES | TRANSPORT_ONLY))
@@ -34,14 +99,14 @@ def test_tools_install_only_their_required_shared_helpers(tmp_path, name):
     installer.reconcile({name})
 
     assert set(installer.installation["packages"]) == expected
-    hooks = tmp_path / "project/.pi/hooks"
-    assert (hooks / "pi-transport/transport.ts").is_file()
-    assert (hooks / "pi-path-guards/path_guards.ts").is_file() == (name in GUARDS)
-    assert (hooks / "pi-path-guards/path_guards.py").is_file() == (name in GUARDS)
-    assert (hooks / "pi-issue-workflows/workflows.ts").is_file() == (name in ISSUES)
+    support = tmp_path / "project/.pi/harness"
+    assert (support / "pi-transport/transport.ts").is_file()
+    assert (support / "pi-path-guards/path_guards.ts").is_file() == (name in GUARDS)
+    assert (support / "pi-path-guards/path_guards.py").is_file() == (name in GUARDS)
+    assert (support / "pi-issue-workflows/workflows.ts").is_file() == (name in ISSUES)
     installer.reconcile(set())
     assert installer.installation["packages"] == {}
-    assert not (hooks / "pi-transport").exists()
+    assert not (support / "pi-transport").exists()
 
 
 def test_shared_transport_survives_removal_of_other_helper_families(tmp_path):
@@ -52,12 +117,12 @@ def test_shared_transport_survives_removal_of_other_helper_families(tmp_path):
     )
     installer.reconcile({"on-edit-block", "issue-readers", "command-guard"})
     installer.reconcile({"issue-readers", "command-guard"})
-    hooks = tmp_path / "project/.pi/hooks"
-    assert not (hooks / "pi-path-guards").exists()
-    assert (hooks / "pi-issue-workflows/workflows.ts").is_file()
-    assert (hooks / "pi-transport/transport.ts").is_file()
+    support = tmp_path / "project/.pi/harness"
+    assert not (support / "pi-path-guards").exists()
+    assert (support / "pi-issue-workflows/workflows.ts").is_file()
+    assert (support / "pi-transport/transport.ts").is_file()
     installer.reconcile({"command-guard"})
-    assert not (hooks / "pi-issue-workflows").exists()
-    assert (hooks / "pi-transport/transport.ts").is_file()
+    assert not (support / "pi-issue-workflows").exists()
+    assert (support / "pi-transport/transport.ts").is_file()
     installer.reconcile(set())
-    assert not (hooks / "pi-transport").exists()
+    assert not (support / "pi-transport").exists()

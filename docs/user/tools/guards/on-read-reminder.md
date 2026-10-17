@@ -29,7 +29,7 @@ The reminder runs after the triggering read. It asks the agent to follow up; it 
 For Pi, install with `harness install on-read-reminder --platform pi` and run `/reload` or restart Pi.
 Approve the project's resources when Pi requests trust. Project rules use the same
 `.harness/guards/on-read-reminder.toml`. User installations keep an editable starter in
-`<Pi agent directory>/hooks/on-read-reminder.toml`; shared `~/.harness/guards/` rules and
+`<Pi agent directory>/harness/on-read-reminder.toml`; shared `~/.harness/guards/` rules and
 project rules load afterward. Pi requires uv or Python 3.11+ on `PATH`.
 
 Pi reminds after successful native `read` and recognized `bash`/`powershell` reads, including partial reads. Failed reads produce no reminder. Each successful matching read can remind again.

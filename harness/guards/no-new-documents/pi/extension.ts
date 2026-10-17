@@ -1,9 +1,9 @@
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { requestPython } from "../../hooks/pi-transport/transport.ts";
+import { requestPython } from "../../harness/pi-transport/transport.ts";
 
-const helper = join(dirname(dirname(dirname(fileURLToPath(import.meta.url)))), "hooks", "no_new_documents_pi.py");
+const helper = join(dirname(dirname(dirname(fileURLToPath(import.meta.url)))), "harness", "no_new_documents_pi.py");
 
 // Match Pi 1.2.0's tools/path-utils resolveToCwd and utils/paths normalizePath.
 // These helpers are private; importing them would couple installs to Pi's layout.

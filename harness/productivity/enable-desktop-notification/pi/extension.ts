@@ -1,9 +1,9 @@
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { requestPython } from "../../hooks/pi-transport/transport.ts";
+import { requestPython } from "../../harness/pi-transport/transport.ts";
 
 const STATE = "harness-desktop-notification-v1";
-const helper = join(dirname(dirname(dirname(fileURLToPath(import.meta.url)))), "hooks", "desktop_notification_pi.py");
+const helper = join(dirname(dirname(dirname(fileURLToPath(import.meta.url)))), "harness", "desktop_notification_pi.py");
 const preview = (text: string, limit: number) => {
   const normalized = text.replace(/\s+/gu, " ").trim();
   return normalized.length <= limit ? normalized : normalized.slice(0, limit - 1) + "…";

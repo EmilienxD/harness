@@ -49,7 +49,7 @@ export async function runPiCommentsJourney(mode: "json" | "rpc", scope: "project
     const platform = scope === "project" ? join(project, ".pi") : fixture.workspace.agentDir;
     assert.equal(existsSync(join(platform, "extensions", "harness-prefer-fewer-comments")), false);
     await runFixtureInstaller(fixture.workspace, "install", ["prefer-fewer-comments"], { scope });
-    const starter = scope === "project" ? join(project, ".harness", "guards", "prefer-fewer-comments.toml") : join(platform, "hooks", "prefer-fewer-comments.toml");
+    const starter = scope === "project" ? join(project, ".harness", "guards", "prefer-fewer-comments.toml") : join(platform, "harness", "prefer-fewer-comments.toml");
     await writeFile(starter, scope === "project" ? policy : "version = 1\n[limits]\nmax_comment_lines = 9\n");
     await mkdir(join(project, ".harness", "guards"), { recursive: true });
     await writeFile(join(project, ".harness", "guards", "prefer-fewer-comments.toml"), policy);
@@ -81,7 +81,7 @@ export async function runPiCommentsJourney(mode: "json" | "rpc", scope: "project
     assert.equal(fixture.assertions().unexpectedRequests, 0);
     await runFixtureInstaller(fixture.workspace, "uninstall", ["prefer-fewer-comments"], { scope });
     await assert.rejects(access(join(platform, "extensions", "harness-prefer-fewer-comments", "index.ts")));
-    await assert.rejects(access(join(platform, "hooks", "pi-transport", "transport.ts")));
+    await assert.rejects(access(join(platform, "harness", "pi-transport", "transport.ts")));
     assert.equal(await readFile(starter, "utf8"), scope === "project" ? policy : "version = 1\n[limits]\nmax_comment_lines = 9\n");
     return { version: fixture.version, mode, scope, inferenceRequests: steps.length + 1, status: run.status };
   } finally { await fixture.close(); }
@@ -153,9 +153,9 @@ export async function runPiCommentsStateJourney() {
     assert.equal(JSON.parse(await readFile(join(project, "again.json"), "utf8")).count, 1);
     assert.equal(fixture.assertions().inferenceRequests, 8);
     await runFixtureInstaller(fixture.workspace, "uninstall", ["prefer-fewer-comments"]);
-    await access(join(project, ".pi", "hooks", "pi-transport", "transport.ts"));
+    await access(join(project, ".pi", "harness", "pi-transport", "transport.ts"));
     await runFixtureInstaller(fixture.workspace, "uninstall", ["on-edit-reminder", "on-edit-block"]);
-    await assert.rejects(access(join(project, ".pi", "hooks", "pi-transport", "transport.ts")));
+    await assert.rejects(access(join(project, ".pi", "harness", "pi-transport", "transport.ts")));
   } finally { await fixture.close(); }
 }
 
@@ -179,7 +179,7 @@ export async function runPiCommentsRecoveryJourney() {
   try {
     const project = fixture.workspace.projectRoot;
     await runFixtureInstaller(fixture.workspace, "install", ["prefer-fewer-comments"]);
-    const helper = join(project, ".pi", "hooks", "prefer_fewer_comments_pi.py");
+    const helper = join(project, ".pi", "harness", "prefer_fewer_comments_pi.py");
     await rename(helper, helper + ".disabled");
     const rpc = fixture.rpc();
     for (let index = 0; index < routes.length; index++) {

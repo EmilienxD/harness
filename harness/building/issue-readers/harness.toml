@@ -1,5 +1,5 @@
 name = "issue-readers"
-version = "1.6.1"
+version = "1.6.2"
 description = "Prepare issue and commit context for address and review workers"
 requires = ["git", "gh"]
 docs = "https://github.com/EmilienxD/harness/blob/main/README.md#user-invoked-skills"
@@ -33,12 +33,27 @@ starter = true
 src = "issue_readers_hook.py"
 dest = "issue_readers_hook.py"
 root = "hooks"
+platforms = ["claude", "chatgpt"]
+executable = true
+
+[[files]]
+src = "issue_readers_hook.py"
+dest = "issue_readers_hook.py"
+root = "support"
+platforms = ["pi"]
 executable = true
 
 [[files]]
 src = "issue_graph.py"
 dest = "issue_graph.py"
 root = "hooks"
+platforms = ["claude", "chatgpt"]
+
+[[files]]
+src = "issue_graph.py"
+dest = "issue_graph.py"
+root = "support"
+platforms = ["pi"]
 
 [[files]]
 src = "address-this/chatgpt/openai.yaml"
@@ -61,5 +76,5 @@ platforms = ["pi"]
 [[files]]
 src = "issue_readers_pi.py"
 dest = "issue_readers_pi.py"
-root = "hooks"
+root = "support"
 platforms = ["pi"]

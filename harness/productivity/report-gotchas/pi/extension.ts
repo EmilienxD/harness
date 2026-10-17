@@ -1,9 +1,9 @@
 import { Type } from "typebox";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { requestPython } from "../../hooks/pi-transport/transport.ts";
+import { requestPython } from "../../harness/pi-transport/transport.ts";
 
-const helper = join(dirname(dirname(dirname(fileURLToPath(import.meta.url)))), "hooks", "report_gotchas_pi.py");
+const helper = join(dirname(dirname(dirname(fileURLToPath(import.meta.url)))), "harness", "report_gotchas_pi.py");
 
 export default function (pi: any): void {
   let controller = new AbortController();

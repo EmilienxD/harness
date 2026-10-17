@@ -35,9 +35,9 @@ class PlatformSupport:
 class FileSpec:
     """One source-to-destination copy instruction.
 
-    ``root`` is a logical destination root: ``workspace``, ``platform``
-    (``.claude`` or ``.codex``), ``skills`` (``.claude/skills`` or
-    ``.agents/skills``), or ``hooks``.
+    ``root`` is a logical destination root: ``workspace``, ``platform``,
+    ``skills``, ``hooks`` (Claude/ChatGPT), ``extensions`` (Pi entry points),
+    or ``support`` (Pi helpers under the platform's ``harness`` directory).
     ``platforms`` may select payload variants; omitted entries are shared by
     every platform the tool declares supported.
     """

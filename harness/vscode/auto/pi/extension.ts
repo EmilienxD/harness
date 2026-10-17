@@ -8,7 +8,7 @@ export default function auto(pi: ExtensionAPI): void {
     description: "Start or preview Aboard Auto Run",
     handler: async (args, ctx) => {
       const message = await new Promise<string>((resolve) => {
-        const script = join(dirname(fileURLToPath(import.meta.url)), "..", "hooks", "auto_hook.py");
+        const script = join(dirname(fileURLToPath(import.meta.url)), "..", "harness", "auto_hook.py");
         const child = spawn("uv", ["run", "--no-project", "--no-managed-python", script], { cwd: ctx.cwd, windowsHide: true, stdio: ["pipe", "pipe", "pipe"] });
         let stderr = ""; let size = 0; let settled = false;
         const done = (message: string) => { if (settled) return; settled = true; clearTimeout(timer); resolve(message); };

@@ -11,7 +11,7 @@ protected = ["**/docs/**", "project-notes/**"]
 
 The starter protects `**/docs/**`. Patterns use gitignore-style `*`, `?`, and `**`. User and project protected paths both apply; Harness preserves the starter file after edits.
 
-For Pi, add `--platform pi`. Its user-scope starter lives at `<PI_CODING_AGENT_DIR>/hooks/no-new-documents.toml`, defaulting to `~/.pi/agent/hooks/no-new-documents.toml`. Home and project policies also apply. The extension guards native writes and recognized literal shell creations, including nested tool calls; arbitrary scripts and other extensions' direct filesystem access remain outside this guardrail.
+For Pi, add `--platform pi`. Its user-scope starter lives at `<PI_CODING_AGENT_DIR>/harness/no-new-documents.toml`, defaulting to `~/.pi/agent/harness/no-new-documents.toml`. Home and project policies also apply. The extension guards native writes and recognized literal shell creations, including nested tool calls; arbitrary scripts and other extensions' direct filesystem access remain outside this guardrail.
 
 Native writes follow Pi's `@`, tilde, file URL, Unicode-space and Windows shell-path expansion. Logical and resolved paths both retain protection, and draft writes reject linked ancestors. Malformed policy or an unavailable Python helper blocks covered calls. Existing documents remain editable.
 
