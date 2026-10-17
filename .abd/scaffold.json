@@ -1,0 +1,15 @@
+{
+  "version": 2,
+  "revision": "06a49270d6f66589478deea2bd0e4eb42ab1162858e1a77e91cd72e97231ac01",
+  "assets": {
+    ".abd/session-setup.ps1": {
+      "sourceHash": "9cdfd5e6de05e0624369f61e92018e3175629cf7f52940deafda9b112622377b"
+    },
+    ".abd/session-setup.sh": {
+      "sourceHash": "4b40f6bf4dce1341e21a953f40b884d952a9d2831010d109c541fd4b9ecda8c4"
+    },
+    ".harness/config.json": {
+      "sourceHash": "4b8894d57dfa621e534ef4eb25263e8f00254cbcb4327f1f98796314ac279dde"
+    }
+  }
+}

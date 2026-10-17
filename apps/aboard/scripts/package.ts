@@ -10,6 +10,7 @@ const required = [
   "dist/extension.js",
   "assets/aboard.png",
   "assets/aboard.svg",
+  "assets/pi-icon.ttf",
   "assets/config.schema.json",
   "assets/runtime/abd_hook.py",
   "assets/runtime/abd_pi.ts",

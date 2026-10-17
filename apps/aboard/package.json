@@ -30,6 +30,15 @@
     "ai"
   ],
   "contributes": {
+    "icons": {
+      "aboard-pi": {
+        "description": "Pi coding agent",
+        "default": {
+          "fontPath": "./assets/pi-icon.ttf",
+          "fontCharacter": "\\E001"
+        }
+      }
+    },
     "jsonValidation": [
       {
         "fileMatch": "**/.harness/config.json",
@@ -623,6 +632,7 @@
     "dist/extension.js.map",
     "assets/aboard.png",
     "assets/aboard.svg",
+    "assets/pi-icon.ttf",
     "assets/config.schema.json",
     "assets/scaffold/",
     "assets/runtime/abd_hook.py",

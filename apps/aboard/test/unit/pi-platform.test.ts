@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { parseLaunchFile } from "../../src/platform/launch-configuration.js";
 import { PiAgentPlatform } from "../../src/pi/platform.js";
 import type { AgentId, SessionId } from "../../src/domain/contracts.js";
-import { piSessionDirectory } from "../../src/pi/sessions.js";
+import { inspectPiSession, piSessionDirectory } from "../../src/pi/sessions.js";
 
 test("Pi profiles accept native thinking and shared effort aliases", () => {
   const platform = new PiAgentPlatform({ lifecycleAssets: { settings: "unused", script: "unused" }, commandRunner: async () => ({ code: 0, stdout: "1.2.0", stderr: "" }) });
@@ -81,6 +81,9 @@ test("Pi resume accepts only a saved conversation with matching project and inta
   try {
     await writeFile(path, rows.map((row) => JSON.stringify(row)).join("\n"));
     assert.equal(await platform.isResumable(sessionId, root), true);
+    assert.equal((await inspectPiSession(sessionId, root))?.title, "Saved conversation");
+    await writeFile(path, rows.slice(0, 2).map((row) => JSON.stringify(row)).join("\n"));
+    assert.equal((await inspectPiSession(sessionId, root))?.title, "Inspect source");
     assert.equal(await platform.isResumable(sessionId, join(root, "different")), false);
     rows[2]!.parentId = "missing";
     await writeFile(path, rows.map((row) => JSON.stringify(row)).join("\n"));

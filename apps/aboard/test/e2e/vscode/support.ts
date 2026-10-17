@@ -11,7 +11,7 @@ export async function removeDirectoryWithRetries(path: string, remove: RemoveDir
 }
 
 export async function testExecutable(): Promise<string> {
-  const executable = await downloadAndUnzipVSCode("1.130.0");
+  const executable = await downloadAndUnzipVSCode("1.141.0");
   if (process.platform !== "win32") return executable;
   const archiveRoot = resolve(executable, "..");
   const entries = await readdir(archiveRoot, { withFileTypes: true });

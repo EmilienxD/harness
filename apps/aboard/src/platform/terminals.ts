@@ -90,6 +90,7 @@ export interface TerminalCreationOptions {
 
 export interface TerminalHost {
   createTerminal(options: TerminalCreationOptions): TerminalHandle;
+  setTitle?(terminal: TerminalHandle, title: string): void;
   createBackgroundProcess?(options: TerminalCreationOptions): TerminalHandle;
   onDidCloseTerminal(listener: (terminal: TerminalHandle) => void): { dispose(): void };
   /** Another editor group showing a terminal; undefined when it is in the active group or the panel. */
@@ -369,6 +370,13 @@ export class TerminalController {
 
   public list(): readonly TerminalSnapshot[] {
     return [...this.#records.values()].map((record) => this.#snapshot(record));
+  }
+
+  public setSessionTitle(sessionId: SessionId, title: string): void {
+    const record = this.#latest((candidate) => candidate.sessionId === sessionId);
+    if (record?.status !== "open" || record.backend === "process" || record.handle === undefined) return;
+    const clean = title.replace(/[\u0000-\u001f\u007f]/gu, " ").trim().slice(0, 120);
+    if (clean) this.options.host.setTitle?.(record.handle, clean);
   }
 
   public liveTerminalForAgent(agentId: AgentId): TerminalId | undefined {

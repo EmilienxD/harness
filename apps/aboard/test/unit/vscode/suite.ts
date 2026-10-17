@@ -3,7 +3,7 @@ import { existsSync } from "node:fs";
 import { access, readFile, readdir, rm } from "node:fs/promises";
 import { delimiter, join } from "node:path";
 
-import { TabInputTerminal, TabInputText, TerminalLocation, Uri, commands, extensions, window, workspace, type TabGroup, type Terminal } from "vscode";
+import { TabInputTerminal, TabInputText, TerminalLocation, ThemeIcon, Uri, commands, extensions, window, workspace, type TabGroup, type Terminal } from "vscode";
 
 import type { AgentId, AgentSession, IsoTimestamp, SessionId, TerminalId } from "../../../src/domain/contracts.js";
 import { FleetRegistry } from "../../../src/domain/fleet.js";
@@ -214,11 +214,13 @@ export async function run(): Promise<void> {
     for (const terminal of placementProbes) terminal.dispose();
   }
 
-  // Exercise the actual VS Code title handling: a fake host accepting a
-  // proposed option does not prove that packaged extensions can use it.
-  const title = "Claude Code: aboard terminal test";
+  // Real VS Code must keep process OSC titles from replacing our label,
+  // and still accept session titles through the stable rename command.
+  const title = "Fix terminal naming";
   const titleTerminals = new Set(window.terminals);
-  const titleProbe = createVsCodeTerminalHost().createTerminal({
+  const titleHost = createVsCodeTerminalHost();
+  const titleRegistration = titleHost.onDidCloseTerminal(() => undefined);
+  const titleProbe = titleHost.createTerminal({
     cwd: root,
     env: {},
     provider: "claude",
@@ -230,13 +232,45 @@ export async function run(): Promise<void> {
       : ["-c", `printf '\\033]0;${title}\\007'; sleep 30`],
   });
   try {
-    titleProbe.show(true);
+    titleProbe.show(false);
+    await eventually(() => window.activeTerminal === titleProbe, "Title probe did not become active");
+    await eventually(
+      () => window.terminals.some((terminal) => !titleTerminals.has(terminal) && terminal.name === "Claude Code"),
+      "VS Code did not preserve the provider label against the process title",
+    );
+    titleHost.setTitle?.(titleProbe, title);
     await eventually(
       () => window.terminals.some((terminal) => !titleTerminals.has(terminal) && terminal.name === title),
-      "VS Code did not display the process's title through the stable terminal API",
+      "VS Code did not display the session title through the stable rename command",
     );
+    for (const [provider, initialName] of [["chatgpt", "Codex"], ["pi", "Pi Agent"]] as const) {
+      const background = titleHost.createTerminal({ cwd: root, env: {}, provider });
+      try {
+        await background.processId;
+        const native = window.terminals.find((terminal) => terminal === background);
+        assert.ok(native);
+        const icon = "iconPath" in native.creationOptions ? native.creationOptions.iconPath : undefined;
+        assert.ok(icon instanceof ThemeIcon, `${provider} must use a product icon for editor tabs`);
+        assert.equal(icon.id, provider === "pi" ? "aboard-pi" : "openai");
+        if (provider === "pi") {
+          const contribution = extension.packageJSON.contributes.icons[icon.id].default as { fontPath: string; fontCharacter: string };
+          assert.equal(contribution.fontCharacter, "\\E001");
+          await access(join(extension.extensionPath, contribution.fontPath));
+        }
+        await eventually(() => window.terminals.some((terminal) => terminal === background && terminal.name === initialName), `${provider} initial label was not preserved`);
+        titleProbe.show(false);
+        await eventually(() => window.activeTerminal === titleProbe, "Background probe did not release focus");
+        titleHost.setTitle?.(background, `${initialName} task`);
+        assert.equal(window.activeTerminal, titleProbe, "Background title updates must not steal focus");
+        background.show(false);
+        await eventually(() => window.terminals.some((terminal) => terminal === background && terminal.name === `${initialName} task`), `${provider} pending task title was not applied on selection`);
+      } finally { background.dispose(); }
+      titleProbe.show(false);
+      await eventually(() => window.activeTerminal === titleProbe, "Title probe did not regain focus");
+    }
   } finally {
     titleProbe.dispose();
+    titleRegistration.dispose();
   }
 
   await commands.executeCommand("aboard.initializeProject");

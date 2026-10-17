@@ -38,6 +38,8 @@ class FakeTerminal implements TerminalHandle {
 class FakeTerminalHost implements TerminalHost {
   public readonly created: Array<{ options: TerminalCreationOptions; terminal: FakeTerminal }> = [];
   public readonly panes = new Map<TerminalHandle, object>();
+  public readonly titles = new Map<TerminalHandle, string>();
+  public setTitle(terminal: TerminalHandle, title: string): void { this.titles.set(terminal, title); }
   #listener: ((terminal: TerminalHandle) => void) | undefined;
 
   public async editorPaneOf(terminal: TerminalHandle): Promise<object | undefined> {
@@ -84,6 +86,22 @@ function setup(sleep: (milliseconds: number) => Promise<void> = async () => unde
   });
   return { controller, host, events };
 }
+
+test("session titles follow runtime binding and do not touch other or released terminals", () => {
+  const { controller, host } = setup();
+  const first = controller.create({ agentId: agent("one"), sessionId: session("pending"), agentType: "interactive", provider: "chatgpt" });
+  controller.create({ agentId: agent("two"), sessionId: session("other"), agentType: "interactive", provider: "pi" });
+  controller.bindSession(agent("one"), session("pending"), session("actual"));
+  controller.setSessionTitle(session("pending"), "Stale title");
+  assert.equal(host.titles.size, 0);
+  controller.setSessionTitle(session("actual"), " Fix terminal names\n ");
+  assert.equal(host.titles.get(host.created[0]!.terminal), "Fix terminal names");
+  assert.equal(host.titles.has(host.created[1]!.terminal), false);
+  controller.release(first.terminalId);
+  controller.setSessionTitle(session("actual"), "Released title");
+  assert.equal(host.titles.get(host.created[0]!.terminal), "Fix terminal names");
+  controller.dispose();
+});
 
 test("loop implementers have visible worktree terminals with the loop environment", () => {
   const { controller, host } = setup();

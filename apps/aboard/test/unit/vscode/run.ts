@@ -5,7 +5,7 @@ import { join, resolve } from "node:path";
 import { downloadAndUnzipVSCode, runTests } from "@vscode/test-electron";
 
 async function testExecutable(): Promise<string> {
-  const executable = await downloadAndUnzipVSCode("1.130.0");
+  const executable = await downloadAndUnzipVSCode("1.141.0");
   if (process.platform !== "win32") return executable;
 
   // Archive test hosts must not be coupled to the machine installer's global update mutex.

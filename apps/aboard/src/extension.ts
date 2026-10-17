@@ -404,25 +404,42 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
     return platform.isResumable(sessionId, cwd, command);
   };
   const titleProbe = new ChatGptSessionProbe();
-  const refreshActivityTitles = async (): Promise<void> => {
-    if (!initialized) return;
-    await Promise.allSettled(activity.entries().filter((entry) => entry.kind === "agent" && entry.reopen !== undefined).map(async (entry) => {
-      if (entry.kind !== "agent" || entry.reopen === undefined) return;
-      const { platform, sessionId } = entry.reopen;
-      const cwd = entry.reopen.cwd ?? workspaceRoot;
-      let title: string | undefined;
-      if (platform === "claude") title = await claudeSessionTitle(sessionId, cwd);
-      else if (platform === "pi") title = (await inspectPiSession(sessionId, cwd))?.title;
-      else {
-        const configured = await launchFile.getFor(platform, entry.type).catch(() => undefined);
-        const settings = configured?.platform === platform ? configured.settings : undefined;
-        const command = typeof settings === "object" && settings !== null && "declaredCommand" in settings
-          ? (settings as { readonly declaredCommand?: readonly string[] }).declaredCommand : undefined;
-        title = await titleProbe.title(sessionId, cwd, command);
-      }
-      if (title !== undefined) activity.setTitle(sessionId, title);
-    }));
+  let refreshingTitles = false;
+  const refreshActivityTitles = async (includeHistory = true): Promise<void> => {
+    if (!initialized || refreshingTitles) return;
+    refreshingTitles = true;
+    const candidates = new Map((includeHistory ? activity.entries() : []).flatMap((entry) => entry.kind !== "agent" || entry.reopen === undefined ? [] : [[entry.reopen.sessionId, {
+      ...entry.reopen, type: entry.type,
+    }] as const]));
+    for (const session of fleet.list()) {
+      if (terminals.liveTerminalForAgent(session.identity.agentId) !== undefined) candidates.set(session.sessionId, {
+        platform: session.platform, sessionId: session.sessionId, cwd: session.cwd ?? workspaceRoot, type: session.identity.type,
+      });
+    }
+    try {
+      await Promise.allSettled([...candidates.values()].map(async (entry) => {
+        const { platform, sessionId } = entry;
+        const cwd = entry.cwd ?? workspaceRoot;
+        let title: string | undefined;
+        if (platform === "claude") title = await claudeSessionTitle(sessionId, cwd);
+        else {
+          const configured = await launchFile.getFor(platform, entry.type).catch(() => undefined);
+          const settings = configured?.platform === platform ? configured.settings : undefined;
+          const command = typeof settings === "object" && settings !== null && "declaredCommand" in settings
+            ? (settings as { readonly declaredCommand?: readonly string[] }).declaredCommand : undefined;
+          title = platform === "pi"
+            ? (await inspectPiSession(sessionId, cwd, command))?.title
+            : await titleProbe.title(sessionId, cwd, command);
+        }
+        if (title !== undefined) {
+          activity.setTitle(sessionId, title);
+          terminals.setSessionTitle(sessionId, title);
+        }
+      }));
+    } finally { refreshingTitles = false; }
   };
+  const titleTimer = setInterval(() => { void refreshActivityTitles(false); }, 10_000);
+  context.subscriptions.push({ dispose: () => clearInterval(titleTimer) });
   if (initialized) await activity.load().catch((error: unknown) => output.appendLine(`Activity store could not be read: ${error instanceof Error ? error.message : "unknown error"}`));
   if (initialized) void refreshActivityTitles();
   const rememberEndedSession = async (
@@ -1052,7 +1069,7 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
   }
   context.subscriptions.push(
     scaffoldWatcher,
-    window.onDidChangeWindowState((state) => { if (state.focused) void publishScaffoldState().then(refreshActivityTitles); }),
+    window.onDidChangeWindowState((state) => { if (state.focused) void publishScaffoldState().then(() => refreshActivityTitles()); }),
   );
   const scaffold = async () => {
     try {

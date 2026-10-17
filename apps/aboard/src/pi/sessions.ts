@@ -48,7 +48,12 @@ export async function inspectPiSession(sessionId: SessionId, cwd: string, comman
       }
       if (!ancestry.some((entry) => entry.type === "message" && typeof entry.message === "object" && entry.message !== null && (entry.message as { role?: unknown }).role === "user")) continue;
       const named = ancestry.filter((entry) => entry.type === "session_info" && typeof entry.name === "string").at(-1)?.name as string | undefined;
-      return { path, ...(named === undefined ? {} : { title: named }) };
+      const firstUser = ancestry.find((entry) => entry.type === "message" && typeof entry.message === "object" && entry.message !== null && (entry.message as { role?: unknown }).role === "user");
+      const content = (firstUser?.message as { content?: unknown } | undefined)?.content;
+      const preview = typeof content === "string" ? content : Array.isArray(content)
+        ? content.filter((block: unknown): block is { type: "text"; text: string } => typeof block === "object" && block !== null && (block as { type?: unknown }).type === "text" && typeof (block as { text?: unknown }).text === "string").map((block) => block.text).join(" ") : undefined;
+      const title = (named?.trim() || preview?.trim())?.split(/\r?\n/u)[0]?.trim().slice(0, 120);
+      return { path, ...(title ? { title } : {}) };
     } catch { continue; }
   }
   return undefined;

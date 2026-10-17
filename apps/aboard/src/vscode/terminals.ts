@@ -60,20 +60,42 @@ function destinationPane(preferred: object | undefined): ViewColumn {
 }
 
 export function createVsCodeTerminalHost(): TerminalHost {
+  const titles = new WeakMap<Terminal, string>();
+  const applyTitle = (terminal: Terminal | undefined): void => {
+    if (terminal === undefined) return;
+    void Promise.resolve(terminal.processId).then(async () => {
+      const name = titles.get(terminal);
+      if (terminal.exitStatus !== undefined || name === undefined || terminal.name === name) return;
+      // Wait for creation before using the active-only stable rename command.
+      // Never reveal a background terminal merely to rename it.
+      if (window.activeTerminal === terminal) await commands.executeCommand("workbench.action.terminal.renameWithArg", { name });
+    }).catch((error: unknown) => console.error("Aboard terminal rename failed", error));
+  };
+  const activeRegistration = window.onDidChangeActiveTerminal(applyTitle);
   return {
-    // Leave agent titles to VS Code and the running process. titleTemplate is
-    // proposed API and is discarded for ordinary packaged extensions.
     createTerminal: (options) => window.createTerminal({
       cwd: options.cwd,
       env: { ...options.env },
       ...(options.provider === undefined && options.editorPane === undefined ? {} : { location: { viewColumn: destinationPane(options.editorPane), preserveFocus: true } }),
-      ...(options.provider === undefined ? {} : { iconPath: new ThemeIcon(({ claude: "claude", chatgpt: "openai", pi: "terminal" } as const)[options.provider]) }),
-      // A fixed VS Code name masks the provider's own terminal title.
-      ...(options.provider !== undefined || options.name === undefined ? {} : { name: options.name }),
+      ...(options.provider === undefined ? {} : { iconPath: new ThemeIcon(({ claude: "claude", chatgpt: "openai", pi: "aboard-pi" } as const)[options.provider]) }),
+      // Own the label so OSC titles cannot reintroduce wrapper names or logos.
+      // VS Code 1.141+ hides the icon of narrow editor tabs, which includes a bare "Pi".
+      ...(options.provider === undefined
+        ? options.name === undefined ? {} : { name: options.name }
+        : { name: ({ claude: "Claude Code", chatgpt: "Codex", pi: "Pi Agent" } as const)[options.provider] }),
       ...(options.shellPath === undefined ? {} : { shellPath: options.shellPath }),
       ...(options.shellArgs === undefined ? {} : { shellArgs: [...options.shellArgs] }),
     }),
-    onDidCloseTerminal: (listener) => window.onDidCloseTerminal(listener),
+    setTitle: (handle, name) => {
+      const terminal = window.terminals.find((candidate) => candidate === handle);
+      if (terminal === undefined) return;
+      titles.set(terminal, name);
+      applyTitle(terminal);
+    },
+    onDidCloseTerminal: (listener) => {
+      const closed = window.onDidCloseTerminal(listener);
+      return { dispose: () => { closed.dispose(); activeRegistration.dispose(); } };
+    },
     editorPaneOf: async (handle) => {
       const terminal = window.terminals.find((candidate) => candidate === handle);
       return terminal === undefined ? undefined : terminalPane(terminal);
