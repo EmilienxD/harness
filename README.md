@@ -272,6 +272,7 @@ Hooks do not need a skill invocation. Select them in the catalogue and restart t
 | --- | --- | --- |
 | `command-guard` | Claude Code, ChatGPT, Pi | Denies shell commands matching an editable dangerous-command policy. It is a guardrail, not a security sandbox. Pi evaluates native `bash`/`powershell` calls against the same policy. |
 | `slash-command-guard` | Pi | Rejects unknown leading slash commands without sending them to the model. |
+| `exclude-unwanted-tools` | Pi | Removes `powershell`, `codemode`, `find`, `grep`, and `ls` from the session tool registry. |
 | `no-new-documents` | Claude Code, ChatGPT, Pi | Stops agents from creating files in configured documentation directories and has them write a draft for your approval instead. Edits to existing files are allowed. |
 | `on-read-reminder` | Claude Code, Pi | Reminds the agent to read required guidance when it reads paths matching configured patterns. |
 | `on-edit-reminder` | Claude Code, Pi | Lets a matching edit land, then requires the relevant guidance to be read and violations corrected. |
@@ -464,6 +465,28 @@ uv run harness install slash-command-guard --platform pi --scope user
 ```
 
 Restart Pi or run `/reload` to activate it.
+
+## Exclude unwanted tools
+
+`exclude-unwanted-tools` is a Pi-only extension that persistently excludes `powershell`,
+`codemode`, `find`, `grep`, and `ls` from the session tool registry, including tools
+registered by other extensions. Other tools remain subject to Pi's normal selection rules.
+The exclusion list is fixed in the package payload; it does not edit `settings.json`.
+
+```powershell
+uv run harness install exclude-unwanted-tools --platform pi --scope user
+```
+
+Restart Pi or run `/reload` to activate it. This preserves the behavior of the original
+standalone `exclude-unwanted-tools.ts`; if migrating from that file, remove the standalone
+copy after installing the package so there is only one owner of the filter.
+
+**Compatibility:** verified against Pi 1.2.0. This adapter patches the private
+`AgentSession._isAllowedTool` method because changing active tools alone does not remove
+them from the registry. If that method is missing, loading reports an error; the fallback
+is to launch Pi with `--exclude-tools powershell,codemode,find,grep,ls`. This is a tool
+preference, not a security boundary. The patch is process-wide, and `/reload` does not
+undo it: after uninstalling or changing the exclusion list, restart Pi.
 
 ## Clear alias
 

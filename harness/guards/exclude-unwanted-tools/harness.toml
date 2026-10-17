@@ -1,0 +1,21 @@
+name = "exclude-unwanted-tools"
+version = "1.0.0"
+description = "Exclude powershell, codemode, find, grep, and ls from Pi's tool registry"
+docs = "https://github.com/EmilienxD/harness/blob/main/README.md#exclude-unwanted-tools"
+
+[platforms.claude]
+status = "unsupported"
+reason = "Filters Pi's session tool registry."
+
+[platforms.chatgpt]
+status = "unsupported"
+reason = "Filters Pi's session tool registry."
+
+[platforms.pi]
+status = "supported"
+
+[[files]]
+src = "pi/extension.ts"
+dest = "harness-exclude-unwanted-tools/index.ts"
+root = "extensions"
+platforms = ["pi"]

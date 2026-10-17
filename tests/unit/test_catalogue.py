@@ -1391,7 +1391,7 @@ def test_every_catalogue_manifest_loads():
             "web-toolkit",
         },
         "guards": {
-            "command-guard", "slash-command-guard", "no-new-documents", "on-edit-block", "on-edit-reminder", "on-read-reminder",
+            "command-guard", "slash-command-guard", "exclude-unwanted-tools", "no-new-documents", "on-edit-block", "on-edit-reminder", "on-read-reminder",
             "prefer-edit-tool", "prefer-fewer-comments", "prefer-read-tool",
             "redirect-subagents", "usage-limit-wait",
         },
