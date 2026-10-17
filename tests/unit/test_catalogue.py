@@ -1381,6 +1381,7 @@ def test_every_catalogue_manifest_loads():
             "background-shell",
             "chrome-devtools",
             "calm",
+            "copy-all",
             "enable-desktop-notification",
             "statusline",
             "agent-launcher", "caveman", "cleanup-git", "setup-command-aliases", "handoff", "handoff-grilling", "mid-prompt-skills", "decisions", "report-gotchas", "subagents", "next-decision",

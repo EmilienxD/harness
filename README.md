@@ -436,6 +436,19 @@ This is a Pi-only presentation extension; it does not change model settings or r
 inference. Install only one custom-footer extension at a time, since Pi has one footer
 slot. Verified against Pi 1.2.0's extension loader and footer component API.
 
+## Copy all
+
+`copy-all` adds Pi's `/copy-all` command. It waits for the agent to become idle, then
+copies user and assistant messages from the current session branch to the clipboard.
+Messages are labeled by role, images appear as `[image]`, and tool messages are excluded.
+
+```powershell
+uv run harness install copy-all --platform pi --scope user
+```
+
+Restart Pi or run `/reload`, then use `/copy-all`.
+No npm installation or build is needed to load it in Pi.
+
 ## Calm
 
 `calm` is a Pi-only extension that hides built-in tool output, file diffs, and Web Toolkit's
