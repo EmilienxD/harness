@@ -1,0 +1,21 @@
+name = "clear-alias"
+version = "1.0.0"
+description = "Alias Pi's /new command as /clear to start a fresh session"
+docs = "https://github.com/EmilienxD/harness/blob/main/README.md#clear-alias"
+
+[platforms.claude]
+status = "unsupported"
+reason = "Adds an alias for Pi's native session command only."
+
+[platforms.chatgpt]
+status = "unsupported"
+reason = "Adds an alias for Pi's native session command only."
+
+[platforms.pi]
+status = "supported"
+
+[[files]]
+src = "pi/extension.ts"
+dest = "harness-clear-alias/index.ts"
+root = "extensions"
+platforms = ["pi"]

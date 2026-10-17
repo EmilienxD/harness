@@ -1381,6 +1381,7 @@ def test_every_catalogue_manifest_loads():
             "background-shell",
             "chrome-devtools",
             "calm",
+            "clear-alias",
             "copy-all",
             "enable-desktop-notification",
             "statusline",

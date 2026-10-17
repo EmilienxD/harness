@@ -449,6 +449,17 @@ uv run harness install copy-all --platform pi --scope user
 Restart Pi or run `/reload`, then use `/copy-all`.
 No npm installation or build is needed to load it in Pi.
 
+## Clear alias
+
+`clear-alias` is a Pi-only extension that adds `/clear` as an alias for `/new`.
+It starts a fresh session without a model request; it does not delete saved sessions.
+
+```powershell
+uv run harness install clear-alias --platform pi --scope user
+```
+
+Restart Pi or run `/reload`, then use `/clear`.
+
 ## Calm
 
 `calm` is a Pi-only extension that hides built-in tool output, file diffs, and Web Toolkit's
