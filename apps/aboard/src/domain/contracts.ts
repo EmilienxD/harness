@@ -73,7 +73,11 @@ export type AgentId = string & { readonly __brand: "AgentId" };
 export type SessionId = string & { readonly __brand: "SessionId" };
 export type TerminalId = string & { readonly __brand: "TerminalId" };
 export type IsoTimestamp = string & { readonly __brand: "IsoTimestamp" };
-export const AGENT_PLATFORM_IDS = ["claude", "chatgpt"] as const;
+export const AGENT_PLATFORM_IDS = ["claude", "chatgpt", "pi"] as const;
+
+export function agentPlatformName(platform: AgentPlatformId): string {
+  return ({ claude: "Claude", chatgpt: "Codex", pi: "Pi" } as const)[platform];
+}
 export type AgentPlatformId = (typeof AGENT_PLATFORM_IDS)[number];
 
 export interface AgentIdentity {

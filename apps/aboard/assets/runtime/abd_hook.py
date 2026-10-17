@@ -194,6 +194,34 @@ def main() -> int:
         payload_raw = None
     payload: dict[str, Any] = payload_raw if isinstance(payload_raw, dict) else {}
 
+    if route == "pi-runtime":
+        # Aboard owns delegated process lifecycle even when project extensions
+        # are untrusted or restricted. Reuse Harness's durable state core.
+        from pathlib import Path
+        from subagents_runtime import sessions
+        from subagents_runtime.delegation import report_child_stop
+        from subagents_runtime.processes import confirm_startup
+
+        session_id = payload.get("sessionId")
+        if not isinstance(session_id, str) or not session_id:
+            return 2
+        execution_id = os.environ.get("HARNESS_EXECUTION_ID")
+        if not execution_id:
+            return 0
+        stable_id = sessions.bind_observed(session_id, Path(payload.get("cwd") or Path.cwd()), "pi", os.environ.get("HARNESS_EXECUTION_MODE", "auto"))
+        if payload.get("operation") == "start":
+            confirm_startup(execution_id, payload.get("pid"))
+        elif payload.get("operation") == "settled":
+            reported = report_child_stop(stable_id, str(payload.get("message") or ""), success=payload.get("success") is True,
+                                         reason=payload.get("reason"), execution_id=execution_id)
+            receipt = os.environ.get("ABOARD_PI_SETTLEMENT")
+            if receipt and reported:
+                with open(receipt, "w", encoding="utf-8") as handle:
+                    json.dump({"executionId": execution_id}, handle)
+        else:
+            return 2
+        return 0
+
     if route == GUARD_ROUTE:
         # Reporting routes may drop an event they cannot read; a restriction
         # that cannot read its own event has to block instead.

@@ -3,6 +3,17 @@ import test from "node:test";
 
 import { createDelegationRoutes, continueHarnessDelegation, delegationParentSession, providerSession } from "../../src/bridge/manual-delegation.js";
 
+test("Pi loop delegation is refused before starting a process", async () => {
+  const handler = createDelegationRoutes({ launch: async () => {
+    assert.fail("unsupported Pi loop must not launch");
+  } });
+  const response = await handler({
+    method: "POST", url: new URL("http://localhost/delegations"), headers: {}, signal: new AbortController().signal,
+    body: { requestId: "pi-loop", task: "loop", provider: "pi", mode: "loop", prompt: "Implement the task.", cwd: process.cwd() },
+  });
+  assert.equal(response.status, 400);
+});
+
 test("manual delegation forwards an explicit model and omits it otherwise", async () => {
   const launches: unknown[] = [];
   const handler = createDelegationRoutes({ launch: async (request) => {

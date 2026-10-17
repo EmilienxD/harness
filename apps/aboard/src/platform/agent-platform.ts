@@ -50,7 +50,8 @@ export interface AgentPlatform {
   bindSession(current: PlatformSessionIdentity, observed: SessionId): SessionId | undefined;
   normalizeLifecycle(kind: PlatformLifecycleKind, payload: unknown): LifecycleObservation;
   /**
-   * Throws when this provider's native rules cannot express these restrictions.
+   * Throws when this provider cannot support the requested launch restrictions.
+   * Pi treats protected paths as worktree guidance, with no filesystem sandbox.
    * Orchestration calls it before creating anything a failed run would leave behind.
    */
   requireEnforceableRestrictions(restrictions: LaunchRestrictions): void;

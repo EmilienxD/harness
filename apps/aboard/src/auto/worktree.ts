@@ -24,6 +24,7 @@ export const PROJECT_CONFIGURATION_ROOTS = [
   { name: ".claude", excludedEntries: ["worktrees"], required: false },
   { name: ".agents", excludedEntries: [], required: false },
   { name: ".codex", excludedEntries: ["sessions", "history.jsonl", "log", "logs", "cache", "tmp"], required: false },
+  { name: ".pi", excludedEntries: ["sessions", "history.jsonl", "log", "logs", "cache", "tmp"], required: false },
   { name: ".abd", excludedEntries: [], required: true },
   { name: ".harness", excludedEntries: ["runtime"], required: false },
 ] as const;

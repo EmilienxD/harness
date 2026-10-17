@@ -54,6 +54,12 @@
         "icon": "$(play)"
       },
       {
+        "command": "aboard.runPi",
+        "title": "Run Pi",
+        "category": "Aboard",
+        "icon": "$(play)"
+      },
+      {
         "command": "aboard.runCodex",
         "title": "Run Codex",
         "category": "Aboard",
@@ -403,6 +409,10 @@
         {
           "command": "aboard.activity.reopen",
           "when": "false"
+        },
+        {
+          "command": "aboard.runPi",
+          "when": "aboard.initialized"
         }
       ],
       "view/item/context": [
@@ -619,7 +629,8 @@
     "assets/runtime/abd-hooks.json",
     "assets/runtime/abd_wrapper.py",
     "README.md",
-    "LICENSE"
+    "LICENSE",
+    "assets/runtime/abd_pi.ts"
   ],
   "scripts": {
     "build": "esbuild src/extension.ts --bundle --platform=node --format=cjs --target=node22 --external:vscode --outfile=dist/extension.js --sourcemap",
@@ -640,7 +651,8 @@
     "e2e:extension:build": "esbuild test/e2e/vscode/run.ts test/e2e/vscode/auto-run.ts test/e2e/vscode/suite.ts --bundle --platform=node --format=cjs --target=node22 --external:vscode --outdir=dist/e2e/vscode --sourcemap",
     "e2e:extension": "npm run build && npm run e2e:extension:build && node dist/e2e/vscode/run.js",
     "e2e:auto-run": "npm run build && npm run e2e:build && npm run e2e:extension:build && node dist/e2e/vscode/auto-run.js",
-    "e2e:full": "npm run check && npm run test:integration && npm run build && npm run e2e:chatgpt && npm run e2e:reset && npm run e2e:reset && npm run e2e:smoke && npm run e2e:reset && npm run e2e:extension && npm run e2e:reset && npm run e2e:auto-run && npm run e2e:reset"
+    "e2e:full": "npm run check && npm run test:integration && npm run build && npm run e2e:pi && npm run e2e:chatgpt && npm run e2e:reset && npm run e2e:reset && npm run e2e:smoke && npm run e2e:reset && npm run e2e:extension && npm run e2e:reset && npm run e2e:auto-run && npm run e2e:reset",
+    "e2e:pi": "npm run e2e:build && node dist/e2e/cli.js pi"
   },
   "devDependencies": {
     "@types/node": "22.20.1",

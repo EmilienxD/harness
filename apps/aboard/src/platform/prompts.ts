@@ -286,7 +286,13 @@ export function promptFileReference(path: string): string {
   return `Perform the task described in @${path}.`;
 }
 
-export type SkillInvocationCharacter = "/" | "$";
+/** Repeated at each Pi turn, including after compaction and conversation resume. */
+export function worktreeGuidance(cwd: string, originalPaths: readonly string[]): string {
+  return `Your assigned working checkout is ${cwd}. Perform this task's file changes, commands, staging, and commits in that checkout. ` +
+    `Keep the original checkout unchanged: ${originalPaths.join(", ")}.`;
+}
+
+export type SkillInvocationCharacter = "/" | "$" | "/skill:";
 
 export function skillInvocation(character: SkillInvocationCharacter, skill: string): string {
   return `${character}${skill}`;

@@ -1,6 +1,6 @@
 import { EventEmitter, ProgressLocation, ThemeIcon, TreeItem, TreeItemCollapsibleState, Uri, commands, env, window, workspace, type Disposable, type ExtensionContext, type OutputChannel, type TreeDataProvider } from "vscode";
 
-import { isHeadlessExecution, type AgentSession, type TerminalId } from "../domain/contracts.js";
+import { agentPlatformName, isHeadlessExecution, type AgentSession, type TerminalId } from "../domain/contracts.js";
 
 import type { TerminalController } from "../platform/terminals.js";
 import type { FleetRegistry } from "../domain/fleet.js";
@@ -75,7 +75,7 @@ export function registerNativeFleetUi(context: ExtensionContext, options: Native
     const channel = window.createOutputChannel(`aboard: ${session.identity.type} ${agentId} progress`);
     const current: { readonly channel: OutputChannel; timer: ReturnType<typeof setInterval> | undefined } = { channel, timer: undefined };
     watches.set(agentId, current);
-    channel.appendLine(`Watching ${session.identity.type} (${session.platform === "claude" ? "Claude" : "Codex"})`);
+    channel.appendLine(`Watching ${session.identity.type} (${agentPlatformName(session.platform)})`);
     channel.appendLine(`Session: ${session.sessionId}`);
     channel.show(true);
     let tail: ProgressTail | undefined;
@@ -120,7 +120,7 @@ export function registerNativeFleetUi(context: ExtensionContext, options: Native
     let session = value?.kind === "agent" ? value.session : undefined;
     if (session === undefined) {
       const choices = fleet.list().filter((candidate) => isHeadlessExecution(candidate.identity.type, candidate.executionMode))
-        .map((candidate) => ({ label: `${candidate.identity.type} · ${candidate.identity.agentId}`, description: candidate.platform === "claude" ? "Claude" : "Codex", session: candidate }));
+        .map((candidate) => ({ label: `${candidate.identity.type} · ${candidate.identity.agentId}`, description: agentPlatformName(candidate.platform), session: candidate }));
       if (choices.length === 0) { void window.showInformationMessage("No background agents are available to watch."); return; }
       session = (await window.showQuickPick(choices, { placeHolder: "Choose a background agent to watch" }))?.session;
     }

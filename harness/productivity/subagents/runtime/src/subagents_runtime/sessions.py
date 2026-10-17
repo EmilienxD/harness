@@ -93,10 +93,10 @@ def launch_configuration(cwd: Path) -> dict[str, Any]:
         providers = value.get("providers", {})
         if not isinstance(auto_run, dict) or (
             "provider" in auto_run
-            and auto_run.get("provider") not in {"claude", "chatgpt"}
+            and auto_run.get("provider") not in {"claude", "chatgpt", "pi"}
         ):
             raise SessionError(
-                f"Harness configuration {path} autoRun.provider must be claude or chatgpt"
+                f"Harness configuration {path} autoRun.provider must be claude, chatgpt, or pi"
             )
         if not isinstance(providers, dict) or any(
             name in providers and not isinstance(providers[name], dict)
@@ -210,6 +210,8 @@ def delegation_profile_arguments(
         effort = effort_override
     model = None if model == "inherit" else model
     effort = None if effort == "inherit" else effort
+    if provider == "pi" and effort == "off":
+        effort = "none"
     model_invalid = (
         model is not None
         and (

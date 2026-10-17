@@ -1,6 +1,6 @@
 import { isRequestedEffort, type RequestedEffort } from "../platform/effort.js";
 import type { AgentPlatformId } from "../platform/agent-platform.js";
-import type { AgentType, AgentSession, ExecutionMode, TerminalId } from "../domain/contracts.js";
+import { AGENT_PLATFORM_IDS, type AgentType, type AgentSession, type ExecutionMode, type TerminalId } from "../domain/contracts.js";
 import { validateResumeMessage, type TerminalController } from "../platform/terminals.js";
 import type { DelegationTask } from "../platform/launch-configuration.js";
 import { isAbsolute, relative, resolve, sep } from "node:path";
@@ -165,8 +165,9 @@ function parse(body: unknown): ManualDelegationLaunch | undefined {
   if (typeof value.requestId !== "string" || value.requestId.trim().length === 0) return undefined;
   if (typeof value.task !== "string" || !(value.task in TASKS)) return undefined;
   const task = TASKS[value.task as keyof typeof TASKS];
-  if (value.provider !== "claude" && value.provider !== "chatgpt") return undefined;
+  if (typeof value.provider !== "string" || !AGENT_PLATFORM_IDS.includes(value.provider as AgentPlatformId)) return undefined;
   if (value.mode !== "interactive" && value.mode !== "auto" && value.mode !== "loop") return undefined;
+  if (value.provider === "pi" && value.mode === "loop") return undefined;
   if (!(task.modes as readonly string[]).includes(value.mode)) return undefined;
   if (typeof value.prompt !== "string" || value.prompt.trim().length === 0) return undefined;
   if (value.resumeAgentId === undefined && SKILL_INVOCATION.test(value.prompt.trim())) return undefined;
@@ -177,7 +178,7 @@ function parse(body: unknown): ManualDelegationLaunch | undefined {
     requestId: value.requestId,
     type: task.type,
     task: value.task as DelegationTask,
-    provider: value.provider,
+    provider: value.provider as AgentPlatformId,
     executionMode: value.mode,
     ...(value.effort === undefined ? {} : { effort: value.effort as RequestedEffort }),
     ...(value.model === undefined ? {} : { model: (value.model as string).trim() }),

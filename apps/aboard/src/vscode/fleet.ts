@@ -1,4 +1,4 @@
-import { agentLabel, isHeadlessExecution, type AgentId, type AgentSession, type IsoTimestamp, type TerminalId, type WorkerFailureType } from "../domain/contracts.js";
+import { agentLabel, agentPlatformName, isHeadlessExecution, type AgentId, type AgentSession, type IsoTimestamp, type TerminalId, type WorkerFailureType } from "../domain/contracts.js";
 import type { FleetEvent, FleetRegistry } from "../domain/fleet.js";
 import type { LeaseAuditEvent, WriteLease } from "../domain/lease.js";
 import type { AutoRunState } from "../auto/engine.js";
@@ -115,8 +115,8 @@ function isBackground(session: AgentSession): boolean {
   return isHeadlessExecution(session.identity.type, session.executionMode);
 }
 
-function providerLabel(platform: AgentSession["platform"]): "Claude" | "Codex" {
-  return platform === "claude" ? "Claude" : "Codex";
+function providerLabel(platform: AgentSession["platform"]): string {
+  return agentPlatformName(platform);
 }
 
 /** Lifecycle states that describe an agent still doing something. */

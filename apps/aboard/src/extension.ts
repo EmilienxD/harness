@@ -26,6 +26,9 @@ import { WorkspaceStartup } from "./runtime/workspace-startup.js";
 import { spawnCommandRunner } from "./platform/preflight.js";
 import { ClaudeAgentPlatform } from "./claude/platform.js";
 import { ChatGptAgentPlatform } from "./chatgpt/platform.js";
+import { PiAgentPlatform } from "./pi/platform.js";
+import { inspectPiSession } from "./pi/sessions.js";
+import { requirePiWorkerSkills } from "./pi/skills.js";
 import { ChatGptSessionProbe } from "./chatgpt/sessions.js";
 import { claudeSessionTitle } from "./claude/sessions.js";
 import { ChatGptHookTrust } from "./chatgpt/hook-trust.js";
@@ -128,7 +131,8 @@ function workerConfigurations(workspaceRoot: string, source: FileLaunchConfigura
   const requireSkills = async (configured: Awaited<ReturnType<FileLaunchConfigurationSource["get"]>>, type: AgentType) => {
     if (type === "address" || type === "review") {
       if (configured.platform === "claude") await requireHarnessWorkerSkills(workspaceRoot);
-      else await requireChatGptWorkerSkills(workspaceRoot);
+      else if (configured.platform === "chatgpt") await requireChatGptWorkerSkills(workspaceRoot);
+      else if (configured.platform === "pi") await requirePiWorkerSkills(workspaceRoot);
     }
     return configured;
   };
@@ -386,12 +390,13 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
   const platforms: ReadonlyMap<AgentPlatformId, AgentPlatform> = new Map<AgentPlatformId, AgentPlatform>([
     [claudePlatform.id, claudePlatform],
     [chatGptPlatform.id, chatGptPlatform],
+    ["pi", new PiAgentPlatform({ commandRunner: spawnCommandRunner(workspaceRoot), lifecycleAssets: { settings: join(context.extensionPath, "assets", "runtime", "abd_pi.ts"), script: join(context.extensionPath, "assets", "runtime", "abd_hook.py") } })],
   ]);
 
   const sessionIsResumable = async (platformId: AgentSession["platform"], sessionId: SessionId, cwd: string, type?: AgentSession["identity"]["type"]): Promise<boolean> => {
     const platform = platforms.get(platformId);
     if (platform === undefined) return false;
-    const configured = type === undefined ? undefined : await launchFile.get(type).catch(() => undefined);
+    const configured = type === undefined ? undefined : await launchFile.getFor(platformId, type).catch(() => undefined);
     const settings = configured?.platform === platformId ? configured.settings : undefined;
     const command = typeof settings === "object" && settings !== null && "declaredCommand" in settings
       ? (settings as { readonly declaredCommand?: readonly string[] }).declaredCommand
@@ -407,8 +412,9 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
       const cwd = entry.reopen.cwd ?? workspaceRoot;
       let title: string | undefined;
       if (platform === "claude") title = await claudeSessionTitle(sessionId, cwd);
+      else if (platform === "pi") title = (await inspectPiSession(sessionId, cwd))?.title;
       else {
-        const configured = await launchFile.get(entry.type).catch(() => undefined);
+        const configured = await launchFile.getFor(platform, entry.type).catch(() => undefined);
         const settings = configured?.platform === platform ? configured.settings : undefined;
         const command = typeof settings === "object" && settings !== null && "declaredCommand" in settings
           ? (settings as { readonly declaredCommand?: readonly string[] }).declaredCommand : undefined;
@@ -782,6 +788,7 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
           requestId: request.requestId,
           ...(request.harnessStateDirectory === undefined ? {} : { harnessStateDirectory: request.harnessStateDirectory }),
           ...(request.harnessRuntimePath === undefined ? {} : { harnessRuntimePath: request.harnessRuntimePath }),
+          ...(request.harnessPython === undefined ? {} : { harnessPython: request.harnessPython }),
           ...(request.harnessSessionId === undefined ? {} : { harnessSessionId: request.harnessSessionId }),
           ...(request.executionId === undefined ? {} : { executionId: request.executionId }),
           ...(returnUri === undefined ? {} : { parentTerminalUri: returnUri }),
@@ -829,6 +836,7 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
             ...(returnUri === undefined ? {} : { parentTerminalUri: returnUri }),
             ...(request.harnessStateDirectory === undefined ? {} : { harnessStateDirectory: request.harnessStateDirectory }),
             ...(request.harnessRuntimePath === undefined ? {} : { harnessRuntimePath: request.harnessRuntimePath }),
+            ...(request.harnessPython === undefined ? {} : { harnessPython: request.harnessPython }),
             type: binding.type, prompt: request.prompt, description: binding.description,
             isolation: { cwd: binding.cwd, protectedPaths: [], writableRoots: [] },
             executionMode: binding.executionMode, configuration: configured,
@@ -849,6 +857,7 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
           ...(returnUri === undefined ? {} : { parentTerminalUri: returnUri }),
           ...(request.harnessStateDirectory === undefined ? {} : { harnessStateDirectory: request.harnessStateDirectory }),
           ...(request.harnessRuntimePath === undefined ? {} : { harnessRuntimePath: request.harnessRuntimePath }),
+          ...(request.harnessPython === undefined ? {} : { harnessPython: request.harnessPython }),
         });
       } }, {
         workspaceRoot,
@@ -1084,6 +1093,7 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
     commands.registerCommand("aboard.launchWorkspace", () => commands.executeCommand("aboard.launch.focus")),
     commands.registerCommand("aboard.runClaudeCode", () => runAgentOn("claude")),
     commands.registerCommand("aboard.runCodex", () => runAgentOn("chatgpt")),
+    commands.registerCommand("aboard.runPi", () => runAgentOn("pi")),
     registerLaunchPanel({ registerWebviewViewProvider: (viewId, provider) => window.registerWebviewViewProvider(viewId, provider) }, {
       store: presetStore, providers: providerChoices,
       launch: async (request) => {

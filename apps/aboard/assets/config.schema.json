@@ -10,7 +10,7 @@
     "autoRun": {
       "type": "object",
       "description": "Auto Run selects Claude when provider is omitted.",
-      "properties": { "provider": { "enum": ["claude", "chatgpt"], "default": "claude" } }
+      "properties": { "provider": { "enum": ["claude", "chatgpt", "pi"], "default": "claude" } }
     },
     "session": {
       "type": "object",
@@ -28,7 +28,8 @@
       "type": "object",
       "properties": {
         "claude": { "$ref": "#/$defs/claudeProvider" },
-        "chatgpt": { "$ref": "#/$defs/chatgptProvider" }
+        "chatgpt": { "$ref": "#/$defs/chatgptProvider" },
+        "pi": { "$ref": "#/$defs/piProvider" }
       }
     },
     "grill": {
@@ -41,6 +42,42 @@
     }
   },
   "$defs": {
+    "piProfile": {
+      "type": "object",
+      "properties": {
+        "command": { "$ref": "#/$defs/command" },
+        "model": { "type": "string", "minLength": 1 },
+        "effort": { "enum": ["inherit", "off", "none", "minimal", "low", "medium", "high", "xhigh", "max", "ultra"] }
+      }
+    },
+    "piProvider": {
+      "type": "object",
+      "properties": {
+        "command": { "$ref": "#/$defs/command" },
+        "interactive": { "$ref": "#/$defs/piProfile" },
+        "delegations": {
+          "type": "object",
+          "properties": {
+            "explore": { "$ref": "#/$defs/piProfile" },
+            "prototype": { "$ref": "#/$defs/piProfile" },
+            "websearch": { "$ref": "#/$defs/piProfile" },
+            "brainstorm": { "$ref": "#/$defs/piProfile" },
+            "address": { "$ref": "#/$defs/piProfile" },
+            "review": { "$ref": "#/$defs/piProfile" },
+            "general": { "$ref": "#/$defs/piProfile" },
+            "loop": { "$ref": "#/$defs/piProfile" }
+          }
+        },
+        "autoRun": {
+          "type": "object",
+          "properties": {
+            "explore": { "$ref": "#/$defs/piProfile" },
+            "address": { "$ref": "#/$defs/piProfile" },
+            "review": { "$ref": "#/$defs/piProfile" }
+          }
+        }
+      }
+    },
     "command": { "type": "array", "minItems": 1, "items": { "type": "string", "minLength": 1 } },
     "claudeProfile": {
       "type": "object",

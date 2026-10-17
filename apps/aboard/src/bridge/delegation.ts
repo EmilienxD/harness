@@ -31,10 +31,11 @@ import { isolationProtectedPaths, worktreeGitMetadataRoots } from "../auto/workt
 import type { IssueDifficulty } from "../shared/labels.js";
 import type { DelegationTask } from "../platform/launch-configuration.js";
 
-function harnessEnvironment(input: { readonly harnessStateDirectory?: string; readonly harnessRuntimePath?: string }): Record<string, string> {
+function harnessEnvironment(input: { readonly harnessStateDirectory?: string; readonly harnessRuntimePath?: string; readonly harnessPython?: string }): Record<string, string> {
   return {
     ...(input.harnessStateDirectory === undefined ? {} : { HARNESS_STATE_DIR: input.harnessStateDirectory }),
     ...(input.harnessRuntimePath === undefined ? {} : { PYTHONPATH: [input.harnessRuntimePath, process.env.PYTHONPATH].filter(Boolean).join(delimiter) }),
+    ...(input.harnessPython === undefined ? {} : { UV_PYTHON: input.harnessPython }),
   };
 }
 
@@ -45,6 +46,7 @@ export interface LaunchIsolation {
 }
 
 export interface DelegationLaunchInput {
+  readonly harnessPython?: string;
   readonly editorPane?: object;
   readonly focus?: boolean;
   readonly model?: string;
@@ -96,6 +98,7 @@ export interface AutomatedLaunchOutcome {
 }
 
 export interface ReopenTarget {
+  readonly harnessPython?: string;
   readonly editorPane?: object;
   readonly model?: string;
   readonly effort?: RequestedEffort;

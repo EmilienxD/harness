@@ -4,6 +4,8 @@ import { join } from "node:path";
 import type { DelegationConfigurationSource } from "../bridge/delegation.js";
 import { parseClaudeLaunchFile } from "../claude/launch-configuration.js";
 import { parseChatGptLaunchFile } from "../chatgpt/launch-configuration.js";
+import { parsePiLaunchFile } from "../pi/launch-configuration.js";
+import { AGENT_PLATFORM_IDS } from "../domain/contracts.js";
 import type { AgentType } from "../domain/contracts.js";
 import type { AgentPlatformId, ConfiguredLaunch } from "./agent-platform.js";
 
@@ -43,9 +45,8 @@ function providerSection(value: unknown, name: AgentPlatformId): Record<string, 
 }
 
 function platform(value: unknown, path: string): AgentPlatformId {
-  if (value === undefined) throw new LaunchFileError(`${path} is required; set it to "claude" or "chatgpt"`);
-  if (value !== "claude" && value !== "chatgpt") throw new LaunchFileError(`${path} must be "claude" or "chatgpt"; received ${JSON.stringify(value)}`);
-  return value;
+  if (typeof value !== "string" || !AGENT_PLATFORM_IDS.includes(value as AgentPlatformId)) throw new LaunchFileError(`${path} must be one of ${AGENT_PLATFORM_IDS.join(", ")}; received ${JSON.stringify(value)}`);
+  return value as AgentPlatformId;
 }
 
 function sessionSettings(value: unknown): { readonly unknownFields: readonly string[] } {
@@ -108,19 +109,22 @@ export function parseLaunchFile(text: string): ParsedLaunchFile {
   const loop = loopSettings(root.loop);
   const claude = parseClaudeLaunchFile(providerSection(providerValues.claude, "claude"));
   const chatgpt = parseChatGptLaunchFile(providerSection(providerValues.chatgpt, "chatgpt"));
+  const pi = parsePiLaunchFile(providerSection(providerValues.pi, "pi"));
   const unknownFields = [
     // `grill` belongs to the grill-me-in-cloud hook, which shares this file.
     ...Object.keys(root).filter((field) => !["version", "autoRun", "providers", "session", "loop", "grill"].includes(field)),
     ...Object.keys(autoRun).filter((field) => field !== "provider").map((field) => `autoRun.${field}`),
-    ...Object.keys(providerValues).filter((field) => field !== "claude" && field !== "chatgpt").map((field) => `providers.${field}`),
+    ...Object.keys(providerValues).filter((field) => !AGENT_PLATFORM_IDS.includes(field as AgentPlatformId)).map((field) => `providers.${field}`),
     ...session.unknownFields.map((field) => `session.${field}`),
     ...loop.unknownFields.map((field) => `loop.${field}`),
     ...claude.unknownFields.map((field) => `providers.claude.${field}`),
     ...chatgpt.unknownFields.map((field) => `providers.chatgpt.${field}`),
+    ...pi.unknownFields.map((field) => `providers.pi.${field}`),
   ];
   const value = new ConfiguredLaunchFile(autoRunProvider, new Map([
     ["claude", claude.value],
     ["chatgpt", chatgpt.value],
+    ["pi", pi.value],
   ]));
   const diagnostics = unknownFields.length === 0
     ? []

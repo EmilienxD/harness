@@ -177,6 +177,7 @@ def test_pi_continuation_reopens_or_forks_the_exact_session(project, launches, l
     ({}, ["--thinking", "low"]),
     ({"model": "anthropic/claude-sonnet-5-5", "effort": "ultra"}, ["--model", "anthropic/claude-sonnet-5-5", "--thinking", "max"]),
     ({"effort": "none"}, ["--thinking", "off"]),
+    ({"effort": "off"}, ["--thinking", "off"]),
     ({"model": "inherit", "effort": "inherit"}, []),
 ])
 def test_pi_explore_profile_keeps_native_model_and_maps_thinking(profile, expected):

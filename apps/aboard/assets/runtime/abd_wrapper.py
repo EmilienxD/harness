@@ -292,7 +292,14 @@ def main() -> int:
                 state = 'uncertain' if provider_alive else 'failed' if spawn_error else 'exited'
                 connection.execute("UPDATE executions SET state=?,exit_code=?,exited_at=CASE WHEN ?='uncertain' THEN NULL ELSE CURRENT_TIMESTAMP END WHERE id=?", (state,exit_code,state,execution_id))
                 session = connection.execute("SELECT session_id FROM executions WHERE id=?", (execution_id,)).fetchone()
-            if session and not provider_alive:
+            pi_reported = False
+            if os.environ.get("ABOARD_PI_SETTLEMENT"):
+                try:
+                    with open(os.environ["ABOARD_PI_SETTLEMENT"], encoding="utf-8") as handle:
+                        pi_reported = json.load(handle).get("executionId") == execution_id
+                except (OSError, ValueError, AttributeError):
+                    pass
+            if session and not provider_alive and not pi_reported:
                 from subagents_runtime.delegation import report_child_stop
                 report_child_stop(session[0], native_message if native_stream else "", success=native_stream and native_success and exit_code == 0 and bool(native_message),
                                   reason=None if native_stream and native_success and exit_code == 0 and native_message else spawn_error or "Provider process exited without delivering a result",

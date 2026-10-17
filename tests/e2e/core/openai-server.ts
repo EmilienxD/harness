@@ -195,6 +195,7 @@ function observation(request: IncomingMessage, url: URL, raw: Buffer, body: Open
     sequence, method: request.method ?? "", path: url.pathname, model: body?.model ?? null,
     sessionHash: body?.sessionId ? `sha256:${createHash("sha256").update(salt).update(body.sessionId).digest("hex")}` : null,
     requestKind: body?.requestKind ?? null, inputTypes: body?.input.map((item) => typeof item.type === "string" ? item.type : "unknown") ?? [],
+    toolNamesOffered: body?.tools.flatMap((tool) => typeof tool.name === "string" ? [tool.name] : []) ?? [],
     requestBodySha256: raw.length ? hash(raw) : null, requestBytes: raw.length, scenario, checkpoint, result, httpStatus,
     ...(diagnostic ? { diagnostic } : {}),
   };

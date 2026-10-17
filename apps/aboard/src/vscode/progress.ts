@@ -11,6 +11,22 @@ export function summarizeProgressEvent(value: unknown): string | undefined {
   if (typeof value !== "object" || value === null) return undefined;
   const event = value as Record<string, unknown>;
   const kind = event.type;
+  if (kind === "tool_execution_start" || kind === "tool_execution_end") {
+    const name = short(event.toolName) || "Tool";
+    const action = kind === "tool_execution_start" ? "started" : event.isError === true ? "failed" : "finished";
+    const args = event.args as Record<string, unknown> | undefined;
+    const detail = kind === "tool_execution_start" ? short(args?.path ?? args?.command ?? args?.query) : "";
+    return `${name} ${action}${detail ? `: ${detail}` : ""}`;
+  }
+  if (kind === "agent_settled") return event.aborted === true ? "Turn aborted" : "Turn settled";
+  if (kind === "message_end") {
+    const message = event.message as { role?: unknown; content?: unknown; stopReason?: unknown; errorMessage?: unknown } | undefined;
+    if (message?.role !== "assistant") return undefined;
+    if (message.stopReason === "error") return `Error: ${short(message.errorMessage) || "provider error"}`;
+    const content = Array.isArray(message.content) ? message.content : [];
+    const text = content.filter((part) => part?.type === "text").map((part) => short(part.text)).filter(Boolean).join(" ");
+    return text ? `Agent: ${short(text)}` : undefined;
+  }
   if (kind === "assistant") {
     const message = event.message as { content?: unknown } | undefined;
     if (!Array.isArray(message?.content)) return undefined;

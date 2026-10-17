@@ -2,7 +2,7 @@
 
 ## Project Shape
 
-Aboard is a strict TypeScript VS Code extension for Claude Code and ChatGPT (Codex CLI). It launches
+Aboard is a strict TypeScript VS Code extension for Claude Code, ChatGPT (Codex CLI), and Pi. It launches
 visible agent terminals, tracks fleet and recent activity, manages project scaffold state, exposes a
 loopback bridge, and orchestrates issue-driven Auto Run workflows. Harness owns the user-facing skills,
 hooks, session commands, and persistent state that Aboard integrates with; Aboard never copies those assets
@@ -24,6 +24,7 @@ points.
   and skills.
 - `src/chatgpt/`: Codex launch, managed-policy checks, lifecycle, sessions, skills, and browser backend
   detection.
+- `src/pi/`: Pi launch/configuration, native lifecycle, session lookup and skill readiness.
 - `src/auto/`: Auto Run engine, observation, permissions, worktrees, and terminal cleanup.
 - `src/bridge/`: authenticated loopback server, lifecycle routes, worker hooks, delegation, and visible
   command-terminal API.
@@ -40,9 +41,9 @@ points.
 
 ## Session and Runtime Model
 
-- `interactive`: empty, user-controlled Claude Code or Codex TUI.
+- `interactive`: empty, user-controlled Claude Code, Codex, or Pi TUI.
 - `explore`: read-only exploration; Claude's built-in Explore agent or a top-level Codex session enforced with
-  `sandbox_mode="read-only"` and `approval_policy="never"`.
+  `sandbox_mode="read-only"` and `approval_policy="never"`, or native Pi read tools enforced by its extension.
 - `prototype`, `websearch`, `brainstorm`, and `general`: manual delegation identities. Their explicit
   `interactive` or `auto` execution mode is separate from Auto Run worker semantics.
 - `address`: Auto Run worker invoking `/address-this` on Claude or `$address-this` on ChatGPT.
@@ -53,15 +54,15 @@ Headless execution is one-shot: a detached provider process with no terminal, no
 It covers `auto` delegations and Auto Run exploration, whose report is read once. Auto Run workers keep an
 unfocused visible terminal even in AFK mode, because the user takes them over, continues them, and accepts
 their work. `isHeadlessExecution` in `domain/contracts.ts` is the one decision the terminal controller and
-both launch adapters ask, so a mode never means headless in one of them and visible in another.
+all launch adapters ask, so a mode never means headless in one of them and visible in another.
 
 `.abd/scaffold.json` is the initialized-project marker; when absent, runtime surfaces and the command
 endpoint are closed. Mutable runtime state belongs in VS Code storage, not the workspace.
 
 `.harness/config.json` is a sparse launch authority and is re-read whenever launch, resume, or reopen
 starts a new process. Resuming into an existing terminal retains that process's configuration.
-Omitted fields use code-owned defaults. `providers.claude` and `providers.chatgpt` are equal,
-independently validated configurations; neither is inferred from the wrapper-friendly `command` array. **Run Agent** asks which provider to launch,
+Omitted fields use code-owned defaults. `providers.claude`, `providers.chatgpt`, and `providers.pi` are equal,
+independently validated configurations; the provider is explicit rather than inferred from the wrapper-friendly `command` array. **Run Agent** asks which provider to launch,
 the Run Agent webview above the fleet edits personal workspace presets, and
 `autoRun.provider` selects the Auto Run default and is scaffolded as `claude`. Reopen always uses the
 provider recorded by the session, even when the Auto Run default changes. Existing processes retain their
@@ -102,7 +103,7 @@ browser tooling when they have a tool for it and to skip the step otherwise; Cla
 launch with `--chrome`. Codex `BROWSER_USE_AVAILABLE_BACKENDS` enforcement is retained in
 `chatgpt/browser.ts` but disabled, because a backend requirement contradicts that skip-if-absent policy.
 
-Worktree runs copy ignored local `.claude`, `.agents`, `.codex`, and `.abd` configuration without
+Worktree runs copy ignored local `.claude`, `.agents`, `.codex`, `.pi`, and `.abd` configuration without
 overwriting checkout files or copying live session state. Refuse the run when a copied path is not ignored.
 
 ## Configuration
@@ -193,7 +194,8 @@ and each window removes only its own record on close. Runtime state and reconcil
 - Determine worker success only from process outcome, commit ancestry/count, and worktree cleanliness.
   Never parse final-response markup or generate/read worker commit messages.
 - Auto Run adds non-removable Git/GitHub restrictions and, for worktrees, original-checkout path
-  restrictions. Shared orchestration passes provider-neutral `LaunchRestrictions`; each adapter encodes
+  restrictions. Pi uses per-turn checkout guidance for those paths, without a filesystem sandbox.
+  Shared orchestration passes provider-neutral `LaunchRestrictions`; each adapter encodes
   them natively and answers `requireEnforceableRestrictions` for what it cannot express. Worktree mode
   asks the Auto Run provider that question before creating a checkout, because an interrupted run leaves
   its checkout behind.
@@ -224,5 +226,15 @@ complete disposable real-CLI journey. Invoke the `tdd` skill before adding unit 
 - `package.json`: contributed commands, views, settings schema, scripts, and pinned toolchain versions.
 - `../../temp/REFACTOR.md`: redesign product boundary; runtime code, focused tests, and scaffold assets
   remain the source of truth for implemented behavior.
-- `../../docs/CLAUDE-REFERENCES/` and `../../docs/CHATGPT-REFERENCES/`: mirrored official integration
+- `../../docs/CLAUDE-REFERENCES/`, `../../docs/CHATGPT-REFERENCES/`, and `../../docs/PI-REFERENCES/`: mirrored official integration
   documentation; consult these before relying on remembered platform behavior.
+
+Pi source/local VSIX support targets 1.2.0. Keep it distinct from the older pinned installer release.
+Pi visible sessions use the native TUI; only existing headless modes use JSON. Workers invoke
+`/skill:address-this` and `/skill:review-this`. Restricted sessions load the mandatory extension
+explicitly, disable MCP and discovered extensions, and enforce allowed tools on nested calls.
+The Python guard owns Git/GitHub command policy. Pi worktrees use the assigned working directory
+and per-turn guidance for `protectedPaths`; filesystem isolation is not required.
+Pi models inherit native settings; explicit overrides require authenticated provider/model IDs.
+Pi loop delegations are unsupported. Native session lookup follows Pi's storage precedence, including
+relative global settings resolved from the project and explicit `--session-dir` command arguments.

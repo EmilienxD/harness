@@ -12,6 +12,7 @@ const required = [
   "assets/aboard.svg",
   "assets/config.schema.json",
   "assets/runtime/abd_hook.py",
+  "assets/runtime/abd_pi.ts",
   "assets/runtime/abd-hooks.json",
   "assets/runtime/abd_wrapper.py",
   "assets/scaffold/.harness/config.json",

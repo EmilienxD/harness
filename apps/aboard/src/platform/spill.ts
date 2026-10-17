@@ -58,6 +58,9 @@ export class FileSystemPromptSpillStore implements PromptSpillStore {
     await mkdir(hookDirectory, { recursive: true });
     const assets = this.lifecycleAssets.get(plan.platform);
     if (assets === undefined) throw new Error(`No lifecycle assets are registered for ${plan.platform}`);
+    if (plan.platform === "pi") {
+      await cp(assets.settings, join(directory, "abd_pi.ts"), { force: true });
+    }
     if (plan.platform === "chatgpt") {
       const contents = await readFile(assets.script);
       const installed = await readFile(hookScript).catch((error: NodeJS.ErrnoException) => {

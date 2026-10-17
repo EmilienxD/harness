@@ -4,6 +4,8 @@ import { join, resolve } from "node:path";
 import { promisify } from "node:util";
 import { runTests } from "@vscode/test-electron";
 
+import { preparePiWorkspace } from "../../../../../tests/e2e/core/pi.js";
+import { startPiAutoRunServer } from "../pi-server.js";
 import { loadConfig } from "../config.js";
 import { AUTO_RUN_AFK_MARKER, AUTO_RUN_FOLLOWUP_MARKER, AUTO_RUN_HITL_MARKER, AUTO_RUN_HITL_REVIEW_MARKER, AUTO_RUN_NESTED_CONTEXT, AUTO_RUN_PERMANENT_NOTE } from "../scenario.js";
 import { startFakeAnthropicServer } from "../server.js";
@@ -14,22 +16,27 @@ import { prepareInteractiveClaudeConfig, testExecutable } from "./support.js";
 
 const execFileAsync = promisify(execFile);
 
-type E2ePlatform = "claude" | "chatgpt";
+type E2ePlatform = "claude" | "chatgpt" | "pi";
 
 export async function runAutoRunJourney(platform: E2ePlatform): Promise<void> {
   const config = loadConfig();
-  if (platform === "claude") await validateClaudeCli(); else await validateCodexCli();
+  if (platform === "claude") await validateClaudeCli(); else if (platform === "chatgpt") await validateCodexCli();
   await resetHarness();
   await clearTestAutoRunRecords();
-  const platformConfigRoot = platform === "claude" ? config.claudeConfigRoot : join(config.runtimeRoot, "codex-config");
+  const platformConfigRoot = platform === "claude" ? config.claudeConfigRoot : join(config.runtimeRoot, `${platform}-config`);
   await rm(platformConfigRoot, { recursive: true, force: true });
   await mkdir(platformConfigRoot, { recursive: true });
   if (platform === "claude") await prepareInteractiveClaudeConfig(platformConfigRoot, [config.cloneRoot, resolve(__dirname, "..", "..", "..")]);
   const issues = await createIssues(config.repository);
   const server = platform === "claude"
     ? await startFakeAnthropicServer({ repoRoot: config.cloneRoot, diagnosticsPath: config.diagnosticsPath, readinessPath: config.readinessPath })
-    : await startFakeOpenAiServer({ repoRoot: config.cloneRoot, diagnosticsPath: config.diagnosticsPath });
-  const activeConfigRoot = platform === "chatgpt" ? await prepareCodexHome(platformConfigRoot, server.baseUrl, [config.cloneRoot]) : platformConfigRoot;
+    : platform === "pi" ? await startPiAutoRunServer({ repoRoot: config.cloneRoot, resolveRepoRoot: () => isolatedWorktreeRoot(config.cloneRoot), diagnosticsPath: config.diagnosticsPath }) : await startFakeOpenAiServer({ repoRoot: config.cloneRoot, diagnosticsPath: config.diagnosticsPath });
+  const piWorkspace = platform === "pi" ? await preparePiWorkspace(platformConfigRoot, server.baseUrl, server.authToken) : undefined;
+  const activeConfigRoot = piWorkspace?.agentDir ?? (platform === "chatgpt" ? await prepareCodexHome(platformConfigRoot, server.baseUrl, [config.cloneRoot]) : platformConfigRoot);
+  if (piWorkspace) {
+    await mkdir(join(config.cloneRoot, ".pi"), { recursive: true });
+    await copyFile(join(piWorkspace.projectRoot, ".pi", "settings.json"), join(config.cloneRoot, ".pi", "settings.json"));
+  }
   await installHarnessWorkerSkills(platform === "chatgpt" ? join(config.cloneRoot, ".agents") : activeConfigRoot);
   try {
     const providerEnvironment = platform === "claude" ? {
@@ -43,7 +50,7 @@ export async function runAutoRunJourney(platform: E2ePlatform): Promise<void> {
       CLAUDE_CODE_MAX_RETRIES: "0",
       DISABLE_UPDATES: "1",
       DISABLE_AUTOUPDATER: "1",
-    } : {
+    } : piWorkspace ? { ...piWorkspace.env, GH_CONFIG_DIR: process.env.GH_CONFIG_DIR ?? join(process.env.APPDATA ?? "", "GitHub CLI"), GIT_AUTHOR_NAME: "harness e2e", GIT_AUTHOR_EMAIL: "harness-e2e@invalid.example", GIT_COMMITTER_NAME: "harness e2e", GIT_COMMITTER_EMAIL: "harness-e2e@invalid.example", TERM: "xterm-256color" } : {
       CODEX_HOME: activeConfigRoot,
       ABOARD_E2E_OPENAI_KEY: server.authToken,
       // The parent Node test process can advertise a non-interactive terminal.
@@ -77,6 +84,7 @@ export async function runAutoRunJourney(platform: E2ePlatform): Promise<void> {
         "aboard.autoRun.prompt": AUTO_RUN_PERMANENT_NOTE,
         "aboard.autoRun.mergeStrategy": "merge",
         "aboard.autoRun.mergeRunPullRequest": true,
+        ...(platform === "pi" ? { "aboard.autoRun.worktree.enabled": true, "aboard.autoRun.worktree.root": join(config.runtimeRoot, "worktrees"), "aboard.autoRun.worktree.keep": false } : {}),
       }, platform);
     }
     const assertions = server.assertions();
@@ -84,7 +92,8 @@ export async function runAutoRunJourney(platform: E2ePlatform): Promise<void> {
       const expected = platform === "chatgpt" ? `auto-run-afk:${checkpoint}` : checkpoint;
       if (!assertions.checkpoints.includes(expected)) throw new Error(`Auto-run journey did not reach ${checkpoint}`);
     }
-    if (assertions.inferenceRequests !== 8 || assertions.unexpectedRequests !== 0) {
+    const taskReads = platform === "pi" ? assertions.observations.filter((observation) => observation.checkpoint === "task-read").length : 0;
+    if (assertions.inferenceRequests !== 8 + taskReads || assertions.unexpectedRequests !== 0) {
       throw new Error(`Unexpected ${platform} auto-run inference activity: ${assertions.inferenceRequests} inference requests, ${assertions.unexpectedRequests} rejected requests`);
     }
   } finally {
@@ -100,9 +109,10 @@ async function commitInitializedScaffold(root: string, settings: Readonly<Record
     providers: Record<E2ePlatform, { command: string[] }>;
   };
   launch.autoRun.provider = platform;
-  launch.providers[platform].command = platform === "claude" ? [
+  launch.providers[platform] ??= { command: [] };
+  launch.providers[platform].command = platform === "pi" ? ["pi", "--offline", "--approve"] : platform === "claude" ? [
     "claude", "--permission-mode", "acceptEdits", "--allowedTools", "Bash(git add*),Bash(git commit*)",
-  ] : ["codex", "--dangerously-bypass-hook-trust"];
+  ] : ["codex"];
   await writeFile(launchPath, `${JSON.stringify(launch, null, 2)}\n`, "utf8");
   const settingsPath = join(root, ".vscode", "settings.json");
   await mkdir(join(root, ".vscode"), { recursive: true });
@@ -110,7 +120,7 @@ async function commitInitializedScaffold(root: string, settings: Readonly<Record
   if (settings["aboard.autoRun.worktree.enabled"] === true) await installWorktreeTrustSetup(root, platform);
   const hooks = join(root, ".git", "e2e-empty-hooks");
   await mkdir(hooks, { recursive: true });
-  await execFileAsync("git", ["add", "--", ".abd", ".harness/config.json", ".vscode/settings.json", ...(platform === "chatgpt" ? [".agents"] : [])], { cwd: root, encoding: "utf8", windowsHide: true });
+  await execFileAsync("git", ["add", "--", ".abd", ".harness/config.json", ".vscode/settings.json", ...(platform === "chatgpt" ? [".agents"] : platform === "pi" ? [".pi"] : [])], { cwd: root, encoding: "utf8", windowsHide: true });
   await execFileAsync("git", ["-c", `core.hooksPath=${hooks}`, "-c", "commit.gpgSign=false", "commit", "--message", "Initialize aboard E2E fixture"], {
     cwd: root,
     encoding: "utf8",
@@ -138,6 +148,7 @@ async function installHarnessWorkerSkills(configRoot: string): Promise<void> {
 }
 
 async function installWorktreeTrustSetup(root: string, platform: E2ePlatform): Promise<void> {
+  if (platform === "pi") return; // Fixture command already selects one-time project approval.
   const script = platform === "claude" ? [
     "$configPath = Join-Path $env:CLAUDE_CONFIG_DIR '.claude.json'",
     "$config = Get-Content -Raw -LiteralPath $configPath | ConvertFrom-Json",
@@ -173,6 +184,11 @@ async function clearTestAutoRunRecords(): Promise<void> {
   for (const entry of entries) {
     if (!entry.isDirectory() || !/^[0-9a-f]{32}$/u.test(entry.name)) continue;
     await rm(join(storage, entry.name, "aboard.aboard", "runtime", "state", "auto-run.json"), { force: true });
+    const ownersRoot = join(storage, entry.name, "aboard.aboard", "owners");
+    const owners = await readdir(ownersRoot, { withFileTypes: true }).catch(() => []);
+    for (const owner of owners) {
+      if (owner.isDirectory() && /^[0-9a-f]{64}$/u.test(owner.name)) await rm(join(ownersRoot, owner.name, "runtime", "state", "auto-run.json"), { force: true });
+    }
   }
 }
 
@@ -213,7 +229,7 @@ async function runHitlJourney(platform: E2ePlatform, branchMode: "per-issue" | "
   const followup = review
     ? undefined
     : await createIssue(config.repository, `Finish deterministic ${branchMode} change`, `${AUTO_RUN_FOLLOWUP_MARKER}\n\nChange deterministic.txt from after to complete.`, ["[AI]-afk", "[AI]-expert-difficulty"]);
-  const platformConfigRoot = platform === "claude" ? config.claudeConfigRoot : join(config.runtimeRoot, "codex-config");
+  const platformConfigRoot = platform === "claude" ? config.claudeConfigRoot : join(config.runtimeRoot, `${platform}-config`);
   await rm(platformConfigRoot, { recursive: true, force: true });
   await mkdir(platformConfigRoot, { recursive: true });
   if (platform === "claude") {
@@ -222,8 +238,15 @@ async function runHitlJourney(platform: E2ePlatform, branchMode: "per-issue" | "
   }
   const server = platform === "claude"
     ? await startFakeAnthropicServer({ repoRoot: config.cloneRoot, resolveRepoRoot: () => isolatedWorktreeRoot(config.cloneRoot), diagnosticsPath: config.diagnosticsPath, readinessPath: config.readinessPath })
-    : await startFakeOpenAiServer({ repoRoot: config.cloneRoot, resolveRepoRoot: () => isolatedWorktreeRoot(config.cloneRoot), diagnosticsPath: config.diagnosticsPath });
+    : platform === "pi" ? await startPiAutoRunServer({ repoRoot: config.cloneRoot, resolveRepoRoot: () => isolatedWorktreeRoot(config.cloneRoot), diagnosticsPath: config.diagnosticsPath }) : await startFakeOpenAiServer({ repoRoot: config.cloneRoot, resolveRepoRoot: () => isolatedWorktreeRoot(config.cloneRoot), diagnosticsPath: config.diagnosticsPath });
+  const piWorkspace = platform === "pi" ? await preparePiWorkspace(platformConfigRoot, server.baseUrl, server.authToken) : undefined;
   let activeConfigRoot = platformConfigRoot;
+  if (piWorkspace) {
+    activeConfigRoot = piWorkspace.agentDir;
+    await mkdir(join(config.cloneRoot, ".pi"), { recursive: true });
+    await copyFile(join(piWorkspace.projectRoot, ".pi", "settings.json"), join(config.cloneRoot, ".pi", "settings.json"));
+    await installHarnessWorkerSkills(piWorkspace.agentDir);
+  }
   if (platform === "chatgpt") {
     activeConfigRoot = await prepareCodexHome(platformConfigRoot, server.baseUrl, [config.cloneRoot]);
     await installHarnessWorkerSkills(join(config.cloneRoot, ".agents"));
@@ -240,7 +263,7 @@ async function runHitlJourney(platform: E2ePlatform, branchMode: "per-issue" | "
       CLAUDE_CODE_MAX_RETRIES: "0",
       DISABLE_UPDATES: "1",
       DISABLE_AUTOUPDATER: "1",
-    } : {
+    } : piWorkspace ? { ...piWorkspace.env, GH_CONFIG_DIR: process.env.GH_CONFIG_DIR ?? join(process.env.APPDATA ?? "", "GitHub CLI"), GIT_AUTHOR_NAME: "harness e2e", GIT_AUTHOR_EMAIL: "harness-e2e@invalid.example", GIT_COMMITTER_NAME: "harness e2e", GIT_COMMITTER_EMAIL: "harness-e2e@invalid.example", TERM: "xterm-256color" } : {
       CODEX_HOME: activeConfigRoot,
       ABOARD_E2E_OPENAI_KEY: server.authToken,
       TERM: "xterm-256color",
@@ -293,7 +316,7 @@ async function runHitlJourney(platform: E2ePlatform, branchMode: "per-issue" | "
       const expected = platform === "chatgpt" ? `${scenario}:${checkpoint}` : checkpoint;
       if (!assertions.checkpoints.includes(expected)) throw new Error(`HITL auto-run did not reach ${checkpoint}`);
     }
-    const expectedRequests = review ? 6 : 7;
+    const expectedRequests = (review ? 6 : 7) + (platform === "pi" ? assertions.observations.filter((observation) => observation.checkpoint === "task-read").length : 0);
     if (assertions.inferenceRequests !== expectedRequests || assertions.unexpectedRequests !== 0) throw new Error("Unexpected HITL inference activity");
   } finally {
     await server.close();
@@ -312,12 +335,20 @@ async function isolatedWorktreeRoot(root: string): Promise<string> {
 }
 
 void (async () => {
-  for (const platform of ["claude", "chatgpt"] as const) {
+  for (const platform of ["claude", "chatgpt", "pi"] as const) {
     const selected = process.argv.find((arg) => arg.startsWith("--platform="))?.split("=")[1];
     if (selected !== undefined && selected !== platform) continue;
-    if (!process.argv.includes("--hitl")) await runAutoRunJourney(platform);
+    if (!process.argv.includes("--hitl")) {
+      process.stdout.write(`Auto Run ${platform}: AFK starting\n`);
+      await runAutoRunJourney(platform);
+      process.stdout.write(`Auto Run ${platform}: AFK passed\n`);
+    }
     for (const mode of ["per-issue", "single-branch"] as const) {
-      for (const review of [false, true]) await runHitlJourney(platform, mode, review);
+      for (const review of [false, true]) {
+        process.stdout.write(`Auto Run ${platform}: HITL ${mode} review=${review} starting\n`);
+        await runHitlJourney(platform, mode, review);
+        process.stdout.write(`Auto Run ${platform}: HITL ${mode} review=${review} passed\n`);
+      }
     }
   }
 })()

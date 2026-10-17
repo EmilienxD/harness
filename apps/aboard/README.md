@@ -1,12 +1,16 @@
 # Aboard
 
-Aboard is a VS Code extension for Claude Code and ChatGPT conversations. It opens interactive work and AUTO RUN workers in visible terminals, and one-shot work you never take over — automatic delegations and AUTO RUN's read-only exploration — in background processes, with fleet and activity tracking for both.
+Aboard is a VS Code extension for Claude Code, ChatGPT, and Pi conversations. It opens interactive work and AUTO RUN workers in visible terminals, and one-shot work you never take over — automatic delegations and AUTO RUN's read-only exploration — in background processes, with fleet and activity tracking for both.
 
 Install it through the [Harness catalogue](../../README.md#installation) by selecting `aboard`. Harness verifies the VSIX and installs the worker assets Aboard needs.
 
+Pi support is available in this source tree and locally built VSIX packages, for Pi 1.2.0. The catalogue currently downloads an older pinned release; it does not install Pi support. Build and install the local VSIX for Pi. Select Pi in Run Agent, or set `autoRun.provider` to `"pi"` in `.harness/config.json`. Configure `providers.pi.interactive`, `delegations`, and `autoRun` independently with `command`, `model`, and `effort`. Models inherit Pi settings unless overridden; explicit models use authenticated `provider/model` IDs. Exploration defaults to low thinking.
+
+Pi workers invoke `/skill:address-this` and `/skill:review-this` from the installed Harness issue-readers skills. Ordinary sessions preserve native Pi resources. Exploration and Auto Run workers load only Aboard's extension and a fixed native tool set, disable MCP, and enforce restrictions on nested tool calls through the shared Python guard. Pi Auto Run supports worktrees: workers launch in the assigned checkout and receive that checkout guidance on every turn, including after resume or compaction. Pi relies on agents following this guidance rather than filesystem sandboxing. `/auto` is supplied by Harness's native Pi extension.
+
 ## At a glance
 
-Aboard launches interactive Claude Code or ChatGPT sessions through visible VS Code terminals. One-shot
+Aboard launches interactive Claude Code, ChatGPT, or Pi sessions through visible VS Code terminals. One-shot
 work uses detached processes with structured output and execution logs. Its Fleet shows live sessions,
 Recent Activity records useful completed work, and AUTO RUN coordinates the local Git checkout with GitHub
 issues and pull requests. An authenticated loopback bridge carries lifecycle events back to the extension.
@@ -16,7 +20,7 @@ Click a background agent in **Agent Fleet**, or run **Aboard: Watch Background A
 ## Visible sessions
 
 Initialize the project once, then open **Run Agent** above the Fleet. **Run Agent** adds one Claude Code or
-Codex session as an editor terminal in the current window's active editor group, preserving its layout.
+Codex or Pi session as an editor terminal in the current window's active editor group, preserving its layout.
 **Launch layout** starts the agents in the selected preset. Choose **New window** to open the same project
 files in a new window and apply the preset grid once. Choose **Current window** to apply the grid in the
 current window and start terminals in their assigned panes, keeping existing editors and terminals open.

@@ -22,11 +22,13 @@ export async function runFixtureInstaller(workspace: PiWorkspace, operation: "in
   readonly scope?: "project" | "user";
   readonly platform?: "pi" | "chatgpt" | "claude";
   readonly dryRun?: boolean;
+  /** An owned fixture catalogue can provide a selectable consumer of an internal package. */
+  readonly catalogueRoot?: string;
 } = {}): Promise<Record<string, unknown>> {
   const root = await findHarnessRoot();
   const scope = options.scope ?? "project";
   const targetArgs = operation === "info" ? [] : ["--platform", options.platform ?? "pi", "--scope", scope, ...(scope === "project" ? ["--root", workspace.projectRoot] : [])];
-  const args = ["run", "--offline", "--no-sync", "--project", root, "python", "-m", "harness_cli", "--local", root, operation, ...packages,
+  const args = ["run", "--offline", "--no-sync", "--project", root, "python", "-m", "harness_cli", "--local", options.catalogueRoot ?? root, operation, ...packages,
     ...targetArgs, "--json",
     ...(options.dryRun ? ["--dry-run"] : []),
   ];

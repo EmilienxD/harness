@@ -211,7 +211,7 @@ function toolNames(tool: Record<string, unknown>): string[] {
 
 async function selectScenario(body: ResponsesRequest): Promise<{ readonly scenario: CodexScenario; readonly spilled: boolean; readonly text: string }> {
   const inputText = requestText(body);
-  const spill = /Perform the task described in @([^\s]+\.md)\./u.exec(inputText);
+  const spill = /Perform the task described in @?([^\s]+\.md)\./u.exec(inputText);
   const historyScenario = scenarioFromToolHistory(body);
   const text = spill === null || historyScenario !== undefined ? inputText : `${inputText}\n${await readSpill(spill[1]!)}`;
   const selected = (scenario: CodexScenario): { readonly scenario: CodexScenario; readonly spilled: boolean; readonly text: string } => ({ scenario, spilled: spill !== null, text });

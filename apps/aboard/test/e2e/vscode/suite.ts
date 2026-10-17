@@ -45,6 +45,23 @@ async function endpoint(directory: string, root: string): Promise<CommandEndpoin
   return undefined;
 }
 
+async function startAutoRunWithFixtureConsent(): Promise<void> {
+  // The fixture acts as the user approving its own isolated Codex hooks. Every
+  // provider tool, lifecycle hook, guard and visible terminal remains real.
+  const original = window.showWarningMessage;
+  let refusal: string | undefined;
+  window.showWarningMessage = ((message: string, ...options: unknown[]) => {
+    if (options.includes("Allow Hooks")) return Promise.resolve("Allow Hooks");
+    if (message.startsWith("aboard cannot start an auto-run:")) { refusal = message; return Promise.resolve(undefined); }
+    return Reflect.apply(original, window, [message, ...options]);
+  }) as typeof original;
+  try {
+    await commands.executeCommand("aboard.startAutoRun");
+    if (refusal) throw new Error(refusal);
+  }
+  finally { window.showWarningMessage = original; }
+}
+
 export async function run(): Promise<void> {
   const root = workspace.workspaceFolders?.[0]?.uri.fsPath;
   assert.equal(root?.toLowerCase(), process.env.ABOARD_E2E_REPOSITORY_ROOT?.toLowerCase());
@@ -78,7 +95,7 @@ export async function run(): Promise<void> {
     const opened: typeof window.terminals[number][] = [];
     const terminalListener = window.onDidOpenTerminal((terminal) => opened.push(terminal));
     await commands.executeCommand("aboard.autoRun.refresh");
-    await commands.executeCommand("aboard.startAutoRun");
+    await startAutoRunWithFixtureConsent();
     const implementer = await eventually(
       () => opened.find((terminal) => "env" in terminal.creationOptions && terminal.creationOptions.env?.ABOARD_AGENT_ID),
       "auto-run did not launch a visible implementer terminal",
@@ -98,11 +115,11 @@ export async function run(): Promise<void> {
     assert.deepEqual(rows.map((item) => item.checkpoint), [
       "auto-explore-read", "auto-explore-complete", "auto-afk-read", "auto-afk-edit", "auto-afk-commit", "auto-afk-complete", "auto-review-commit", "auto-review-complete",
     ]);
-    const expectedTool = platform === "chatgpt" ? "exec" : "Read";
+    const expectedTool = platform === "pi" ? "read" : platform === "chatgpt" ? "exec" : "Read";
     assert.ok(rows.find((item) => item.checkpoint === "auto-afk-read")?.toolNamesOffered.includes(expectedTool));
-    assert.ok(rows.find((item) => item.checkpoint === "auto-afk-edit")?.toolNamesOffered.includes(platform === "chatgpt" ? "exec" : "Edit"));
+    assert.ok(rows.find((item) => item.checkpoint === "auto-afk-edit")?.toolNamesOffered.includes(platform === "pi" ? "edit" : platform === "chatgpt" ? "exec" : "Edit"));
     assert.equal(rows.some((item) => item.toolNamesOffered.some((name) => name.startsWith("mcp__aboard__"))), false);
-    assert.equal(rows.every((item) => platform === "chatgpt" ? item.model === "codex-e2e" || item.model?.includes("luna") === true : item.model?.includes("haiku") === true), true, `routine workers use their configured ${platform} routing`);
+    assert.equal(rows.every((item) => platform === "pi" ? item.model === "pi-e2e" : platform === "chatgpt" ? item.model === "codex-e2e" || item.model?.includes("luna") === true : item.model?.includes("haiku") === true), true, `routine workers use their configured ${platform} routing`);
 
     await eventually(async () => {
       const issue = JSON.parse((await execFileAsync("gh", ["issue", "view", String(issueNumber), "--repo", repository, "--json", "state"], { encoding: "utf8" })).stdout) as { state?: string };
@@ -116,7 +133,7 @@ export async function run(): Promise<void> {
     const pullRequests = await eventually(async () => {
       const rows = JSON.parse((await execFileAsync("gh", ["pr", "list", "--repo", repository, "--state", "all", "--limit", "20", "--json", "number,state,headRefName,baseRefName,body,mergeCommit"], { encoding: "utf8" })).stdout) as { state?: string; headRefName?: string; baseRefName?: string; body?: string; mergeCommit?: { oid?: string } }[];
       const issuePullRequest = rows.find((row) => row.body?.includes(`Closes #${issueNumber}`));
-      const runPullRequest = rows.find((row) => row.headRefName?.startsWith("abd/") && row.baseRefName === "main");
+      const runPullRequest = rows.find((row) => row.headRefName === issuePullRequest?.baseRefName && row.baseRefName === "main");
       return issuePullRequest?.state === "MERGED" && runPullRequest?.state === "MERGED" ? { issuePullRequest, runPullRequest } : undefined;
     }, "auto-run did not merge its issue and run pull requests", 480);
     assert.ok(pullRequests.runPullRequest.headRefName?.startsWith("abd/"));
@@ -130,6 +147,7 @@ export async function run(): Promise<void> {
       return /^## main\.\.\.origin\/main(?: \[behind \d+\])?\s*$/u.test(status) ? status : undefined;
     }, "auto-run did not restore clean main", 480);
     assert.equal(await readFile(join(root, "deterministic.txt"), "utf8"), "harness e2e fixture: before\n");
+    await execFileAsync("git", ["fetch", "origin", "main"], { cwd: root, encoding: "utf8", windowsHide: true });
     const remoteFixture = (await execFileAsync("git", ["show", "origin/main:deterministic.txt"], { cwd: root, encoding: "utf8" })).stdout;
     assert.equal(remoteFixture.replace(/\r\n/gu, "\n"), "harness e2e fixture: after\n");
     return;
@@ -146,7 +164,7 @@ export async function run(): Promise<void> {
     const opened: typeof window.terminals[number][] = [];
     const terminalListener = window.onDidOpenTerminal((terminal) => opened.push(terminal));
     await commands.executeCommand("aboard.autoRun.refresh");
-    await commands.executeCommand("aboard.startAutoRun");
+    await startAutoRunWithFixtureConsent();
     await eventually(() => opened[0], "HITL auto-run did not launch its first visible terminal");
 
     const handoffCheckpoint = review ? "auto-hitl-review-complete" : "auto-hitl-handoff";
@@ -160,6 +178,10 @@ export async function run(): Promise<void> {
     }, "HITL run did not create its isolated checkout");
     assert.notEqual(worktree.toLowerCase(), root.toLowerCase());
     assert.equal(await readFile(join(root, "deterministic.txt"), "utf8"), "harness e2e fixture: before\n");
+    for (const terminal of opened) {
+      const cwd = "cwd" in terminal.creationOptions ? terminal.creationOptions.cwd : undefined;
+      assert.equal(typeof cwd === "string" ? resolve(cwd).toLowerCase() : cwd?.fsPath.toLowerCase(), resolve(worktree).toLowerCase());
+    }
 
     // The user is expected to be able to talk to the worker they must accept,
     // and closing that terminal before acceptance stops the run instead.
@@ -194,7 +216,7 @@ export async function run(): Promise<void> {
       const value = await diagnostics();
       return value?.observations.some((item) => item.checkpoint === finalCheckpoint) ? value : undefined;
     }, review ? "HITL acceptance conversation did not complete" : "HITL follow-up address did not complete", 480);
-    const successes = completed.observations.filter((item) => item.scenario !== null && item.result === "success");
+    const successes = completed.observations.filter((item) => item.scenario !== null && item.scenario !== "task" && item.result === "success");
     assert.deepEqual(successes.map((item) => item.checkpoint), review ? [
       "auto-hitl-read", "auto-hitl-edit", "auto-hitl-commit", "auto-hitl-complete",
       "auto-hitl-review-read", "auto-hitl-review-complete",
@@ -202,9 +224,10 @@ export async function run(): Promise<void> {
       "auto-hitl-read", "auto-hitl-edit", "auto-hitl-handoff",
       "auto-followup-read", "auto-followup-edit", "auto-followup-commit", "auto-followup-complete",
     ]);
-    assert.equal(new Set(successes.map((item) => item.sessionHash).filter(Boolean)).size, 2);
+    if (platform !== "pi") assert.equal(new Set(successes.map((item) => item.sessionHash).filter(Boolean)).size, 2);
+    else assert.equal(new Set(opened.filter((terminal) => "env" in terminal.creationOptions).map((terminal) => "env" in terminal.creationOptions ? terminal.creationOptions.env?.ABOARD_SESSION_ID : undefined).filter(Boolean)).size, 2);
     assert.equal(successes.some((item) => item.toolNamesOffered.some((name) => name.startsWith("mcp__aboard__"))), false);
-    assert.equal(successes.every((item) => item.model?.includes(platform === "chatgpt" ? "sol" : "opus") === true), true, `advanced and expert workers use their configured ${platform} routing`);
+    assert.equal(successes.every((item) => platform === "pi" ? item.model === "pi-e2e" : item.model?.includes(platform === "chatgpt" ? "sol" : "opus") === true), true, `advanced and expert workers use their configured ${platform} routing`);
     if (!review) await eventually(async () => {
       const issue = JSON.parse((await execFileAsync("gh", ["issue", "view", String(followup), "--repo", repository, "--json", "state"], { encoding: "utf8" })).stdout) as { state?: string };
       return issue.state === "CLOSED" ? issue : undefined;
