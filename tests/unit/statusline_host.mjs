@@ -65,7 +65,8 @@ try {
     const raw = component.render(160)[0];
     assert(raw.endsWith(`\x1b[${code}m${value === 1000 ? "1k" : value}\x1b[39m/650/1k`));
     assert(raw.startsWith("demo "), "project must have no color");
-    assert(raw.includes("\x1b[39m  openai test-model high  "), "model/thinking must have no color");
+    assert(raw.includes(`  openai ${theme.fg("mdHeading", "test-model")} high  `),
+      "only the model must use the theme's secondary gold/heading color");
   }
   tokens = 0;
   assert(render()[0].endsWith("0/650/1k"));
@@ -102,18 +103,30 @@ try {
   session.getContextUsage = () => ({ tokens: 125000, contextWindow: 256000, percent: null });
   assert.deepEqual(render(), ["demo  anthropic other-model off  125k/200k/256k"]);
   const layouts = [
-    "demo  anthropic other-model off  125k/200k/256k",
-    "demo  other-model off  125k/200k/256k",
-    "demo  other-model  125k/200k/256k",
-    "demo  125k/200k/256k",
-    "demo",
+    [47, ["demo  anthropic other-model off  125k/200k/256k"]],
+    [46, ["demo  125k/200k/256k", "anthropic other-model off"]],
+    [41, ["demo  125k/200k/256k", "anthropic other-model off"]],
+    [25, ["demo  125k/200k/256k", "anthropic other-model off"]],
+    [24, ["demo  125k/200k/256k", "other-model off"]],
+    [20, ["demo  125k/200k/256k", "other-model off"]],
+    [19, ["demo", "125k/200k/256k"]],
+    [17, ["demo", "125k/200k/256k"]],
+    [14, ["demo", "125k/200k/256k"]],
+    [12, ["demo"]],
+    [3, ["..."]],
   ];
-  for (let i = 0; i < layouts.length; i++) {
-    assert.equal(strip(component.render(layouts[i].length)[0]), layouts[i]);
-    if (i + 1 < layouts.length) {
-      assert.equal(strip(component.render(layouts[i].length - 1)[0]), layouts[i + 1]);
+  for (const [width, expected] of layouts) {
+    const lines = component.render(width);
+    assert.deepEqual(lines.map(strip), expected, `width ${width}`);
+    if (expected.some((line) => line.includes("other-model"))) {
+      assert(lines.some((line) => line.includes(theme.fg("mdHeading", "other-model"))));
     }
   }
+  branch = "long-feature-branch";
+  assert.deepEqual(component.render(43).map(strip), [
+    "demo (long-feature-branch)", "anthropic other-model off  125k/200k/256k",
+  ]);
+  branch = null;
   for (const [value, expected] of [[0, "0"], [999, "999"], [1000, "1k"], [125499, "125k"], [125500, "126k"]]) {
     session.getContextUsage = () => ({ tokens: value, contextWindow: 256000, percent: null });
     assert(render()[0].endsWith(`${expected}/200k/256k`));
@@ -125,8 +138,8 @@ try {
   assert(render()[0].startsWith("demo (你好branch)"));
   for (const width of [0, 1, 2, 10, 25]) {
     const lines = component.render(width);
-    assert.equal(lines.length, 1);
-    assert(tui.visibleWidth(lines[0]) <= width);
+    assert(lines.length >= 1 && lines.length <= 2);
+    assert(lines.every((line) => tui.visibleWidth(line) <= width));
   }
   component.invalidate();
   component.dispose();
@@ -137,7 +150,7 @@ try {
   assert.equal(listeners.size, 1, "reload must not accumulate branch listeners");
   assert.equal(requests, 0);
   assert.equal(session.messages.length, 0);
-  console.log("PASS: Pi 1.2.0 loader and session binding; exact footer, live model/thinking/context, Git refresh, unknown usage, control characters, narrow widths, reload/disposal; zero inference");
+  console.log("PASS: Pi 1.2.0 loader and session binding; exact footer, live model/thinking/context, Git refresh, unknown usage, control characters, two-row wrapping and field removal, narrow widths, reload/disposal; zero inference");
 } finally {
   component?.dispose();
   session?.dispose();

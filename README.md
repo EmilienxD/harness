@@ -397,7 +397,7 @@ Run `test-workflows status` explicitly when verifying changes, as you would run 
 
 ## Statusline
 
-`statusline` replaces Pi's footer with exactly one line:
+`statusline` replaces Pi's footer with one line when space allows:
 
 ```text
 harness (main)  openai gpt-6.1-sol medium  125k/200k/256k
@@ -413,13 +413,17 @@ current context window, including per-model overrides.
 Pi can also compact on overflow, so this is the normal trigger threshold, not a guarantee.
 Disabled auto-compaction displays `off` instead of the threshold; unavailable values use `?`.
 
-`main` is red; other branches use Pi's theme accent. Project,
-provider, model, and thinking level remain uncolored. Only the used-token value is colored;
+`main` is red; other branches use Pi's theme accent. The model uses Pi's theme heading
+color (the secondary gold highlight in the dark theme). Project, provider, and thinking
+level remain uncolored. Within the context counters, only the used-token value is colored;
 the separators, compaction threshold, and total remain uncolored. Usage progresses from green
 (below 50% of the compaction threshold), to blue (50–75%), yellow (75–90%), and red
 (90% and above). With auto-compaction disabled or its threshold unknown, colors use
 the full context window instead. Unknown usage remains uncolored.
-Outside Git, the branch parentheses are omitted. Narrow terminals remove whole fields
+Outside Git, the branch parentheses are omitted. When the footer no longer fits on one
+line, provider, model, and thinking level move together onto a second line while the
+project/branch stays on the first. Context counters go on whichever row has more space
+available (the first row on a tie). If two lines still cannot fit, fields are removed
 in this order: provider, thinking level, model, context. Only then is the project/branch truncated.
 No costs, paths, or extension status rows are added.
 

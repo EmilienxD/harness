@@ -33,7 +33,7 @@ export default function (pi: ExtensionAPI) {
           const location = project + (branch
             ? ` ${branch === "main" ? color(31, branchLabel) : theme.fg("accent", branchLabel)}` : "");
           const provider = plain(ctx.model?.provider ?? "no-provider");
-          const model = plain(ctx.model?.id ?? "no-model");
+          const model = theme.fg("mdHeading", plain(ctx.model?.id ?? "no-model"));
           const thinking = pi.getThinkingLevel();
           const usage = ctx.getContextUsage();
           const tokens = usage?.tokens;
@@ -51,12 +51,28 @@ export default function (pi: ExtensionAPI) {
           const colored = pressure === undefined ? used
             : color(pressure < 0.5 ? 32 : pressure < 0.75 ? 34 : pressure < 0.9 ? 33 : 31, used);
           const fields = [provider, thinking, model, `${colored}/${limit}/${formatTokens(total)}`];
-          const line = () => [location, [fields[0], fields[2], fields[1]].filter(Boolean).join(" "), fields[3]]
-            .filter(Boolean).join("  ");
           const available = Math.max(0, width);
-          // Drop whole fields in priority order before truncating the project/branch.
-          for (let i = 0; i < fields.length && visibleWidth(line()) > available; i++) fields[i] = "";
-          return [truncateToWidth(line(), available)];
+          const useSecondRow = visibleWidth(`${location}  ${provider} ${model} ${thinking}  ${fields[3]}`) > available;
+          const layout = () => {
+            const modelFields = [fields[0], fields[2], fields[1]].filter(Boolean).join(" ");
+            const details = [modelFields, fields[3]].filter(Boolean).join("  ");
+            const single = [location, details].filter(Boolean).join("  ");
+            if (!useSecondRow || !details) return [single];
+            const lines = [location, modelFields];
+            if (fields[3]) {
+              const row = visibleWidth(lines[0]) <= visibleWidth(lines[1]) ? 0 : 1;
+              lines[row] = [lines[row], fields[3]].filter(Boolean).join("  ");
+            }
+            return lines.filter(Boolean);
+          };
+          let lines = layout();
+          // Keep model details together; put context on the roomier row before dropping fields.
+          for (let i = 0; i < fields.length &&
+            (lines.length > 2 || lines.some((line) => visibleWidth(line) > available)); i++) {
+            fields[i] = "";
+            lines = layout();
+          }
+          return lines.map((line) => truncateToWidth(line, available));
         },
       };
     });
