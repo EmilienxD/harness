@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import { compilePrompt, publicationSchema, type AnswerDraft, type RoundPayload } from "@/lib/grill-contract";
 
+export const DEFAULT_GRILL_URL = "https://grill-me-in-cloud.vercel.app";
 export const BUCKET = "grill-assets";
 export const json = (body: unknown, status = 200, headers?: HeadersInit) => {
   const responseHeaders = new Headers(headers);
@@ -28,8 +29,7 @@ export function validatePublication(value: unknown) {
 }
 
 export function canonicalSessionUrl(provider: string, sessionId: string, requestOrigin?: string): string {
-  const origin = process.env["HARNESS_GRILL_URL"] || requestOrigin || "";
-  if (!origin) throw new Error("A Grill-Me board origin is required");
+  const origin = process.env["HARNESS_GRILL_URL"] || requestOrigin || DEFAULT_GRILL_URL;
   const parsed = new URL(origin);
   if (parsed.origin !== origin) throw new Error("HARNESS_GRILL_URL must be an origin without a trailing slash");
   return `${origin}/?session=${encodeURIComponent(`${provider}:${sessionId}`)}`;

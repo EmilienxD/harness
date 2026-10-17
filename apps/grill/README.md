@@ -13,6 +13,16 @@ The board is designed for one person. It uses a shared four-digit access code in
 - Produces a read-only prompt that can be copied, sent through Aboard, or sent to Pi when its session relay is connected. Pi claims answers only while idle and confirms receipt from its saved session.
 - Keeps unfinished sessions indefinitely. Finishing a session moves it to the archive and starts a 30-day period before the daily cleanup removes its data and stored images. Finished sessions can be restored during that period, and a newly published round restores its session automatically.
 
+## Default hosted board
+
+Clients default to `https://grill-me-in-cloud.vercel.app`. Configure only the shared four-digit code in `.harness/config.local.json` or `~/.harness/config.json`:
+
+```json
+{ "version": 1, "grill": { "code": "1234" } }
+```
+
+Use the board's actual access code, not the example above. `grill.url` (or `HARNESS_GRILL_URL`) is an optional override for a personal deployment or local development; it is not required for the default board.
+
 ## Personal deployment
 
 You need a Supabase project, a Vercel account, Node.js with npm, and a checkout of this repository.
@@ -44,24 +54,25 @@ Add these environment variables to the Vercel project:
 
 | Variable | Value |
 | --- | --- |
-| `HARNESS_GRILL_URL` | The canonical production origin, such as `https://grill.example.com`, with no trailing slash |
+| `HARNESS_GRILL_URL` | Optional canonical origin override, with no trailing slash; otherwise links use the request origin, falling back to `https://grill-me-in-cloud.vercel.app` |
 | `HARNESS_GRILL_CODE` | Exactly four digits; this is shared by the browser, publisher, and Aboard |
 | `HARNESS_GRILL_SESSION_SECRET` | A long random secret used to sign browser-session cookies |
 | `CRON_SECRET` | A different random secret, at least 16 characters, used to authenticate cleanup requests |
 | `SUPABASE_URL` | The project URL from Supabase |
 | `SUPABASE_SECRET_KEY` | The project's server-only secret key |
 
-If the first deployment assigned the production URL, set `HARNESS_GRILL_URL` afterward and redeploy. Never expose the Supabase secret key in browser-prefixed variables or commit any of these values.
+Set `HARNESS_GRILL_URL` if generated links should use a fixed canonical origin instead of the request origin. Never expose the Supabase secret key in browser-prefixed variables or commit secrets.
 
 The included Vercel configuration runs cleanup once per day. Vercel sends `CRON_SECRET` to the cleanup endpoint as a bearer token.
 
 ### 3. Connect the local clients
 
-Set these two variables in the environment that launches Claude Code, Codex, or Pi:
+Set the code in the environment that launches Claude Code, Codex, or Pi. For a personal deployment, also override the default URL:
 
 ```text
-HARNESS_GRILL_URL=https://your-production-origin.example
 HARNESS_GRILL_CODE=1234
+# Optional: omit to use https://grill-me-in-cloud.vercel.app
+HARNESS_GRILL_URL=https://your-production-origin.example
 ```
 
 Use the same values in the VS Code extension host if you want Aboard delivery. Each initialized project relays separately and labels its presence with its own project name and home-relative path. Aboard reports only recent, exact-session presence, and a delivery succeeds only once the provider's own prompt-submit hook confirms the prompt arrived.
@@ -98,7 +109,7 @@ The production access cookie is secure over HTTPS; local HTTP development works 
 
 ## Security model
 
-This is a personal tool, not a multi-user service. Keep both the deployment URL and access code private. All application tables have row-level security enabled with direct anonymous and authenticated access revoked, stored images are private, and Supabase credentials remain server-side.
+This is a personal tool, not a multi-user service. Keep the access code private. All application tables have row-level security enabled with direct anonymous and authenticated access revoked, stored images are private, and Supabase credentials remain server-side.
 
 Published explanation HTML and JavaScript are intentionally trusted. Only connect agents and clients whose output you are willing to execute in your browser.
 

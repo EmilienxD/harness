@@ -162,6 +162,8 @@ export class GrillCloudRelay {
   }
 }
 
+const DEFAULT_GRILL_URL = "https://grill-me-in-cloud.vercel.app";
+
 type GrillSection = { readonly url?: unknown; readonly code?: unknown };
 
 function grillSection(path: string): GrillSection {
@@ -191,7 +193,7 @@ export function grillTarget(workspaceRoot: string, environment: NodeJS.ProcessEn
   const shared = grillSection(join(workspaceRoot, ".harness", "config.json"));
   const user = grillSection(join(environment.HARNESS_STATE_DIR || join(home, ".harness"), "config.json"));
   return {
-    origin: local.url || shared.url || user.url || environment.HARNESS_GRILL_URL,
+    origin: local.url || shared.url || user.url || environment.HARNESS_GRILL_URL || DEFAULT_GRILL_URL,
     // The committed project config never supplies the code.
     code: local.code || user.code || environment.HARNESS_GRILL_CODE,
   };
@@ -209,9 +211,9 @@ export function createGrillCloudRelay(options: Omit<GrillCloudRelayOptions, "ori
     return undefined;
   }
   const { origin, code } = target;
-  if (!origin && !code) return undefined;
+  if (!code) return undefined;
   if (typeof origin !== "string" || !origin || typeof code !== "string" || !/^\d{4}$/u.test(code)) {
-    options.log("Grill relay disabled: grill.url and a four-digit grill.code must both be set in .harness/config.local.json or ~/.harness/config.json (grill.url may also live in .harness/config.json), or through HARNESS_GRILL_URL and HARNESS_GRILL_CODE.");
+    options.log("Grill relay disabled: set a four-digit grill.code in .harness/config.local.json or ~/.harness/config.json, or through HARNESS_GRILL_CODE. grill.url or HARNESS_GRILL_URL optionally overrides https://grill-me-in-cloud.vercel.app.");
     return undefined;
   }
   try {

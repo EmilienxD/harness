@@ -301,7 +301,7 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
     grillRelay = createGrillCloudRelay({ fleet, terminals, workspaceRoot, prompts: promptSubmissions, log: (message) => output.appendLine(message) });
     grillRelay?.start();
     output.appendLine(grillRelay === undefined
-      ? "Grill relay is inactive: no grill board is configured in .harness/config.local.json, .harness/config.json, ~/.harness/config.json, or this VS Code process's HARNESS_GRILL_URL and HARNESS_GRILL_CODE. After adding one, reload the window."
+      ? "Grill relay is inactive: configure a four-digit grill.code in .harness/config.local.json or ~/.harness/config.json, or this VS Code process's HARNESS_GRILL_CODE. The board defaults to https://grill-me-in-cloud.vercel.app; grill.url is an optional override. After configuring it, reload the window."
       : `Grill relay started for this project as instance ${grillRelay.instanceId}.`);
   };
   context.subscriptions.push({ dispose: () => grillRelay?.dispose() });

@@ -61,6 +61,27 @@ function configured(t: { after(fn: () => void): void }, files: { local?: object;
   return { workspaceRoot, home };
 }
 
+for (const source of ["local", "user", "environment"] as const) {
+  test(`code-only ${source} configuration enables the relay on the production board`, (t) => {
+    const { workspaceRoot, home } = configured(t, source === "environment" ? {} : { [source]: { code: "2468" } });
+    const env = source === "environment" ? { HARNESS_GRILL_CODE: "2468" } : {};
+    assert.deepEqual(grillTarget(workspaceRoot, env, home), { origin: "https://grill-me-in-cloud.vercel.app", code: "2468" });
+    const relay = createGrillCloudRelay({
+      fleet: new FleetRegistry(), terminals, prompts: new PromptSubmissions(), workspaceRoot, home, environment: env, log: () => undefined,
+    });
+    assert.ok(relay);
+    relay.dispose();
+  });
+}
+
+test("the production default does not enable a relay without an access code", (t) => {
+  const { workspaceRoot, home } = configured(t, {});
+  const relay = createGrillCloudRelay({
+    fleet: new FleetRegistry(), terminals, prompts: new PromptSubmissions(), workspaceRoot, home, environment: {}, log: () => undefined,
+  });
+  assert.equal(relay, undefined);
+});
+
 test("the relay targets the board the project's config names, not the extension host's environment", (t) => {
   const { workspaceRoot, home } = configured(t, { local: { url: "https://board.example.test", code: "4321" } });
   const localDev = { HARNESS_GRILL_URL: "http://127.0.0.1:4173", HARNESS_GRILL_CODE: "1111" };

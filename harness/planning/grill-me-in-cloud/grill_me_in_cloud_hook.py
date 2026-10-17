@@ -21,6 +21,7 @@ from dataclasses import dataclass
 from html.parser import HTMLParser
 from pathlib import Path
 
+DEFAULT_GRILL_URL = "https://grill-me-in-cloud.vercel.app"
 SCHEMA_VERSION = 1
 MAX_IMAGE_BYTES = 6 * 1024 * 1024
 MAX_ROUND_BYTES = 24 * 1024 * 1024
@@ -279,12 +280,12 @@ class HostedClient:
         local = grill_section(project / ".harness" / "config.local.json") if project else {}
         shared = grill_section(project / ".harness" / "config.json") if project else {}
         user = grill_section(user_config_path())
-        origin = local.get("url") or shared.get("url") or user.get("url") or os.environ.get("HARNESS_GRILL_URL", "")
+        origin = local.get("url") or shared.get("url") or user.get("url") or os.environ.get("HARNESS_GRILL_URL") or DEFAULT_GRILL_URL
         code = local.get("code") or user.get("code") or os.environ.get("HARNESS_GRILL_CODE", "")
-        if not origin or not code:
+        if not code:
             raise ValueError(
-                "grill.url and grill.code are required in .harness/config.local.json or ~/.harness/config.json "
-                "(grill.url may also live in .harness/config.json), or set HARNESS_GRILL_URL and HARNESS_GRILL_CODE"
+                "grill.code is required in .harness/config.local.json or ~/.harness/config.json, "
+                "or set HARNESS_GRILL_CODE. grill.url is an optional override of " + DEFAULT_GRILL_URL
             )
         if not isinstance(origin, str) or not isinstance(code, str):
             raise ValueError("Hosted grill URL and code must be strings")

@@ -160,6 +160,31 @@ def write_config(path, **grill):
     path.write_text(json.dumps({"version": 1, "grill": grill}), encoding="utf-8")
 
 
+@pytest.mark.parametrize("source", ["local", "user", "environment"])
+def test_code_only_configuration_uses_the_production_board(tmp_path, monkeypatch, source):
+    project = tmp_path / "project"
+    monkeypatch.setenv("HARNESS_STATE_DIR", str(tmp_path / "home"))
+    monkeypatch.delenv("HARNESS_GRILL_URL", raising=False)
+    monkeypatch.delenv("HARNESS_GRILL_CODE", raising=False)
+    if source == "environment":
+        monkeypatch.setenv("HARNESS_GRILL_CODE", "2468")
+    else:
+        path = project / ".harness" / "config.local.json" if source == "local" else tmp_path / "home" / "config.json"
+        write_config(path, code="2468")
+
+    client = HostedClient.from_environment(project)
+
+    assert (client.origin, client.code) == ("https://grill-me-in-cloud.vercel.app", "2468")
+
+
+def test_environment_url_overrides_the_production_board(tmp_path, monkeypatch):
+    monkeypatch.setenv("HARNESS_STATE_DIR", str(tmp_path / "home"))
+    monkeypatch.setenv("HARNESS_GRILL_URL", "http://localhost:8080")
+    monkeypatch.setenv("HARNESS_GRILL_CODE", "2468")
+
+    assert HostedClient.from_environment(tmp_path).origin == "http://localhost:8080"
+
+
 def test_config_files_override_stale_process_environment(tmp_path, monkeypatch):
     project = tmp_path / "project"
     write_config(project / ".harness" / "config.local.json", url="http://127.0.0.1:4173", code="2468")
