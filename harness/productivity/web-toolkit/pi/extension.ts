@@ -2,6 +2,9 @@ import { execFile } from "node:child_process";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 
+// Presentation-only opt-in shared with Calm. Mark the executor so Pi's renderer
+// definition copies retain it, without importing or requiring the Calm extension.
+const calmPresentation = { [Symbol.for("harness:calm:web-toolkit:v1")]: true };
 const TIMEOUT_MS = 120_000;
 const OUTPUT_BYTES = 256 * 1024;
 const INSTALL_COMMAND = 'uv tool install --force "git+https://github.com/EmilienxD/harness@617f66049cb5441d4edeaea31733c1525b98261c#subdirectory=harness/productivity/web-toolkit/runtime"';
@@ -79,7 +82,9 @@ export default function (pi: ExtensionAPI): void {
       blocked_domains: Type.Optional(Type.Array(domain, { description: "Exclude results from these domains and their subdomains, including matches within allowed_domains." })),
     }, { additionalProperties: false }),
     outputSchema, annotations,
-    execute: (_id, args, signal, _update, ctx) => run("search", searchQuery(args.query, args.allowed_domains, args.blocked_domains), signal, ctx.cwd),
+    execute: Object.assign<import("@earendil-works/pi-coding-agent").ToolDefinition["execute"], typeof calmPresentation>(
+      (_id, args, signal, _update, ctx) => run("search", searchQuery(args.query, args.allowed_domains, args.blocked_domains), signal, ctx.cwd),
+      calmPresentation),
   });
   pi.registerTool({
     name: "web_fetch", label: "Fetch web page",
@@ -94,6 +99,8 @@ export default function (pi: ExtensionAPI): void {
     promptGuidelines: sourceGuidelines,
     parameters: Type.Object({ url: Type.String({ minLength: 1, description: "URL of the webpage, PDF, or text document to read, for example https://docs.python.org/3/ or http://localhost:3000/." }) }, { additionalProperties: false }),
     outputSchema, annotations,
-    execute: (_id, args, signal, _update, ctx) => run("fetch", args.url, signal, ctx.cwd),
+    execute: Object.assign<import("@earendil-works/pi-coding-agent").ToolDefinition["execute"], typeof calmPresentation>(
+      (_id, args, signal, _update, ctx) => run("fetch", args.url, signal, ctx.cwd),
+      calmPresentation),
   });
 }

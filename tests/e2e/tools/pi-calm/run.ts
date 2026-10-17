@@ -60,7 +60,8 @@ export async function runPiCalmJourney(scope: "project" | "user") {
     const harnessRoot = await findHarnessRoot();
     for (const flags of [[], ["--legacy-renderer"]]) {
       await exec(process.execPath, [join(harnessRoot, "tests/e2e/tools/pi-calm/render-check.mjs"),
-        await piPackageRoot(), extension, ...flags], {
+        await piPackageRoot(), extension,
+        join(harnessRoot, "harness/productivity/web-toolkit/pi/extension.ts"), ...flags], {
         cwd: workspace.projectRoot, env: workspace.env, windowsHide: true, timeout: 30_000,
       });
     }

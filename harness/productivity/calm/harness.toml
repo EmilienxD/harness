@@ -1,5 +1,5 @@
 name = "calm"
-version = "1.6.1"
+version = "1.7.0"
 description = "Keep Pi quiet while showing the latest tool call in a transient chat block"
 docs = "https://github.com/EmilienxD/harness/blob/main/README.md#calm"
 

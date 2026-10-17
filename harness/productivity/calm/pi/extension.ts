@@ -23,6 +23,8 @@ function toolCallSummary(name: string, args: unknown): string {
   let detail = path;
   if (name === "bash" || name === "powershell") detail = text("command");
   else if (name === "grep" || name === "find") detail = [text("pattern"), path].filter(Boolean).join(" ");
+  else if (name === "web_search") detail = text("query");
+  else if (name === "web_fetch") detail = text("url");
   // Show routing arguments, never write contents or edit text.
   const summary = stripTerminalSequences([name, detail].filter(Boolean).join(" "))
     .replace(/\r\n?/g, "\n").replace(/\t/g, "    ")
@@ -181,7 +183,7 @@ export default function (pi: ExtensionAPI): void {
   });
 
   pi.registerCommand("calm", {
-    description: "Toggle Calm: show the latest tool call in a transient chat block and hide built-in output.",
+    description: "Toggle Calm: show the latest tool call in a transient chat block and hide built-in and Web Toolkit output.",
     handler: async (_args, ctx) => {
       const active = !calmPresentationIsActive();
       persistCalmPreference(active);

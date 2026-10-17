@@ -438,7 +438,9 @@ slot. Verified against Pi 1.2.0's extension loader and footer component API.
 
 ## Calm
 
-`calm` is a Pi-only extension that hides built-in tool output and file diffs. A compact block
+`calm` is a Pi-only extension that hides built-in tool output, file diffs, and Web Toolkit's
+`web_search` / `web_fetch` output. Web summaries show the search query or fetched URL.
+A compact block
 in the chat shows just the latest tool call, such as `read src/app.ts` or `bash npm test`.
 Commands preserve line breaks and wrap to fit the terminal. Summaries are capped at 350
 characters, including a trailing `…` when truncated.
@@ -460,7 +462,9 @@ Restart Pi and run `/calm` to toggle the display; it confirms `calm mode: enable
 Pi agent directory's `calm` file and survives restart. A fresh installation starts disabled.
 Use `/calm` again to restore tool details; Ctrl+T still controls reasoning visibility.
 Calm removes the empty label for reasoning you have already collapsed. Images, assistant
-responses, and custom or overridden tools remain visible. Session data and tool execution
+responses, and unrelated custom or overridden tools remain visible. Web Toolkit 1.3.3 or newer
+opts its native Pi tools into Calm; update both packages to enable this integration.
+Session data and tool execution
 are preserved. Pi 1.2.0 is the verified host version; the display adapters use internal
 component fields and may need updates after Pi upgrades.
 

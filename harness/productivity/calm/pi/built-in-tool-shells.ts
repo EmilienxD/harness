@@ -12,7 +12,8 @@
 // unchanged and the adapter changes only its final TUI row layout. Execution,
 // settings, SDK overrides, extension collisions, and stored results remain
 // owned by Pi. Image results remain visible without their call/result shell,
-// and custom tools or tools outside Pi's eight built-ins render unchanged.
+// and unrelated custom tools render unchanged. Web Toolkit explicitly opts its
+// search/fetch executors into the same presentation-only layout.
 import {
   AgentSession,
   ToolExecutionComponent,
@@ -122,7 +123,11 @@ export function installCalmBuiltInToolShellLayout(): () => void {
       state.toolDefinition !== undefined &&
       (patch.builtInDefinitions.has(state.toolDefinition) ||
         patch.builtInExecutors.has(state.toolDefinition.execute));
-    if (!isKnownBuiltIn || !patch.hidesShell()) {
+    const isWebToolkit =
+      (state.toolName === "web_search" || state.toolName === "web_fetch") &&
+      (state.toolDefinition?.execute as unknown as Record<symbol, unknown> | undefined)
+        ?.[Symbol.for("harness:calm:web-toolkit:v1")] === true;
+    if ((!isKnownBuiltIn && !isWebToolkit) || !patch.hidesShell()) {
       return originalRender.call(component, width);
     }
 

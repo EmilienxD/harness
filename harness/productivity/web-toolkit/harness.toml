@@ -1,5 +1,5 @@
 name = "web-toolkit"
-version = "1.3.2"
+version = "1.3.3"
 description = "Local web search and page fetching CLI, with native Pi tools"
 docs = "https://github.com/EmilienxD/harness/blob/main/README.md#web-toolkit"
 

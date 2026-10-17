@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { mock } from "node:test";
 
-const [packageRoot, extensionPath] = process.argv.slice(2);
+const [packageRoot, extensionPath, webToolkitPath] = process.argv.slice(2);
 const fromDist = (relative) => import(pathToFileURL(join(packageRoot, "dist", relative)).href);
 const pi = await fromDist("index.js");
 const requirePi = createRequire(join(packageRoot, "package.json"));
@@ -77,7 +77,7 @@ function sessionFor(name, definition, source = "builtin", sdkOverride = false) {
 function rowFor(name, definition, args, id = `check-${name}`) {
   // This is the actual merge performed by Pi 1.2's interactive view.
   const renderers = withBuiltInRenderers(name, definition);
-  assert.notEqual(renderers, definition);
+  if (!name.startsWith("web_")) assert.notEqual(renderers, definition);
   assert.equal(renderers.execute, definition.execute);
   return new pi.ToolExecutionComponent(name, id, args, {}, renderers,
     { requestRender() { redraws++; } }, process.cwd());
@@ -92,10 +92,20 @@ const cases = [
   ["find", pi.createFindTool, { pattern: "*.txt", path: "." }],
   ["ls", pi.createLsTool, { path: "." }],
 ];
+// Load the real Web Toolkit definitions, not lookalikes carrying the marker.
+const webToolkit = await loadExtensions([webToolkitPath], process.cwd());
+assert.deepEqual(webToolkit.errors, []);
+const webTools = webToolkit.extensions[0].tools;
+for (const [name, args] of [
+  ["web_search", { query: "Pi extension API" }],
+  ["web_fetch", { url: "https://example.com/docs" }],
+]) {
+  cases.push([name, () => webTools.get(name).definition, args]);
+}
 const rows = [];
 for (const [name, factory, args] of cases) {
   const definition = factory(process.cwd());
-  const session = sessionFor(name, definition);
+  const session = sessionFor(name, definition, name.startsWith("web_") ? "extension" : "builtin");
   const row = rowFor(name, session.getToolDefinition(name), args);
   assert.equal(row.render(100).length, 0, `${name}: hide streaming call`);
   row.updateResult({ content: [{ type: "text", text: "fixture output" }], isError: false,
@@ -124,7 +134,7 @@ const startCall = async (toolName, args, fields = {}, allowReplacement = true) =
   const id = fields.toolCallId ?? `summary-${++callNumber}`;
   if (!fields.parentToolCallId) {
     const definition = factories.get(toolName)(process.cwd());
-    const session = sessionFor(toolName, definition);
+    const session = sessionFor(toolName, definition, toolName.startsWith("web_") ? "extension" : "builtin");
     callRows.set(id, rowFor(toolName, session.getToolDefinition(toolName), args, id));
     chatContainer.addChild(callRows.get(id));
   }
@@ -142,6 +152,22 @@ const assertBlock = (summary) => {
   assert.ok(body.includes(summary), "the chat block contains the expected summary");
   assert.match(lines.at(-1), /^╰/);
 };
+for (const [name, args, summary] of [
+  ["web_search", { query: "Pi extension API" }, "web_search Pi extension API"],
+  ["web_fetch", { url: "https://example.com/docs" }, "web_fetch https://example.com/docs"],
+]) {
+  const row = await startCall(name, args);
+  assertBlock(summary);
+  await completeCall([...activeCallIds].at(-1), true);
+  assert.match(chatLines()[2], /\u001b\[31m•\u001b\[39m/);
+  await emit(extension, "before_provider_request");
+  advance(3000);
+  assert.deepEqual(row.render(100), [], "completed web output leaves no row");
+  // The same name alone must not opt an unrelated extension into Calm.
+  const other = { ...webTools.get(name).definition, execute: async () => ({ content: [], details: {} }) };
+  const unrelated = rowFor(name, sessionFor(name, other, "extension").getToolDefinition(name), args);
+  assert.ok(unrelated.render(100).length > 0, "unrelated same-named custom tools remain visible");
+}
 await startCall("read", { path: "src/app.ts" });
 assertBlock("read src/app.ts");
 const firstSpinner = chatLines()[2].slice(2, 3);

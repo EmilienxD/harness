@@ -55,8 +55,8 @@ export function setCalmStockExportRendering(next: boolean): void {
 
 /**
  * True while Calm should hide the supported transcript chrome: collapsed
- * thinking labels and the known Pi built-in tool call/result shells. Genuine
- * user prompts, assistant text, custom tools, and every other transcript row
+ * thinking labels, known Pi built-in tool shells, and opted-in Web Toolkit
+ * shells. Genuine user prompts, assistant text, unrelated custom tools, and every other transcript row
  * class are never filtered by this flag.
  */
 export function calmHidesTranscriptChrome(): boolean {
