@@ -123,15 +123,16 @@ browser profile and daemon identity are isolated from personal installations.
 
 `calm` additionally ships a Pi-only presentation extension in
 `harness/productivity/calm/`. Its `/calm` command persists an agent-directory preference
-without inference. It hides native tool rows and collapsed thinking labels while retaining
+without inference. It hides all tool rows and collapsed thinking labels while retaining
 Pi's normal running indicator. Version 1.2.0 shows the latest requested/executing tool's name
 and command/path in a transient chat block. Version 1.6.0 keeps each displayed call visible
 through execution and for three seconds after its completion, coalesces rapid updates to the latest
 call, and defers request/settlement clearing until that hold elapses. Native tool completion events
 replace the spinner with a green success or red failure dot. Timers never delay tool execution and are cancelled on session
 replacement, reload and shutdown. The local fork preserves the upstream MIT license and carries
-Pi 1.2.0 renderer-copy compatibility plus native PowerShell coverage. Extension and SDK tool
-overrides retain their own display. The real RPC journey verifies command effects, native
+Pi 1.2.0 renderer-copy compatibility plus native PowerShell coverage. Since 1.8.0, the common
+tool-row adapter covers every tool, including extension/SDK overrides and custom renderers,
+without registration markers. Images remain visible, and disabling Calm restores native rendering. The real RPC journey verifies command effects, native
 tool execution and exact request counts; component checks verify row hiding, restoration,
 reasoning expansion, image preservation and reload against the installed Pi SDK.
 

@@ -6,11 +6,11 @@ import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { mock } from "node:test";
 
-const [packageRoot, extensionPath, webToolkitPath] = process.argv.slice(2);
+const [packageRoot, extensionPath, webToolkitPath, backgroundShellPath] = process.argv.slice(2);
 const fromDist = (relative) => import(pathToFileURL(join(packageRoot, "dist", relative)).href);
 const pi = await fromDist("index.js");
 const requirePi = createRequire(join(packageRoot, "package.json"));
-const { Container, visibleWidth, stripTerminalSequences, wrapTextWithAnsi, truncateToWidth } = await import(pathToFileURL(requirePi.resolve("@earendil-works/pi-tui")).href);
+const { Container, Text, visibleWidth, stripTerminalSequences, wrapTextWithAnsi, truncateToWidth } = await import(pathToFileURL(requirePi.resolve("@earendil-works/pi-tui")).href);
 const { loadExtensions } = await fromDist("core/extensions/loader.js");
 const { withBuiltInRenderers } = await fromDist("core/tools/renderers/index.js");
 pi.initTheme("dark", false);
@@ -60,7 +60,9 @@ async function load() {
   await emit(loaded.extensions[0], "session_start");
   return loaded.extensions[0];
 }
+const registryLookup = pi.AgentSession.prototype.getToolDefinition;
 let extension = await load();
+assert.equal(pi.AgentSession.prototype.getToolDefinition, registryLookup, "Calm does not patch tool lookup");
 assert.equal(hiddenLabel, "");
 let now = 0;
 mock.method(performance, "now", () => now);
@@ -77,8 +79,8 @@ function sessionFor(name, definition, source = "builtin", sdkOverride = false) {
 function rowFor(name, definition, args, id = `check-${name}`) {
   // This is the actual merge performed by Pi 1.2's interactive view.
   const renderers = withBuiltInRenderers(name, definition);
-  if (!name.startsWith("web_")) assert.notEqual(renderers, definition);
-  assert.equal(renderers.execute, definition.execute);
+  if (cases.some(([builtin]) => builtin === name) && !name.startsWith("web_")) assert.notEqual(renderers, definition);
+  assert.equal(renderers?.execute, definition?.execute);
   return new pi.ToolExecutionComponent(name, id, args, {}, renderers,
     { requestRender() { redraws++; } }, process.cwd());
 }
@@ -103,6 +105,24 @@ for (const [name, args] of [
   cases.push([name, () => webTools.get(name).definition, args]);
 }
 const rows = [];
+const backgroundShell = await loadExtensions([backgroundShellPath], process.cwd());
+assert.deepEqual(backgroundShell.errors, []);
+for (const [name, tool] of backgroundShell.extensions[0].tools) {
+  if (name !== "bash" && name !== "powershell") continue;
+  const definition = tool.definition;
+  const args = { command: "echo fixture", run_in_background: true };
+  const row = rowFor(name, sessionFor(name, definition, "extension").getToolDefinition(name), args);
+  assert.deepEqual(row.render(100), [], `${name}: hide Background Shell call`);
+  row.updateResult({ content: [{ type: "text", text: "private shell output" }], isError: false }, false);
+  assert.deepEqual(row.render(100), [], `${name}: hide Background Shell result`);
+  await emit(extension, "tool_execution_start", { toolName: name, args, toolCallId: `check-${name}` });
+  assert.ok(row.render(100).join("\n").includes("echo fixture"), `${name}: display Background Shell summary`);
+  await emit(extension, "session_start");
+  rows.push(row);
+  const unrelated = { ...definition, execute: async () => ({ content: [], details: {} }) };
+  assert.deepEqual(rowFor(name, sessionFor(name, unrelated, "extension").getToolDefinition(name), args).render(100), [],
+    "unmarked shell overrides are hidden too");
+}
 for (const [name, factory, args] of cases) {
   const definition = factory(process.cwd());
   const session = sessionFor(name, definition, name.startsWith("web_") ? "extension" : "builtin");
@@ -115,6 +135,24 @@ for (const [name, factory, args] of cases) {
   assert.equal(row.render(100).length, 0, `${name}: hide expanded result`);
   rows.push(row);
 }
+for (const renderShell of ["default", "self", undefined]) {
+  const name = `custom_${renderShell ?? "unavailable"}`;
+  const definition = renderShell ? {
+    name, execute: async () => ({ content: [], details: {} }), renderShell,
+    renderCall: () => new Text("custom call framing", 0, 0),
+    renderResult: () => new Text("private custom result", 0, 0),
+  } : undefined;
+  const row = rowFor(name, definition, { path: "custom.ts" });
+  assert.deepEqual(row.render(100), [], `${name}: hide custom or fallback call`);
+  row.updateResult({ content: [{ type: "text", text: "private fallback output" }], isError: false }, false);
+  row.setExpanded(true);
+  assert.deepEqual(row.render(100), [], `${name}: hide expanded custom or fallback result`);
+  await emit(extension, "tool_execution_start", { toolName: name, toolCallId: `check-${name}`, args: { path: "custom.ts" } });
+  assert.ok(row.render(100).join("\n").includes(`${name} custom.ts`), "arbitrary tool gets a summary");
+  await emit(extension, "session_start");
+  rows.push(row);
+}
+assert.equal(pi.AgentSession.prototype.getToolDefinition, registryLookup, "tool lookup remains unchanged");
 for (const event of ["agent_start", "agent_end", "agent_settled"]) await emit(extension, event);
 
 const callRows = new Map();
@@ -163,10 +201,10 @@ for (const [name, args, summary] of [
   await emit(extension, "before_provider_request");
   advance(3000);
   assert.deepEqual(row.render(100), [], "completed web output leaves no row");
-  // The same name alone must not opt an unrelated extension into Calm.
+  // Unmarked same-named extensions are covered too.
   const other = { ...webTools.get(name).definition, execute: async () => ({ content: [], details: {} }) };
   const unrelated = rowFor(name, sessionFor(name, other, "extension").getToolDefinition(name), args);
-  assert.ok(unrelated.render(100).length > 0, "unrelated same-named custom tools remain visible");
+  assert.deepEqual(unrelated.render(100), [], "unmarked same-named custom tools are hidden");
 }
 await startCall("read", { path: "src/app.ts" });
 assertBlock("read src/app.ts");
@@ -310,15 +348,15 @@ advance(3000);
 assert.deepEqual(chatLines(), []);
 for (const row of rows) assert.equal(row.render(100).length, 0);
 
-// Overrides have their own presentation and must not be mistaken for native tools.
+// SDK and extension overrides are filtered without touching their definitions.
 for (const source of ["extension", "sdk"]) {
   const definition = { ...pi.createReadTool(process.cwd()), execute: async () => ({ content: [], details: {} }) };
   const session = sessionFor("read", definition, source);
-  assert.ok(rowFor("read", session.getToolDefinition("read"), { path: "fixture" }).render(100).length > 0);
+  assert.deepEqual(rowFor("read", session.getToolDefinition("read"), { path: "fixture" }).render(100), []);
 }
 const sdkDefinition = pi.createReadTool(process.cwd());
 const sdkSession = sessionFor("read", sdkDefinition, "builtin", true);
-assert.ok(rowFor("read", sdkSession.getToolDefinition("read"), { path: "fixture" }).render(100).length > 0);
+assert.deepEqual(rowFor("read", sdkSession.getToolDefinition("read"), { path: "fixture" }).render(100), []);
 rows[0].imageComponents = [{ render: () => ["image remains visible"] }];
 assert.deepEqual(rows[0].render(100), ["image remains visible"]);
 rows[0].imageComponents = [];

@@ -183,7 +183,7 @@ export default function (pi: ExtensionAPI): void {
   });
 
   pi.registerCommand("calm", {
-    description: "Toggle Calm: show the latest tool call in a transient chat block and hide built-in and Web Toolkit output.",
+    description: "Toggle Calm: show the latest tool call in a transient chat block and hide all tool output.",
     handler: async (_args, ctx) => {
       const active = !calmPresentationIsActive();
       persistCalmPreference(active);

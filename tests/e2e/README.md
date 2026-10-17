@@ -137,7 +137,9 @@ The real Pi RPC journey checks zero-inference `/calm` preference changes, restar
 native write/read effects, exact inference counts and receipt-driven removal.
 An isolated child loads the installed payload through Pi's real extension loader and checks
 all eight native tool rows through Pi 1.2's renderer merge. It verifies streaming/completed
-row hiding, exact restoration, reasoning expansion, images, custom/SDK override preservation,
+row hiding for native tools, Background Shell, unmarked custom tools, SDK overrides, custom
+self-framed renderers and unavailable-tool fallback rows, plus summary rendering, exact
+restoration, reasoning expansion and images,
 reload and listener disposal. UI calls that replace the native working display fail the check.
 The actual tool-row component renders the latest summary as a transient chat block;
 checks cover streaming arguments, three-second holds after tool completion using a controlled monotonic clock,
