@@ -12,7 +12,7 @@ import {
 } from "./bridge/server.js";
 import { createTerminalRoutes } from "./bridge/terminal-routes.js";
 import { CommandTerminalService, createCommandRoutes, type CommandTerminalId } from "./bridge/command-terminals.js";
-import { createDelegationRoutes, delegationParentSession, readDelegationBinding, resumeInOpenTerminal } from "./bridge/manual-delegation.js";
+import { createDelegationRoutes, delegationParentSession, providerSession, readDelegationBinding, resumeInOpenTerminal } from "./bridge/manual-delegation.js";
 import { FileCommandEndpointRegistry, commandEndpointDirectory } from "./bridge/command-endpoint.js";
 import { TerminalController, type TerminalHandle } from "./platform/terminals.js";
 import type { TerminalId } from "./domain/contracts.js";
@@ -336,6 +336,16 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
       terminals.show(terminalId);
     },
   }));
+  // A visible child opens as a tab beside its parent agent rather than in
+  // whichever editor group the user happens to be working in.
+  const parentEditorPane = async (parentSessionId: string | undefined): Promise<{ readonly editorPane?: object }> => {
+    if (parentSessionId === undefined) return {};
+    const sessionId = await providerSession(delegationStateDirectory, parentSessionId).catch(() => parentSessionId);
+    const parent = fleet.getBySession(sessionId as SessionId);
+    const terminalId = parent === undefined ? undefined : terminals.liveTerminalForAgent(parent.identity.agentId);
+    const editorPane = terminalId === undefined ? undefined : await terminals.editorPaneOf(terminalId).catch(() => undefined);
+    return editorPane === undefined ? {} : { editorPane };
+  };
   const activityListeners = new Set<() => void>();
   const activity = new ActivityRecorder({
     store: new FileActivityStore(runtime.root, runtimeAdmission),
@@ -766,6 +776,7 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
           ? await parentTerminalUri(request.harnessSessionId)
           : undefined;
         return coordinator.launchManual({
+          ...(request.executionMode === "auto" ? {} : await parentEditorPane(request.parentSessionId)),
           ...(request.effort === undefined ? {} : { effort: request.effort }),
           ...(request.model === undefined ? {} : { model: request.model }),
           requestId: request.requestId,
@@ -808,6 +819,7 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
         if (request.forkSessionId !== undefined) {
           const configured = await launchFile.getDelegationFor(binding.provider, binding.task);
           return coordinator.launchManual({
+            ...(binding.executionMode === "auto" ? {} : await parentEditorPane(binding.parentSessionId)),
             ...(request.effort === undefined ? {} : { effort: request.effort }),
             ...(request.model === undefined ? {} : { model: request.model }),
             forkSessionId: request.forkSessionId as SessionId,
@@ -824,6 +836,7 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
         }
         if (lockMarkerLive(lockPath)) throw new Error("Delegated execution is running or uncertain; resume refused");
         return coordinator.reopen({
+          ...(binding.executionMode === "auto" ? {} : await parentEditorPane(binding.parentSessionId)),
           ...(request.effort === undefined ? {} : { effort: request.effort }),
           ...(request.model === undefined ? {} : { model: request.model }),
           platform: binding.provider, agentId: binding.agentId as AgentId, type: binding.type,

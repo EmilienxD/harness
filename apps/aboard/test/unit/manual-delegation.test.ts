@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { createDelegationRoutes, continueHarnessDelegation, delegationParentSession } from "../../src/bridge/manual-delegation.js";
+import { createDelegationRoutes, continueHarnessDelegation, delegationParentSession, providerSession } from "../../src/bridge/manual-delegation.js";
 
 test("manual delegation forwards an explicit model and omits it otherwise", async () => {
   const launches: unknown[] = [];
@@ -308,5 +308,8 @@ test("a delegated child resolves the saved parent session for an explicit termin
 
     assert.equal(await delegationParentSession(root, "stable-child"), "native-parent");
     assert.equal(await delegationParentSession(root, "missing-child"), undefined);
+    // A grandchild's parent is this delegated child, running under its own provider session.
+    assert.equal(await providerSession(root, "stable-child"), "native-child");
+    assert.equal(await providerSession(root, "native-parent"), "native-parent");
   } finally { await rm(root, { recursive: true, force: true }); }
 });

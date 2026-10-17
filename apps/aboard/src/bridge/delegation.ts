@@ -96,6 +96,7 @@ export interface AutomatedLaunchOutcome {
 }
 
 export interface ReopenTarget {
+  readonly editorPane?: object;
   readonly model?: string;
   readonly effort?: RequestedEffort;
   readonly harnessStateDirectory?: string;
@@ -365,6 +366,7 @@ export class DelegationCoordinator {
         sessionId: target.sessionId,
         agentType: target.type,
         provider: target.platform,
+        ...(target.editorPane === undefined ? {} : { editorPane: target.editorPane }),
         ...(target.issueNumbers === undefined ? {} : { issueNumbers: target.issueNumbers }),
         ...(target.completionCommitStartingSha === undefined ? {} : { completionCommitStartingSha: target.completionCommitStartingSha }),
         ...(target.reviewRange === undefined ? {} : { reviewRange: target.reviewRange }),

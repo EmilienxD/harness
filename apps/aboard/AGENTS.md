@@ -80,6 +80,8 @@ fleet and terminals. Startup handoffs carry project, owner,
 and request identities; use the durable request journal before launch effects and keep uncertain requests
 from being replayed. Apply geometry only for an explicit Launch layout request or new-window startup.
 After launch, user rearrangements remain authoritative; Run Agent adds one tab without applying a grid.
+Visible delegations open as a tab in their live parent terminal's group. VS Code exposes no
+terminal-to-tab mapping, so `terminalPane` reveals the parent and observes the group VS Code activates.
 
 Difficulty routing:
 

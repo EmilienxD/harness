@@ -1,4 +1,4 @@
-import { ConfigurationTarget, ThemeIcon, commands, window, workspace, type ViewColumn } from "vscode";
+import { ConfigurationTarget, TabInputTerminal, ThemeIcon, commands, window, workspace, type TabGroup, type Terminal, type ViewColumn } from "vscode";
 
 import type { TerminalHost } from "../platform/terminals.js";
 
@@ -22,6 +22,39 @@ export async function initializeAgentLayout(columns: number, rows: number): Prom
   return captureEditorPanes();
 }
 
+/**
+ * The editor group showing a terminal. VS Code exposes no terminal-to-tab
+ * mapping, so reveal the terminal and read the group VS Code activates for it.
+ * Undefined means no other group was activated: the terminal is in the active
+ * group or the panel, and callers fall back to the active group.
+ */
+export async function terminalPane(terminal: Terminal, timeoutMs = 1_000): Promise<TabGroup | undefined> {
+  const showing = () => window.activeTerminal === terminal && window.tabGroups.activeTabGroup.activeTab?.input instanceof TabInputTerminal;
+  // A new terminal becomes active even in the panel, so only an editor terminal
+  // whose title is on the active tab is taken as already shown; any other
+  // reveal is observed below.
+  const location = "location" in terminal.creationOptions ? terminal.creationOptions.location : undefined;
+  if (showing() && typeof location === "object" && "viewColumn" in location && window.tabGroups.activeTabGroup.activeTab?.label === terminal.name) return window.tabGroups.activeTabGroup;
+  const before = window.tabGroups.activeTabGroup;
+  return new Promise((resolve) => {
+    const subscriptions: { dispose(): void }[] = [];
+    const finish = (group: TabGroup | undefined) => {
+      clearTimeout(timer);
+      for (const subscription of subscriptions) subscription.dispose();
+      resolve(group);
+    };
+    // Terminal focus and group activation arrive as separate events, while
+    // starting terminals flip active tabs within groups. Only the group
+    // activation identifies the terminal's own group.
+    const check = () => {
+      if (showing() && window.tabGroups.activeTabGroup !== before) finish(window.tabGroups.activeTabGroup);
+    };
+    const timer = setTimeout(() => finish(undefined), timeoutMs);
+    subscriptions.push(window.onDidChangeActiveTerminal(check), window.tabGroups.onDidChangeTabGroups(check));
+    terminal.show(false);
+  });
+}
+
 function destinationPane(preferred: object | undefined): ViewColumn {
   return (window.tabGroups.all.find((group) => group === preferred) ?? window.tabGroups.activeTabGroup).viewColumn;
 }
@@ -41,5 +74,9 @@ export function createVsCodeTerminalHost(): TerminalHost {
       ...(options.shellArgs === undefined ? {} : { shellArgs: [...options.shellArgs] }),
     }),
     onDidCloseTerminal: (listener) => window.onDidCloseTerminal(listener),
+    editorPaneOf: async (handle) => {
+      const terminal = window.terminals.find((candidate) => candidate === handle);
+      return terminal === undefined ? undefined : terminalPane(terminal);
+    },
   };
 }

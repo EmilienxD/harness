@@ -3,7 +3,7 @@ import { existsSync } from "node:fs";
 import { access, readFile, readdir, rm } from "node:fs/promises";
 import { delimiter, join } from "node:path";
 
-import { TabInputTerminal, TabInputText, Uri, commands, extensions, window, workspace } from "vscode";
+import { TabInputTerminal, TabInputText, TerminalLocation, Uri, commands, extensions, window, workspace, type TabGroup, type Terminal } from "vscode";
 
 import type { AgentId, AgentSession, IsoTimestamp, SessionId, TerminalId } from "../../../src/domain/contracts.js";
 import { FleetRegistry } from "../../../src/domain/fleet.js";
@@ -141,6 +141,51 @@ export async function run(): Promise<void> {
     }
   }
   await eventually(() => window.tabGroups.all.every((group) => terminalCount(group) === 0), "layout probes did not close");
+
+  // A delegated child joins its parent's group as a tab while the user works elsewhere.
+  await initializeAgentLayout(2, 1);
+  await eventually(() => window.tabGroups.all.length === 2, "the family layout did not create two panes");
+  const [workPane, parentPane] = captureEditorPanes() as [TabGroup, TabGroup];
+  const familyTerminals: Terminal[] = [];
+  try {
+    const parent = nativeHost.createTerminal({ ...placementOptions, editorPane: parentPane }) as Terminal;
+    const sibling = nativeHost.createTerminal({ ...placementOptions, editorPane: parentPane }) as Terminal;
+    familyTerminals.push(parent, sibling);
+    const other = nativeHost.createTerminal({ ...placementOptions, editorPane: workPane }) as Terminal;
+    familyTerminals.push(other);
+    await eventually(() => terminalCount(parentPane) === 2 && terminalCount(workPane) === 1, `family terminals did not open in their panes: ${window.tabGroups.all.map(terminalCount).join("/")}`);
+    other.show(false);
+    await eventually(() => window.activeTerminal === other && window.tabGroups.activeTabGroup === workPane, "the user's terminal did not take focus");
+    const located = await nativeHost.editorPaneOf!(parent);
+    assert.equal(located, parentPane, "a background parent tab in another group is located");
+    familyTerminals.push(nativeHost.createTerminal({ ...placementOptions, editorPane: located }) as Terminal);
+    await eventually(() => terminalCount(parentPane) === 3, "the child did not open as a tab in its parent's group");
+    assert.equal(terminalCount(workPane), 1, "the group the user worked in gains no child");
+    assert.equal(window.tabGroups.all.length, 2, "the child does not split a new group");
+
+    await window.showTextDocument(document, { viewColumn: workPane.viewColumn });
+    await eventually(() => window.tabGroups.activeTabGroup === workPane && window.tabGroups.activeTabGroup.activeTab?.input instanceof TabInputText, "the user's editor did not take focus");
+    assert.equal(await nativeHost.editorPaneOf!(parent), parentPane, "the parent is located while a text editor has focus");
+    assert.equal(await nativeHost.editorPaneOf!(parent), parentPane, "an already focused parent is located immediately");
+
+    // Within the user's own group no other group activates; the active-group fallback is the parent's.
+    sibling.show(false);
+    await eventually(() => window.activeTerminal === sibling && window.tabGroups.activeTabGroup === parentPane, "the sibling did not take focus");
+    assert.equal(await nativeHost.editorPaneOf!(parent), undefined, "a parent in the active group activates no other group");
+    assert.equal(window.tabGroups.activeTabGroup, parentPane, "the fallback group is the parent's");
+
+    const panel = window.createTerminal({ cwd: root, location: TerminalLocation.Panel });
+    familyTerminals.push(panel);
+    await panel.processId;
+    assert.equal(await nativeHost.editorPaneOf!(panel), undefined, "a panel parent has no editor group");
+  } finally {
+    for (const terminal of familyTerminals) {
+      terminal.dispose();
+      await eventually(() => !window.terminals.includes(terminal), "a family terminal did not close");
+    }
+  }
+  await eventually(() => window.tabGroups.all.every((group) => terminalCount(group) === 0), "family terminals did not close");
+
   await initializeAgentLayout(1, 2);
   await commands.executeCommand("vscode.setEditorLayout", { orientation: 1, groups: [{ size: 0.25 }, { size: 0.75 }] });
   const placementLayout = await commands.executeCommand("vscode.getEditorLayout");

@@ -21,7 +21,8 @@ Codex session as an editor terminal in the current window's active editor group,
 files in a new window and apply the preset grid once. Choose **Current window** to apply the grid in the
 current window and start terminals in their assigned panes, keeping existing editors and terminals open.
 The default preset has two vertically stacked
-Codex terminals.
+Codex terminals. A visible subagent opens as a new tab in its parent agent's editor group, even when you are
+working in another pane.
 
 Presets describe an initial grid using **Columns** and **Rows**, with up to nine panes. Each pane contains
 terminal tabs. Select a pane to edit its providers; **Empty** opens a regular terminal using your default shell.

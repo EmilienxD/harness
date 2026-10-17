@@ -92,6 +92,8 @@ export interface TerminalHost {
   createTerminal(options: TerminalCreationOptions): TerminalHandle;
   createBackgroundProcess?(options: TerminalCreationOptions): TerminalHandle;
   onDidCloseTerminal(listener: (terminal: TerminalHandle) => void): { dispose(): void };
+  /** Another editor group showing a terminal; undefined when it is in the active group or the panel. */
+  editorPaneOf?(terminal: TerminalHandle): Promise<object | undefined>;
 }
 
 export interface BridgeTerminalEnvironment {
@@ -423,6 +425,13 @@ export class TerminalController {
 
   public show(terminalId: TerminalId): void {
     this.#requireOpenHandle(terminalId).show(false);
+  }
+
+  /** Locating the pane reveals and focuses the terminal. */
+  public async editorPaneOf(terminalId: TerminalId): Promise<object | undefined> {
+    const record = this.#records.get(terminalId);
+    if (record?.status !== "open" || record.backend === "process" || record.handle === undefined) return undefined;
+    return this.options.host.editorPaneOf?.(record.handle);
   }
 
   public kill(terminalId: TerminalId): void {

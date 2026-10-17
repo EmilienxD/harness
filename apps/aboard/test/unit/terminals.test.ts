@@ -37,7 +37,12 @@ class FakeTerminal implements TerminalHandle {
 
 class FakeTerminalHost implements TerminalHost {
   public readonly created: Array<{ options: TerminalCreationOptions; terminal: FakeTerminal }> = [];
+  public readonly panes = new Map<TerminalHandle, object>();
   #listener: ((terminal: TerminalHandle) => void) | undefined;
+
+  public async editorPaneOf(terminal: TerminalHandle): Promise<object | undefined> {
+    return this.panes.get(terminal);
+  }
 
   public createBackgroundProcess(options: TerminalCreationOptions): TerminalHandle {
     return this.createTerminal(options);
@@ -92,6 +97,19 @@ test("loop implementers have visible worktree terminals with the loop environmen
   assert.equal(host.created[0]?.options.env.HARNESS_SESSION_ID, "child");
   assert.equal(host.created[0]?.options.env.HARNESS_EXECUTION_ID, "execution");
   assert.equal(host.created[0]?.options.env.HARNESS_STATE_DIR, "C:\\state");
+});
+
+test("only an open visible terminal has an editor pane", async () => {
+  const { controller, host } = setup();
+  const pane = {};
+  const visible = controller.create({ agentId: agent("parent"), sessionId: session("parent"), agentType: "interactive", provider: "claude" });
+  const headless = controller.create({ agentId: agent("worker"), sessionId: session("worker"), agentType: "general", executionMode: "auto", provider: "claude" });
+  for (const { terminal } of host.created) host.panes.set(terminal, pane);
+
+  assert.equal(await controller.editorPaneOf(visible.terminalId), pane);
+  assert.equal(await controller.editorPaneOf(headless.terminalId), undefined);
+  host.close(host.created[0]!.terminal);
+  assert.equal(await controller.editorPaneOf(visible.terminalId), undefined);
 });
 
 test("restoring a native terminal adopts its existing process without commands or focus and retains control", () => {

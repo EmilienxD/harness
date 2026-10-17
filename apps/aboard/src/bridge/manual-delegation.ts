@@ -119,9 +119,12 @@ export async function readDelegationBinding(directory: string, sessionId: string
 /** Resolve a delegated child to the provider session owned by its parent terminal. */
 export async function delegationParentSession(directory: string, childSessionId: string): Promise<string | undefined> {
   const child = await readDelegationBinding(directory, childSessionId);
-  if (child?.parentSessionId === undefined) return undefined;
-  const delegatedParent = await readDelegationBinding(directory, child.parentSessionId);
-  return delegatedParent?.sessionId ?? child.parentSessionId;
+  return child?.parentSessionId === undefined ? undefined : providerSession(directory, child.parentSessionId);
+}
+
+/** A delegated Harness session runs under its own provider session; an observed one shares its ID. */
+export async function providerSession(directory: string, harnessSessionId: string): Promise<string> {
+  return (await readDelegationBinding(directory, harnessSessionId))?.sessionId ?? harnessSessionId;
 }
 
 export async function continueHarnessDelegation(
