@@ -1,12 +1,28 @@
 import assert from "node:assert/strict";
+import { execFile } from "node:child_process";
 import { existsSync } from "node:fs";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { mkdir, readFile, realpath, writeFile } from "node:fs/promises";
+import { dirname, join } from "node:path";
+import { promisify } from "node:util";
 import { setTimeout as delay } from "node:timers/promises";
-import { runFixtureInstaller } from "../../core/installer.js";
+import { findHarnessRoot, runFixtureInstaller } from "../../core/installer.js";
+import { spawnableCommand } from "../../core/path.js";
 import { createPiFixture } from "../../core/pi-fixture.js";
 import { type PiScenarioStep } from "../../core/pi-scenario.js";
 import { backgroundScenario, marker } from "./scenario.js";
+
+async function piPackageRoot(): Promise<string> {
+  const command = spawnableCommand("pi", []);
+  let root = dirname(await realpath(command.args[0] ?? command.file));
+  while (true) {
+    try {
+      if (JSON.parse(await readFile(join(root, "package.json"), "utf8")).name === "@earendil-works/pi-coding-agent") return root;
+    } catch { /* ascend from the CLI entry */ }
+    const parent = dirname(root);
+    if (parent === root) throw new Error("Background shell component checks require Pi's installed npm SDK");
+    root = parent;
+  }
+}
 
 const worker = `
 const fs = require('node:fs');
@@ -122,11 +138,19 @@ export async function runPiBackgroundShellJourney(scope: "project" | "user", she
     await runFixtureInstaller(workspace, "install", ["background-shell"], { scope, dryRun: true });
     assert.equal(existsSync(extension), false);
     await runFixtureInstaller(workspace, "install", ["background-shell"], { scope });
+    if (scope === "project") {
+      await promisify(execFile)(process.execPath, [join(await findHarnessRoot(), "tests/e2e/tools/pi-background-shell/behavior-check.mjs"),
+        await piPackageRoot(), extension], { cwd: project, env: workspace.env, windowsHide: true, timeout: 30000 });
+    }
     const repeat = await runFixtureInstaller(workspace, "install", ["background-shell"], { scope });
     assert.equal((repeat.results as { status: string }[])[0]!.status, "unchanged");
     await runFixtureInstaller(workspace, "install", ["command-guard"]);
     await writeFile(join(project, ".harness/guards/command-guard.toml"), 'version = 1\n[[rules]]\nreason = "E2E denied"\npatterns = ["forbidden-marker"]\n');
     const rpc = fixture.rpc({ timeoutMs: 150000 });
+    const discovery = await rpc.request("get_commands");
+    assert.ok((discovery.data as { commands: { name: string }[] }).commands.some(({ name }) => name === "ps"));
+    assert.equal((await rpc.prompt("/ps")).status, "handled");
+    assert.equal(fixture.assertions().inferenceRequests, 0);
     let expectedRequests = 0;
     async function prompt(route: string, errors: boolean[] = [false]) {
       const run = await rpc.prompt(marker(route));
@@ -217,15 +241,14 @@ export async function runPiBackgroundShellJourney(scope: "project" | "user", she
     assert.equal(existsSync(join(project, "started-invalid.json")), false);
     await prompt("nested-denied", [true, true]); expectedRequests--;
     assert.equal(existsSync(join(project, "started-nested-denied.json")), false);
-    await prompt("cancel");
+    const cancellationLaunch = await prompt("cancel");
+    const cancelled = (cancellationLaunch.events.filter(event => event.type === "tool_execution_end").at(-1)!.result as { structuredContent: { log_path: string } }).structuredContent;
     await until(() => existsSync(join(project, "child-cancel.json")), "Background child never started");
-    await prompt("cancel-now");
-    await until(() => existsSync(join(project, "completion-cancel.json")), "Cancellation notification did not arrive");
-    const cancelled = JSON.parse(await readFile(join(project, "completion-cancel.json"), "utf8"));
-    assert.equal(cancelled.state, "cancelled"); assert.equal(cancelled.exit_code, null);
-    expectedRequests += 2;
-    await until(() => fixture.assertions().inferenceRequests === expectedRequests, "Cancellation did not settle");
+    const cancellation = await prompt("cancel-now");
+    const finalCancellation = (cancellation.events.filter(event => event.type === "tool_execution_end").at(-1)!.result as { structuredContent: { state: string; exit_code: number | null } }).structuredContent;
+    assert.equal(finalCancellation.state, "cancelled"); assert.equal(finalCancellation.exit_code, null);
     await idle();
+    assert.equal(existsSync(join(project, "completion-cancel.json")), false, "Tool cancellation consumes the automatic follow-up");
     await prompt("reload");
     await until(() => existsSync(join(project, "child-reload.json")), "Reload child never started");
     assert.equal((await rpc.prompt("/bg-reload")).status, "handled");
@@ -258,6 +281,7 @@ export async function runPiBackgroundShellJourney(scope: "project" | "user", she
     assert.equal(fixture.assertions().inferenceRequests, expectedRequests);
     await runFixtureInstaller(workspace, "uninstall", ["background-shell"], { scope });
     assert.equal(existsSync(extension), false);
+    assert.equal(existsSync(join(dirname(extension), "ui.ts")), false);
     return { scope, shell, version: fixture.version, requests: expectedRequests };
   } finally { await fixture.close(); }
 }

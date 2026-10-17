@@ -157,6 +157,11 @@ log limits, command-guard denial before launch, invalid arguments, process-tree 
 reload, tree-navigation, session-switch and shutdown cleanup, nested execution and guard denial,
 exact inference counts, unchanged project settings/instructions, and
 receipt-driven uninstall. All provider traffic stays on the authenticated fake loopback endpoint.
+The `/ps` command is discovered and handled without inference. A tool cancellation returns its
+final state directly without an automatic duplicate. Project acceptance also runs eleven
+component/real-process checks against the installed Pi SDK: selector navigation, cancellation
+and reopening, editor replacement/restoration, bounded wrapping/scrolling, key-release filtering,
+native fullscreen Page Up/Down and wheel dispatch, pending-result consumption, and delivery retry.
 `npm run e2e:pi-background-shell` is the corresponding CLI journey.
 
 ## Reusable boundaries

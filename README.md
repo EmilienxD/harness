@@ -594,6 +594,17 @@ The optional Windows `powershell` tool follows your existing tool selection; ins
 package does not switch Bash commands to PowerShell syntax.
 
 `shell_job` lists jobs, reads status or recent output, and cancels a job with its process tree.
+The optional `title` parameter gives commands a short label. In Pi's terminal UI, `/ps` opens
+a command selector beneath a single separator, replacing the input bar until the menu closes.
+Use arrows and Enter to inspect a job, Page Up/Down or the mouse wheel over the shell to scroll,
+and `x` to stop it and return to the selector. Escape returns to the list or closes the menu.
+Cancelled jobs stay visible until the menu closes, then disappear from the next selection.
+The panel grows to fit its content up to 20 rows or 45% of the terminal height; command text
+wraps across up to three rows. Press `l` to load the retained log or `f` to follow recent output.
+Closing the menu restores the previous input editor and draft. Mouse scrolling requires Pi's
+fullscreen mode. Completion messages show status and recent output; tool calls that already
+return a final status consume pending notifications for that job.
+
 It retains the last 8 KiB of decoded output and the first 16 MiB in a private temporary log,
 with truncation reported explicitly. At most eight shell commands run concurrently (including
 commands waiting in the foreground), and 64 background job receipts

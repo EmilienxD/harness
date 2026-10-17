@@ -143,6 +143,12 @@ Version 2.0.0 automatically moves foreground commands to the background when the
 expires (`timeout`, default 120 seconds), preserving the running process and output from launch.
 `execution_timeout` sets an optional hard deadline from launch, including time after handoff;
 explicitly backgrounded commands retain their optional hard `timeout` deadline.
+Version 2.1.0 adds optional job titles, a running count, compact completion rendering and `/ps`.
+Its bounded selector/output panel replaces the editor beneath one separator, restoring the
+previous editor and draft on close. Native fullscreen chat paging is disabled in memory only
+while the menu is open; the panel handles Page Up/Down and normalized wheel events over its
+output. Cancelled rows disappear on reopening. Final tool results consume pending notifications;
+failed submissions retain their receipts for capped retries and settlement-triggered delivery.
 It has no npm or shared Python dependency and installs through ordinary extension file mappings,
 without instruction or configuration fragments. Background jobs are scoped to the live session;
 reload, tree navigation, session changes, and shutdown cancel jobs and discard logs.

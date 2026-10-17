@@ -8,9 +8,11 @@ import {
   createBashToolDefinition, createPowerShellToolDefinition,
   createLocalBashOperations, createLocalPowerShellOperations,
   getAgentDir, SettingsManager,
-  type BashOperations, type BashToolDetails, type ExtensionAPI, type ExtensionToolContext,
+  type BashOperations, type BashToolDetails, type ExtensionAPI, type ExtensionToolContext, type ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
+import { Text } from "@earendil-works/pi-tui";
+import { openJobPanel, clean, jobLabel } from "./ui.ts";
 import type { JsonValue } from "@earendil-works/pi-ai";
 
 const MAX_LOG = 16 * 1024 * 1024;
@@ -29,10 +31,10 @@ type Shell = "bash" | "powershell";
 type State = "running" | "completed" | "failed" | "cancelled" | "timed_out";
 type ShellExecution = ReturnType<typeof createBashToolDefinition>["execute"];
 interface ShellInput {
-  command: string; timeout?: number; execution_timeout?: number; run_in_background?: boolean;
+  command: string; title?: string; timeout?: number; execution_timeout?: number; run_in_background?: boolean;
 }
 interface Job {
-  id: string; shell: Shell; command: string; state: State;
+  id: string; shell: Shell; command: string; title: string; state: State;
   started: number; ended?: number; exitCode: number | null;
   logPath: string; logBytes: number; truncated: boolean; tail: string;
   controller: AbortController; done: Promise<void>; epoch: number; background: boolean;
@@ -45,10 +47,34 @@ export default function (pi: ExtensionAPI): void {
   let epoch = 0;
   let noticeTimer: ReturnType<typeof setTimeout> | undefined;
   let noticeAttempts = 0;
+  let context: ExtensionContext | undefined;
+  let stopping = false;
+  let widgetCount = -1;
+  const consumed = new Set<string>();
+  const listeners = new Set<() => void>();
+  let closePanel: (() => void) | undefined;
+  function refresh() {
+    for (const listener of listeners) { try { listener(); } catch { /* A closed viewer must not interrupt execution. */ } }
+    if (context?.mode !== "tui") return;
+    const count = [...jobs.values()].filter(j => j.background && !j.ended).length;
+    if (count === widgetCount) return;
+    widgetCount = count;
+    context.ui.setWidget("harness-background-shell", count ? [`${count} background job${count === 1 ? "" : "s"} running \u00b7 /ps to inspect or stop`] : undefined);
+  }
+  function consume(job: Job) {
+    notices.delete(job.id);
+    if (!job.ended) consumed.add(job.id);
+  }
+  async function cancel(job: Job, reportInTool: boolean) {
+    if (reportInTool) consume(job);
+    if (job.state === "running") { job.state = "cancelled"; job.controller.abort(); }
+    await job.done;
+    refresh();
+  }
 
   function summary(job: Job) {
     return {
-      id: job.id, shell: job.shell, state: job.state, exit_code: job.exitCode,
+      id: job.id, shell: job.shell, title: job.title, state: job.state, exit_code: job.exitCode,
       command: job.command.slice(0, 240),
       elapsed_seconds: Math.round(((job.ended ?? Date.now()) - job.started) / 100) / 10,
       log_path: job.logPath, log_truncated: job.truncated,
@@ -58,14 +84,14 @@ export default function (pi: ExtensionAPI): void {
     return { content: [{ type: "text" as const, text: JSON.stringify(value) }], details: value, structuredContent: value, isError };
   }
   function queueNotice(job: Job) {
-    if (job.epoch !== epoch) return;
+    if (job.epoch !== epoch || stopping || consumed.delete(job.id)) return;
     notices.set(job.id, job);
     noticeTimer ??= setTimeout(deliver, 100);
   }
   function deliver() {
     noticeTimer = undefined;
     const completed = [...notices.values()].filter((job) => job.epoch === epoch);
-    if (!completed.length) return;
+    if (!completed.length || stopping) return;
     const data = completed.map((job) => ({ ...summary(job), output: job.tail }));
     try {
       pi.sendMessage({
@@ -76,15 +102,16 @@ export default function (pi: ExtensionAPI): void {
       for (const job of completed) notices.delete(job.id);
       noticeAttempts = 0;
     } catch {
-      if (++noticeAttempts < 3) noticeTimer = setTimeout(deliver, 250 * noticeAttempts);
-      else {
-        console.error("Harness background-shell could not deliver completion; inspect shell_job status/output.");
-        notices.clear(); noticeAttempts = 0;
-      }
+      noticeAttempts++;
+      noticeTimer = setTimeout(deliver, Math.min(30000, 500 * 2 ** Math.min(noticeAttempts, 6)));
+      noticeTimer.unref?.();
     }
   }
   async function reset() {
+    closePanel?.(); closePanel = undefined;
     epoch++;
+    stopping = true;
+    consumed.clear();
     clearTimeout(noticeTimer); noticeTimer = undefined;
     notices.clear(); noticeAttempts = 0;
     const previous = [...jobs.values()];
@@ -96,10 +123,16 @@ export default function (pi: ExtensionAPI): void {
     }
     await Promise.all(previous.map((job) => job.done));
     if (previousRoot) await rm(previousRoot, { recursive: true, force: true });
+    stopping = false;
+    widgetCount = -1; refresh();
   }
-  pi.on("session_start", reset);
+  pi.on("session_start", async (_event, ctx) => { context = ctx; await reset(); });
   pi.on("session_tree", reset);
-  pi.on("session_shutdown", reset);
+  pi.on("session_shutdown", async () => { await reset(); context = undefined; });
+  pi.on("agent_settled", () => {
+    if (!notices.size) return;
+    clearTimeout(noticeTimer); noticeTimer = undefined; deliver();
+  });
 
   function definition(shell: Shell, ctx?: ExtensionToolContext, operations?: BashOperations) {
     if (shell === "powershell") return createPowerShellToolDefinition(ctx?.cwd ?? process.cwd(), { operations });
@@ -124,7 +157,7 @@ export default function (pi: ExtensionAPI): void {
     if (jobs.size >= MAX_JOBS) {
       const oldest = [...jobs.values()].find((job) => job.ended && !notices.has(job.id));
       if (!oldest) throw new Error("Background job retention is full.");
-      jobs.delete(oldest.id);
+      jobs.delete(oldest.id); consumed.delete(oldest.id);
       unlinkSync(oldest.logPath);
     }
     const native = nativeOperations(shell, ctx);
@@ -132,7 +165,7 @@ export default function (pi: ExtensionAPI): void {
     const id = `bg-${randomUUID()}`;
     const logPath = join(logRoot, `${id}.log`);
     const fd = openSync(logPath, "wx", 0o600);
-    const job: Job = { id, shell, command: args.command, state: "running", started: Date.now(), exitCode: null,
+    const job: Job = { id, shell, command: args.command, title: clean(args.title ?? args.command).replace(/\s+/g, " ").trim().slice(0, 80), state: "running", started: Date.now(), exitCode: null,
       logPath, logBytes: 0, truncated: false, tail: "", controller: new AbortController(),
       done: Promise.resolve(), epoch, background: args.run_in_background === true };
     const decoder = new StringDecoder("utf8");
@@ -149,12 +182,13 @@ export default function (pi: ExtensionAPI): void {
           }
           if (bytes.length !== chunk.length) job.truncated = true;
           if (!job.background) options.onData(chunk);
+          else refresh();
         } });
         job.exitCode = outcome.exitCode;
         return outcome;
       },
     };
-    jobs.set(id, job);
+    jobs.set(id, job); refresh();
     const cancelForeground = () => {
       if (job.state === "running") job.state = "cancelled";
       job.controller.abort();
@@ -186,6 +220,7 @@ export default function (pi: ExtensionAPI): void {
         job.ended = Date.now();
         if (job.background) queueNotice(job);
         else { jobs.delete(id); unlinkSync(logPath); }
+        refresh();
       }
     })();
     job.done = finished.then(() => {});
@@ -196,7 +231,7 @@ export default function (pi: ExtensionAPI): void {
     const moved = new Promise<undefined>((resolve) => {
       waitTimer = setTimeout(() => {
         if (job.state !== "running" || job.ended || job.epoch !== epoch || signal?.aborted) return;
-        job.background = true;
+        job.background = true; refresh();
         signal?.removeEventListener("abort", cancelForeground);
         resolve(undefined);
       }, (args.timeout ?? DEFAULT_FOREGROUND_TIMEOUT) * 1000);
@@ -213,13 +248,14 @@ export default function (pi: ExtensionAPI): void {
   }
 
   const shellSchema = Type.Object({
+    title: Type.Optional(Type.String({ description: "Short human-readable job title for /ps." })),
     command: Type.String({ minLength: 1, description: "Command in this tool's shell syntax." }),
     timeout: Type.Optional(Type.Number({ exclusiveMinimum: 0, maximum: 2147483, description: "Seconds to wait in the foreground before moving the running command to the background (default 120). With run_in_background=true, this is a hard execution deadline instead; omitted means no deadline." })),
     execution_timeout: Type.Optional(Type.Number({ exclusiveMinimum: 0, maximum: 2147483, description: "Optional hard execution deadline in seconds from launch, including time after automatic backgrounding. Terminates the process tree. If a background timeout is also supplied, the earlier deadline wins." })),
     run_in_background: Type.Optional(Type.Boolean({ description: "Return a job ID immediately and notify the agent automatically when the command exits." })),
   }, { additionalProperties: false });
   const receiptSchema = Type.Object({
-    id: Type.String(), shell: Type.String(), command: Type.String(), state: Type.String(),
+    id: Type.String(), shell: Type.String(), title: Type.String(), command: Type.String(), state: Type.String(),
     exit_code: Type.Union([Type.Integer(), Type.Null()]), elapsed_seconds: Type.Number(),
     log_path: Type.String(), log_truncated: Type.Boolean(),
     notification: Type.Optional(Type.String()), output: Type.Optional(Type.String()),
@@ -232,9 +268,11 @@ export default function (pi: ExtensionAPI): void {
       renderCall: (args, theme, context) => base.renderCall!({ ...args,
         command: args.run_in_background ? `[background] ${args.command}` : args.command,
       }, theme, context),
-      renderResult: (value, options, theme, context) => base.renderResult!({ ...value,
-        details: value.details as BashToolDetails | undefined,
-      }, options, theme, context),
+      renderResult: (value, options, theme, context) => {
+        const data = value.details as ReturnType<typeof summary> & { output?: string } | undefined;
+        if (data?.id) return new Text(jobLabel(data) + (options.expanded && data.output ? `\n${clean(data.output)}` : ""), 0, 0);
+        return base.renderResult!({ ...value, details: value.details as BashToolDetails | undefined }, options, theme, context);
+      },
       defaultActive: shell === "bash",
       description: `${base.description}\nForeground commands that exceed timeout (default 120 seconds) continue in the background without restarting; the result includes a job ID, log path and recent output. Set run_in_background=true to return immediately. Completion notifications contain exit status and recent output. Use execution_timeout for a hard deadline from launch; timeout on explicitly backgrounded calls remains a hard deadline. Use shell_job to inspect output or cancel. Jobs belong to this live session.`,
       promptSnippet: `Execute ${shell} commands in the foreground or background with completion notifications.`,
@@ -263,12 +301,35 @@ export default function (pi: ExtensionAPI): void {
       if (args.action === "list") return result({ jobs: [...jobs.values()].filter((job) => job.background).map(summary) });
       const job = args.id ? jobs.get(args.id) : undefined;
       if (!job?.background) throw new Error("Unknown background job in this session; use shell_job list.");
-      if (args.action === "cancel" && job.state === "running") {
-        job.state = "cancelled";
-        job.controller.abort();
-        await job.done;
-      }
+      if (args.action === "cancel") await cancel(job, true);
+      else if (job.ended) consume(job);
       return result({ ...summary(job), ...(args.action === "output" ? { output: job.tail } : {}) });
     },
   });
+  pi.registerMessageRenderer<{ jobs: Array<ReturnType<typeof summary> & { output?: string }> }>(
+    "harness-background-shell-completion", (message, { expanded }, theme) => {
+      const lines = (message.details?.jobs ?? []).map(job => {
+        const color = job.state === "completed" ? "success" : job.state === "cancelled" ? "muted" : "error";
+        const header = theme.fg(color, jobLabel(job));
+        const output = clean(job.output ?? "").split("\n");
+        return header + (job.output ? "\n" + output.slice(expanded ? 0 : -4).join("\n") : "");
+      });
+      return new Text(lines.join("\n\n"), 0, 0);
+    });
+  pi.registerCommand("ps", {
+    description: "Inspect, follow output, or stop this session's background jobs",
+    handler: async (_args, ctx) => {
+      if (ctx.mode !== "tui") {
+        if (ctx.hasUI) ctx.ui.notify([...jobs.values()].filter(j => j.background).map(j => jobLabel(summary(j))).join("\n") || "No background jobs.", "info");
+        return;
+      }
+      closePanel?.();
+      closePanel = openJobPanel({
+        list: () => [...jobs.values()].filter(j => j.background).map(j => ({ ...summary(j), command: j.command, output: j.tail })),
+        cancel: async id => { const job = jobs.get(id); if (job) await cancel(job, false); },
+        subscribe: listener => { listeners.add(listener); return () => { listeners.delete(listener); }; },
+      }, ctx.ui);
+    },
+  });
+
 }

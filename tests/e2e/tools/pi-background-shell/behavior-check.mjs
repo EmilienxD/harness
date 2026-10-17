@@ -1,0 +1,544 @@
+import { install, JobPanel, clean, openJobPanel, getKeybindings, ScrollView, TuiAltScreen, VStack, visibleWidth } from "./behavior-runtime.mjs";
+import assert from "node:assert/strict";
+import test from "node:test";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { existsSync } from "node:fs";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
+const pause = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+async function until(check) {
+  const end = Date.now() + 6e3;
+  while (!await check()) {
+    if (Date.now() >= end) throw new Error("Behavior deadline exceeded");
+    await pause(20);
+  }
+}
+async function fixture(run) {
+  const root = await mkdtemp(join(tmpdir(), "harness-bg-behavior-"));
+  const previous = process.env.PI_CODING_AGENT_DIR;
+  process.env.PI_CODING_AGENT_DIR = join(root, "agent");
+  const tools = new Map(), handlers = new Map(), commands = new Map(), renderers = new Map();
+  const sent = [];
+  let failures = 0;
+  const ctx = {
+    cwd: root,
+    mode: "rpc",
+    hasUI: false,
+    isIdle: () => true,
+    isProjectTrusted: () => true,
+    sessionManager: { getSessionId: () => "behavior-test", getSessionFile: () => void 0 }
+  };
+  install({
+    on: (name, handler) => handlers.set(name, handler),
+    registerTool: (tool) => tools.set(tool.name, tool),
+    registerCommand: (name, command2) => commands.set(name, command2),
+    registerMessageRenderer: (name, renderer) => renderers.set(name, renderer),
+    sendMessage: (message) => {
+      if (failures-- > 0) throw new Error("Injected delivery failure");
+      sent.push(message);
+    }
+  });
+  const call = async (tool, args) => tools.get(tool).execute("test", args, void 0, void 0, ctx);
+  try {
+    await handlers.get("session_start")({}, ctx);
+    await run({ root, tools, handlers, commands, renderers, sent, call, ctx, fail: (count) => {
+      failures = count;
+    } });
+  } finally {
+    await handlers.get("session_shutdown")();
+    if (previous === void 0) delete process.env.PI_CODING_AGENT_DIR;
+    else process.env.PI_CODING_AGENT_DIR = previous;
+    await rm(root, { recursive: true, force: true });
+  }
+}
+const shell = process.platform === "win32" ? "powershell" : "bash";
+const command = (delay) => shell === "powershell" ? `Start-Sleep -Milliseconds ${delay}; Write-Output 'final-output'` : `sleep ${delay / 1e3}; printf final-output`;
+test("delivery survives more than three failures and is emitted only once", async () => {
+  await fixture(async (f) => {
+    f.fail(100);
+    await f.call(shell, { command: command(100), run_in_background: true, title: "Retry example" });
+    await until(async () => (await f.call("shell_job", { action: "list" })).details.jobs[0].state === "completed");
+    for (let i = 0; i < 4; i++) f.handlers.get("agent_settled")();
+    assert.equal(f.sent.length, 0);
+    f.fail(0);
+    f.handlers.get("agent_settled")();
+    assert.equal(f.sent.length, 1);
+    assert.equal(f.sent[0].details.jobs[0].title, "Retry example");
+    f.handlers.get("agent_settled")();
+    assert.equal(f.sent.length, 1);
+  });
+});
+test("reading a completed result consumes its undelivered notification", async () => {
+  await fixture(async (f) => {
+    f.fail(100);
+    const receipt = (await f.call(shell, { command: command(100), run_in_background: true })).details;
+    let final;
+    for (let i = 0; i < 100; i++) {
+      final = (await f.call("shell_job", { action: "output", id: receipt.id })).details;
+      if (final.state !== "running") break;
+      await pause(30);
+    }
+    assert.equal(final.state, "completed");
+    assert.match(final.output, /final-output/);
+    f.fail(0);
+    f.handlers.get("agent_settled")();
+    await pause(150);
+    assert.equal(f.sent.length, 0);
+  });
+});
+test("tool cancellation returns the final state without an automatic duplicate", async () => {
+  await fixture(async (f) => {
+    const receipt = (await f.call(shell, { command: command(1e4), run_in_background: true })).details;
+    const cancelled = (await f.call("shell_job", { action: "cancel", id: receipt.id })).details;
+    assert.equal(cancelled.state, "cancelled");
+    await pause(200);
+    assert.equal(f.sent.length, 0);
+  });
+});
+test("cancellation reaps a descendant holding inherited output pipes", async () => {
+  await fixture(async (f) => {
+    await writeFile(join(f.root, "worker.cjs"), `
+      const fs = require('node:fs');
+      const child = require('node:child_process').spawn(process.execPath,
+        ['-e', "setTimeout(() => require('node:fs').writeFileSync('orphan.txt', 'alive'), 1800)"],
+        { stdio: ['ignore', 'inherit', 'inherit'] });
+      fs.writeFileSync('child-started.txt', String(child.pid));
+      console.log('parent started');
+      setTimeout(() => {}, 10000);
+    `);
+    const quote = (s) => `'${s.replaceAll("'", "''")}'`;
+    const receipt = (await f.call(shell, { command: `${shell === "powershell" ? "& " : ""}${quote(process.execPath)} worker.cjs`, run_in_background: true })).details;
+    await until(() => existsSync(join(f.root, "child-started.txt")));
+    const start = Date.now();
+    const result = (await f.call("shell_job", { action: "cancel", id: receipt.id })).details;
+    assert.equal(result.state, "cancelled");
+    assert.ok(Date.now() - start < 3e3, "Inherited pipes must not hang cancellation");
+    await pause(2200);
+    assert.equal(existsSync(join(f.root, "orphan.txt")), false);
+    assert.equal(f.sent.length, 0);
+  });
+});
+test("viewer sanitizes output, fits narrow terminals, and releases subscriptions", async () => {
+  const jobs = [{
+    id: "bg-example",
+    title: "\u96EA\njob",
+    command: "demo",
+    state: "running",
+    shell,
+    elapsed_seconds: 1,
+    exit_code: null,
+    log_path: "unused",
+    log_truncated: false,
+    output: "\x1B[2Junsafe\0\n\u96EA"
+  }];
+  let unsubscribed = 0, stopped = 0, closed = 0;
+  const panel = new JobPanel(
+    {
+      list: () => jobs,
+      cancel: async () => {
+        stopped++;
+        jobs[0].state = "cancelled";
+      },
+      subscribe: () => () => {
+        unsubscribed++;
+      }
+    },
+    { terminal: { rows: 30 }, requestRender() {
+    } },
+    { fg: (_, text) => text, bold: (text) => text },
+    { matches: (data, binding) => data === { "tui.select.cancel": "esc", "tui.select.confirm": "enter" }[binding] },
+    () => {
+      closed++;
+    }
+  );
+  try {
+    assert.equal(clean("\x1B[2Jx\0"), "x");
+    panel.handleInput("enter");
+    for (const width of [1, 12, 40, 80]) assert.ok(panel.render(width).every((line) => visibleWidth(line) <= width));
+    panel.handleInput("x");
+    await pause(10);
+    assert.equal(stopped, 1);
+    panel.handleInput("esc");
+    panel.handleInput("esc");
+    assert.equal(closed, 1);
+    assert.equal(unsubscribed, 1);
+    panel.dispose();
+    assert.equal(unsubscribed, 1);
+  } finally {
+    panel.dispose();
+  }
+});
+test("/ps hides input behind one separator, caps and scrolls output, and restores the editor", () => {
+  let widget, listener;
+  const previousEditor = () => {
+  };
+  let editorFactory = previousEditor;
+  let inputSubscriptions = 0, outputSubscriptions = 0;
+  const terminal = { rows: 40 };
+  const job = {
+    id: "bg-layout",
+    title: "Layout test",
+    command: "demo",
+    state: "running",
+    shell,
+    elapsed_seconds: 1,
+    exit_code: null,
+    log_path: "unused",
+    log_truncated: false,
+    output: Array.from({ length: 80 }, (_, i) => `line-${i}: ` + "abcdefghij".repeat(6)).join("\n")
+  };
+  const close = openJobPanel({
+    list: () => [job],
+    cancel: async () => {
+    },
+    subscribe: () => {
+      outputSubscriptions++;
+      return () => {
+        outputSubscriptions--;
+      };
+    }
+  }, {
+    getEditorComponent: () => editorFactory,
+    theme: { fg: (_, text) => text, bold: (text) => text },
+    setEditorComponent: (factory) => {
+      editorFactory = factory;
+      widget = factory === previousEditor ? void 0 : factory({ terminal, requestRender() {
+      } }, { borderColor: (text) => text }, getKeybindings());
+    },
+    onTerminalInput: (handler) => {
+      listener = handler;
+      inputSubscriptions++;
+      return () => {
+        listener = void 0;
+        inputSubscriptions--;
+      };
+    }
+  });
+  try {
+    assert.notEqual(editorFactory, previousEditor);
+    const hiddenEditor = widget;
+    hiddenEditor.setText("unfinished draft");
+    const editorLines = hiddenEditor.render(32);
+    assert.equal(editorLines[0], "\u2500".repeat(32));
+    assert.equal(editorLines[1], "Background shell", "Heading immediately follows the separator in the same editor component");
+    assert.equal(hiddenEditor.getText(), "unfinished draft", "Hiding input preserves its text");
+    assert.equal(listener("\r").consume, true);
+    const bottom = widget.render(32).slice(1);
+    assert.ok(bottom.length <= 18, "40-row terminal allows at most 45% for the panel");
+    assert.ok(bottom.some((line) => line.includes("line-79")), "Enter opens the selected command output");
+    assert.ok(bottom.every((line) => visibleWidth(line) <= 32));
+    assert.equal(listener("\x1B[A").consume, true);
+    assert.notDeepEqual(widget.render(32).slice(1), bottom, "Up scrolls into earlier output");
+    assert.equal(listener("	").consume, true);
+    assert.equal(listener("\x1B[9;1:3u").consume, true);
+    assert.equal(listener("typing in prompt").consume, true, "Tab cannot return typing to the hidden editor");
+    assert.equal(listener("	").consume, true);
+    assert.equal(listener("j").consume, true);
+    terminal.rows = 12;
+    assert.ok(widget.render(32).length <= 6, "Resizing recomputes the height cap");
+    terminal.rows = 100;
+    assert.ok(widget.render(32).length <= 21, "Tall terminals keep the absolute height cap");
+    close();
+    assert.equal(widget, void 0);
+    assert.equal(editorFactory, previousEditor, "Closing restores the original editor factory");
+    assert.equal(inputSubscriptions, 0);
+    assert.equal(outputSubscriptions, 0);
+    close();
+  } finally {
+    close();
+  }
+});
+test("/ps starts with a scrolling command selector and Enter opens the chosen job", () => {
+  const jobs = Array.from({ length: 25 }, (_, i) => ({
+    id: `bg-job-${i}`,
+    title: `Job ${i}`,
+    command: `command-${i}`,
+    state: "running",
+    shell,
+    elapsed_seconds: 1,
+    exit_code: null,
+    log_path: "unused",
+    log_truncated: false,
+    output: `OUTPUT-${i}`
+  }));
+  const panel = new JobPanel(
+    { list: () => jobs, cancel: async () => {
+    }, subscribe: () => () => {
+    } },
+    { terminal: { rows: 30 }, requestRender() {
+    } },
+    { fg: (_, text) => text, bold: (text) => text },
+    { matches: (data, binding) => data === { "tui.select.cancel": "esc", "tui.select.confirm": "enter", "tui.select.down": "down", "tui.select.up": "up" }[binding] },
+    () => {
+    }
+  );
+  try {
+    const initial = panel.render(100);
+    assert.ok(initial.some((line) => line.includes("Job 0")));
+    assert.ok(initial.some((line) => line.includes("Job 1")), "Multiple running commands appear in the selector");
+    assert.ok(!initial.some((line) => line.includes("OUTPUT-")), "Opening the panel keeps the selector visible");
+    for (let i = 0; i < 24; i++) panel.handleInput("down");
+    assert.ok(panel.render(100).some((line) => line.includes("Job 24")), "Selection scrolls beyond the visible list");
+    panel.handleInput("enter");
+    assert.ok(panel.render(100).some((line) => line.includes("OUTPUT-24")));
+    panel.handleInput("esc");
+    assert.ok(panel.render(100).some((line) => line.includes("Job 24")), "Escape returns to the same selection");
+    panel.handleInput("up");
+    panel.handleInput("enter");
+    assert.ok(panel.render(100).some((line) => line.includes("OUTPUT-23")), "Another command can be selected");
+  } finally {
+    panel.dispose();
+  }
+});
+test("arrow press/release pairs move one row; release never navigates or closes the panel", () => {
+  const jobs = Array.from({ length: 5 }, (_, i) => ({
+    id: `bg-key-${i}`,
+    title: `Key job ${i}`,
+    command: `command-${i}`,
+    state: "running",
+    shell,
+    elapsed_seconds: 1,
+    exit_code: null,
+    log_path: "unused",
+    log_truncated: false,
+    output: Array.from({ length: 30 }, (_2, n) => `output-${i}-${n}`).join("\n")
+  }));
+  let closed = false;
+  const panel = new JobPanel(
+    { list: () => jobs, cancel: async () => {
+    }, subscribe: () => () => {
+    } },
+    { terminal: { rows: 30 }, requestRender() {
+    } },
+    { fg: (_, text) => text, bold: (text) => text },
+    getKeybindings(),
+    () => {
+      closed = true;
+    }
+  );
+  const selected = () => panel.render(100).find((line) => line.startsWith("\u276F"));
+  try {
+    panel.handleInput("\x1B[1;1:1B");
+    panel.handleInput("\x1B[1;1:3B");
+    assert.ok(selected()?.includes("Key job 1"));
+    panel.handleInput("\x1B[1;1:1A");
+    panel.handleInput("\x1B[1;1:3A");
+    assert.ok(selected()?.includes("Key job 0"));
+    panel.handleInput("\x1B[B");
+    panel.handleInput("\x1B[B");
+    assert.ok(selected()?.includes("Key job 2"), "Two actual presses still move two rows");
+    panel.handleInput("\r");
+    const bottom = panel.render(100);
+    panel.handleInput("\x1B[1;1:1A");
+    panel.handleInput("\x1B[1;1:3A");
+    const scrolled = panel.render(100);
+    const output = (lines) => lines.filter((line) => line.startsWith("output-"));
+    assert.deepEqual(output(scrolled).slice(1), output(bottom).slice(0, -1), "Output scrolls exactly one line");
+    panel.handleInput("\x1B[27;1:1u");
+    panel.handleInput("\x1B[27;1:3u");
+    assert.equal(closed, false, "Escape release must not close the selector after returning from output");
+    assert.ok(selected()?.includes("Key job 2"));
+  } finally {
+    panel.dispose();
+  }
+});
+test("cancelled jobs stay visible until /ps closes and disappear from the reopened selector", async () => {
+  const jobs = ["running", "completed", "failed"].map((state, i) => ({
+    id: `bg-retained-${i}`,
+    title: `Retained job ${i}`,
+    command: `command-${i}`,
+    state,
+    shell,
+    elapsed_seconds: 1,
+    exit_code: null,
+    log_path: "unused",
+    log_truncated: false,
+    output: `output-${i}`
+  }));
+  const source = { list: () => jobs, cancel: async (id) => {
+    jobs.find((job) => job.id === id).state = "cancelled";
+  }, subscribe: () => () => {
+  } };
+  const create = () => new JobPanel(
+    source,
+    { terminal: { rows: 30 }, requestRender() {
+    } },
+    { fg: (_, text) => text, bold: (text) => text },
+    getKeybindings(),
+    () => {
+    }
+  );
+  let panel = create();
+  try {
+    panel.handleInput("x");
+    await pause(10);
+    assert.equal(jobs[0].state, "cancelled");
+    assert.ok(panel.render(100).some((line) => line.includes("Retained job 0")), "Cancelling does not remove the row while the menu is open");
+    panel.dispose();
+    panel = create();
+    const reopened = panel.render(100);
+    assert.ok(!reopened.some((line) => line.includes("Retained job 0")));
+    assert.ok(reopened.some((line) => line.includes("Retained job 1")), "Completed jobs remain selectable");
+    assert.ok(reopened.some((line) => line.includes("Retained job 2")), "Failed jobs remain selectable");
+    assert.equal(source.list().length, 3, "Filtering the selector preserves job records and logs");
+  } finally {
+    panel.dispose();
+  }
+});
+test("native fullscreen routing sends Page Up/Down and shell wheel events to output, then restores chat paging", () => {
+  let input = () => {
+  };
+  const terminal = {
+    columns: 100,
+    rows: 40,
+    kittyProtocolActive: false,
+    start: (handler) => {
+      input = handler;
+    },
+    stop() {
+    },
+    write() {
+    },
+    hideCursor() {
+    },
+    showCursor() {
+    },
+    moveBy() {
+    },
+    clearLine() {
+    },
+    clearFromCursor() {
+    },
+    clearScreen() {
+    },
+    setTitle() {
+    },
+    setProgress() {
+    },
+    setProgramStatus() {
+    }
+  };
+  const tui = new TuiAltScreen(terminal);
+  const chat = new ScrollView({ render: () => Array.from({ length: 200 }, (_, i) => `chat-${i}`), invalidate() {
+  } }, { primary: true, follow: "end" });
+  let editor;
+  const previous = () => ({ render: () => ["prompt"], invalidate() {
+  } });
+  let editorFactory = previous;
+  const theme = { fg: (_, text) => text, bold: (text) => text };
+  const setEditor = (factory) => {
+    editorFactory = factory;
+    editor = factory(tui, { borderColor: (text) => text }, getKeybindings());
+    tui.setLayoutRoot(new VStack([{ component: chat, basis: 0, grow: 1, minSize: 1 }, { component: editor, basis: "auto", minSize: 3 }]));
+  };
+  setEditor(previous);
+  tui.start();
+  let close;
+  try {
+    close = openJobPanel({ list: () => [{
+      id: "bg-fullscreen",
+      title: "Fullscreen",
+      command: "demo",
+      shell,
+      state: "running",
+      elapsed_seconds: 1,
+      exit_code: null,
+      log_path: "unused",
+      log_truncated: false,
+      output: Array.from({ length: 200 }, (_, i) => `shell-${i}`).join("\n")
+    }], cancel: async () => {
+    }, subscribe: () => () => {
+    } }, {
+      theme,
+      getEditorComponent: () => editorFactory,
+      setEditorComponent: setEditor,
+      onTerminalInput: (handler) => tui.addInputListener(handler)
+    });
+    input("\r");
+    tui.renderNow(true);
+    const bottom = editor.render(100);
+    const chatTop = chat.scrollTop;
+    input("\x1B[5~");
+    tui.renderNow(true);
+    assert.notDeepEqual(editor.render(100), bottom, "Page Up scrolls shell output through native input routing");
+    assert.equal(chat.scrollTop, chatTop, "Page Up leaves the chat fixed");
+    input("\x1B[6~");
+    tui.renderNow(true);
+    assert.deepEqual(editor.render(100), bottom, "Page Down returns to the output bottom");
+    input("\x1B[<64;10;36M");
+    tui.renderNow(true);
+    assert.notDeepEqual(editor.render(100), bottom, "Wheel over shell output scrolls that output");
+    assert.equal(chat.scrollTop, chatTop, "Shell wheel does not scroll the chat");
+    input("\x1B[<65;10;36M");
+    tui.renderNow(true);
+    assert.deepEqual(editor.render(100), bottom);
+    input("\x1B[<65;10;36M");
+    tui.renderNow(true);
+    assert.equal(chat.scrollTop, chatTop, "Wheel at the shell boundary does not spill into chat");
+    close();
+    tui.renderNow(true);
+    const restoredTop = chat.scrollTop;
+    input("\x1B[5~");
+    tui.renderNow(true);
+    assert.ok(chat.scrollTop < restoredTop, "Closing /ps restores native chat paging");
+  } finally {
+    close?.();
+    tui.stop();
+  }
+});
+test("x in shell output returns to the selector immediately and long commands wrap to three rows", async () => {
+  const job = {
+    id: "bg-command",
+    title: "Long command",
+    command: "word ".repeat(100),
+    shell,
+    state: "running",
+    elapsed_seconds: 1,
+    exit_code: null,
+    log_path: "unused",
+    log_truncated: false,
+    output: "SHELL-OUTPUT"
+  };
+  let finish;
+  let cancellations = 0;
+  const panel = new JobPanel(
+    { list: () => [job], cancel: async () => {
+      cancellations++;
+      await new Promise((resolve) => {
+        finish = resolve;
+      });
+      job.state = "cancelled";
+    }, subscribe: () => () => {
+    } },
+    { terminal: { rows: 40 }, requestRender() {
+    } },
+    { fg: (_, text) => text, bold: (text) => text },
+    getKeybindings(),
+    () => {
+    }
+  );
+  try {
+    panel.handleInput("\r");
+    const output = panel.render(32);
+    const start = output.findIndex((line) => line.startsWith(`${shell}:`));
+    const end = output.indexOf("SHELL-OUTPUT");
+    assert.equal(end - start, 3, "Command uses three wrapped rows before shell output");
+    assert.ok(output[end - 1].endsWith("\u2026"), "Only the third command row carries truncation");
+    assert.ok(output.every((line) => visibleWidth(line) <= 32));
+    assert.ok(output.length <= 18, "Command wrapping respects the panel height cap");
+    panel.handleInput("x");
+    assert.equal(cancellations, 1);
+    assert.ok(!panel.render(80).includes("SHELL-OUTPUT"), "Selector is shown before cancellation finishes");
+    assert.ok(panel.render(80).some((line) => line.includes("Long command")));
+    finish();
+    await pause(10);
+    assert.equal(job.state, "cancelled");
+    panel.handleInput("\r");
+    panel.handleInput("x");
+    assert.ok(!panel.render(80).includes("SHELL-OUTPUT"), "x also returns from an already stopped shell");
+    assert.equal(cancellations, 1);
+  } finally {
+    finish?.();
+    panel.dispose();
+  }
+});

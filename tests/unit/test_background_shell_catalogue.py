@@ -23,11 +23,14 @@ def test_background_shell_installs_and_removes_without_touching_instructions(tmp
     installer = CatalogueInstaller(discover(), target, receipts)
     installer.reconcile({"background-shell"})
     extension = target.destination_path("extensions", "harness-background-shell/index.ts")
+    ui = extension.with_name("ui.ts")
     assert extension.is_file()
+    assert ui.is_file()
     assert target.settings_path.read_text(encoding="utf-8") == settings
     assert instructions.read_text(encoding="utf-8") == "Personal instructions\n"
     installer.reconcile(set())
     assert not extension.exists()
+    assert not ui.exists()
     assert target.settings_path.read_text(encoding="utf-8") == settings
     assert instructions.read_text(encoding="utf-8") == "Personal instructions\n"
 
