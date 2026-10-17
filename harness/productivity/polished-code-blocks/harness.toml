@@ -1,6 +1,6 @@
 name = "polished-code-blocks"
-version = "1.0.0"
-description = "Render Pi Markdown code blocks with rounded frames, language labels and syntax highlighting"
+version = "1.1.0"
+description = "Render numbered Pi code blocks with rounded frames, syntax highlighting and exact-content copying"
 docs = "https://github.com/EmilienxD/harness/blob/main/README.md#polished-code-blocks"
 
 [platforms.claude]
