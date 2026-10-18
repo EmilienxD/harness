@@ -22,7 +22,8 @@ Click a background agent in **Agent Fleet**, or run **Aboard: Watch Background A
 Initialize the project once, then open **Run Agent** above the Fleet. **Run Agent** adds one Claude Code or
 Codex or Pi session as an editor terminal in the current window's active editor group, preserving its layout.
 **Launch layout** starts the agents in the selected preset. Choose **New window** to open the selected checkout
-in a new window and apply the preset grid once. Choose **Current window** to apply the grid in the
+in a new window and apply the preset grid once. These generated workspace duplicates are not added to
+VS Code's **Open Recent** list. Choose **Current window** to apply the grid in the
 current window and start terminals in their assigned panes, keeping existing editors and terminals open.
 The default preset has two vertically stacked
 Codex terminals. A visible subagent opens as a new tab in its parent agent's editor group, even when you are
@@ -85,6 +86,10 @@ Fleet; the layout panel omits them. Other windows or external agents may also be
 
 Launching agents disables automatic terminal group locking in the current workspace settings, so
 new terminal panes can also open files. Groups you lock manually keep their locked state.
+It also sets `workbench.editor.tabSizing` to `fixed`, using VS Code's native maximum tab width
+(`workbench.editor.tabSizingFixedMaxWidth`, 160 px by default). This bounds long Pi, Claude Code,
+and Codex titles visually without cutting the stored title. VS Code applies this sizing to all editor
+tabs in the workspace; your configured minimum and maximum widths are preserved.
 
 Closing a workspace during startup releases the launch controls; a window that never activates expires
 after 15 seconds. Abandoned startup requests do not launch agents if the window opens later. A failed or

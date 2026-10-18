@@ -3,13 +3,13 @@ import { existsSync } from "node:fs";
 import { access, readFile, readdir, rm } from "node:fs/promises";
 import { delimiter, join } from "node:path";
 
-import { TabInputTerminal, TabInputText, TerminalLocation, ThemeIcon, Uri, commands, extensions, window, workspace, type TabGroup, type Terminal } from "vscode";
+import { ConfigurationTarget, TabInputTerminal, TabInputText, TerminalLocation, ThemeIcon, Uri, commands, extensions, window, workspace, type TabGroup, type Terminal } from "vscode";
 
 import type { AgentId, AgentSession, IsoTimestamp, SessionId, TerminalId } from "../../../src/domain/contracts.js";
 import { FleetRegistry } from "../../../src/domain/fleet.js";
 import { WriteLease } from "../../../src/domain/lease.js";
 import { FleetTreeModel } from "../../../src/vscode/fleet.js";
-import { initializeAgentLayout, captureEditorPanes, createVsCodeTerminalHost } from "../../../src/vscode/terminals.js";
+import { initializeAgentLayout, captureEditorPanes, createVsCodeTerminalHost, prepareAgentTerminalGroups } from "../../../src/vscode/terminals.js";
 import { AgentWorkspaceFiles } from "../../../src/runtime/agent-workspace-owner.js";
 import { WorkspaceStartup } from "../../../src/runtime/workspace-startup.js";
 import { WorkspaceBatchLauncher } from "../../../src/platform/workspace-launcher.js";
@@ -92,6 +92,19 @@ export async function run(): Promise<void> {
 
   const root = workspace.workspaceFolders?.[0]?.uri.fsPath;
   assert.ok(root, "integration workspace is open");
+
+  // Width is native presentation, not destructive truncation of session titles.
+  const editorConfiguration = workspace.getConfiguration("workbench.editor");
+  await editorConfiguration.update("tabSizing", "fit", ConfigurationTarget.Workspace);
+  await editorConfiguration.update("tabSizingFixedMaxWidth", 175, ConfigurationTarget.Workspace);
+  await editorConfiguration.update("autoLockGroups", { terminal: false, default: true }, ConfigurationTarget.Workspace);
+  const locksBefore = workspace.getConfiguration("workbench.editor").get("autoLockGroups");
+  await prepareAgentTerminalGroups();
+  assert.equal(workspace.getConfiguration("workbench.editor").get("tabSizing"), "fixed");
+  assert.equal(workspace.getConfiguration("workbench.editor").get("tabSizingFixedMaxWidth"), 175, "custom maximum width is preserved");
+  assert.deepEqual(workspace.getConfiguration("workbench.editor").get("autoLockGroups"), locksBefore, "existing locks are preserved");
+  await prepareAgentTerminalGroups();
+  assert.equal(workspace.getConfiguration("workbench.editor").get("tabSizing"), "fixed", "preparation is idempotent");
 
   // Native editor groups are the contract: keep open content, preserve user
   // geometry after initialization, and never resurrect a removed preset pane.

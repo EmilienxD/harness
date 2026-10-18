@@ -24,7 +24,7 @@ export class NewWorkspaceLauncher {
         progress.report({ message: "Opening the new workspace…" });
         const handoff = await this.options.files.create(projectRoot, plan);
         const startup = new WorkspaceStartup(this.options.storageRoot, handoff);
-        try { await commands.executeCommand("vscode.openFolder", Uri.file(handoff.workspaceFile), { forceNewWindow: true }); }
+        try { await commands.executeCommand("vscode.openFolder", Uri.file(handoff.workspaceFile), { forceNewWindow: true, noRecentEntry: true }); }
         catch (error) {
           // Reserve an unopened request so a delayed activation cannot replay it.
           await startup.wait({ activationTimeoutMs: 0 }).catch(() => undefined);
