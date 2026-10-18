@@ -167,6 +167,24 @@ endpoint verify resource precedence, configured and explicit-only skills, exact 
 reference reads/writes, image preservation, failure handling, and receipt-driven removal.
 See `tests/e2e/tools/pi-mid-prompt-skills/`.
 
+`file-mentions` additionally ships a Pi-only input extension in 1.2.0, outside the original
+backlog. User `@path` references append escaped file/directory containers with absolute paths,
+per-message canonical-path deduplication, fresh UTF-8 file bytes, bounded shallow directory
+samples and explicit unavailable/omitted metadata. A native user-Markdown transformer hides the
+snapshot in the interactive transcript, leaving the original user block unchanged. Live user
+`message_end` events emit relative-path loaded/skipped/truncated statuses through Pi's native
+grey info notifications after the user block. Rendering and history replay never emit notifications.
+Model context and stored snapshots retain the content; old 1.0 snapshots also receive content
+hiding on replay. Real installed user-message component checks cover hidden contents, unchanged
+user blocks, relative labels, special characters and reload. RPC checks verify native info
+notification payloads and their ordering after user-message start. Code examples
+and expanded skill/context blocks are excluded; input text/images are preserved. Limits are
+20 reference spellings, 256 KiB per file, 1 MiB aggregate raw content and 100 entries/16 KiB per
+listing. These extension-owned reads are not tool-outcome evidence for path guards. Real Pi
+1.2.0 project/user JSON and RPC journeys verify resource bytes/paths, fresh content, directory
+bounds, skips, native receipt writes, exact inference counts and receipt-driven removal.
+See `tests/e2e/tools/pi-file-mentions/`.
+
 `slash-command-guard` additionally ships a Pi-only input extension in 1.0.0, outside the
 original backlog. Native UI and extension commands dispatch before its input handler;
 resolved skills and prompt templates pass through to native expansion. Other slash-leading

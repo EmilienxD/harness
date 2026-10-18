@@ -1379,6 +1379,7 @@ def test_every_catalogue_manifest_loads():
         "shipping": {"setup-help"},
         "productivity": {
             "background-shell",
+            "file-mentions",
             "chrome-devtools",
             "calm",
             "clear-alias",

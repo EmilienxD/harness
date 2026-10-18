@@ -281,6 +281,7 @@ Hooks do not need a skill invocation. Select them in the catalogue and restart t
 | `prefer-edit-tool` | Claude Code | Nudges the agent toward Write/Edit after shell-based file changes. |
 | `prefer-fewer-comments` | Claude Code, ChatGPT, Pi | Flags newly written comments or docstrings that exceed an editable budget. Pi wraps native writes/edits with exact mutation snapshots. |
 | `mid-prompt-skills` | Claude Code, ChatGPT, Pi | Loads skills typed after other prompt text when the provider otherwise leaves them as plain text. |
+| `file-mentions` | Pi | Includes `@file` contents and bounded `@directory` listings directly in the prompt. |
 | `redirect-subagents` | Claude Code | Redirects built-in Agent tool work to configured alternate providers and returns the result to the parent session. |
 | `usage-limit-wait` | Claude Code, ChatGPT | Pauses at an exhausted subscription window and resumes after reset; usage-reader failures always fail open. |
 
@@ -298,6 +299,52 @@ Project policies use `.harness/guards/no-new-documents.toml`; Pi user policies s
 `<PI_CODING_AGENT_DIR>/harness/no-new-documents.toml` (default `~/.pi/agent/harness/`). Home and project
 policies also apply. Command outcomes follow the active session branch; pending drafts follow the
 current filesystem. Quote paths containing spaces.
+
+#### File mentions
+
+`file-mentions` gives Pi Claude-style automatic file context. After installing, restart Pi or run
+`/reload`, then write prompts such as:
+
+```text
+Explain @src/main.ts using @"docs/design notes.md" and show how it fits into @src/components/.
+```
+
+```powershell
+uv run harness install file-mentions --platform pi --scope user
+```
+
+The extension keeps your original text and images, appending an HTML-style `<file-mentions>`
+container with `<file path="…">` and `<directory path="…">` blocks in model context. Absolute paths
+identify each resource; HTML escaping keeps file contents and unusual filenames inside their
+containers. In Pi's interactive transcript, the user message block shows only your original text.
+A separate grey info notification below it lists relative-path statuses such as `src/main.ts loaded.`
+Unavailable references show `path not loaded.` and bounded folder listings identify truncation.
+Content hiding also applies to older snapshots after reload/resume; info notifications are emitted
+only for live messages, not when rendering history. Full contents remain in the stored message and provider
+context (and thus raw JSON/session exports); this is display filtering, not secret redaction.
+Relative paths resolve from Pi's working directory; absolute paths, `~/…`, Windows paths and quoted paths with
+spaces are supported. Repeated references to the same resolved path load once per message;
+later messages read fresh content. Fenced/inline code examples and expanded skill/context blocks
+are ignored, and loaded contents are never recursively scanned for more mentions.
+
+Limits are 20 distinct reference spellings per message, 256 KiB per UTF-8 text file and 1 MiB of
+raw content across files/listings. Oversized, binary, missing, unreadable or non-UTF-8 files produce
+an explicit `<unavailable>` block rather than partial file contents. Other references still load.
+References beyond the count limit are reported in an `<omitted>` block. Images/PDFs are not
+attached through this extension; use Pi's image attachment support or a suitable file tool.
+
+Folders include immediate names only, including dotfiles, with `/` for directories and `@` for
+symlinks. Names are JSON-quoted to keep control characters on one line. Each listing samples at
+most 100 entries, sorts that sample, and caps output at 16 KiB; `truncated="true"` signals omitted
+entries. It neither recurses nor loads file contents from a folder mention.
+
+This mirrors Claude's file/listing convenience, not all of its policies: there is no Claude token
+counter, MCP-resource expansion or automatic ancestor `CLAUDE.md` loading. See
+[Claude's documented behavior](https://code.claude.com/docs/en/common-workflows#reference-files-and-directories).
+Pi's own instruction discovery is unchanged. Reading happens inside the extension, not through
+a model tool call: tool-call guards/reminders do not observe these reads, and mentions do not
+satisfy `on-edit-block`'s read-evidence requirements. Explicit mentions can read outside the project
+and follow symlinks; only reference files you intend to send to the model.
 
 #### Guard configuration
 

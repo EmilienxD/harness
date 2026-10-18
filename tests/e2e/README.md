@@ -35,6 +35,7 @@ npm run test:chrome-devtools
 npm run test:pi-background-shell
 npm run test:pi-calm
 npm run test:pi-mid-prompt-skills
+npm run test:pi-file-mentions
 npm run e2e:flush-out-useless-tests
 ```
 
@@ -89,6 +90,21 @@ credentials, selectors, proxies, and cloud credentials are excluded. Launches us
 disable telemetry/version checks/MCP and unrelated built-in extensions, and trust only the
 generated project through process-local `--approve`. Automatic compaction, retries, and cache
 warming are disabled. Trust is never persisted for an unrelated project.
+
+## Pi file mentions
+
+`npm run test:pi-file-mentions` installs the real `file-mentions` package at project and user
+scopes and runs JSON/RPC prompts through Pi 1.2.0. The endpoint checks structured resource paths,
+fixture bytes, escaping, duplicate counts, fresh content, shallow directory entries, explicit
+skips and bounded listings, rather than instruction wording. A separate child loads the installed
+extension with Pi's real loader and user-message component: it verifies content stays in model
+input while rendering only the original user block, including old snapshots and reload. Statuses
+use separate native info notifications with literal relative paths, including unusual characters;
+RPC journeys verify notification payloads and ordering after user-message start. Native tool writes produce fixture receipts; each scope requires exactly
+10 inference requests, zero unexpected requests, unchanged
+settings and receipt-driven removal. Unit checks additionally cover images, code exclusions,
+UTF-8 validation, aggregate/reference budgets and canonical symlink deduplication. No personal
+Pi configuration or paid model service is used.
 
 ## Chrome DevTools
 

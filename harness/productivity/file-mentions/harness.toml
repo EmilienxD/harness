@@ -1,0 +1,21 @@
+name = "file-mentions"
+version = "1.2.0"
+description = "Automatically include @referenced text files and bounded folder listings in Pi prompts"
+docs = "https://github.com/EmilienxD/harness/blob/main/README.md#file-mentions"
+
+[platforms.claude]
+status = "unsupported"
+reason = "Claude Code already includes file mentions natively."
+
+[platforms.chatgpt]
+status = "unsupported"
+reason = "Uses Pi's native input transformation API."
+
+[platforms.pi]
+status = "supported"
+
+[[files]]
+src = "pi/extension.ts"
+dest = "harness-file-mentions/index.ts"
+root = "extensions"
+platforms = ["pi"]
