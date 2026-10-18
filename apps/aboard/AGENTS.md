@@ -30,7 +30,7 @@ points.
   command-terminal API.
 - `src/runtime/`: admission, persistence, activity recording, layout, counters, and lock markers.
 - `src/scaffold/`: `.abd/` initialization, updates, and scaffold ownership.
-- `src/git/` and `src/github/`: the only owners of Auto Run Git and GitHub mutation.
+- `src/git/` and `src/github/`: Git/GitHub mutation boundaries; `git/worktree.ts` owns shared checkout allocation, configuration overlays, and setup primitives.
 - `src/vscode/`: tree views, the Run Agent launcher, commands, native UI, terminals, reviews, and activity
   presentation.
 - `assets/scaffold/`: project files installed into `.abd/`.
@@ -73,10 +73,11 @@ runtime `general` identity. Profiles may use `inherit`; Auto Run workers may use
 Platform-specific values must be validated before a terminal is created.
 
 The launcher webview owns personal preset editing; preset definitions live in profile storage and describe
-future launches. Run Agent opens one editor terminal in the current window's active editor group.
-Launch layout offers Current window and New window. Both apply the preset grid and start its terminals
-in their assigned panes. Current window preserves open editors and terminals while applying the grid;
-New window opens the same project and launches once during initialization. Each window manages its own
+future launches. Run Agent opens one editor terminal in the current window's active editor group, with a current/new/existing
+checkout picker. Launch layout selects its checkout independently of Current window or New window. Both
+apply the preset grid and start all agent and shell terminals in the selected checkout. Current window
+preserves open editors, terminals, and the Explorer root; New window opens the selected checkout and launches
+once during initialization. Checkout choices stay out of personal layout presets. Each window manages its own
 fleet and terminals. Startup handoffs carry project, owner,
 and request identities; use the durable request journal before launch effects and keep uncertain requests
 from being replayed. Apply geometry only for an explicit Launch layout request or new-window startup.
@@ -103,8 +104,12 @@ browser tooling when they have a tool for it and to skip the step otherwise; Cla
 launch with `--chrome`. Codex `BROWSER_USE_AVAILABLE_BACKENDS` enforcement is retained in
 `chatgpt/browser.ts` but disabled, because a backend requirement contradicts that skip-if-absent policy.
 
-Worktree runs copy ignored local `.claude`, `.agents`, `.codex`, `.pi`, and `.abd` configuration without
-overwriting checkout files or copying live session state. Refuse the run when a copied path is not ignored.
+New worktrees copy ignored local `.claude`, `.agents`, `.codex`, `.pi`, `.abd`, and `.harness` configuration
+without overwriting checkout files or copying live session state. Refuse preparation when a copied path is
+not ignored. `platform/checkouts.ts` owns retained manual checkout preparation and retry state; Auto Run
+keeps its separate cleanup policy. Anchor numbered sibling names at the main checkout even when launching
+from a linked checkout. Existing manual checkouts retain their files and skip setup; launch and reopen read
+the target checkout's launch configuration. See README.md, “Choosing a checkout,” for the user flow.
 
 ## Configuration
 

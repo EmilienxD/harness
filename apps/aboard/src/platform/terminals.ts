@@ -3,6 +3,8 @@ import {
   type ShellKind,
 } from "./shell.js";
 import { randomUUID } from "node:crypto";
+import { basename } from "node:path";
+import { samePath } from "../git/worktree.js";
 import { createBackgroundProcess } from "./background.js";
 import { normalizeFileReferences } from "./prompt-paths.js";
 
@@ -376,7 +378,10 @@ export class TerminalController {
     const record = this.#latest((candidate) => candidate.sessionId === sessionId);
     if (record?.status !== "open" || record.backend === "process" || record.handle === undefined) return;
     const clean = title.replace(/[\u0000-\u001f\u007f]/gu, " ").trim().slice(0, 120);
-    if (clean) this.options.host.setTitle?.(record.handle, clean);
+    if (clean) {
+      const checkout = samePath(record.cwd, this.options.environment().workspaceRoot) ? "" : ` · ${basename(record.cwd.replaceAll("\\", "/"))}`;
+      this.options.host.setTitle?.(record.handle, `${clean}${checkout}`);
+    }
   }
 
   public liveTerminalForAgent(agentId: AgentId): TerminalId | undefined {

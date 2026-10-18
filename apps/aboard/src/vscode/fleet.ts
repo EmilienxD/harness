@@ -3,6 +3,7 @@ import type { FleetEvent, FleetRegistry } from "../domain/fleet.js";
 import type { LeaseAuditEvent, WriteLease } from "../domain/lease.js";
 import type { AutoRunState } from "../auto/engine.js";
 import { formatIssueNumbers } from "../shared/issues.js";
+import { basename } from "node:path";
 
 export type FleetTreeNode =
   { readonly kind: "agent"; readonly session: AgentSession; readonly leaseHolder: boolean };
@@ -52,6 +53,7 @@ export class FleetTreeModel {
     const markers = [
       providerLabel(session.platform),
       session.lifecycle.status,
+      session.cwd === undefined ? "" : basename(session.cwd.replaceAll("\\", "/")),
       node.leaseHolder ? "lease holder" : "",
     ].filter(Boolean);
     return {
@@ -133,6 +135,7 @@ function agentTooltip(session: AgentSession, leaseHolder: boolean): string {
     `Provider: ${providerLabel(session.platform)}`,
     `Mode: ${isBackground(session) ? "Background" : "Interactive"}`,
     `Session: ${session.sessionId}`,
+    session.cwd === undefined ? "" : `Checkout: ${session.cwd}`,
     `Status: ${session.lifecycle.status}`,
     leaseHolder ? "Holds the write lease" : "",
   ].filter(Boolean).join("\n");

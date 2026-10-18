@@ -688,3 +688,12 @@ test("auto-run exploration is a background process while auto-run workers keep a
   assert.deepEqual(created?.shows, []);
   assert.deepEqual(created?.sent.map((entry) => entry.text), ["cd -LiteralPath 'C:\\work\\aboard'", "claude \"/address-this\""]);
 });
+
+
+test("conversation title updates preserve the checkout indicator for worktree terminals", () => {
+  const { controller, host } = setup();
+  controller.create({ agentId: agent("worktree"), sessionId: session("worktree-session"), agentType: "interactive", provider: "chatgpt", cwd: "C:/work/aboard-2" });
+  controller.setSessionTitle(session("worktree-session"), "Fix search");
+  assert.equal(host.titles.get(host.created[0]!.terminal), "Fix search · aboard-2");
+  controller.dispose();
+});

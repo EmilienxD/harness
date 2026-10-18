@@ -21,6 +21,9 @@ import { AgentWorkspaceFiles, WorkspaceRequestJournal, acquireWorkspaceOwner, ac
 import { WorkspaceBatchLauncher, presentWorkspaceBatchResult, validateWorkspaceLaunchPlan, type WorkspaceLaunchPlan, type WorkspaceLaunchProgress } from "./platform/workspace-launcher.js";
 import { WorkspacePresetStore } from "./domain/workspace-presets.js";
 import { NewWorkspaceLauncher } from "./vscode/workspace-launch.js";
+import { ManualCheckouts } from "./platform/checkouts.js";
+import { pickCheckout, prepareCheckout } from "./vscode/checkout-picker.js";
+import { samePath } from "./git/worktree.js";
 import { waitForIdleProviderStartup } from "./runtime/idle-startup.js";
 import { WorkspaceStartup } from "./runtime/workspace-startup.js";
 import { spawnCommandRunner } from "./platform/preflight.js";
@@ -76,7 +79,7 @@ import { WorkspaceAgentIdCounter } from "./runtime/agent-id-counter.js";
 import { PromptResolver } from "./platform/prompts.js";
 import { GitHubDelegationPromptResolver } from "./github/prompt-adapter.js";
 import { FileSystemPromptSpillStore, createPromptSpillRoot } from "./platform/spill.js";
-import { readFile, rm } from "node:fs/promises";
+import { readFile, rm, stat } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { isHeadlessExecution, type AgentId, type AgentSession, type AgentType, type IsoTimestamp, type SessionId, type TerminalId as TerminalIdBrand } from "./domain/contracts.js";
@@ -128,11 +131,11 @@ async function readProjectSettings(workspaceRoot: string): Promise<ProjectSettin
 
 
 function workerConfigurations(workspaceRoot: string, source: FileLaunchConfigurationSource): DelegationConfigurationSource {
-  const requireSkills = async (configured: Awaited<ReturnType<FileLaunchConfigurationSource["get"]>>, type: AgentType) => {
+  const requireSkills = async (configured: Awaited<ReturnType<FileLaunchConfigurationSource["get"]>>, type: AgentType, root = workspaceRoot) => {
     if (type === "address" || type === "review") {
-      if (configured.platform === "claude") await requireHarnessWorkerSkills(workspaceRoot);
-      else if (configured.platform === "chatgpt") await requireChatGptWorkerSkills(workspaceRoot);
-      else if (configured.platform === "pi") await requirePiWorkerSkills(workspaceRoot);
+      if (configured.platform === "claude") await requireHarnessWorkerSkills(root);
+      else if (configured.platform === "chatgpt") await requireChatGptWorkerSkills(root);
+      else if (configured.platform === "pi") await requirePiWorkerSkills(root);
     }
     return configured;
   };
@@ -140,6 +143,8 @@ function workerConfigurations(workspaceRoot: string, source: FileLaunchConfigura
     get: async (type) => requireSkills(await source.get(type), type),
     getFor: async (platform, type) => requireSkills(await source.getFor(platform, type), type),
     getDelegationFor: async (platform, task) => requireSkills(await source.getDelegationFor(platform, task), task === "explore" ? "explore" : "general"),
+    getForWorktree: async (platform, type, cwd) => requireSkills(await source.getForWorktree(platform, type, cwd), type, cwd),
+    getDelegationForWorktree: async (platform, task, cwd) => requireSkills(await source.getDelegationForWorktree(platform, task, cwd), task === "explore" ? "explore" : "general", cwd),
   };
 }
 
@@ -396,7 +401,8 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
   const sessionIsResumable = async (platformId: AgentSession["platform"], sessionId: SessionId, cwd: string, type?: AgentSession["identity"]["type"]): Promise<boolean> => {
     const platform = platforms.get(platformId);
     if (platform === undefined) return false;
-    const configured = type === undefined ? undefined : await launchFile.getFor(platformId, type).catch(() => undefined);
+    if (!(await stat(cwd).catch(() => undefined))?.isDirectory()) throw new Error(`The session's checkout is missing: ${cwd}. Restore it before reopening this session.`);
+    const configured = type === undefined ? undefined : await launchFile.getForWorktree(platformId, type, cwd).catch(() => undefined);
     const settings = configured?.platform === platformId ? configured.settings : undefined;
     const command = typeof settings === "object" && settings !== null && "declaredCommand" in settings
       ? (settings as { readonly declaredCommand?: readonly string[] }).declaredCommand
@@ -423,7 +429,7 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
         let title: string | undefined;
         if (platform === "claude") title = await claudeSessionTitle(sessionId, cwd);
         else {
-          const configured = await launchFile.getFor(platform, entry.type).catch(() => undefined);
+          const configured = await launchFile.getForWorktree(platform, entry.type, cwd).catch(() => undefined);
           const settings = configured?.platform === platform ? configured.settings : undefined;
           const command = typeof settings === "object" && settings !== null && "declaredCommand" in settings
             ? (settings as { readonly declaredCommand?: readonly string[] }).declaredCommand : undefined;
@@ -647,6 +653,7 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
   activeSessionMonitor = sessionMonitor;
   const git: GitClient = new CachingGitClient(new ProcessGitClient(workspaceRoot));
   const branchCleanup = new AboardBranchCleanup(new ProcessAboardBranchRepository(workspaceRoot), github);
+  const mainCheckoutRoot = (await git.worktrees())[0]?.path ?? workspaceRoot;
   const autoRun = new AutoRunEngine({
     git,
     gitFor: (cwd) => new CachingGitClient(new ProcessGitClient(cwd)),
@@ -655,6 +662,7 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
     // asked for one, in their files otherwise.
     workspaces: new WorktreeRunWorkspaces({
       workspaceRoot,
+      mainCheckoutRoot,
       git,
       gitFor: (cwd) => new CachingGitClient(new ProcessGitClient(cwd)),
       settings: () => currentConfiguration.autoRun.worktree,
@@ -729,6 +737,13 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
   context.subscriptions.push(shellHost.onDidCloseTerminal((terminal) => {
     for (const [id, handle] of shellTerminals) if (handle === terminal) shellTerminals.delete(id);
   }));
+  const checkouts = new ManualCheckouts({
+    workspaceRoot, storageRoot: context.globalStorageUri.fsPath,
+    settings: () => currentConfiguration.autoRun.worktree,
+    reserved: (path) => autoRun.isActive() && samePath(path, autoRun.persisted()?.settings.workspaceRoot ?? workspaceRoot),
+    activeAgents: (path) => fleet.list().filter((session) => isLiveSession(session) && samePath(session.cwd ?? workspaceRoot, path)).length,
+    log: (message) => output.appendLine(message),
+  });
   const batchLauncher = new WorkspaceBatchLauncher({
     providers: providerChoices.map((provider) => provider.id),
     initialized: () => agentWorkspaceInitialized,
@@ -737,10 +752,10 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
       agentWorkspaceInitialized = true;
     },
     initializeLayout: initializeAgentLayout,
-    launch: async (provider, editorPane, onCreated) => {
+    launch: async (provider, editorPane, onCreated, checkoutRoot = workspaceRoot) => {
       if (provider === "") {
         const terminalId = randomUUID();
-        const terminal = shellHost.createTerminal({ cwd: workspaceRoot, env: {}, editorPane: editorPane ?? window.tabGroups.activeTabGroup });
+        const terminal = shellHost.createTerminal({ cwd: checkoutRoot, env: {}, editorPane: editorPane ?? window.tabGroups.activeTabGroup });
         shellTerminals.set(terminalId, terminal);
         onCreated();
         return { terminalId };
@@ -748,7 +763,8 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
       return coordinator.launchInteractive({
         type: "interactive", description: `${provider} interactive`, focus: false,
         ...(editorPane === undefined ? {} : { editorPane }),
-        configuration: await launchFile.getFor(provider as AgentPlatformId, "interactive"),
+        configuration: await launchFile.getForWorktree(provider as AgentPlatformId, "interactive", checkoutRoot),
+        isolation: { cwd: checkoutRoot, protectedPaths: [], writableRoots: [] },
       }, "user", onCreated);
     },
     focus: (terminalId) => {
@@ -792,9 +808,7 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
       createTerminalRoutes(terminals),
       createCommandRoutes(commandTerminals),
       createDelegationRoutes({ launch: async (request) => {
-        const configured = request.executionMode === "loop"
-          ? await launchFile.getDelegationForWorktree(request.provider, request.task, request.cwd)
-          : await launchFile.getDelegationFor(request.provider, request.task);
+        const configured = await launchFile.getDelegationForWorktree(request.provider, request.task, request.cwd);
         const returnUri = request.executionMode !== "auto" && request.harnessSessionId !== undefined
           ? await parentTerminalUri(request.harnessSessionId)
           : undefined;
@@ -841,7 +855,7 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
           if (reused !== undefined) return reused;
         }
         if (request.forkSessionId !== undefined) {
-          const configured = await launchFile.getDelegationFor(binding.provider, binding.task);
+          const configured = await launchFile.getDelegationForWorktree(binding.provider, binding.task, binding.cwd);
           return coordinator.launchManual({
             ...(binding.executionMode === "auto" ? {} : await parentEditorPane(binding.parentSessionId)),
             ...(request.effort === undefined ? {} : { effort: request.effort }),
@@ -971,11 +985,23 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
     if (!requireInitialized()) return;
     workspaceBatchActive++;
     try {
+      const selection = await pickCheckout(checkouts, workspaceRoot);
+      if (!selection) return;
+      // Validate the source provider before creation; the target's authority is read again after setup.
+      await launchFile.getForWorktree(provider, "interactive", selection.kind === "existing" ? selection.path : workspaceRoot);
+      if (selection.kind === "new" || selection.kind === "existing" && !samePath(selection.path, workspaceRoot)) {
+        const action = selection.kind === "new" ? "Create and run" : "Run here";
+        const proceed = await window.showWarningMessage(`The agent will run in ${selection.kind === "new" ? "the new worktree" : selection.path}. This window's Explorer remains on ${workspaceRoot}.`, action);
+        if (proceed !== action) return;
+      }
+      const checkoutRoot = await prepareCheckout(checkouts, selection, (message) => output.appendLine(message), () => output.show());
+      if (!checkoutRoot) return;
       await window.withProgress({ location: ProgressLocation.Notification, title: "Starting agent", cancellable: false }, async () => {
         await prepareAgentTerminalGroups();
         await coordinator.launchInteractive({
           type: "interactive", description: `${provider} interactive`,
-          configuration: await launchFile.getFor(provider, "interactive"),
+          configuration: await launchFile.getForWorktree(provider, "interactive", checkoutRoot),
+          isolation: { cwd: checkoutRoot, protectedPaths: [], writableRoots: [] },
         }, "user");
       });
     } catch (error) {
@@ -1106,6 +1132,15 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
       );
       if (confirmed === "Update") await scaffold();
     }),
+    commands.registerCommand("aboard.openAgentCheckout", async (node: unknown) => {
+      const selected = node as { session?: AgentSession; entry?: { kind?: string; reopen?: { cwd?: string } } } | undefined;
+      const path = selected?.session?.cwd ?? selected?.entry?.reopen?.cwd ?? workspaceRoot;
+      if (!(await stat(path).catch(() => undefined))?.isDirectory()) {
+        void window.showErrorMessage(`The checkout is missing: ${path}`);
+        return;
+      }
+      await commands.executeCommand("vscode.openFolder", Uri.file(path), { forceNewWindow: true });
+    }),
     commands.registerCommand("aboard.runAgent", () => runAgent()),
     commands.registerCommand("aboard.launchWorkspace", () => commands.executeCommand("aboard.launch.focus")),
     commands.registerCommand("aboard.runClaudeCode", () => runAgentOn("claude")),
@@ -1113,11 +1148,35 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
     commands.registerCommand("aboard.runPi", () => runAgentOn("pi")),
     registerLaunchPanel({ registerWebviewViewProvider: (viewId, provider) => window.registerWebviewViewProvider(viewId, provider) }, {
       store: presetStore, providers: providerChoices,
+      currentPath: workspaceRoot,
+      checkoutChoices: () => checkouts.choices(),
+      validateBranch: async (branch) => {
+        await new ProcessGitClient(workspaceRoot).validateBranchName(branch);
+        return await checkouts.branchExists(branch) ? "Branch already exists." : undefined;
+      },
       launch: async (request) => {
         if (!requireInitialized()) return;
-        if (request.destination === "new") { await workspaceLauncher.launch(request); return; }
+        // Reject invalid profiles before creating a checkout or opening another window.
+        for (const provider of new Set(request.preset.panes.flatMap((pane) => pane.providers).filter(Boolean))) await launchFile.getForWorktree(provider as AgentPlatformId, "interactive", request.checkout?.kind === "existing" ? request.checkout.path : workspaceRoot);
+        const selection = request.checkout ?? { kind: "current" as const };
+        const checkoutRoot = await prepareCheckout(checkouts, selection, (message) => output.appendLine(message), () => output.show());
+        if (!checkoutRoot) return;
+        if (request.destination === "new") {
+          const targetState = await readScaffoldState(checkoutRoot, expectedScaffoldRevision);
+          if (targetState !== "ready") {
+            const action = targetState === "uninitialized" ? "Initialize checkout" : "Update checkout";
+            const answer = await window.showWarningMessage(`Aboard must ${targetState === "uninitialized" ? "initialize" : "update"} ${checkoutRoot} before launching a layout in its own window. Existing configuration is preserved; worktree setup scripts will not run.`, { modal: true }, action);
+            if (answer !== action) return;
+            const report = await scaffoldProject({ projectRoot: checkoutRoot, assetRoot: scaffoldAssetRoot });
+            for (const warning of report.warnings) output.appendLine(`Checkout initialization: ${warning}`);
+            for (const path of report.preserved) output.appendLine(`Checkout initialization preserved: ${path}`);
+            if (await readScaffoldState(checkoutRoot, expectedScaffoldRevision) !== "ready") throw new Error(`The checkout at ${checkoutRoot} still needs an Aboard update. Open it and resolve its preserved project assets before launching.`);
+          }
+          await workspaceLauncher.launch(request, checkoutRoot);
+          return;
+        }
         await window.withProgress({ location: ProgressLocation.Notification, title: "Starting terminals in current window", cancellable: false }, async (progress) => {
-          const result = await launchLocal(validateWorkspaceLaunchPlan({ preset: request.preset, empty: false, manual: true }, providerChoices.map((provider) => provider.id)), (state) => {
+          const result = await launchLocal(validateWorkspaceLaunchPlan({ preset: request.preset, empty: false, manual: true, checkoutRoot }, providerChoices.map((provider) => provider.id)), (state) => {
             progress.report({ message: `${state.started} of ${state.total} terminals ready${state.failed > 0 ? `, ${state.failed} failed` : ""}` });
           }, "current");
           for (const failure of result.failed) output.appendLine(`Current window launch: ${failure.provider}: ${failure.message}`);
@@ -1193,7 +1252,14 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
       }), handoff.plan));
     })).catch((error: unknown) => output.appendLine(`Workspace handoff: ${error instanceof Error ? error.message : String(error)}`))
       .finally(() => startupStatus?.dispose());
-  } else startupStatus?.dispose();
+  } else {
+    startupStatus?.dispose();
+    if (workspaceStartup !== undefined && !initialized) {
+      const message = "This checkout needs Aboard initialization or an update. Prepare it in this window, then launch the layout again.";
+      void workspaceStartup.execute(async () => ({ started: 0, cancelled: 0, failed: [{ provider: "workspace", message }] })).catch((error: unknown) => output.appendLine(`Workspace handoff: ${error instanceof Error ? error.message : String(error)}`));
+      void window.showErrorMessage(message);
+    }
+  }
   return { commandEndpointDirectory: commandEndpoint.directory, agentWorkspaceStorageRoot: context.globalStorageUri.fsPath };
 }
 

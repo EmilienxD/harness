@@ -198,3 +198,16 @@ for (const manual of [false, true]) test(`${manual ? "manual" : "automatic"} wor
   });
   await assert.rejects(launcher.launch({ preset: { id: "changed", name: "Changed", columns: 2, rows: 1, panes: [{ providers: ["chatgpt"] }, { providers: [] }] }, empty: false, manual }), /already initialized/);
 });
+
+
+test("every terminal assignment receives the batch checkout without changing the preset", async () => {
+  const requests: { provider: string; checkoutRoot: string | undefined }[] = [];
+  const launcher = new WorkspaceBatchLauncher({ providers: ["claude"], initialized: () => false, markInitialized: async () => {}, initializeLayout: async () => [{}, {}],
+    launch: async (provider, _pane, created, checkoutRoot) => { requests.push({ provider, checkoutRoot }); created(); return { terminalId: String(requests.length) }; }, focus: () => {},
+  });
+  const preset = { id: "checkout", name: "Checkout", columns: 1, rows: 2, panes: [{ providers: ["claude"] }, { providers: [""] }] };
+  const result = await launcher.launchCurrent({ preset, empty: false, manual: true, checkoutRoot: "/project-3" });
+  assert.equal(result.started, 2);
+  assert.deepEqual(requests, [{ provider: "claude", checkoutRoot: "/project-3" }, { provider: "", checkoutRoot: "/project-3" }]);
+  assert.equal("checkoutRoot" in preset, false);
+});

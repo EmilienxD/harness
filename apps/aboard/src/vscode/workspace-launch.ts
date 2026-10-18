@@ -15,14 +15,14 @@ export class NewWorkspaceLauncher {
     log: (message: string) => void;
   }) {}
 
-  async launch(request: Pick<LauncherRequest, "preset">): Promise<void> {
+  async launch(request: Pick<LauncherRequest, "preset">, projectRoot: string = this.options.projectRoot): Promise<void> {
     if (this.#busy) return;
     this.#busy = true;
     try {
       await window.withProgress({ location: ProgressLocation.Notification, title: "Launching agent workspace", cancellable: false }, async (progress) => {
         const plan = validateWorkspaceLaunchPlan({ preset: request.preset, empty: false, manual: true }, this.options.providers);
         progress.report({ message: "Opening the new workspace…" });
-        const handoff = await this.options.files.create(this.options.projectRoot, plan);
+        const handoff = await this.options.files.create(projectRoot, plan);
         const startup = new WorkspaceStartup(this.options.storageRoot, handoff);
         try { await commands.executeCommand("vscode.openFolder", Uri.file(handoff.workspaceFile), { forceNewWindow: true }); }
         catch (error) {

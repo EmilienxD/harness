@@ -115,6 +115,11 @@
         "icon": "$(eye)"
       },
       {
+        "command": "aboard.openAgentCheckout",
+        "title": "Open Checkout in New Window",
+        "category": "Aboard"
+      },
+      {
         "command": "aboard.killAgent",
         "title": "Kill Agent",
         "category": "Aboard",
@@ -308,6 +313,10 @@
       ],
       "commandPalette": [
         {
+          "command": "aboard.openAgentCheckout",
+          "when": "false"
+        },
+        {
           "command": "aboard.launchWorkspace",
           "when": "aboard.initialized"
         },
@@ -425,6 +434,10 @@
         }
       ],
       "view/item/context": [
+        {
+          "command": "aboard.openAgentCheckout",
+          "when": "viewItem == aboard.agent.interactive || viewItem == aboard.agent.background || (view == aboard.recentActivity && viewItem =~ /reopen/)"
+        },
         {
           "command": "aboard.focusAgent",
           "when": "viewItem == aboard.agent.interactive"

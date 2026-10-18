@@ -21,8 +21,8 @@ Click a background agent in **Agent Fleet**, or run **Aboard: Watch Background A
 
 Initialize the project once, then open **Run Agent** above the Fleet. **Run Agent** adds one Claude Code or
 Codex or Pi session as an editor terminal in the current window's active editor group, preserving its layout.
-**Launch layout** starts the agents in the selected preset. Choose **New window** to open the same project
-files in a new window and apply the preset grid once. Choose **Current window** to apply the grid in the
+**Launch layout** starts the agents in the selected preset. Choose **New window** to open the selected checkout
+in a new window and apply the preset grid once. Choose **Current window** to apply the grid in the
 current window and start terminals in their assigned panes, keeping existing editors and terminals open.
 The default preset has two vertically stacked
 Codex terminals. A visible subagent opens as a new tab in its parent agent's editor group, even when you are
@@ -39,6 +39,49 @@ The preset grid is applied once per explicit launch. Afterward, resizing, moving
 are under your control. Use **Run Agent** to add individual agents while keeping that arrangement, or
 **Launch layout** with **Current window** to explicitly launch another preset grid and terminal batch.
 Each window manages its own Fleet.
+
+### Choosing a checkout
+
+**Run Agent** asks for a provider, then offers **Current checkout**, **New worktree…**, and the repository's
+other registered worktrees. The provider-specific commands skip only the provider question. Existing
+worktrees show their branch and path; dirty checkouts can be used without resetting or replacing their files.
+
+In **Run Agent**, choose **New worktree…** and enter a branch name. The default starting point is the current checkout's exact HEAD,
+including local commits; uncommitted changes stay behind. Optionally choose another branch, remote-tracking
+ref, or commit. No fetch or push is required. An existing local branch requires explicit reuse; a branch already
+checked out elsewhere must be selected through its existing worktree instead.
+
+**Launch layout** has separate **Window** and **Checkout** selectors. Choosing **New worktree…** reveals the
+branch field below the path preview. Only new branch names are accepted, with inline validation; new branches
+always start from the current checkout's HEAD. The selector shows `checkout-name (branch)`, while the path
+summary marks modified checkouts. Paths displayed in the panel abbreviate your home directory as `~`.
+Every agent and ordinary shell tab in that layout uses the selected checkout. Checkout choices are not saved in presets.
+
+New worktrees use the first free numbered sibling of the repository's main checkout: `project-1`, `project-2`,
+and so on, reusing available gaps. Launching from `project-2` still allocates a `project-N` sibling, never `project-2-1`.
+The existing `aboard.autoRun.worktree.root` directory override and `setupTimeoutSeconds` limit also apply to
+manual worktree creation; its `enabled` and `keep` settings do not control manual launches.
+
+Creation uses the same local-configuration overlay and `.abd/session-setup.ps1` / `.abd/session-setup.sh`
+scripts as Auto Run. The script comes from the source checkout and runs with the new checkout as its working
+directory, once per worktree rather than per terminal. Existing checkout selection never reruns setup or copies
+configuration. Failed preparation launches no agents, retains the checkout, and offers **Retry setup**,
+**Open checkout**, and **View log**; incomplete preparation remains detectable after a reload.
+
+A new window opens the selected checkout as its project folder. If an existing checkout has no Aboard scaffold
+or needs an update, Aboard asks permission to initialize/update it before opening the layout; this is distinct
+from worktree setup and preserves existing configuration. In the current window, only terminal working
+directories change: Explorer remains on the original folder. Launch layout shows this warning inline without
+an additional confirmation; Run Agent still asks for confirmation before launching into another checkout.
+Fleet rows and terminal titles identify checkout directories; a Fleet or reopenable Recent Activity row offers **Open Checkout in New Window**. Activity and reopen retain the original checkout,
+and manual launch, delegation, and reopen configuration is read from that checkout's `.harness/config.json`.
+Missing checkouts are not silently replaced with the original project.
+
+Manual worktrees are retained when agents exit, windows close, or startup fails. Remove them explicitly with
+Git when finished. Worktrees isolate files, not agent permissions: ordinary interactive sessions retain native
+provider permissions rather than acquiring Auto Run's restrictions. Known active Auto Run checkouts in this
+window cannot be reused for manual launches. Run Agent's checkout picker shows agent counts from this window's
+Fleet; the layout panel omits them. Other windows or external agents may also be using the checkout.
 
 Launching agents disables automatic terminal group locking in the current workspace settings, so
 new terminal panes can also open files. Groups you lock manually keep their locked state.
@@ -201,7 +244,7 @@ For example, Claude Auto Run can explore through Kiro while its address and revi
 
 The available manual delegation keys are `explore`, `prototype`, `websearch`, `brainstorm`, `address`, `review`, and `general`. Prototype delegation supports only `interactive` mode; `auto` is rejected. AUTO RUN has separate `explore`, `address`, and `review` keys under each provider's `autoRun` object. The JSON schema supplies completion and documents key defaults; Aboard resolves the effective values in code.
 
-Worktree mode gives a run its own checkout. Aboard copies ignored local `.claude`, `.agents`, `.codex`, and `.abd` configuration without overwriting tracked files. Optional setup commands live in `.abd/session-setup.ps1` and `.abd/session-setup.sh`.
+Worktree mode gives a run its own checkout. Aboard copies ignored local `.claude`, `.agents`, `.codex`, `.pi`, `.abd`, and `.harness` configuration without overwriting checkout files or copying provider session state. Optional setup commands live in `.abd/session-setup.ps1` and `.abd/session-setup.sh`.
 
 The hosted Grill-Me board relay runs per project and defaults to `https://grill-me-in-cloud.vercel.app`. Only the shared four-digit `code` is required; `url` is an optional override (an origin without a trailing slash). It reads these fields from the same sources as the grill hook: `.harness/config.local.json`, `.harness/config.json` (URL only), `~/.harness/config.json`, then the extension host's `HARNESS_GRILL_URL` and `HARNESS_GRILL_CODE`. The workspace must also be initialized, and a changed source takes effect after a window reload. A project without a ready `.abd/` neither reports presence nor polls the board, and removing `.abd/` stops its relay. Each relay reports its own project name and home-relative path alongside presence, so the board's Aboard status names the project it belongs to. Aboard reports only open, bound provider sessions and revalidates the terminal binding before delivery. It saves the immutable Grill prompt in a private local response file and submits a short, single-line reference instead of pasting the multiline answers into the terminal. Claude receives an `@` file reference, which loads the contents into context without an agent read call. Codex receives a path without `@` (backslashes on Windows) and an instruction to read it. Pi receives an `@` reference with forward slashes and an instruction to read it; Aboard does not add automatic file loading to Pi. Paths containing spaces are quoted. Response files survive submission confirmation and window reloads so a delayed agent read can still succeed; subsequent deliveries prune response files older than seven days. Delivery is acknowledged only after the provider's `UserPromptSubmit` hook confirms the handoff arrived; an unconfirmed handoff is reported as failed after 15 seconds. Confirmation means the handoff was submitted, not that the agent has read or applied the answers. Aboard-launched terminals inherit both environment values.
 
