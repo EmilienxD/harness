@@ -50,7 +50,7 @@ partially successful batch reports one error and keeps any running agents.
 Workspace launch shows progress immediately. The new window displays a startup spinner and reports how
 many agents are ready. Preset terminals open without waiting for earlier agents to finish starting.
 
-The **Run Claude Code** and **Run Codex** commands remain direct shortcuts through the same launcher.
+The **Run Claude Code**, **Run Codex**, and **Run Pi** commands remain direct shortcuts through the same launcher.
 Each provider's command, model, and reasoning effort come from `.harness/config.json`. Aboard reads
 that file whenever a launch, resume, or reopen starts a new process, so existing processes keep their
 configuration while future sessions use your latest choices.
