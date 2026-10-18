@@ -35,12 +35,19 @@ if (['cancel','foreground-cancel','hard-foreground','auto-deadline','shutdown','
   const child = cp.spawn(process.execPath, ['-e', "setTimeout(()=>require('node:fs').writeFileSync('orphan-'+process.argv[1],'bad'),6000)", mode], {stdio:'ignore'});
   fs.writeFileSync('child-' + mode + '.json', JSON.stringify({pid:child.pid}));
 }
-setTimeout(() => {
+const finish = () => {
   if(mode === 'large') process.stdout.write('x'.repeat(17 * 1024 * 1024));
   fs.writeFileSync('effect-' + mode, 'done');
   console.log('RESULT:' + mode + ':雪');
   process.exit(mode === 'failure' ? 7 : 0);
-}, Number(duration));
+};
+if (mode === 'busy') {
+  const ready = setInterval(() => {
+    if (!fs.existsSync('started-busy-work.json')) return;
+    clearInterval(ready);
+    setTimeout(finish, Number(duration));
+  }, 20);
+} else setTimeout(finish, Number(duration));
 `;
 
 export async function runPiBackgroundShellJourney(scope: "project" | "user", shell: "bash" | "powershell") {
@@ -48,6 +55,9 @@ export async function runPiBackgroundShellJourney(scope: "project" | "user", she
   const command = (mode: string, ms: number) => `${shell === "powershell" ? "& " : ""}${quote(process.execPath)} worker.cjs ${mode} ${ms}`;
   const step = (name: string, ms: number, extra = {}): PiScenarioStep => ({ checkpoint: name, tool: shell, input: { command: command(name, ms), run_in_background: true, ...extra } });
   const routes: Record<string, readonly PiScenarioStep[]> = {
+    busy: [step("busy", 400),
+      { checkpoint: "busy-foreground", tool: shell, input: { command: command("busy-work", 1800) } },
+      { checkpoint: "busy-observed", tool: "write", input: { path: "busy-observed.txt", content: "completion observed mid-task" } }],
     foreground: [{ checkpoint: "foreground", tool: shell, input: { command: command("foreground", 10) } }],
     "foreground-failure": [{ checkpoint: "foreground-failure", tool: shell, input: { command: command("failure", 10), timeout: 5 } }],
     "hard-foreground": [{ checkpoint: "hard-foreground", tool: shell, input: { command: command("hard-foreground", 10000), timeout: 1 } }],
@@ -81,14 +91,23 @@ export async function runPiBackgroundShellJourney(scope: "project" | "user", she
     assert.equal(parameters.properties?.run_in_background?.type, "boolean");
     assert.equal(parameters.properties?.timeout?.type, "number");
     assert.equal(parameters.properties?.execution_timeout, undefined);
+    assert.equal(request.tools.some(item => item.name === "shell_job"), false);
+    for (const name of ["get_background_shell_status", "cancel_background_shell"]) {
+      const tool = request.tools.find(item => item.name === name);
+      assert.ok(tool);
+      const schema = tool.parameters as { required?: string[]; properties?: Record<string, { type?: string }> };
+      assert.deepEqual(schema.required, ["id"]);
+      assert.equal(schema.properties?.id?.type, "string");
+      if (name === "get_background_shell_status") assert.equal(schema.properties?.show_output?.type, "boolean");
+    }
     if (route === "cancel-now" || route === "inspect") {
       const launches = request.input.filter((item) => item.type === "function_call_output").map((item) => {
         try { return JSON.parse(String(item.output)) as { id?: string }; } catch { return {}; }
       }).filter((item) => item.id);
       const id = launches.at(-1)?.id;
       assert.ok(id);
-      return route === "cancel-now" ? [{ checkpoint: "cancel-job", tool: "shell_job", input: { action: "cancel", id } }]
-        : ["list", "status", "output"].map((action) => ({ checkpoint: `inspect-${action}`, tool: "shell_job", input: action === "list" ? { action } : { action, id } }));
+      return route === "cancel-now" ? [{ checkpoint: "cancel-job", tool: "cancel_background_shell", input: { id } }]
+        : [undefined, false, true].map((show_output, index) => ({ checkpoint: `inspect-${index}`, tool: "get_background_shell_status", input: show_output === undefined ? { id } : { id, show_output } }));
     }
     const steps = routes[route];
     if (!steps) throw new Error("Unknown background scenario route");
@@ -128,7 +147,7 @@ export async function runPiBackgroundShellJourney(scope: "project" | "user", she
     }`);
     const settings = join(project, ".pi", "settings.json");
     const config = JSON.parse(await readFile(settings, "utf8"));
-    config.defaultTools = ["read", "write", shell, "shell_job", "background_nested", "background_nested_auto", "background_nested_cancel", "background_nested_denied"];
+    config.defaultTools = ["read", "write", shell, "get_background_shell_status", "cancel_background_shell", "background_nested", "background_nested_auto", "background_nested_cancel", "background_nested_denied"];
     if (shell === "bash") {
       config.shellCommandPrefix = "export HARNESS_BACKGROUND_PREFIX=verified";
     }
@@ -171,6 +190,28 @@ export async function runPiBackgroundShellJourney(scope: "project" | "user", she
       }
       throw new Error("Automatic completion turn did not become idle");
     }
+    await writeFile(settings, JSON.stringify({ ...config, backgroundShell: { foregroundTimeout: 5 } }));
+    const busy = await prompt("busy", [false, false, false]);
+    assert.equal(await readFile(join(project, "busy-observed.txt"), "utf8"), "completion observed mid-task");
+    assert.equal(await readFile(join(project, "effect-busy"), "utf8"), "done");
+    assert.equal(await readFile(join(project, "effect-busy-work"), "utf8"), "done");
+    const completionIndex = busy.events.findIndex(event => event.type === "message_end" &&
+      (event.message as { customType?: string })?.customType === "harness-background-shell-completion");
+    const executions = busy.events.flatMap((event, index) => event.type === "tool_execution_end" ? [index] : []);
+    assert.ok(completionIndex > executions[1]!, "Steering waits for the executing foreground tool");
+    assert.ok(completionIndex < executions[2]!, "Completion must arrive before the next task step");
+    assert.equal(busy.assistantStopReasons.filter(reason => reason === "stop").length, 1, "No redundant final responses");
+    await idle();
+    assert.equal(fixture.assertions().inferenceRequests, expectedRequests, "No completion-only follow-up after settlement");
+    const delivered = await prompt("inspect", [false, false, false]);
+    for (const event of delivered.events.filter(event => event.type === "tool_execution_end")) {
+      const status = (event.result as { structuredContent: { state: string; notification_state: string } }).structuredContent;
+      assert.equal(status.state, "completed");
+      assert.equal(status.notification_state, "delivered", "A finalized completion must be acknowledged, not merely submitted");
+    }
+    await idle();
+    assert.equal(fixture.assertions().inferenceRequests, expectedRequests);
+    await writeFile(settings, before);
     const foreground = await prompt("foreground");
     const foregroundEnd = foreground.events.find((event) => event.type === "tool_execution_end")!;
     assert.equal((foregroundEnd.result as { structuredContent: { exit_code: number } }).structuredContent.exit_code, 0);
@@ -192,7 +233,7 @@ export async function runPiBackgroundShellJourney(scope: "project" | "user", she
       const launched = await prompt(mode, nested ? [false, false] : [false]);
       const launchEnd = launched.events.filter((event) => event.type === "tool_execution_end").at(-1)!;
       const launch = (launchEnd.result as { structuredContent: { id: string; log_path: string; output: string } }).structuredContent;
-      assert.equal(typeof launch.id, "string");
+      assert.match(launch.id, /^[0-9a-f]{6}$/);
       // Nested tools are real executions, but only the outer call adds inference history.
       if (nested) expectedRequests--;
       if (mode === "auto") {
@@ -202,7 +243,17 @@ export async function runPiBackgroundShellJourney(scope: "project" | "user", she
       }
       if (mode === "success") {
         assert.equal(existsSync(join(project, "effect-success")), false, "Background launch must return before completion");
-        await prompt("inspect", [false, false, false]);
+        const inspected = await prompt("inspect", [false, false, false]);
+        const reminder = inspected.events.find(event => event.type === "message_end" &&
+          (event.message as { customType?: string })?.customType === "harness-background-shell-reminder");
+        assert.ok(reminder, "A user turn with running commands must receive a count reminder");
+        assert.deepEqual((reminder.message as { details: unknown }).details, { running_count: 1 });
+        const statuses = inspected.events.filter(event => event.type === "tool_execution_end").map(event =>
+          (event.result as { structuredContent: { id: string; state: string; output?: string } }).structuredContent);
+        for (const status of statuses) { assert.equal(status.id, launch.id); assert.equal(status.state, "running"); }
+        assert.equal(Object.hasOwn(statuses[0]!, "output"), false);
+        assert.equal(Object.hasOwn(statuses[1]!, "output"), false);
+        assert.equal(typeof statuses[2]!.output, "string");
         await prompt("chat", []);
       }
       const completionPath = join(project, `completion-${mode}.json`);

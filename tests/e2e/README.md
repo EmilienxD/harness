@@ -173,7 +173,12 @@ project and user scope and launches real Pi RPC sessions. The project Bash journ
 not end the job. A second prompt succeeds while it runs. A completion notification then wakes
 the agent, whose real `write` tool saves the observed exit status and output to a fixture receipt.
 The inference server routes from call/result history and completion data, without polling jobs
-or using prompt wording assertions. Windows user-scope acceptance also exercises native PowerShell.
+or using prompt wording assertions. The running command is inspected with omitted, false and true
+`show_output` values through `get_background_shell_status`; status is always returned, output is
+opt-in. User turns receive a hidden count-only reminder, and both replacement tools require an ID.
+Windows user-scope acceptance also exercises native PowerShell. A synchronized background worker
+finishes during a real foreground command; its steering message must reach the next model request
+before the ongoing task's next write, with one final response and no completion-only follow-up.
 
 Automatic-handoff cases (the fixture sets `backgroundShell.foregroundTimeout`) verify the foreground limit returns before completion, the worker
 launches once, its log includes output from before and after handoff, and another prompt can
@@ -186,10 +191,13 @@ reload, tree-navigation, session-switch and shutdown cleanup, nested execution a
 exact inference counts, unchanged project settings/instructions, and
 receipt-driven uninstall. All provider traffic stays on the authenticated fake loopback endpoint.
 The `/ps` command is discovered and handled without inference. A tool cancellation returns its
-final state directly without an automatic duplicate. Project acceptance also runs eleven
-component/real-process checks against the installed Pi SDK: selector navigation, cancellation
+final state directly through `cancel_background_shell` without an automatic duplicate when
+cancelled before submission; Pi-owned queued messages cannot be retracted. Project
+acceptance also runs component/real-process checks against the installed Pi SDK: split-tool schemas,
+optional output, running-count reminders, six-character ID collisions/non-reuse, selector navigation, cancellation
 and reopening, editor replacement/restoration, bounded wrapping/scrolling, key-release filtering,
-native fullscreen Page Up/Down and wheel dispatch, pending-result consumption, and delivery retry.
+native fullscreen Page Up/Down and wheel dispatch, pre-submission consumption, receipt confirmation,
+queued-message non-retraction, ambiguous-submission deduplication, and synchronous rejection retry.
 `npm run e2e:pi-background-shell` is the corresponding CLI journey.
 
 ## Reusable boundaries

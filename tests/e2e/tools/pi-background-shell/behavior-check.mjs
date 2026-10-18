@@ -1,6 +1,8 @@
 import { install, JobPanel, clean, openJobPanel, getKeybindings, ScrollView, TuiAltScreen, VStack, visibleWidth } from "./behavior-runtime.mjs";
 import assert from "node:assert/strict";
-import test from "node:test";
+import test, { mock } from "node:test";
+import crypto from "node:crypto";
+import { syncBuiltinESMExports } from "node:module";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
@@ -18,7 +20,7 @@ async function fixture(run) {
   const previous = process.env.PI_CODING_AGENT_DIR;
   process.env.PI_CODING_AGENT_DIR = join(root, "agent");
   const tools = new Map(), handlers = new Map(), commands = new Map(), renderers = new Map();
-  const sent = [];
+  const sent = [], deliveries = [];
   let failures = 0;
   const ctx = {
     cwd: root,
@@ -33,15 +35,16 @@ async function fixture(run) {
     registerTool: (tool) => tools.set(tool.name, tool),
     registerCommand: (name, command2) => commands.set(name, command2),
     registerMessageRenderer: (name, renderer) => renderers.set(name, renderer),
-    sendMessage: (message) => {
+    sendMessage: (message, options) => {
       if (failures-- > 0) throw new Error("Injected delivery failure");
       sent.push(message);
+      deliveries.push(options);
     }
   });
   const call = async (tool, args) => tools.get(tool).execute("test", args, void 0, void 0, ctx);
   try {
     await handlers.get("session_start")({}, ctx);
-    await run({ root, tools, handlers, commands, renderers, sent, call, ctx, fail: (count) => {
+    await run({ root, tools, handlers, commands, renderers, sent, deliveries, call, ctx, fail: (count) => {
       failures = count;
     } });
   } finally {
@@ -53,11 +56,113 @@ async function fixture(run) {
 }
 const shell = process.platform === "win32" ? "powershell" : "bash";
 const command = (delay) => shell === "powershell" ? `Start-Sleep -Milliseconds ${delay}; Write-Output 'final-output'` : `sleep ${delay / 1e3}; printf final-output`;
-test("delivery survives more than three failures and is emitted only once", async () => {
+test("split tools require IDs and optional output preserves status", async () => {
+  await fixture(async (f) => {
+    assert.equal(f.tools.has("shell_job"), false);
+    const statusTool = f.tools.get("get_background_shell_status");
+    const cancelTool = f.tools.get("cancel_background_shell");
+    assert.deepEqual(statusTool.parameters.required, ["id"]);
+    assert.deepEqual(cancelTool.parameters.required, ["id"]);
+    assert.equal(statusTool.parameters.properties.show_output.type, "boolean");
+    assert.equal(statusTool.parameters.properties.action, undefined);
+    assert.deepEqual(Object.keys(cancelTool.parameters.properties), ["id"]);
+    for (const tool of [statusTool.name, cancelTool.name]) {
+      await assert.rejects(f.call(tool, { id: "missing" }), /Unknown background command ID/);
+    }
+    const receipt = (await f.call(shell, { command: command(100), run_in_background: true })).details;
+    assert.match(receipt.id, /^[0-9a-f]{6}$/);
+    await until(() => f.sent.length === 1);
+    for (const args of [{ id: receipt.id }, { id: receipt.id, show_output: false }, { id: receipt.id, show_output: true }]) {
+      const value = await f.call(statusTool.name, args);
+      assert.equal(value.details.state, "completed");
+      assert.equal(value.details.exit_code, 0);
+      assert.equal(value.structuredContent, value.details);
+      if (args.show_output) assert.match(value.details.output, /final-output/);
+      else assert.equal(Object.hasOwn(value.details, "output"), false);
+    }
+    const cancelled = (await f.call(cancelTool.name, { id: receipt.id })).details;
+    assert.equal(cancelled.state, "completed");
+    await f.handlers.get("session_tree")();
+    await assert.rejects(f.call(statusTool.name, { id: receipt.id }), /Unknown background command ID/);
+  });
+});
+test("user turns get only a live running count, excluding foreground and completed jobs", async () => {
+  await fixture(async (f) => {
+    const remind = (messageType = "user") => f.handlers.get("before_agent_start")({ messageType });
+    assert.equal(remind(), undefined);
+    await mkdir(join(f.root, "agent"), { recursive: true });
+    await writeFile(join(f.root, "agent", "settings.json"), JSON.stringify({ backgroundShell: { foregroundTimeout: 5 } }));
+    const foreground = f.call(shell, { command: command(300) });
+    assert.equal(remind(), undefined);
+    await foreground;
+    const first = (await f.call(shell, { command: command(1e4), run_in_background: true })).details;
+    const second = (await f.call(shell, { command: command(1e4), run_in_background: true })).details;
+    assert.notEqual(first.id, second.id);
+    const reminder = remind().message;
+    assert.equal(reminder.customType, "harness-background-shell-reminder");
+    assert.equal(reminder.display, false);
+    assert.deepEqual(reminder.details, { running_count: 2 });
+    assert.equal(remind("custom"), undefined);
+    await f.call("cancel_background_shell", { id: first.id });
+    assert.deepEqual(remind().message.details, { running_count: 1 });
+    await f.call("cancel_background_shell", { id: second.id });
+    assert.equal(remind(), undefined);
+    await f.handlers.get("session_tree")();
+    assert.equal(remind(), undefined);
+  });
+});
+test("short IDs retry collisions and are not reused after foreground receipts disappear", async () => {
+  await fixture(async (f) => {
+    const original = crypto.randomUUID;
+    const ids = ["abcdef", "abcdef", "123456", "abcdef", "123456", "789abc"];
+    const random = mock.method(crypto, "randomUUID", () => {
+      const prefix = ids.shift();
+      return prefix ? `${prefix}00-0000-4000-8000-000000000000` : original();
+    });
+    syncBuiltinESMExports();
+    try {
+      // Foreground IDs are retained as reserved even though their logs/receipts are removed.
+      await f.call(shell, { command: command(10) });
+      const first = (await f.call(shell, { command: command(1e4), run_in_background: true })).details;
+      const second = (await f.call(shell, { command: command(1e4), run_in_background: true })).details;
+      assert.equal(first.id, "123456");
+      assert.equal(second.id, "789abc");
+      assert.notEqual(first.log_path, second.log_path);
+      await f.call("cancel_background_shell", { id: first.id });
+      await f.call("cancel_background_shell", { id: second.id });
+    } finally {
+      random.mock.restore();
+      syncBuiltinESMExports();
+    }
+  });
+});
+test("submission without a receipt is not blindly retried; queued messages cannot be consumed", async () => {
+  await fixture(async (f) => {
+    const receipt = (await f.call(shell, { command: command(100), run_in_background: true })).details;
+    await until(() => f.sent.length === 1);
+    assert.deepEqual(f.deliveries[0], { deliverAs: "steer", triggerTurn: true });
+    // Pi's void API does not expose async success/failure. No receipt is ambiguous.
+    for (let i = 0; i < 4; i++) f.handlers.get("agent_settled")();
+    await pause(650);
+    assert.equal(f.sent.length, 1);
+    const status = (await f.call("get_background_shell_status", { id: receipt.id })).details;
+    assert.equal(status.notification_state, "submitted");
+    assert.equal(status.state, "completed");
+    assert.equal(f.sent.length, 1, "Reading status cannot retract Pi's existing queue entry");
+    const message = { role: "custom", ...f.sent[0] };
+    f.handlers.get("message_end")({ message: { ...message, details: { ...message.details, epoch: -1 } } });
+    assert.equal((await f.call("get_background_shell_status", { id: receipt.id })).details.notification_state, "submitted");
+    f.handlers.get("message_end")({ message });
+    assert.equal((await f.call("get_background_shell_status", { id: receipt.id })).details.notification_state, "delivered");
+    f.handlers.get("agent_settled")();
+    assert.equal(f.sent.length, 1);
+  });
+});
+test("synchronously rejected submissions are retried and submitted only once", async () => {
   await fixture(async (f) => {
     f.fail(100);
     await f.call(shell, { command: command(100), run_in_background: true, title: "Retry example" });
-    await until(async () => (await f.call("shell_job", { action: "list" })).details.jobs[0].state === "completed");
+    await until(() => !f.handlers.get("before_agent_start")({ messageType: "user" }));
     for (let i = 0; i < 4; i++) f.handlers.get("agent_settled")();
     assert.equal(f.sent.length, 0);
     f.fail(0);
@@ -76,14 +181,14 @@ test("timeout is a hard limit; the configured foreground limit alone decides han
     assert.ok(schema.timeout);
     assert.equal(schema.execution_timeout, undefined);
     await assert.rejects(f.call(shell, { command: command(5e3), timeout: 0.2 }), /deadline/);
-    assert.deepEqual((await f.call("shell_job", { action: "list" })).details.jobs, []);
+    assert.equal(f.handlers.get("before_agent_start")({ messageType: "user" }), undefined);
     const moved = (await f.call(shell, { command: command(5e3), timeout: 1.5 })).details;
     assert.equal(moved.state, "running");
     assert.match(moved.notification, /0\.5 seconds/);
-    await until(async () => (await f.call("shell_job", { action: "status", id: moved.id })).details.state === "timed_out");
+    await until(async () => (await f.call("get_background_shell_status", { id: moved.id })).details.state === "timed_out");
     const plain = (await f.call(shell, { command: command(900) })).details;
     assert.equal(plain.state, "running");
-    await until(async () => (await f.call("shell_job", { action: "status", id: plain.id })).details.state === "completed");
+    await until(async () => (await f.call("get_background_shell_status", { id: plain.id })).details.state === "completed");
   });
 });
 test("completion keeps output for the agent but renders only exit status, even expanded", async () => {
@@ -118,11 +223,12 @@ test("reading a completed result consumes its undelivered notification", async (
     const receipt = (await f.call(shell, { command: command(100), run_in_background: true })).details;
     let final;
     for (let i = 0; i < 100; i++) {
-      final = (await f.call("shell_job", { action: "output", id: receipt.id })).details;
+      final = (await f.call("get_background_shell_status", { show_output: true, id: receipt.id })).details;
       if (final.state !== "running") break;
       await pause(30);
     }
     assert.equal(final.state, "completed");
+    assert.equal(final.notification_state, "consumed");
     assert.match(final.output, /final-output/);
     f.fail(0);
     f.handlers.get("agent_settled")();
@@ -133,7 +239,7 @@ test("reading a completed result consumes its undelivered notification", async (
 test("tool cancellation returns the final state without an automatic duplicate", async () => {
   await fixture(async (f) => {
     const receipt = (await f.call(shell, { command: command(1e4), run_in_background: true })).details;
-    const cancelled = (await f.call("shell_job", { action: "cancel", id: receipt.id })).details;
+    const cancelled = (await f.call("cancel_background_shell", { id: receipt.id })).details;
     assert.equal(cancelled.state, "cancelled");
     await pause(200);
     assert.equal(f.sent.length, 0);
@@ -154,7 +260,7 @@ test("cancellation reaps a descendant holding inherited output pipes", async () 
     const receipt = (await f.call(shell, { command: `${shell === "powershell" ? "& " : ""}${quote(process.execPath)} worker.cjs`, run_in_background: true })).details;
     await until(() => existsSync(join(f.root, "child-started.txt")));
     const start = Date.now();
-    const result = (await f.call("shell_job", { action: "cancel", id: receipt.id })).details;
+    const result = (await f.call("cancel_background_shell", { id: receipt.id })).details;
     assert.equal(result.state, "cancelled");
     assert.ok(Date.now() - start < 3e3, "Inherited pipes must not hang cancellation");
     await pause(2200);

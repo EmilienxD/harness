@@ -1,5 +1,5 @@
 name = "background-shell"
-version = "2.2.3"
+version = "3.0.1"
 description = "Pi background shell jobs with automatic completion, output browsing, and cancellation"
 docs = "https://github.com/EmilienxD/harness/blob/main/README.md#background-shell"
 

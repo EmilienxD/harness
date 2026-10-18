@@ -679,10 +679,14 @@ Commands start in the foreground unless `run_in_background: true` requests an im
 receipt. If a foreground command runs longer than the foreground limit (120 seconds by default), the same process
 continues in the background without restarting. Its result includes the job ID, temporary log
 path, and recent output. Completion delivers the actual exit status, elapsed time, and recent
-output to the agent and wakes it if idle. The TUI shows only
+output to the agent. Version 3.0.1 uses steering: completion reaches an ongoing task at the next
+agent-loop boundary, or wakes the agent if idle. It does not interrupt an executing foreground
+tool batch. When only background work remains, the agent should end its response and wait for
+notification rather than run foreground sleeps or poll. The TUI shows only
 ``Background command `<title or command>` exited with status <status-code>.``, even when expanded;
-command output remains available through `/ps` or `shell_job`. If cancellation or a hard deadline
-prevents an exit code from being reported, the status is `unknown`. Quiet commands keep running.
+command output remains available through `/ps` or `get_background_shell_status` with
+`show_output: true`. If cancellation or a hard deadline prevents an exit code from being reported,
+the status is `unknown`. Quiet commands keep running.
 
 The agent-visible `timeout` parameter is a hard limit in seconds, measured from launch, that
 terminates the command and its process tree whether it runs in the foreground or background.
@@ -690,12 +694,17 @@ It has no default. The foreground-to-background handoff is a user setting, not a
 parameter: set `backgroundShell.foregroundTimeout` (seconds, default 120) in Pi's `settings.json`.
 A command whose `timeout` is at or below that limit is cancelled in the foreground and never
 moves to the background; a longer `timeout` keeps counting after handoff and cancels the job.
-Cancellation before handoff stops the command; after handoff, use `shell_job` to cancel it.
+Cancellation before handoff stops the command; after handoff, use `cancel_background_shell` to cancel it.
 Version 2.2.0 removes `execution_timeout`.
 The optional Windows `powershell` tool follows your existing tool selection; installing this
 package does not switch Bash commands to PowerShell syntax.
 
-`shell_job` lists jobs, reads status or recent output, and cancels a job with its process tree.
+Version 3.0.0 replaces `shell_job` with two tools, both requiring the command `id`:
+`get_background_shell_status` always returns status and includes recent output when its optional
+`show_output` boolean is true (default false); `cancel_background_shell` stops the command and
+its process tree and returns the final status. IDs are six hexadecimal characters, checked for
+uniqueness within the live session. After each user message, the agent receives a small reminder
+when background commands are still running, containing only their count; there is no agent listing tool.
 The optional `title` parameter gives commands a short label. In Pi's terminal UI, `/ps` opens
 a command selector beneath a single separator, replacing the input bar until the menu closes.
 Use arrows and Enter to inspect a job, Page Up/Down or the mouse wheel over the shell to scroll,
@@ -704,8 +713,14 @@ Cancelled and completed jobs stay visible until the menu closes, then disappear 
 The panel grows to fit its content up to 20 rows or 45% of the terminal height; command text
 wraps across up to three rows. Press `l` to load the retained log or `f` to follow recent output.
 Closing the menu restores the previous input editor and draft. Mouse scrolling requires Pi's
-fullscreen mode. Completion messages show status and recent output; tool calls that already
-return a final status consume pending notifications for that job.
+fullscreen mode. Completion messages show status and recent output. A final status read or
+cancellation suppresses notifications still owned by the extension, but cannot retract a message
+already queued in Pi. `notification_state` distinguishes `not_ready`, `pending`, `submitted`,
+`delivered` (observed through Pi's finalized-message event, not proof the model acted on it),
+and `consumed`. Synchronous
+submission rejections are retried with capped backoff. Pi's fire-and-forget API cannot report
+per-message asynchronous failures: submitted notifications without a session receipt are not
+blindly resent. Status and output remain retrievable by ID.
 
 It retains the last 8 KiB of decoded output and the first 16 MiB in a private temporary log,
 with truncation reported explicitly. At most eight shell commands run concurrently (including

@@ -145,12 +145,22 @@ Foreground commands automatically move to the background after a configurable li
 process and output from launch. The agent-visible `timeout` is a hard deadline from launch in
 either mode: at or below the foreground limit the command is cancelled without handoff, above it
 the same deadline cancels the background job. Version 2.2.0 removed `execution_timeout`.
+Version 3.0.1 sends completions as steering with idle wake-up, so busy tasks receive them at
+the next agent-loop boundary rather than after final settlement. Executing tool batches are
+not interrupted; the agent should end its response when only background work remains.
+Version 3.0.0 replaces the action-based `shell_job` tool with ID-required
+`get_background_shell_status` (optional `show_output`) and `cancel_background_shell`. Six-hex-character
+IDs are collision-checked within the live session. User-started turns receive a hidden running-count
+reminder when jobs remain; custom completion turns do not. There is no agent listing tool.
 Version 2.1.0 adds optional job titles, a running count, compact completion rendering and `/ps`.
 Its bounded selector/output panel replaces the editor beneath one separator, restoring the
 previous editor and draft on close. Native fullscreen chat paging is disabled in memory only
 while the menu is open; the panel handles Page Up/Down and normalized wheel events over its
-output. Cancelled rows disappear on reopening. Final tool results consume pending notifications;
-failed submissions retain their receipts for capped retries and settlement-triggered delivery.
+output. Cancelled rows disappear on reopening. Final tool results consume extension-pending
+notifications, not messages already queued in Pi. Submission and session delivery are distinct
+`notification_state` values, with `message_end` confirming session delivery. Only synchronous
+submission rejections are retried with capped backoff and on settlement; Pi's void send API
+exposes no per-message asynchronous failure result. Ambiguous submissions are not blindly resent.
 It has no npm or shared Python dependency and installs through ordinary extension file mappings,
 without instruction or configuration fragments. Background jobs are scoped to the live session;
 reload, tree navigation, session changes, and shutdown cancel jobs and discard logs.
