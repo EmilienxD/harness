@@ -676,19 +676,22 @@ Windows shell resolver, including Windows PowerShell when PowerShell 7 is unavai
 Ask Pi: "Run the test suite in the background, continue the review, and inspect the result
 when it finishes." The shell tool itself exposes the option and its usage guidance.
 Commands start in the foreground unless `run_in_background: true` requests an immediate job
-receipt. If a foreground command exceeds `timeout` (120 seconds by default), the same process
+receipt. If a foreground command runs longer than the foreground limit (120 seconds by default), the same process
 continues in the background without restarting. Its result includes the job ID, temporary log
 path, and recent output. Completion delivers the actual exit status, elapsed time, and recent
-output and wakes an idle agent. Quiet commands keep running.
+output to the agent and wakes it if idle. The TUI shows only
+``Background command `<title or command>` exited with status <status-code>.``, even when expanded;
+command output remains available through `/ps` or `shell_job`. If cancellation or a hard deadline
+prevents an exit code from being reported, the status is `unknown`. Quiet commands keep running.
 
-Starting with **2.0.0**, foreground `timeout` is a wait limit, not a termination deadline.
-Use `execution_timeout` for an optional hard deadline in seconds measured from launch; it
-continues counting after automatic backgrounding and terminates the process tree when reached.
-For explicitly backgrounded commands, `timeout` retains its hard-deadline behavior and has no
-default. If both hard deadlines are supplied, the earlier one wins. For example, `timeout: 5,
-execution_timeout: 600` waits up to five seconds in the foreground and permits ten minutes
-of total execution. Cancellation before handoff stops the command; after handoff, use
-`shell_job` to cancel it.
+The agent-visible `timeout` parameter is a hard limit in seconds, measured from launch, that
+terminates the command and its process tree whether it runs in the foreground or background.
+It has no default. The foreground-to-background handoff is a user setting, not an agent
+parameter: set `backgroundShell.foregroundTimeout` (seconds, default 120) in Pi's `settings.json`.
+A command whose `timeout` is at or below that limit is cancelled in the foreground and never
+moves to the background; a longer `timeout` keeps counting after handoff and cancels the job.
+Cancellation before handoff stops the command; after handoff, use `shell_job` to cancel it.
+Version 2.2.0 removes `execution_timeout`.
 The optional Windows `powershell` tool follows your existing tool selection; installing this
 package does not switch Bash commands to PowerShell syntax.
 
@@ -697,7 +700,7 @@ The optional `title` parameter gives commands a short label. In Pi's terminal UI
 a command selector beneath a single separator, replacing the input bar until the menu closes.
 Use arrows and Enter to inspect a job, Page Up/Down or the mouse wheel over the shell to scroll,
 and `x` to stop it and return to the selector. Escape returns to the list or closes the menu.
-Cancelled jobs stay visible until the menu closes, then disappear from the next selection.
+Cancelled and completed jobs stay visible until the menu closes, then disappear from the next selection.
 The panel grows to fit its content up to 20 rows or 45% of the terminal height; command text
 wraps across up to three rows. Press `l` to load the retained log or `f` to follow recent output.
 Closing the menu restores the previous input editor and draft. Mouse scrolling requires Pi's

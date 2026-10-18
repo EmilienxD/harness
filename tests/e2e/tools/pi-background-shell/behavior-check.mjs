@@ -1,7 +1,7 @@
 import { install, JobPanel, clean, openJobPanel, getKeybindings, ScrollView, TuiAltScreen, VStack, visibleWidth } from "./behavior-runtime.mjs";
 import assert from "node:assert/strict";
 import test from "node:test";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -66,6 +66,50 @@ test("delivery survives more than three failures and is emitted only once", asyn
     assert.equal(f.sent[0].details.jobs[0].title, "Retry example");
     f.handlers.get("agent_settled")();
     assert.equal(f.sent.length, 1);
+  });
+});
+test("timeout is a hard limit; the configured foreground limit alone decides handoff", async () => {
+  await fixture(async (f) => {
+    await mkdir(join(f.root, "agent"), { recursive: true });
+    await writeFile(join(f.root, "agent", "settings.json"), JSON.stringify({ backgroundShell: { foregroundTimeout: 0.5 } }));
+    const schema = f.tools.get(shell).parameters.properties;
+    assert.ok(schema.timeout);
+    assert.equal(schema.execution_timeout, undefined);
+    await assert.rejects(f.call(shell, { command: command(5e3), timeout: 0.2 }), /deadline/);
+    assert.deepEqual((await f.call("shell_job", { action: "list" })).details.jobs, []);
+    const moved = (await f.call(shell, { command: command(5e3), timeout: 1.5 })).details;
+    assert.equal(moved.state, "running");
+    assert.match(moved.notification, /0\.5 seconds/);
+    await until(async () => (await f.call("shell_job", { action: "status", id: moved.id })).details.state === "timed_out");
+    const plain = (await f.call(shell, { command: command(900) })).details;
+    assert.equal(plain.state, "running");
+    await until(async () => (await f.call("shell_job", { action: "status", id: plain.id })).details.state === "completed");
+  });
+});
+test("completion keeps output for the agent but renders only exit status, even expanded", async () => {
+  await fixture(async (f) => {
+    await f.call(shell, { command: command(100), run_in_background: true, title: "Status example" });
+    await until(() => f.sent.length === 1);
+    const message = f.sent[0];
+    assert.equal(message.display, true);
+    const data = JSON.parse(message.content);
+    assert.equal(data.type, "shell_job_completion");
+    assert.match(data.jobs[0].output, /final-output/);
+    const renderer = f.renderers.get(message.customType);
+    const theme = { fg: (_, text) => text };
+    for (const expanded of [false, true]) {
+      assert.deepEqual(renderer(message, { expanded }, theme).render(200).map(line => line.trimEnd()), [
+        "Background command `Status example` exited with status 0."
+      ]);
+      const jobs = [
+        { ...message.details.jobs[0], title: "Failed\x1b[2J\njob", state: "failed", exit_code: 7 },
+        { ...message.details.jobs[0], title: "Timed `out`", state: "timed_out", exit_code: null },
+      ];
+      assert.deepEqual(renderer({ ...message, details: { jobs } }, { expanded }, theme).render(200).map(line => line.trimEnd()), [
+        "Background command `Failed job` exited with status 7.",
+        "Background command `Timed 'out'` exited with status unknown.",
+      ]);
+    }
   });
 });
 test("reading a completed result consumes its undelivered notification", async () => {
@@ -223,21 +267,24 @@ test("/ps hides input behind one separator, caps and scrolls output, and restore
     assert.equal(editorLines[1], "Background shell", "Heading immediately follows the separator in the same editor component");
     assert.equal(hiddenEditor.getText(), "unfinished draft", "Hiding input preserves its text");
     assert.equal(listener("\r").consume, true);
-    const bottom = widget.render(32).slice(1);
+    const bottom = widget.render(32).slice(1, -1);
     assert.ok(bottom.length <= 18, "40-row terminal allows at most 45% for the panel");
     assert.ok(bottom.some((line) => line.includes("line-79")), "Enter opens the selected command output");
     assert.ok(bottom.every((line) => visibleWidth(line) <= 32));
+    assert.equal(widget.render(32).at(-1), "─".repeat(32), "A full-width bar closes the panel above the status line");
+    assert.equal(bottom.at(-2), "", "One empty line separates the info from the keyboard help");
+    assert.ok(bottom.at(-1).startsWith("↑/↓ scroll"));
     assert.equal(listener("\x1B[A").consume, true);
-    assert.notDeepEqual(widget.render(32).slice(1), bottom, "Up scrolls into earlier output");
+    assert.notDeepEqual(widget.render(32).slice(1, -1), bottom, "Up scrolls into earlier output");
     assert.equal(listener("	").consume, true);
     assert.equal(listener("\x1B[9;1:3u").consume, true);
     assert.equal(listener("typing in prompt").consume, true, "Tab cannot return typing to the hidden editor");
     assert.equal(listener("	").consume, true);
     assert.equal(listener("j").consume, true);
     terminal.rows = 12;
-    assert.ok(widget.render(32).length <= 6, "Resizing recomputes the height cap");
+    assert.ok(widget.render(32).length <= 7, "Resizing recomputes the height cap");
     terminal.rows = 100;
-    assert.ok(widget.render(32).length <= 21, "Tall terminals keep the absolute height cap");
+    assert.ok(widget.render(32).length <= 22, "Tall terminals keep the absolute height cap");
     close();
     assert.equal(widget, void 0);
     assert.equal(editorFactory, previousEditor, "Closing restores the original editor factory");
@@ -342,8 +389,8 @@ test("arrow press/release pairs move one row; release never navigates or closes 
     panel.dispose();
   }
 });
-test("cancelled jobs stay visible until /ps closes and disappear from the reopened selector", async () => {
-  const jobs = ["running", "completed", "failed"].map((state, i) => ({
+test("cancelled and completed jobs stay visible until /ps closes and disappear from the reopened selector", async () => {
+  const jobs = ["running", "running", "completed", "failed"].map((state, i) => ({
     id: `bg-retained-${i}`,
     title: `Retained job ${i}`,
     command: `command-${i}`,
@@ -373,14 +420,18 @@ test("cancelled jobs stay visible until /ps closes and disappear from the reopen
     panel.handleInput("x");
     await pause(10);
     assert.equal(jobs[0].state, "cancelled");
+    assert.ok(!panel.render(100).some((line) => line.includes("Retained job 2")), "A job that finished before /ps opened is not listed");
+    jobs[1].state = "completed";
+    assert.ok(panel.render(100).some((line) => line.includes("Retained job 1 · completed")), "A job finishing while the menu is open is shown as completed");
     assert.ok(panel.render(100).some((line) => line.includes("Retained job 0")), "Cancelling does not remove the row while the menu is open");
     panel.dispose();
     panel = create();
     const reopened = panel.render(100);
     assert.ok(!reopened.some((line) => line.includes("Retained job 0")));
-    assert.ok(reopened.some((line) => line.includes("Retained job 1")), "Completed jobs remain selectable");
-    assert.ok(reopened.some((line) => line.includes("Retained job 2")), "Failed jobs remain selectable");
-    assert.equal(source.list().length, 3, "Filtering the selector preserves job records and logs");
+    assert.ok(!reopened.some((line) => line.includes("Retained job 1")), "Completed jobs disappear on reopening");
+    assert.ok(!reopened.some((line) => line.includes("Retained job 2")));
+    assert.ok(reopened.some((line) => line.includes("Retained job 3")), "Failed jobs remain selectable");
+    assert.equal(source.list().length, 4, "Filtering the selector preserves job records and logs");
   } finally {
     panel.dispose();
   }

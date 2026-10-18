@@ -140,10 +140,11 @@ reasoning expansion, image preservation and reload against the installed Pi SDK.
 `harness/productivity/background-shell/`. It overrides `bash` and Windows `powershell` with
 an explicit `run_in_background` parameter, reuses Pi's native shell resolution and execution,
 and owns bounded job receipts/logs, cancellation, and automatic completion messages.
-Version 2.0.0 automatically moves foreground commands to the background when their wait limit
-expires (`timeout`, default 120 seconds), preserving the running process and output from launch.
-`execution_timeout` sets an optional hard deadline from launch, including time after handoff;
-explicitly backgrounded commands retain their optional hard `timeout` deadline.
+Foreground commands automatically move to the background after a configurable limit
+(`backgroundShell.foregroundTimeout` in Pi settings, default 120 seconds), preserving the running
+process and output from launch. The agent-visible `timeout` is a hard deadline from launch in
+either mode: at or below the foreground limit the command is cancelled without handoff, above it
+the same deadline cancels the background job. Version 2.2.0 removed `execution_timeout`.
 Version 2.1.0 adds optional job titles, a running count, compact completion rendering and `/ps`.
 Its bounded selector/output panel replaces the editor beneath one separator, restoring the
 previous editor and draft on close. Native fullscreen chat paging is disabled in memory only

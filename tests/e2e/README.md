@@ -175,11 +175,10 @@ the agent, whose real `write` tool saves the observed exit status and output to 
 The inference server routes from call/result history and completion data, without polling jobs
 or using prompt wording assertions. Windows user-scope acceptance also exercises native PowerShell.
 
-Automatic-handoff cases verify a foreground wait limit returns before completion, the worker
+Automatic-handoff cases (the fixture sets `backgroundShell.foregroundTimeout`) verify the foreground limit returns before completion, the worker
 launches once, its log includes output from before and after handoff, and another prompt can
 run while it continues. A nested caller aborts its own signal after handoff to verify background
-ownership. Hard deadlines are checked before and after handoff, including equal wait/execution
-deadlines; commands that settle in the foreground must not send a completion notification.
+ownership. Hard `timeout` deadlines are checked before and after handoff, including a timeout equal to the foreground limit; commands that settle in the foreground must not send a completion notification.
 
 Further cases cover nonzero native exit codes, explicit termination deadlines, large output and
 log limits, command-guard denial before launch, invalid arguments, process-tree cancellation,

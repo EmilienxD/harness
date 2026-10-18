@@ -50,25 +50,25 @@ export async function runPiBackgroundShellJourney(scope: "project" | "user", she
   const routes: Record<string, readonly PiScenarioStep[]> = {
     foreground: [{ checkpoint: "foreground", tool: shell, input: { command: command("foreground", 10) } }],
     "foreground-failure": [{ checkpoint: "foreground-failure", tool: shell, input: { command: command("failure", 10), timeout: 5 } }],
-    "hard-foreground": [{ checkpoint: "hard-foreground", tool: shell, input: { command: command("hard-foreground", 10000), timeout: 5, execution_timeout: 0.6 } }],
-    "equal-deadlines": [{ checkpoint: "equal-deadlines", tool: shell, input: { command: command("equal-deadlines", 10000), timeout: 0.6, execution_timeout: 0.6 } }],
-    auto: [{ checkpoint: "auto", tool: shell, input: { command: command("auto", 2200), timeout: 0.4 } }],
-    "auto-failure": [{ checkpoint: "auto-failure", tool: shell, input: { command: command("auto-failure", 1500) + "; exit 7", timeout: 0.2 } }],
-    "auto-deadline": [{ checkpoint: "auto-deadline", tool: shell, input: { command: command("auto-deadline", 10000), timeout: 0.2, execution_timeout: 1.2 } }],
-    "background-deadline": [step("background-deadline", 10000, { timeout: 10, execution_timeout: 0.6 })],
+    "hard-foreground": [{ checkpoint: "hard-foreground", tool: shell, input: { command: command("hard-foreground", 10000), timeout: 1 } }],
+    "equal-deadlines": [{ checkpoint: "equal-deadlines", tool: shell, input: { command: command("equal-deadlines", 10000), timeout: 1.5 } }],
+    auto: [{ checkpoint: "auto", tool: shell, input: { command: command("auto", 2200) } }],
+    "auto-failure": [{ checkpoint: "auto-failure", tool: shell, input: { command: command("auto-failure", 2200) + "; exit 7" } }],
+    "auto-deadline": [{ checkpoint: "auto-deadline", tool: shell, input: { command: command("auto-deadline", 10000), timeout: 3 } }],
+    "background-deadline": [step("background-deadline", 10000, { timeout: 0.6 })],
     success: [step("success", scope === "project" ? 26000 : 1800)],
     failure: [step("failure", 1200)],
     timeout: [step("timeout", 10000, { timeout: 0.6 })],
     large: [step("large", 1200)],
     denied: [{ checkpoint: "denied", tool: shell, input: { command: command("denied", 10) + " # forbidden-marker", run_in_background: true } }],
     malformed: [{ checkpoint: "invalid-timeout", tool: shell, input: { command: command("invalid", 10), run_in_background: true, timeout: -1 } }],
-    cancel: [{ checkpoint: "cancel", tool: shell, input: { command: command("cancel", 10000), timeout: 0.2 } }],
-    reload: [{ checkpoint: "reload", tool: shell, input: { command: command("reload", 10000), timeout: 0.2 } }], shutdown: [step("shutdown", 10000)],
+    cancel: [{ checkpoint: "cancel", tool: shell, input: { command: command("cancel", 10000) } }],
+    reload: [{ checkpoint: "reload", tool: shell, input: { command: command("reload", 10000) } }], shutdown: [step("shutdown", 10000)],
     tree: [step("tree", 10000)], switch: [step("switch", 10000)],
     nested: [{ checkpoint: "nested-background", tool: "background_nested", input: {} }],
     "nested-auto": [{ checkpoint: "nested-auto", tool: "background_nested_auto", input: {} }],
     "foreground-cancel": [{ checkpoint: "foreground-cancel", tool: "background_nested_cancel", input: {} }],
-    "auto-denied": [{ checkpoint: "auto-denied", tool: shell, input: { command: command("auto-denied", 10000) + " # forbidden-marker", timeout: 0.2 } }],
+    "auto-denied": [{ checkpoint: "auto-denied", tool: shell, input: { command: command("auto-denied", 10000) + " # forbidden-marker" } }],
     "nested-denied": [{ checkpoint: "nested-denied", tool: "background_nested_denied", input: {} }],
     "ps-error": [{ checkpoint: "powershell-error", tool: shell,
       input: { command: "Start-Sleep -Milliseconds 1200; Write-Error 'fixture command failed'", run_in_background: true } }],
@@ -79,6 +79,8 @@ export async function runPiBackgroundShellJourney(scope: "project" | "user", she
     assert.ok(advertised, "Selected shell must remain model-visible");
     const parameters = advertised.parameters as { properties?: Record<string, { type?: string }> };
     assert.equal(parameters.properties?.run_in_background?.type, "boolean");
+    assert.equal(parameters.properties?.timeout?.type, "number");
+    assert.equal(parameters.properties?.execution_timeout, undefined);
     if (route === "cancel-now" || route === "inspect") {
       const launches = request.input.filter((item) => item.type === "function_call_output").map((item) => {
         try { return JSON.parse(String(item.output)) as { id?: string }; } catch { return {}; }
@@ -102,7 +104,7 @@ export async function runPiBackgroundShellJourney(scope: "project" | "user", she
     export default function(pi) {
       for(const [name,command] of ${JSON.stringify([
         ["background_nested", command("nested", 1500)],
-        ["background_nested_auto", command("nested-auto", 1500)],
+        ["background_nested_auto", command("nested-auto", 3000)],
         ["background_nested_cancel", command("foreground-cancel", 10000)],
         ["background_nested_denied", command("nested-denied", 10) + " # forbidden-marker"],
       ])}) pi.registerTool({name,label:name,description:'Fixture nested shell call',parameters:Type.Object({}),
@@ -112,7 +114,7 @@ export async function runPiBackgroundShellJourney(scope: "project" | "user", she
           const cancel=name==='background_nested_cancel';
           const timer=cancel?setTimeout(()=>controller.abort(),1200):undefined;
           try {
-            const outcome=await ctx.executeTool(${JSON.stringify(shell)},auto?{command,timeout:0.2}:cancel?{command,timeout:5}:{command,run_in_background:true},{signal:auto||cancel?controller.signal:signal});
+            const outcome=await ctx.executeTool(${JSON.stringify(shell)},auto?{command}:cancel?{command}:{command,run_in_background:true},{signal:auto||cancel?controller.signal:signal});
             if(auto)controller.abort();
             return {...outcome.result,isError:outcome.isError};
           } finally {clearTimeout(timer);}
@@ -130,6 +132,7 @@ export async function runPiBackgroundShellJourney(scope: "project" | "user", she
     if (shell === "bash") {
       config.shellCommandPrefix = "export HARNESS_BACKGROUND_PREFIX=verified";
     }
+    config.backgroundShell = { foregroundTimeout: 1.5 };
     await writeFile(settings, JSON.stringify(config));
     const before = await readFile(settings, "utf8");
     const instruction = join(project, "AGENTS.md");

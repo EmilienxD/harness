@@ -65,7 +65,8 @@ export function openJobPanel(source: Source, ui: ExtensionUIContext): () => void
 export class SeparatorEditor extends CustomEditor {
   panel?: JobPanel;
   render(width: number): string[] {
-    return [this.borderColor("─".repeat(Math.max(0, width))), ...(this.panel?.render(width) ?? [])];
+    const bar = this.borderColor("─".repeat(Math.max(0, width)));
+    return this.panel ? [bar, ...this.panel.render(width), bar] : [bar];
   }
   handleMouse(event: TuiMouseEvent): TuiMouseEventResult | undefined {
     if (event.type !== "wheel" || !this.panel) return;
@@ -74,7 +75,7 @@ export class SeparatorEditor extends CustomEditor {
   }
 }
 export class JobPanel implements Component {
-  private hiddenCancelled = new Set<string>();
+  private settled = new Set<string>();
   private selected?: string;
   private index = 0;
   private detail = false;
@@ -89,7 +90,7 @@ export class JobPanel implements Component {
   private viewportRows = 1;
   constructor(private source: Source, private tui: TUI, private theme: Theme,
     private keys: Pick<KeybindingsManager, "matches">, private done: (value: void) => void) {
-    for (const job of source.list()) if (job.state === "cancelled") this.hiddenCancelled.add(job.id);
+    for (const job of source.list()) if (job.state === "cancelled" || job.state === "completed") this.settled.add(job.id);
     const jobs = this.visibleJobs();
     this.index = Math.max(0, jobs.findIndex(job => job.state === "running"));
     this.selected = jobs[this.index]?.id;
@@ -107,7 +108,7 @@ export class JobPanel implements Component {
     this.selected = jobs[this.index]?.id;
     return { jobs, job: jobs[this.index] };
   }
-  private visibleJobs() { return this.source.list().filter(job => !this.hiddenCancelled.has(job.id)); }
+  private visibleJobs() { return this.source.list().filter(job => !this.settled.has(job.id)); }
   private maxHeight() { return Math.min(20, Math.max(3, Math.floor(this.tui.terminal.rows * 0.45))); }
   private height() { return this.viewportRows; }
   scroll(lines: number) {
@@ -158,26 +159,27 @@ export class JobPanel implements Component {
     const limit = this.maxHeight();
     const footer = this.theme.fg("dim", this.detail ? "↑/↓ scroll · PgUp/PgDn · l log · f follow · x stop · Esc back" : "↑/↓ select · Enter inspect · x stop · Esc close");
     const noteRows = this.note && limit > 5 ? 1 : 0;
+    const gap = limit > 4 ? 1 : 0;
     if (this.detail && job) {
       const text = this.fullLog ?? clean(job.output ?? "");
       const output = wrapTextWithAnsi(text, Math.max(1, width));
       if (limit > 4) lines.push(jobLabel(job));
       if (limit > 6) {
         const commandLines = wrapTextWithAnsi(`${job.shell}: ${clean(job.command).replace(/\s+/g, " ")}`, Math.max(1, width));
-        const count = Math.min(3, limit - lines.length - 2 - noteRows);
+        const count = Math.min(3, limit - lines.length - 2 - gap - noteRows);
         const visible = commandLines.slice(0, count);
         if (commandLines.length > count && visible.length) {
           visible[visible.length - 1] = truncateToWidth(visible[visible.length - 1]!, Math.max(0, width - 1), "") + "…";
         }
         lines.push(...visible);
       }
-      const available = Math.max(1, limit - lines.length - 1 - noteRows);
+      const available = Math.max(1, limit - lines.length - 1 - gap - noteRows);
       this.viewportRows = available;
       this.offset = Math.min(this.offset, Math.max(0, output.length - available));
       const end = Math.max(0, output.length - this.offset);
       lines.push(...output.slice(Math.max(0, end - available), end));
     } else {
-      const available = Math.max(1, limit - 2 - noteRows);
+      const available = Math.max(1, limit - 2 - gap - noteRows);
       this.viewportRows = available;
       const start = Math.max(0, Math.min(this.index - Math.floor(available / 2), jobs.length - available));
       lines.push(...jobs.slice(start, start + available).map((item, i) =>
@@ -185,6 +187,7 @@ export class JobPanel implements Component {
       if (!jobs.length) lines.push("No background jobs in this session.");
     }
     if (noteRows) lines.push(this.theme.fg("muted", this.note));
+    if (gap) lines.push("");
     lines.push(footer);
     return lines.slice(0, limit).map(line => truncateToWidth(line, Math.max(1, width)));
   }
