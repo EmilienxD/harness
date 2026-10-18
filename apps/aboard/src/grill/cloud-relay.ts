@@ -5,7 +5,9 @@ import { basename, join, parse, relative, sep } from "node:path";
 import type { FleetRegistry } from "../domain/fleet.js";
 import type { AgentPlatformId, SessionId } from "../domain/contracts.js";
 import type { PromptSubmissions } from "../platform/prompt-submissions.js";
-import type { TerminalController } from "../platform/terminals.js";
+import { validateResumeMessage, type TerminalController } from "../platform/terminals.js";
+import { grillResponsePrompt } from "../platform/prompts.js";
+import { GrillResponseFiles, grillResponseReference } from "./response-files.js";
 
 type Presence = { readonly provider: AgentPlatformId; readonly session_id: string };
 type Delivery = { readonly delivery_id: string; readonly provider: AgentPlatformId; readonly session_id: string; readonly prompt: string };
@@ -16,6 +18,7 @@ export interface GrillCloudRelayOptions {
   readonly fleet: FleetRegistry;
   readonly terminals: TerminalController;
   readonly prompts: Pick<PromptSubmissions, "expect">;
+  readonly responseFiles?: Pick<GrillResponseFiles, "write">;
   readonly workspaceRoot: string;
   readonly origin: string;
   readonly code: string;
@@ -48,6 +51,7 @@ export class GrillCloudRelay {
   readonly #activeIntervalMs: number;
   readonly #idleIntervalMs: number;
   readonly #confirmationTimeoutMs: number;
+  readonly #responseFiles: Pick<GrillResponseFiles, "write">;
   #timer: ReturnType<typeof setTimeout> | undefined;
   #stopped = false;
   #running = false;
@@ -61,6 +65,7 @@ export class GrillCloudRelay {
     this.#activeIntervalMs = options.activeIntervalMs ?? 5_000;
     this.#idleIntervalMs = options.idleIntervalMs ?? 30_000;
     this.#confirmationTimeoutMs = options.confirmationTimeoutMs ?? 15_000;
+    this.#responseFiles = options.responseFiles ?? new GrillResponseFiles();
   }
 
   public get instanceId(): string {
@@ -142,9 +147,18 @@ export class GrillCloudRelay {
       if (terminalId === undefined) throw new Error("Provider terminal is no longer open");
       const terminal = this.options.terminals.get(terminalId);
       if (terminal.backend !== "terminal" || terminal.sessionId !== delivery.session_id) throw new Error("Terminal binding changed before submission");
+      validateResumeMessage(delivery.prompt);
+      const path = await this.#responseFiles.write(delivery.prompt);
+      const message = grillResponsePrompt(delivery.provider, grillResponseReference(delivery.provider, path));
+      // Writing is asynchronous: never paste into a terminal whose binding changed meanwhile.
+      const current = this.options.terminals.get(terminalId);
+      if (this.#stopped || current.backend !== "terminal" || current.sessionId !== delivery.session_id ||
+          this.options.terminals.liveTerminalForAgent(session.identity.agentId) !== terminalId) {
+        throw new Error("Terminal binding changed before submission");
+      }
       const expectation = this.options.prompts.expect(session.sessionId, this.#confirmationTimeoutMs);
       try {
-        await this.options.terminals.sendResumeMessage(terminalId, delivery.prompt);
+        await this.options.terminals.sendResumeMessage(terminalId, message);
       } catch (error) {
         expectation.cancel();
         throw error;
