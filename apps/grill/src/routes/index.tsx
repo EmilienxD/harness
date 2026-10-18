@@ -708,12 +708,12 @@ function GrillBoard() {
                 role="status"
                 title={
                   online
-                    ? `${detail.session.provider === "pi" ? "Pi" : "Aboard"} online in ${detail.aboard?.workspace_path ?? detail.aboard?.workspace_name ?? "an unknown project"}`
-                    : `${detail.session.provider === "pi" ? "Pi" : "Aboard"} offline`
+                    ? `Aboard online in ${detail.aboard?.workspace_path ?? detail.aboard?.workspace_name ?? "an unknown project"}`
+                    : "Aboard offline"
                 }
               >
                 <span className="aboard-badge__dot" aria-hidden="true" />
-                {detail.session.provider === "pi" ? "Pi" : "Aboard"}
+                Aboard
                 <span className="visually-hidden">{online ? "online" : "offline"}</span>
               </span>
             )}
