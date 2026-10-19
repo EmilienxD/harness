@@ -35,7 +35,7 @@ Recommendations:
 
 1. Introduce an installer adapter and ship shared skills plus a small, tested extension bridge.
 2. Port guards and deterministic commands using existing Python cores, not independent TypeScript rewrites of every policy.
-3. Complete the requested tool rollout, including a standalone hosted-answer relay; then add native Pi session orchestration, Aboard, and `/ship`.
+3. Complete the requested tool rollout, including a standalone hosted-answer relay; then add native Pi session orchestration and `/ship`. Aboard's Pi adapter now ships.
 4. Keep `redirect-subagents`, `prefer-read-tool`, and `prefer-edit-tool` Claude-only. `agent-launcher` is not required for Pi and is excluded from planned ports.
 5. Keep `usage-limit-wait` conditional on the selected model service and a verified quota/reset reader. There is no documented universal Pi subscription-window API.
 
@@ -172,7 +172,7 @@ Effort is relative implementation complexity: **low**, **medium**, **high**. It 
 | [`audit`](../harness/planning/audit/harness.toml) | Yes / S | Same evidence-based read-only audit. Single-agent path is portable; explicit explorer delegation and its completion contract depend on Harness `subagents` support. | Low alone; session-dependent / 1 |
 | [`breakdown-help-wanted-issue`](../harness/planning/breakdown-help-wanted-issue/harness.toml) | Yes / S | Same request clarification and optional oldest-GitHub-issue lookup. Requires `gh` authentication, not a Pi API. | Low / 1 |
 | [`grill-me`](../harness/planning/grill-me/harness.toml) | Yes / S | Same frontier-based conversational interviewing; keep explicit user decisions. | Low / 1 |
-| [`grill-me-in-cloud`](../harness/planning/grill-me-in-cloud/harness.toml) | Yes / E, cross-service change | Reuse round/asset/outbox/publishing core; supply fresh paths and publication results with extension lifecycle/tool events. Add `pi` to hosted API schemas, protocol vocabulary, **new database constraint migration**, and session/title binding. The architecture proposes a standalone Pi answer relay first, with Aboard relay support later. A Pi hook alone cannot make current server acceptance work. | High / 2 |
+| [`grill-me-in-cloud`](../harness/planning/grill-me-in-cloud/harness.toml) | Yes / E, cross-service change | Reuse round/asset/outbox/publishing core; supply fresh paths and publication results with extension lifecycle/tool events. Add `pi` to hosted API schemas, protocol vocabulary, **new database constraint migration**, and session/title binding. The standalone Pi answer relay and Aboard relay are shipped. A Pi hook alone cannot make current server acceptance work. | High / 2 |
 | [`lavish`](../harness/planning/lavish/harness.toml) | Yes / S with small edit | `npx lavish-axi` artifact/review workflow is independent of Pi. Remove or normalize literal Claude `$ARGUMENTS` handling; do not leave Pi to infer an unreplaced placeholder. Browser review remains external. | Low / 1 |
 | [`prototype`](../harness/planning/prototype/harness.toml) | Yes / S | Same throwaway branch/logic/UI workflow and supporting guides. Available browser tools determine UI verification depth. No automatic prototype delegation: current interactive-only constraint stays. | Low / 1 |
 | [`read-all-adrs`](../harness/planning/read-all-adrs/harness.toml) | Yes / S | Same exhaustive Markdown read. Large ADR inventories still consume model context and may need appropriate context capacity. | Low / 1 |
@@ -205,7 +205,7 @@ Effort is relative implementation complexity: **low**, **medium**, **high**. It 
 
 | Package | Useful to Pi? / route | Implementation and parity requirements | Effort / priority |
 | --- | --- | --- | --- |
-| [`aboard`](../harness/vscode/aboard/harness.toml) | Yes / P | Add Pi platform/launch/session/preflight/lifecycle/skill adapters, provider config and UI options, managed extension assets, worktree copying and resume support. Preserve visible terminals, leases, authenticated bridge, prompt receipt confirmation and Auto Run commit contracts. Read-only/safety capability checks must precede checkout creation. New VSIX release/pin is required to ship support. | High / 2 |
+| [`aboard`](../harness/vscode/aboard/harness.toml) | Shipped / P | 0.3.9 ships the Pi platform/launch/session/preflight/lifecycle/skill adapters, provider config and UI options, managed extension assets, worktree copying and resume support. It preserves visible terminals, leases, authenticated bridge, prompt receipt confirmation and Auto Run commit contracts; read-only/safety capability checks precede checkout creation. | Implemented |
 | [`auto`](../harness/vscode/auto/harness.toml) | Yes / E, Aboard-dependent | Native `/auto` and `/auto --dry` call the existing authenticated Aboard endpoint without a model turn. Retain active-session requirement and explicit error when unavailable. Full workers depend on the Aboard Pi adapter and mandatory restrictions. | Low command; high dependency / 2 |
 
 ### Shipping — 1 package
@@ -231,8 +231,8 @@ These are not active catalogue selections and should not be counted as implement
 
 These catalogue-wide considerations informed the [extended architecture proposal](PI-ARCHITECTURE.md).
 That proposal resolves initial packaging, dependency ownership, custom Pi roots, command routing,
-and standalone hosted delivery; use its decisions for the first 35 packages. Persistent runtime,
-`/ship`, and Aboard boundaries below describe later integration work.
+and standalone hosted delivery; use its decisions for the first 35 packages. Persistent runtime
+and `/ship` boundaries below describe later integration work; Aboard's Pi adapter is shipped.
 
 ### 1. Installer: add a real third platform, without changing persistent commands into installer actions
 
@@ -308,7 +308,7 @@ The official [subagent example](PI-REFERENCES/examples/extensions/subagent/READM
 
 ### 5. Aboard and hosted Grill: adapters plus capability gates
 
-Implement the existing `AgentPlatform` contract for Pi, provider configuration/effort handling, session binding/resumability, launch preflight and worker lifecycle. Extend contributed UI/provider choices and worktree configuration copying. The extension must rebind bridge session identity across `/new`, `/resume`, forks, reloads and compaction and cleanly end the old binding.
+The shipped Aboard adapter implements the existing `AgentPlatform` contract for Pi, provider configuration/effort handling, session binding/resumability, launch preflight and worker lifecycle. It extends contributed UI/provider choices and worktree configuration copying, and rebinds bridge session identity across `/new`, `/resume`, forks, reloads and compaction while cleanly ending the old binding.
 
 Retain Aboard's visible-terminal worker contract. RPC alone is headless and is not the same Pi TUI terminal; a terminal extension can expose authenticated inbound messages, or existing terminal submission can remain with provider receipt confirmation. A future RPC-rendered UI is a separate product choice.
 
@@ -387,6 +387,6 @@ Completed in this investigation:
 - `uv run pytest tests/unit/test_update_references.py -q`: **10 passed**.
 - `uv run pytest -q`: **1508 passed**.
 
-Not performed: Pi installation, executing proposed extensions or model turns, model-service quota experiments, real-CLI Pi E2E, Aboard/Grill modifications, remote workflow execution, publishing or deployment. Documentation-level feasibility is high for shared skills and direct extension APIs; persistent lifecycle/restriction parity must be established by the phase gates above. No report claim should be read as runtime certification of Pi 1.2.0.
+Not performed: model-service quota experiments and remote workflow execution. Aboard Pi installation, real-CLI E2E, release publication and catalogue pinning are now complete; documentation-level feasibility remains high for the remaining proposed integrations. No report claim should be read as runtime certification outside the stated acceptance journeys.
 
-**Decision-ready result:** Pi is a viable third host with substantial reuse. Approve the installer/skills/extension foundation first; require explicit safety and persistent-session evidence before advertising full subagents, `/ship`, or Aboard parity.
+**Decision-ready result:** Pi is a viable third host with substantial reuse. Aboard parity is shipped; require explicit safety and persistent-session evidence before advertising full `/ship` parity.
