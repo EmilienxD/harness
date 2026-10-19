@@ -30,7 +30,7 @@ Codex terminals. A visible subagent opens as a new tab in its parent agent's edi
 working in another pane.
 
 Presets describe an initial grid using **Columns** and **Rows**, with up to nine panes. Each pane contains
-terminal tabs. Select a pane to edit its providers; **Empty** opens a regular terminal using your default shell.
+terminal tabs. Reducing Columns or Rows removes the extra panes from the draft preset, without closing running terminals. Select a pane to edit its providers; **Empty** opens a regular terminal using your default shell.
 The preset field combines a dropdown with an editable name. **Save** updates the selected preset's name,
 grid, and assignments. **Create** creates a new preset with the edited name and configuration, and is
 enabled when the name differs from the selected preset. **Reset** restores its saved name, grid, and assignments.
@@ -70,10 +70,10 @@ configuration. Failed preparation launches no agents, retains the checkout, and 
 **Open checkout**, and **View log**; incomplete preparation remains detectable after a reload.
 
 A new window opens the selected checkout as its project folder. If an existing checkout has no Aboard scaffold
-or needs an update, Aboard asks permission to initialize/update it before opening the layout; this is distinct
+or needs an update, Aboard initializes/updates it before opening the layout; this is distinct
 from worktree setup and preserves existing configuration. In the current window, only terminal working
-directories change: Explorer remains on the original folder. Launch layout shows this warning inline without
-an additional confirmation; Run Agent still asks for confirmation before launching into another checkout.
+directories change: Explorer remains on the original folder. Launch layout and Run Agent show a short yellow warning without
+an additional confirmation.
 Fleet rows and terminal titles identify checkout directories; a Fleet or reopenable Recent Activity row offers **Open Checkout in New Window**. Activity and reopen retain the original checkout,
 and manual launch, delegation, and reopen configuration is read from that checkout's `.harness/config.json`.
 Missing checkouts are not silently replaced with the original project.

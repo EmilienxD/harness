@@ -69,11 +69,11 @@ test("loading damaged personal presets preserves valid siblings and reports acti
   assert.match(diagnostics[0]!, /unavailable provider: pi/);
 });
 
-test("grid shrinking refuses occupied removed panes until the user resolves assignments", () => {
+test("grid shrinking drops removed draft panes and preserves the original preset", () => {
   const store = new WorkspacePresetStore(storage(), ["claude", "chatgpt"]);
   const preset = store.preferredPreset;
-  assert.throws(() => resizeWorkspacePreset(preset, 1, 1), /pane 2: chatgpt/);
-  preset.panes[1]!.providers = [];
+  assert.deepEqual(resizeWorkspacePreset(preset, 1, 1).panes, [{ providers: ["chatgpt"] }]);
+  assert.equal(preset.panes.length, 2);
   assert.equal(resizeWorkspacePreset(preset, 1, 1).panes.length, 1);
   assert.throws(() => resizeWorkspacePreset(preset, 5, 2), /nine panes/);
   assert.throws(() => validateWorkspacePreset({ ...preset, panes: [{ providers: ["pi"] }, { providers: [] }] }, ["claude", "chatgpt"]), /unavailable provider/);

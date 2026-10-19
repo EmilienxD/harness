@@ -26,7 +26,7 @@ export async function pickCheckout(checkouts: ManualCheckouts, workspaceRoot: st
 
 export async function prepareCheckout(checkouts: ManualCheckouts, selection: CheckoutSelection, log: (message: string) => void, showLog: () => void): Promise<string | undefined> {
   try {
-    return await window.withProgress({ location: ProgressLocation.Notification, title: "Preparing checkout", cancellable: false }, (progress) => checkouts.prepare(selection, (message) => { log(message); progress.report({ message }); }));
+    return await window.withProgress({ location: ProgressLocation.Window, title: "Preparing checkout", cancellable: false }, (progress) => checkouts.prepare(selection, (message) => { log(message); progress.report({ message }); }));
   } catch (error) {
     if (error instanceof CheckoutBranchInUseError) {
       const answer = await window.showWarningMessage(error.message, "Use existing worktree");
@@ -38,7 +38,7 @@ export async function prepareCheckout(checkouts: ManualCheckouts, selection: Che
     if (action === "Open checkout") await commands.executeCommand("vscode.openFolder", Uri.file(error.path), { forceNewWindow: true });
     if (action === "View log") showLog();
     if (action === "Retry setup") {
-      return window.withProgress({ location: ProgressLocation.Notification, title: "Retrying worktree setup", cancellable: false }, (progress) => checkouts.retrySetup(error.path, (message) => { log(message); progress.report({ message }); }));
+      return window.withProgress({ location: ProgressLocation.Window, title: "Retrying worktree setup", cancellable: false }, (progress) => checkouts.retrySetup(error.path, (message) => { log(message); progress.report({ message }); }));
     }
     return undefined;
   }

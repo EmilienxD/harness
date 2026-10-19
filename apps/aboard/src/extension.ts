@@ -981,7 +981,7 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
   // Disposed through subscriptions like every other resource; `deactivate` also
   // awaits it so queued writes are flushed on a normal shutdown.
   context.subscriptions.push({ dispose: () => void persistence?.dispose() });
-  const runAgentOn = async (provider: AgentPlatformId): Promise<void> => {
+  const runAgentOn = async (provider: AgentPlatformId, warn: (message: string) => void = (message) => { void window.showWarningMessage(message); }): Promise<void> => {
     if (!requireInitialized()) return;
     workspaceBatchActive++;
     try {
@@ -990,13 +990,11 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
       // Validate the source provider before creation; the target's authority is read again after setup.
       await launchFile.getForWorktree(provider, "interactive", selection.kind === "existing" ? selection.path : workspaceRoot);
       if (selection.kind === "new" || selection.kind === "existing" && !samePath(selection.path, workspaceRoot)) {
-        const action = selection.kind === "new" ? "Create and run" : "Run here";
-        const proceed = await window.showWarningMessage(`The agent will run in ${selection.kind === "new" ? "the new worktree" : selection.path}. This window's Explorer remains on ${workspaceRoot}.`, action);
-        if (proceed !== action) return;
+        warn("Agents use another checkout; Explorer stays here.");
       }
       const checkoutRoot = await prepareCheckout(checkouts, selection, (message) => output.appendLine(message), () => output.show());
       if (!checkoutRoot) return;
-      await window.withProgress({ location: ProgressLocation.Notification, title: "Starting agent", cancellable: false }, async () => {
+      await window.withProgress({ location: ProgressLocation.Window, title: "Starting agent", cancellable: false }, async () => {
         await prepareAgentTerminalGroups();
         await coordinator.launchInteractive({
           type: "interactive", description: `${provider} interactive`,
@@ -1006,14 +1004,14 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
       });
     } catch (error) {
       if (!(error instanceof Error && error.name === "SessionStartCancelledError")) {
-        void window.showErrorMessage(error instanceof Error ? error.message : "Unable to start the agent");
+        warn(error instanceof Error ? error.message : "Unable to start the agent");
       }
     } finally { workspaceBatchActive--; }
   };
-  const runAgent = async (): Promise<void> => {
+  const runAgent = async (warn?: (message: string) => void): Promise<void> => {
     if (!requireInitialized()) return;
     const selected = await window.showQuickPick(providerChoices.map((provider) => ({ label: `$(${provider.icon}) ${provider.displayName}`, provider: provider.id })), { placeHolder: "Choose the provider for this agent" });
-    if (selected !== undefined) await runAgentOn(selected.provider);
+    if (selected !== undefined) await runAgentOn(selected.provider, warn);
   };
   const reconcileStaleSessions = (): void => {
     const openTerminalIds = new Set(terminals.list().filter((terminal) => terminal.status === "open").map((terminal) => terminal.terminalId));
@@ -1164,9 +1162,6 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
         if (request.destination === "new") {
           const targetState = await readScaffoldState(checkoutRoot, expectedScaffoldRevision);
           if (targetState !== "ready") {
-            const action = targetState === "uninitialized" ? "Initialize checkout" : "Update checkout";
-            const answer = await window.showWarningMessage(`Aboard must ${targetState === "uninitialized" ? "initialize" : "update"} ${checkoutRoot} before launching a layout in its own window. Existing configuration is preserved; worktree setup scripts will not run.`, { modal: true }, action);
-            if (answer !== action) return;
             const report = await scaffoldProject({ projectRoot: checkoutRoot, assetRoot: scaffoldAssetRoot });
             for (const warning of report.warnings) output.appendLine(`Checkout initialization: ${warning}`);
             for (const path of report.preserved) output.appendLine(`Checkout initialization preserved: ${path}`);
@@ -1175,12 +1170,12 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
           await workspaceLauncher.launch(request, checkoutRoot);
           return;
         }
-        await window.withProgress({ location: ProgressLocation.Notification, title: "Starting terminals in current window", cancellable: false }, async (progress) => {
+        await window.withProgress({ location: ProgressLocation.Window, title: "Starting terminals in current window", cancellable: false }, async (progress) => {
           const result = await launchLocal(validateWorkspaceLaunchPlan({ preset: request.preset, empty: false, manual: true, checkoutRoot }, providerChoices.map((provider) => provider.id)), (state) => {
             progress.report({ message: `${state.started} of ${state.total} terminals ready${state.failed > 0 ? `, ${state.failed} failed` : ""}` });
           }, "current");
           for (const failure of result.failed) output.appendLine(`Current window launch: ${failure.provider}: ${failure.message}`);
-          await presentWorkspaceBatchResult(result, (message) => window.showErrorMessage(message));
+          await presentWorkspaceBatchResult(result, async (message) => { throw new Error(message); });
         });
       },
       runAgent,
@@ -1241,7 +1236,7 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
   if (startupHandoff !== undefined && initialized && workspaceStartup !== undefined) {
     const handoff = startupHandoff;
     // The owner remains autonomous if its source closes. The durable claim prevents replay on reload.
-    void Promise.resolve(window.withProgress({ location: ProgressLocation.Notification, title: "Starting workspace terminals", cancellable: false }, async (progress) => {
+    void Promise.resolve(window.withProgress({ location: ProgressLocation.Window, title: "Starting workspace terminals", cancellable: false }, async (progress) => {
       progress.report({ message: "Preparing the terminal layout…" });
       let completed = 0;
       return workspaceStartup.execute(() => workspaceJournal.execute(handoff.requestId, () => launchLocal(validateWorkspaceLaunchPlan(handoff.plan, providerChoices.map((provider) => provider.id)), (state) => {

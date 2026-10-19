@@ -103,7 +103,6 @@ test("Save includes name and config changes while Save as requires a different n
   const rows = ui.elements.get("rows")!;
   rows.value = "1";
   rows.onchange!();
-  ui.elements.get("removeOverflow")!.onclick!();
   ui.elements.get("save")!.onclick!();
   await ui.flush();
   assert.equal(presets.presets.length, 6);
@@ -212,7 +211,9 @@ test("Run Agent uses its local launcher without accepting a destination or activ
     runAgent: async (...args: unknown[]) => { calls.push(args); },
   });
   await receive({ type: "run", destinationId: "old-window", activePane: true });
-  assert.deepEqual(calls, [[]]);
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0]!.length, 1);
+  assert.equal(typeof calls[0]![0], "function", "only the inline warning callback is passed");
   registration.dispose();
 });
 
@@ -347,7 +348,7 @@ test("checkout summaries show modified state while selectors omit paths, status 
   assert.ok(panel.html.includes("select,#branch{width:100%}"));
   assert.equal(panel.html.includes("A new window is recommended."), false);
   assert.ok(panel.html.includes("--vscode-editorWarning-foreground"));
-  assert.ok(panel.html.includes("#branchError{color:var(--vscode-errorForeground)"));
+  assert.equal(panel.html.includes("--vscode-errorForeground"), false);
   panel.registration.dispose();
 });
 
@@ -371,5 +372,50 @@ test("missing and Auto Run-reserved worktrees are displayed but cannot launch a 
     assert.equal(ui.elements.get("launch")!.disabled, true);
     assert.equal(checkout.children.find((item) => item.value === "existing:" + path)?.disabled, true);
   }
+  panel.registration.dispose();
+});
+
+
+test("shrinking rows and columns immediately removes extra draft panes without recovery controls", async () => {
+  const presets = store();
+  const launches: LauncherRequest[] = [];
+  const panel = await mount({ store: presets, providers, launch: async request => { launches.push(request); }, runAgent: async () => {} });
+  const ui = await browser(panel);
+  for (const id of ["shrink", "shrinkActions", "moveOverflow", "removeOverflow", "cancelShrink"]) assert.equal(ui.elements.has(id), false);
+  const resize = (id: string, value: number) => { const input = ui.elements.get(id)!; input.value = String(value); input.onchange!(); };
+  // Select the pane that will disappear, including its implicit empty terminal.
+  resize("columns", 2);
+  ui.elements.get("preview")!.children[3]!.onclick!();
+  resize("rows", 1);
+  assert.equal(Number(ui.elements.get("rows")!.value), 1);
+  assert.equal(ui.elements.get("preview")!.children.length, 2);
+  assert.equal(ui.elements.get("assignments")!.children.length, 1);
+  assert.equal(ui.elements.get("launch")!.disabled, false);
+  resize("columns", 1);
+  assert.equal(ui.elements.get("preview")!.children.length, 1);
+  // Repeated 1 -> 2 -> 1 transitions must remain usable.
+  for (let i = 0; i < 3; i++) { resize("rows", 2); resize("rows", 1); }
+  resize("rows", 10);
+  assert.equal(Number(ui.elements.get("rows")!.value), 1, "invalid geometry keeps the last valid grid");
+  resize("rows", 1);
+  ui.elements.get("save")!.onclick!(); await ui.flush();
+  assert.equal(presets.preferredPreset.rows, 1);
+  assert.equal(presets.preferredPreset.columns, 1);
+  assert.deepEqual(presets.preferredPreset.panes, [{ providers: ["chatgpt"] }]);
+  ui.elements.get("launch")!.onclick!(); await ui.flush();
+  assert.equal(launches.length, 1);
+  assert.equal(launches[0]!.preset.panes.length, 1);
+  panel.registration.dispose();
+});
+
+test("Run Agent reports nonblocking warnings inline and remains available afterward", async () => {
+  let runs = 0;
+  const panel = await mount({ store: store(), providers, launch: async () => {}, runAgent: async warn => { runs++; warn("Agents use another checkout; Explorer stays here."); } });
+  const ui = await browser(panel);
+  ui.elements.get("run")!.onclick!(); await ui.flush();
+  assert.equal(runs, 1);
+  assert.equal(ui.elements.get("error")!.hidden, false);
+  assert.equal(ui.elements.get("run")!.disabled, false);
+  assert.equal(ui.elements.get("launch")!.disabled, false);
   panel.registration.dispose();
 });
