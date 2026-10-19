@@ -430,7 +430,7 @@ session replacement, invalidate stale round context after branch navigation, can
 shutdown, and preserve queued answers on disconnect, failed submission, or loss of ownership.
 Keep current configuration/credentials outside model-facing context.
 
-This requires additive `pi` support in [`protocol/grill/v1/states.json`](../protocol/grill/v1/states.json),
+This requires additive `pi` support in [`docs/protocol/grill/v1/states.json`](protocol/grill/v1/states.json),
 hosted schemas/API validation, Pi session/title extraction, and a **new** database migration
 widening existing provider constraints. Do not rewrite the initial migration. A publication-only
 port is incomplete: round publication, assets, presence, queued answers, and confirmed delivery
