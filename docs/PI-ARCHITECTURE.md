@@ -5,7 +5,7 @@ Pi is an opt-in catalogue target for all 22 skill-led packages below, plus `cave
 `setup-help`, and `websearch`. Shared skill installation
 works at project and user scope; three path guards, the command guard, comment budgets, document draft approval, Git cleanup inventory,
 both issue workflow packages, cloud interviews, session commits, desktop notifications and gotcha reports ship. The hosted Pi migration/app are deployed
-and verified against the production board. Remaining extensions are pending. Aboard has source/local VSIX Pi support; the older installer-pinned VSIX does not. Its native adapter supports worktrees through the assigned working directory and per-turn checkout guidance; Pi does not enforce filesystem isolation.
+and verified against the production board. Aboard Pi support is shipped in the catalogue's Aboard 0.3.9 pin. Its native adapter supports worktrees through the assigned working directory and per-turn checkout guidance; Pi does not enforce filesystem isolation.
 This proposal defines the implementation boundaries and first release scope.
 The [compatibility report](PI-COMPATIBILITY.md) retains the catalogue-wide feasibility assessment.
 
@@ -941,9 +941,8 @@ launch requests and append the launch status. `/reply-to-agent-with-previous-mes
 `/skill:` spelling send the latest successful assistant text on the active branch without inference.
 Interactive children report at `agent_settled`; a new prompt or failed turn expires an armed reply,
 and quitting cancels an unanswered request. In-process `/new` and `/fork` sessions become unrelated
-conversations. Loop implementers are rejected for Pi. The source/local Aboard VSIX accepts Pi
-delegations through its native adapter and shared durable runtime; older pinned releases refuse
-them. Headless children load project extensions only in trusted projects, so nested
+conversations. Loop implementers are rejected for Pi. Aboard accepts Pi delegations through its
+native adapter and shared durable runtime. Headless children load project extensions only in trusted projects, so nested
 delegation from automatic children needs project trust or a user-scope installation.
 
 `npm run test:pi-subagents` installs the real catalogue package with `--local` (the checkout runtime

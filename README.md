@@ -761,12 +761,12 @@ The access cookie is marked `Secure` whenever the request arrives over HTTPS, so
 
 Pi is an opt-in target for all 24 shared skill packages, including `caveman` and `setup-help`, the three path guards, comment budgets, document draft approval, Git cleanup inventory, both issue workflows, and the cloud interview extension. Project skills use `.pi/skills`;
 user installs use `~/.pi/agent/skills` or the configured `PI_CODING_AGENT_DIR`. Omitted `--platform`
-continues to select Claude Code and ChatGPT. Persistent `subagents` also supports Pi; other Pi extensions are pending.
+continues to select Claude Code and ChatGPT. Persistent `subagents` and Aboard also support Pi; other Pi extensions are pending.
 The [Pi architecture proposal](docs/PI-ARCHITECTURE.md) records the requested 35-package backlog
 in priority order: 22 packages primarily reuse shared skills and 13 need native extensions.
 It defines provider-owned install roots, receipt ownership, a versioned bridge to existing Python
 cores, explicit commands, branch-aware session state, hosted answer delivery, and acceptance gates.
-`/ship` and the full Aboard adapter follow the initial tool rollout.
+`/ship` remains a later provider integration; Aboard's Pi adapter is shipped.
 
 The [Pi compatibility report](docs/PI-COMPATIBILITY.md) supplies catalogue-wide feasibility and
 API evidence. [Pi's official references and key extension examples](docs/PI-REFERENCES/README.md)
