@@ -122,3 +122,11 @@ def test_aboard_couples_auto_but_shares_issue_readers():
 
     assert dependencies["auto"].lifecycle == "coupled"
     assert dependencies["issue-readers"].lifecycle == "shared"
+
+
+def test_aboard_supports_pi_and_uses_the_pi_enabled_release():
+    tool = discover()["aboard"]
+
+    assert tool.support_for("pi").status.value == "supported"
+    action = next(action for action in tool.actions if action.type == "vscode-extension")
+    assert action.data["url"].endswith("/aboard-v0.3.9/aboard-0.3.9.vsix")
