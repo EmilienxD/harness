@@ -224,7 +224,7 @@ flowchart TD
     Support --> Helpers
     Support --> State[Branch-aware session event receipts]
     Entries --> Hosted[Hosted Grill protocol and answer relay]
-    Future[Later persistent runtime and Aboard adapters] -.-> Support
+    Future[Later persistent runtime integrations] -.-> Support
 ```
 
 The installer owns file placement, dependencies, reconciliation, and receipts. A Pi extension owns
@@ -416,14 +416,14 @@ and guards; it does not start issue publication, Git cleanup, or an interview au
 
 ## Hosted grilling without an Aboard dependency
 
-`grill-me-in-cloud` is in the requested release, while the full Pi Aboard adapter is deferred.
-Propose a session-scoped relay owned by the grilling extension, reusing existing hosted delivery
+`grill-me-in-cloud` is in the requested release, and the Pi Aboard adapter now ships separately.
+The standalone session-scoped relay remains owned by the grilling extension, reusing existing hosted delivery
 contracts. It polls/claims queued answers, submits them through Pi's native user-message API,
 and acknowledges only after a correlated, persisted user-message receipt confirms acceptance by
 the bound session. The void return from `sendUserMessage` alone is insufficient confirmation.
 It needs no Harness ask/reply runtime and keeps the real Pi TUI visible.
 
-The relay and a later Aboard relay must compete through the same delivery claim/idempotency
+The relay and Aboard's relay compete through the same delivery claim/idempotency
 rules, so both running cannot double-submit an answer. Persist delivery IDs and submission receipts
 before retrying; recover an accepted-but-unacknowledged submission without resending it. Rebind on
 session replacement, invalidate stale round context after branch navigation, cancel polling on
@@ -708,12 +708,12 @@ Harness `provider: pi` identifies the agent host; Pi's own model `--provider` id
 Context-usage telemetry for Pi remains unimplemented rather than estimated.
 
 `ship` follows that runtime adapter, preserving inboxes, wait tokens, bounded feedback, result
-replay, and one implementer per worktree. Aboard follows with a native platform adapter, visible
-terminal binding, prompt receipts, worktree setup, and restriction admission. JSON exit status
+replay, and one implementer per worktree. Aboard ships a native platform adapter, visible terminal
+binding, prompt receipts, worktree setup, and restriction admission. JSON exit status
 or RPC prompt acceptance alone does not prove a successful completed run. Native Pi RPC is a
 headless transport; adopting it must not silently replace the visible-terminal product.
 
-These future adapters consume the same event/identity contracts without making the initial
+The remaining future adapters consume the same event/identity contracts without making the initial
 35 packages depend on their implementation. The compatibility report retains their detailed
 feasibility and broader release gates. All 24 shared skill packages and the installer slice are implemented
 in the checkout; the three path guards, document draft approval, Git cleanup inventory, both issue
@@ -927,7 +927,7 @@ claims/processes, tree/fork isolation, stop/reload and new-session behavior. The
 explicit `e2e:pi-grill:live` journey verifies the same successful publication/Storage/delivery
 boundaries against an actual configured service. It checks exact inference counts and deletes
 only its UUID-owned sessions/assets. Scripted inference certifies integration; TUI/browser
-rendering, unscripted design quality and a future Pi Aboard adapter are outside this gate.
+rendering and unscripted design quality are outside this gate.
 
 ## Shipped persistent subagents
 
