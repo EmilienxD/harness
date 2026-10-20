@@ -37,6 +37,7 @@ npm run test:pi-background-shell
 npm run test:pi-calm
 npm run test:pi-mid-prompt-skills
 npm run test:pi-file-mentions
+npm run test:pi-environment-context
 npm run e2e:flush-out-useless-tests
 ```
 
@@ -96,6 +97,17 @@ credentials, selectors, proxies, and cloud credentials are excluded. Launches us
 disable telemetry/version checks/MCP and unrelated built-in extensions, and trust only the
 generated project through process-local `--approve`. Automatic compaction, retries, and cache
 warming are disabled. Trust is never persisted for an unrelated project.
+
+## Pi environment context
+
+`npm run test:pi-environment-context` installs the real Pi-only catalogue package at both
+project and user scopes. Real Pi 1.2.0 JSON/RPC runs cover non-Git and local Git working
+directories, reload without inference, native write effects, dry-run/repeat installs, and
+receipt-driven removal. A fixture extension records final section names and sizes at agent start,
+plus native session metadata; checks do not compare prompt wording. Each scope requires
+seven inference requests and zero unexpected requests. Unit fixtures separately verify
+full Git counts, staged/unstaged overlap, conflicts, renames, individual untracked files,
+and list truncation. No personal Pi configuration or paid inference is used.
 
 ## Pi file mentions
 
