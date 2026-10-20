@@ -414,6 +414,14 @@ child as an RPC session with the runtime's environment. The child's previous-mes
 zero inference requests and the result starts the idle parent's next turn. Each journey asserts
 exactly four inference requests, the succeeded and acknowledged request, one persisted result
 message matching its delivery ID, the child's native session file and no remaining request file.
+The shutdown regression also runs a real JSON Pi parent with an automatic Codex child using
+`gpt-6.1-sol` at medium effort, with both catalogue targets installed from the checkout runtime.
+Its hook adapter deliberately withholds the child's `Stop` result and runs the actual `SessionEnd`
+handler before process exit. Acceptance requires a pending request at shutdown, the supervisor's
+successful reply, one persisted and acknowledged Pi delivery, a native Codex session, an empty
+inbox and exactly four fake-API requests. The shared Claude/Codex subagent journey additionally
+checks this shutdown order on both the initial automatic launch and its continuation.
+
 This certifies Windows headless integration, not the Pi TUI, POSIX, or Claude/Codex parents with
 Pi children through real CLIs.
 

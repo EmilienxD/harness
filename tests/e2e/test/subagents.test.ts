@@ -7,6 +7,15 @@ import { startFakeAnthropicServer } from "../core/anthropic-server.js";
 import { startFakeOpenAiServer } from "../core/openai-server.js";
 import { claudeTransition, codexTransition, scenarioCatalogHash } from "../tools/subagents/scenario.js";
 
+test("automatic Codex SessionEnd cannot discard the supervisor's successful reply", { timeout: 180_000 }, async () => {
+  const result = await runSubagentsJourney("chatgpt", "auto", false, false, { shutdownBeforeResult: true });
+  assert.equal(result.shutdownsBeforeResult, 2);
+  assert.equal(result.inferenceRequests, 5);
+  assert.deepEqual(result.completedClis, ["child", "parent"]);
+  assert.equal(result.requestFilesRemaining, 0);
+  assert.equal(result.unexpectedRequests, 0);
+});
+
 for (const platform of ["claude", "chatgpt"] as const) {
   test(`subagents rejects unknown ${platform} histories at its fake API`, async () => {
     const server = platform === "claude"

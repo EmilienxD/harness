@@ -43,6 +43,8 @@ export interface SubagentsJourneyResult {
   readonly requestFilesRemaining: number;
   readonly unexpectedRequests: number;
   readonly recoveredSessions: number;
+  readonly inferenceRequests?: number;
+  readonly shutdownsBeforeResult?: number;
 }
 
 export async function runSubagentsRecoveryJourney(platform: Platform): Promise<SubagentsJourneyResult> {
@@ -53,7 +55,8 @@ export async function runSubagentsRootJourney(platform: Platform): Promise<Subag
   return runSubagentsJourney(platform, "auto", false, true);
 }
 
-export async function runSubagentsJourney(platform: Platform, mode: "interactive" | "auto" = "interactive", recovery = false, alternateRoot = false): Promise<SubagentsJourneyResult> {
+export async function runSubagentsJourney(platform: Platform, mode: "interactive" | "auto" = "interactive", recovery = false, alternateRoot = false, options: { shutdownBeforeResult?: boolean } = {}): Promise<SubagentsJourneyResult> {
+  const shutdownBeforeResult = options.shutdownBeforeResult ?? false;
   if (platform === "claude") await validateClaudeCli(); else await validateCodexCli();
   const root = await canonicalMkdtemp(join(tmpdir(), `harness-subagents-${platform}-e2e-`));
   const projectRoot = join(root, "project");
@@ -76,6 +79,18 @@ export async function runSubagentsJourney(platform: Platform, mode: "interactive
     const python = await pythonCommand(runtimeSource);
     const binRoot = await createRuntimeShim(root, python);
     await stagePayload(platform, packageRoot, projectRoot, python);
+    if (shutdownBeforeResult) {
+      if (platform !== "chatgpt" || mode !== "auto" || recovery || alternateRoot) throw new Error("Shutdown regression requires automatic Codex delegation");
+      const hooksPath = join(projectRoot, ".codex", "hooks.json");
+      const settings = JSON.parse(await readFile(hooksPath, "utf8")) as HookSettings;
+      const hook = join(harnessRoot, "tests", "e2e", "tools", "subagents", "shutdown-hook.py");
+      for (const groups of Object.values(settings.hooks)) {
+        for (const group of groups) {
+          for (const entry of group.hooks) entry.command = `${python} ${hook}`;
+        }
+      }
+      await writeFile(hooksPath, JSON.stringify(settings));
+    }
     await initializeRepository(projectRoot);
     if (alternateRoot) {
       await execFileAsync("git", ["-c", "user.name=Harness E2E", "-c", "user.email=harness-e2e@example.invalid", "commit", "--quiet", "--allow-empty", "-m", "fixture"], { cwd: projectRoot, windowsHide: true });
@@ -243,6 +258,12 @@ export async function runSubagentsJourney(platform: Platform, mode: "interactive
       return { checkpoints, completedClis: statuses.map((item) => item.role), requestFilesRemaining, unexpectedRequests: assertions.unexpectedRequests, recoveredSessions: 2 };
     }
 
+    if (shutdownBeforeResult) {
+      await waitForCheckpoint(async () => (await readdir(cliStatusRoot).catch(() => [])).some((name) => name.startsWith("shutdown-")));
+      const receipt = (await readdir(cliStatusRoot)).find((name) => name.startsWith("shutdown-"))!;
+      const shutdown = JSON.parse(await readFile(join(cliStatusRoot, receipt), "utf8"));
+      if (shutdown.state !== "pending" || shutdown.hasReply) throw new Error(`SessionEnd preempted the supervisor result: ${JSON.stringify(shutdown)}`);
+    }
     let statuses: readonly [CliStatus, CliStatus];
     try {
       statuses = await waitForStatuses(cliStatusRoot);
@@ -273,7 +294,28 @@ export async function runSubagentsJourney(platform: Platform, mode: "interactive
     if (checkpoints.some((item) => !expectedCheckpoints.includes(item)) || required.some((item) => !checkpoints.includes(item)) || checkpoints[0] !== "parent-request-write" || checkpoints.at(-1) !== "child-resume-complete") {
       throw new Error(`subagents checkpoint contract changed: ${checkpoints.join(", ")}`);
     }
+    let shutdownsBeforeResult: number | undefined;
+    if (shutdownBeforeResult) {
+      const receipts = (await readdir(cliStatusRoot)).filter((name) => name.startsWith("shutdown-"));
+      for (const name of receipts) {
+        const receipt = JSON.parse(await readFile(join(cliStatusRoot, name), "utf8"));
+        if (receipt.state !== "pending" || receipt.hasReply) throw new Error("Resumed child shutdown preempted the supervisor result");
+      }
+      shutdownsBeforeResult = receipts.length;
+      const result = await execFileAsync(python, ["-c", [
+        "import json",
+        "from subagents_runtime.storage import connect",
+        "with connect() as db:",
+        " rows=db.execute('SELECT state,reply,acknowledged_at IS NOT NULL FROM requests ORDER BY created_at,rowid').fetchall()",
+        "print(json.dumps([list(row) for row in rows]))",
+      ].join("\n")], { cwd: projectRoot, env: environment, encoding: "utf8", windowsHide: true, timeout: 10_000 });
+      const rows = JSON.parse(result.stdout) as [string, string, number][];
+      if (rows.length !== 2 || rows[0]?.[0] !== "succeeded" || rows[0][1] !== CHILD_REPLY || rows[0][2] !== 1 || rows[1]?.[0] !== "succeeded" || rows[1][1] !== NEXT_REPLY) {
+        throw new Error("Automatic shutdown regression did not persist and acknowledge the successful replies");
+      }
+    }
     return {
+      ...(shutdownsBeforeResult === undefined ? {} : { shutdownsBeforeResult, inferenceRequests: assertions.observations.length }),
       checkpoints,
       completedClis: [childStatus.role, parentStatus.role],
       requestFilesRemaining: await countRequestFiles(join(stateRoot, "inboxes")),
@@ -313,7 +355,7 @@ async function executionSnapshot(python: string, cwd: string, env: NodeJS.Proces
   return JSON.parse(result.stdout) as ExecutionSnapshot[];
 }
 
-async function killProcessTree(pid: number, allowExited = false): Promise<void> {
+export async function killProcessTree(pid: number, allowExited = false): Promise<void> {
   if (process.platform === "win32") {
     try { await execFileAsync("taskkill",["/PID",String(pid),"/T","/F"],{windowsHide:true,timeout:10_000}); }
     catch (error) {
