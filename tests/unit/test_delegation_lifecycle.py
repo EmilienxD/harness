@@ -17,6 +17,25 @@ from subagents_runtime.delegation import (
 )
 
 
+def test_stop_wait_rechecks_delivery_when_the_last_child_settles(monkeypatch):
+    from subagents_runtime import delegation
+
+    delivery = delegation.ParentDelivery("fixture-delivery", "fixture result")
+    settled = False
+
+    def claim(*args):
+        return delivery if settled else None
+
+    def pending(*args):
+        nonlocal settled
+        settled = True
+        return False
+
+    monkeypatch.setattr(delegation, "claim_parent_delivery", claim)
+    monkeypatch.setattr(delegation, "has_pending_children", pending)
+    assert delegation.wait_parent_delivery("parent", timeout_seconds=1) is delivery
+
+
 def setup_request(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, mode: str = "auto") -> tuple[str, str, str]:
     monkeypatch.setenv("HARNESS_STATE_DIR", str(tmp_path / "state"))
     monkeypatch.setattr(sessions, "_visible_terminal", lambda *_args: None)

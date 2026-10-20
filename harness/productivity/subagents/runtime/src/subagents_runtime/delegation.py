@@ -1203,7 +1203,8 @@ def wait_parent_delivery(
         if delivery is not None:
             return delivery
         if not has_pending_children(parent_session_id):
-            return None
+            # The last child can settle between the claim and pending-state reads.
+            return claim_parent_delivery(parent_session_id, "Stop")
         if time.monotonic() >= deadline:
             from subagents_runtime.loop import expire_parent_wait
             expire_parent_wait(parent_session_id)

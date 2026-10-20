@@ -448,19 +448,40 @@ def handle(
     return None
 
 
+def failure_output(event: str, reason: str) -> dict[str, Any]:
+    if event == "PreToolUse":
+        return {"hookSpecificOutput": {
+            "hookEventName": event, "permissionDecision": "deny", "permissionDecisionReason": reason,
+        }}
+    if event == "UserPromptSubmit":
+        return {"decision": "block", "reason": reason}
+    if event in {"SessionStart", "PostToolUse", "Stop"}:
+        return {"continue": False, "stopReason": reason, "systemMessage": reason}
+    # Interrupt and SessionEnd cannot reject an already-ended operation.
+    return {"systemMessage": reason}
+
+
 def main() -> int:
     provider = provider_from_argv(sys.argv[1:])
     if provider == "pi":
         from subagents_runtime.pi_bridge import main as pi_main
 
         return pi_main()
+    payload = {}
     try:
         payload = json.load(sys.stdin)
-        output = handle(payload, provider) if isinstance(payload, dict) else None
+        if not isinstance(payload, dict):
+            raise ValueError("hook input must be a JSON object")
+        output = handle(payload, provider)
         if output is not None:
             print(json.dumps(output))
-    except Exception as exc:  # noqa: BLE001 - Provider entrypoint reports hook failures without a traceback.
-        print(str(exc), file=sys.stderr)
+    except Exception as exc:  # noqa: BLE001 - Provider entrypoint converts failures to event-specific decisions.
+        reason = f"Subagents hook failed ({type(exc).__name__}): {exc}"
+        if provider == "chatgpt":
+            event = str(payload.get("hook_event_name") or "UserPromptSubmit") if isinstance(payload, dict) else "UserPromptSubmit"
+            print(json.dumps(failure_output(event, reason)))
+            return 0
+        print(reason, file=sys.stderr)
         return 2
     return 0
 
