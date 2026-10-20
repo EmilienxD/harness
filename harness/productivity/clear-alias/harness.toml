@@ -1,5 +1,5 @@
 name = "clear-alias"
-version = "1.0.0"
+version = "1.0.1"
 description = "Alias Pi's /new command as /clear to start a fresh session"
 docs = "https://github.com/EmilienxD/harness/blob/main/README.md#clear-alias"
 
@@ -16,6 +16,6 @@ status = "supported"
 
 [[files]]
 src = "pi/extension.ts"
-dest = "harness-clear-alias/index.ts"
+dest = ".harness-clear-alias/index.ts"
 root = "extensions"
 platforms = ["pi"]

@@ -11,7 +11,7 @@ export async function runPiMidPromptSkills(scope: "project" | "user", mode: "jso
   try {
     const { workspace } = fixture;
     const resourcesRoot = scope === "project" ? join(workspace.projectRoot, ".pi") : workspace.agentDir;
-    const extension = join(resourcesRoot, "extensions", "harness-mid-prompt-skills", "index.ts");
+    const extension = join(resourcesRoot, "extensions", ".harness-mid-prompt-skills", "index.ts");
     const settings = join(workspace.projectRoot, ".pi", "settings.json");
     const originalSettings = await readFile(settings, "utf8");
     // Skill commands hidden from the UI must still work, as with Pi's native explicit loader.
@@ -93,7 +93,7 @@ export async function runPiMidPromptSkills(scope: "project" | "user", mode: "jso
     await runFixtureInstaller(workspace, "uninstall", ["mid-prompt-skills"], { scope });
     await assert.rejects(access(extension), { code: "ENOENT" });
     for (const skill of resources) await access(skill.path);
-    assert.equal(await readFile(settings, "utf8"), settingsBefore);
+    assert.deepEqual(JSON.parse(await readFile(settings, "utf8")), JSON.parse(settingsBefore));
     // After removal a later invocation is ordinary text again, not an extension transform.
     const removed: InvocationCase = { name: "removed", prompt: "Use /skill:e2e-second", skills: [] };
     routes.set(removed.name, invocationScenario(removed, resources));

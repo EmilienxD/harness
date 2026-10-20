@@ -47,7 +47,7 @@ export async function runPiCommentsJourney(mode: "json" | "rpc", scope: "project
     await writeFile(join(project, "multi.py"), "first = 1\nsecond = 1\n");
     await runFixtureInstaller(fixture.workspace, "install", ["prefer-fewer-comments"], { scope, dryRun: true });
     const platform = scope === "project" ? join(project, ".pi") : fixture.workspace.agentDir;
-    assert.equal(existsSync(join(platform, "extensions", "harness-prefer-fewer-comments")), false);
+    assert.equal(existsSync(join(platform, "extensions", ".harness-prefer-fewer-comments")), false);
     await runFixtureInstaller(fixture.workspace, "install", ["prefer-fewer-comments"], { scope });
     const starter = scope === "project" ? join(project, ".harness", "guards", "prefer-fewer-comments.toml") : join(platform, "harness", "prefer-fewer-comments.toml");
     await writeFile(starter, scope === "project" ? policy : "version = 1\n[limits]\nmax_comment_lines = 9\n");
@@ -80,7 +80,7 @@ export async function runPiCommentsJourney(mode: "json" | "rpc", scope: "project
     assert.equal(fixture.assertions().inferenceRequests, steps.length + 1);
     assert.equal(fixture.assertions().unexpectedRequests, 0);
     await runFixtureInstaller(fixture.workspace, "uninstall", ["prefer-fewer-comments"], { scope });
-    await assert.rejects(access(join(platform, "extensions", "harness-prefer-fewer-comments", "index.ts")));
+    await assert.rejects(access(join(platform, "extensions", ".harness-prefer-fewer-comments", "index.ts")));
     await assert.rejects(access(join(platform, "harness", "pi-transport", "transport.ts")));
     assert.equal(await readFile(starter, "utf8"), scope === "project" ? policy : "version = 1\n[limits]\nmax_comment_lines = 9\n");
     return { version: fixture.version, mode, scope, inferenceRequests: steps.length + 1, status: run.status };

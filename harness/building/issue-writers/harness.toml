@@ -1,5 +1,5 @@
 name = "issue-writers"
-version = "2.3.2"
+version = "2.3.3"
 description = "Draft and publish GitHub issues"
 requires = ["git", "gh"]
 docs = "https://github.com/EmilienxD/harness/blob/main/README.md#user-invoked-skills"
@@ -101,7 +101,7 @@ platforms = ["chatgpt"]
 
 [[files]]
 src = "pi/extension.ts"
-dest = "harness-issue-writers/index.ts"
+dest = ".harness-issue-writers/index.ts"
 root = "extensions"
 platforms = ["pi"]
 

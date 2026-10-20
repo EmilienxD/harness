@@ -23,13 +23,13 @@ def test_calm_install_and_removal_preserve_preferences_and_settings(tmp_path, mo
     target.settings_path.write_text(settings, encoding="utf-8")
     installer = CatalogueInstaller(discover(), target, ReceiptStore.load(tmp_path / "receipts.json"))
     installer.reconcile({"calm"})
-    extension = target.destination_path("extensions", "harness-calm/index.ts")
+    extension = target.destination_path("extensions", ".harness-calm/index.ts")
     assert extension.is_file()
     assert (extension.parent / "LICENSE").is_file()
     assert (extension.parent / "built-in-tool-shells.ts").is_file()
     installer.reconcile(set())
     assert not extension.exists()
-    assert target.settings_path.read_text(encoding="utf-8") == settings
+    assert target.read_settings() == json.loads(settings)
     assert preference.read_text(encoding="utf-8") == "on\n"
 
 

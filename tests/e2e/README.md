@@ -18,6 +18,7 @@ npm ci
 npm run check
 npm run e2e:pi
 npm run test:pi
+npm run test:pi-package-precedence
 npm run test:pi-shared-skills
 npm run test:pi-path-guards
 npm run test:pi-command-guard
@@ -56,8 +57,13 @@ each skill, reads bundled references and the websearch source index with real to
 and receipt-driven removal. Scripted fixture actions certify resource integration;
 they do not evaluate unscripted workflow judgment or external services.
 
-Pi extension entry points install under `extensions/`; their Python helpers, TypeScript support,
-and user policy starters install under `harness/`, outside extension discovery. Command-guard
+Pi extension entry points install under `extensions/.harness-*` and load through per-tool
+native package identities. `test:pi-package-precedence` installs two versions at user and
+project scopes and verifies one project tool/command/hook, reload, copied checkouts, package
+filters, untrusted projects and user fallback after removal. It also runs native npm updates
+with npm networking disabled and checks receipt-driven dependency/lock cleanup preserves
+another installed package. Archives and settings remain inside the fixture.
+Python helpers, TypeScript support, and user policy starters install under `harness/`, outside extension discovery. Command-guard
 journeys check fresh project and user installations create no `hooks/` directory. They also run
 the installed Pi startup warning detector in an isolated subprocess and require zero warnings.
 JSON/RPC suppress interactive deprecation warnings, so silence alone is not evidence. A positive

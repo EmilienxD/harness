@@ -1,5 +1,5 @@
 name = "background-shell"
-version = "3.0.1"
+version = "3.0.2"
 description = "Pi background shell jobs with automatic completion, output browsing, and cancellation"
 docs = "https://github.com/EmilienxD/harness/blob/main/README.md#background-shell"
 
@@ -16,12 +16,12 @@ status = "supported"
 
 [[files]]
 src = "pi/extension.ts"
-dest = "harness-background-shell/index.ts"
+dest = ".harness-background-shell/index.ts"
 root = "extensions"
 platforms = ["pi"]
 
 [[files]]
 src = "pi/ui.ts"
-dest = "harness-background-shell/ui.ts"
+dest = ".harness-background-shell/ui.ts"
 root = "extensions"
 platforms = ["pi"]

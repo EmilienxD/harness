@@ -26,7 +26,7 @@ def test_file_mentions_install_and_remove(tmp_path, monkeypatch, scope):
         assert tool.support_for(platform).status is SupportStatus.UNSUPPORTED
     installer = CatalogueInstaller(tools, target, ReceiptStore.load(tmp_path / "receipts.json"))
     installer.reconcile({"file-mentions"})
-    extension = target.destination_path("extensions", "harness-file-mentions/index.ts")
+    extension = target.destination_path("extensions", ".harness-file-mentions/index.ts")
     assert extension.read_bytes() == (tool.root / "pi/extension.ts").read_bytes()
     installer.reconcile(set())
     assert not extension.exists()

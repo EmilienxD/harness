@@ -156,7 +156,7 @@ export async function runPiBackgroundShellJourney(scope: "project" | "user", she
     const before = await readFile(settings, "utf8");
     const instruction = join(project, "AGENTS.md");
     await writeFile(instruction, "Personal fixture instructions.\n");
-    const extension = join(scope === "project" ? join(project, ".pi") : workspace.agentDir, "extensions/harness-background-shell/index.ts");
+    const extension = join(scope === "project" ? join(project, ".pi") : workspace.agentDir, "extensions/.harness-background-shell/index.ts");
     await runFixtureInstaller(workspace, "install", ["background-shell"], { scope, dryRun: true });
     assert.equal(existsSync(extension), false);
     await runFixtureInstaller(workspace, "install", ["background-shell"], { scope });
@@ -167,6 +167,7 @@ export async function runPiBackgroundShellJourney(scope: "project" | "user", she
     const repeat = await runFixtureInstaller(workspace, "install", ["background-shell"], { scope });
     assert.equal((repeat.results as { status: string }[])[0]!.status, "unchanged");
     await runFixtureInstaller(workspace, "install", ["command-guard"]);
+    const installedSettings = await readFile(settings, "utf8");
     await writeFile(join(project, ".harness/guards/command-guard.toml"), 'version = 1\n[[rules]]\nreason = "E2E denied"\npatterns = ["forbidden-marker"]\n');
     const rpc = fixture.rpc({ timeoutMs: 150000 });
     const discovery = await rpc.request("get_commands");
@@ -190,7 +191,7 @@ export async function runPiBackgroundShellJourney(scope: "project" | "user", she
       }
       throw new Error("Automatic completion turn did not become idle");
     }
-    await writeFile(settings, JSON.stringify({ ...config, backgroundShell: { foregroundTimeout: 5 } }));
+    await writeFile(settings, JSON.stringify({ ...JSON.parse(installedSettings), backgroundShell: { foregroundTimeout: 5 } }));
     const busy = await prompt("busy", [false, false, false]);
     assert.equal(await readFile(join(project, "busy-observed.txt"), "utf8"), "completion observed mid-task");
     assert.equal(await readFile(join(project, "effect-busy"), "utf8"), "done");
@@ -211,7 +212,7 @@ export async function runPiBackgroundShellJourney(scope: "project" | "user", she
     }
     await idle();
     assert.equal(fixture.assertions().inferenceRequests, expectedRequests);
-    await writeFile(settings, before);
+    await writeFile(settings, installedSettings);
     const foreground = await prompt("foreground");
     const foregroundEnd = foreground.events.find((event) => event.type === "tool_execution_end")!;
     assert.equal((foregroundEnd.result as { structuredContent: { exit_code: number } }).structuredContent.exit_code, 0);
@@ -329,11 +330,13 @@ export async function runPiBackgroundShellJourney(scope: "project" | "user", she
     for (const mode of ["foreground", "foreground-cancel", "foreground-failure", "hard-foreground", "equal-deadlines"]) {
       assert.equal(existsSync(join(project, `completion-${mode}.json`)), false, "Foreground results must not also send background notifications");
     }
-    assert.equal(await readFile(settings, "utf8"), before);
+    assert.deepEqual(JSON.parse(await readFile(settings, "utf8")), JSON.parse(installedSettings));
     assert.equal(await readFile(instruction, "utf8"), "Personal fixture instructions.\n");
     assert.equal(fixture.assertions().unexpectedRequests, 0);
     assert.equal(fixture.assertions().inferenceRequests, expectedRequests);
     await runFixtureInstaller(workspace, "uninstall", ["background-shell"], { scope });
+    await runFixtureInstaller(workspace, "uninstall", ["command-guard"]);
+    assert.deepEqual(JSON.parse(await readFile(settings, "utf8")), JSON.parse(before));
     assert.equal(existsSync(extension), false);
     assert.equal(existsSync(join(dirname(extension), "ui.ts")), false);
     return { scope, shell, version: fixture.version, requests: expectedRequests };

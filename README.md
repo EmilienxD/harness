@@ -64,6 +64,13 @@ from this checkout, then invoke `/skill:tdd` or `/skill:audit` in Pi. `todo-hitl
 `/skill:mark-as-todo-hitl` and `/skill:address-todo-hitl`.
 Project skills live in `.pi/skills`; user skills live in `~/.pi/agent/skills`, or the agent
 directory selected by `PI_CODING_AGENT_DIR`. Review project resources before granting Pi trust.
+Pi extensions use native package identities: a trusted project's enabled copy replaces the
+same tool at user scope, while other user extensions remain available. Removing the project
+copy restores the user copy on the next launch or `/reload`. Explicit project package filters
+also take precedence. Harness supplies the packages
+locally; no npm registry installation is needed. When upgrading an older installation, upgrade
+both scopes where the same extension is installed. Modified legacy extension files must be
+restored or moved out of `extensions` before migration can finish.
 Audit runs in the current session; Pi explorer delegation remains pending. UI prototypes
 require available browser tools, Lavish requires `npx` and external browser review, GitHub
 lookup requires authenticated `gh`, and text replacements remain Windows-only.
@@ -87,7 +94,8 @@ uv run harness install on-read-reminder on-edit-reminder on-edit-block --platfor
 
 Run `/reload` in Pi, approve the project resources, and configure the corresponding
 `.harness/guards/*.toml` policies. The empty starters leave the guards inactive until rules
-are added. Extensions live in `.pi/extensions`; Python helpers live in `.pi/harness`.
+are added. Extension entry points live in `.pi/extensions/.harness-*` and load through native
+package declarations; Python helpers live in `.pi/harness`.
 User installs use the effective Pi agent directory, with policy starters beside the helpers in `harness/`.
 Pi guards require uv or Python 3.11+. They cover native reads/edits/writes, including nested
 calls, and recognized shell reads; shell mutations need separate controls.

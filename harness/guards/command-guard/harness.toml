@@ -1,5 +1,5 @@
 name = "command-guard"
-version = "2.2.2"
+version = "2.2.3"
 description = "Cross-platform PreToolUse guard that denies configured dangerous Bash and PowerShell commands"
 docs = "https://github.com/EmilienxD/harness/blob/main/README.md#hooks"
 
@@ -40,7 +40,7 @@ platforms = ["pi"]
 
 [[files]]
 src = "pi/extension.ts"
-dest = "harness-command-guard/index.ts"
+dest = ".harness-command-guard/index.ts"
 root = "extensions"
 platforms = ["pi"]
 

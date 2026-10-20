@@ -90,7 +90,7 @@ export async function runPiGrill(options: { scope: "project" | "user"; mode?: "r
     Object.assign(fixture.workspace.env, { HARNESS_GRILL_URL: origin, HARNESS_GRILL_CODE: code });
     await runFixtureInstaller(fixture.workspace, "install", ["grill-me-in-cloud"], { scope: options.scope });
     const platform = options.scope === "project" ? join(fixture.workspace.projectRoot, ".pi") : fixture.workspace.agentDir;
-    await access(join(platform, "extensions", "harness-grill-me-in-cloud", "index.ts"));
+    await access(join(platform, "extensions", ".harness-grill-me-in-cloud", "index.ts"));
     const probe = join(fixture.workspace.projectRoot, ".pi", "extensions", "grill-lifecycle-test");
     await mkdir(probe, { recursive: true });
     await writeFile(join(probe, "index.ts"), `export default function(pi) {
@@ -216,7 +216,7 @@ export async function runPiGrill(options: { scope: "project" | "user"; mode?: "r
     assert.equal(fixture.assertions().inferenceRequests, 5 + offset);
     await receiver.close();
     await runFixtureInstaller(fixture.workspace, "uninstall", ["grill-me-in-cloud"], { scope: options.scope });
-    await assert.rejects(access(join(platform, "extensions", "harness-grill-me-in-cloud", "index.ts")));
+    await assert.rejects(access(join(platform, "extensions", ".harness-grill-me-in-cloud", "index.ts")));
     await assert.rejects(access(join(platform, "harness", "pi-transport", "transport.ts")));
     assert.equal(fixture.assertions().unexpectedRequests, 0);
     return { version: fixture.version, scope: options.scope, mode: options.mode ?? "rpc", inferenceRequests: 5 + offset, hosted: board ? "fault-fixture" : new URL(origin).hostname };

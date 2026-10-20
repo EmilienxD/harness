@@ -69,7 +69,7 @@ def test_fresh_pi_catalogue_installs_without_a_hooks_directory(tmp_path, monkeyp
     assert selected <= set(installer.installation["packages"])
     assert not (target.install_root / "hooks").exists()
     assert (target.install_root / "harness/pi-transport/transport.ts").is_file()
-    assert (target.install_root / "extensions/harness-command-guard/index.ts").is_file()
+    assert (target.install_root / "extensions/.harness-command-guard/index.ts").is_file()
     for name in selected:
         for payload in available[name].expand(Platform.PI, scope):
             assert payload.root != "hooks", name

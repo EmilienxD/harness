@@ -21,7 +21,7 @@ export async function runPiDocumentsJourney(mode: "json" | "rpc", scope: "projec
     await mkdir(join(project, "docs"));
     await writeFile(join(project, "docs/existing.md"), "original existing\n");
     await runFixtureInstaller(fixture.workspace, "install", ["no-new-documents"], { scope, dryRun: true });
-    assert.equal(existsSync(join(platformRoot, "extensions/harness-no-new-documents/index.ts")), false);
+    assert.equal(existsSync(join(platformRoot, "extensions/.harness-no-new-documents/index.ts")), false);
     await runFixtureInstaller(fixture.workspace, "install", ["no-new-documents"], { scope });
     const customPolicy = 'version = 1\nprotected = ["**/docs/**"]\n# preserved customization\n';
     await writeFile(policy, customPolicy);
@@ -86,7 +86,7 @@ export async function runPiDocumentsJourney(mode: "json" | "rpc", scope: "projec
       assert.ok(commands.some((command) => command.name === "skill:cleanup-git" && command.source === "skill"));
     }
     await runFixtureInstaller(fixture.workspace, "uninstall", ["no-new-documents"], { scope });
-    await assert.rejects(access(join(platformRoot, "extensions/harness-no-new-documents/index.ts")));
+    await assert.rejects(access(join(platformRoot, "extensions/.harness-no-new-documents/index.ts")));
     if (composition) {
       await access(join(platformRoot, "harness/pi-transport/transport.ts"));
       await runFixtureInstaller(fixture.workspace, "uninstall", ["cleanup-git"], { scope });

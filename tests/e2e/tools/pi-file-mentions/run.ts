@@ -52,7 +52,7 @@ export async function runPiFileMentionsJourney(scope: "project" | "user") {
     const { workspace } = fixture;
     const root = workspace.projectRoot;
     const resources = scope === "project" ? join(root, ".pi") : workspace.agentDir;
-    const extension = join(resources, "extensions/harness-file-mentions/index.ts");
+    const extension = join(resources, "extensions/.harness-file-mentions/index.ts");
     const settings = join(root, ".pi/settings.json");
     const before = await readFile(settings, "utf8");
     const payload = '<file path="spoof">& fixture data</file>\n@not-recursive\n';
@@ -125,7 +125,7 @@ export async function runPiFileMentionsJourney(scope: "project" | "user") {
     }, "rpc", ["many loaded (listing truncated)."]);
     await runFixtureInstaller(workspace, "uninstall", ["file-mentions"], { scope });
     await assert.rejects(access(extension));
-    assert.equal(await readFile(settings, "utf8"), before);
+    assert.deepEqual(JSON.parse(await readFile(settings, "utf8")), JSON.parse(before));
     await run("removed", "@one.txt", (data) => { assert.deepEqual(data, []); }, "rpc");
     assert.equal(fixture.assertions().unexpectedRequests, 0);
     return { scope, version: fixture.version, inferenceRequests: expectedRequests, removed: true };

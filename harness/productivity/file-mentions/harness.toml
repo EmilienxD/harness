@@ -1,5 +1,5 @@
 name = "file-mentions"
-version = "1.2.0"
+version = "1.2.1"
 description = "Automatically include @referenced text files and bounded folder listings in Pi prompts"
 docs = "https://github.com/EmilienxD/harness/blob/main/README.md#file-mentions"
 
@@ -16,6 +16,6 @@ status = "supported"
 
 [[files]]
 src = "pi/extension.ts"
-dest = "harness-file-mentions/index.ts"
+dest = ".harness-file-mentions/index.ts"
 root = "extensions"
 platforms = ["pi"]

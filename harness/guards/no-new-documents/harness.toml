@@ -1,5 +1,5 @@
 name = "no-new-documents"
-version = "3.2.2"
+version = "3.2.3"
 description = "Cross-platform guard that routes new files in configured documentation directories through user-approved drafts"
 docs = "https://github.com/EmilienxD/harness/blob/main/README.md#hooks"
 
@@ -55,7 +55,7 @@ starter = true
 
 [[files]]
 src = "pi/extension.ts"
-dest = "harness-no-new-documents/index.ts"
+dest = ".harness-no-new-documents/index.ts"
 root = "extensions"
 platforms = ["pi"]
 

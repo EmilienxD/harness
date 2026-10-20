@@ -15,6 +15,32 @@ This is a design baseline, not runtime certification. Before implementation, ver
 Pi exports and CLI against that baseline and record the version used for acceptance checks.
 Rolling reference refreshes do not widen the supported runtime range automatically.
 
+Harness extension packages use one native npm identity per catalogue tool. The installer
+generates a manifest in `<platform>/npm/node_modules/harness-pi-<tool>/` and a backup tarball
+in `<platform>/harness/packages/`. Its native `npm:harness-pi-<tool>@file:<absolute archive>`
+source references an immutable, content-addressed tarball in `pi-packages/` beside the receipt
+store. Retain these cache files after uninstall: copied worktrees can still reference them.
+An absolute source avoids npm's working-directory-dependent resolution of relative tarballs.
+Its explicit extension paths reach receipt-owned `.harness-*` entries
+under `extensions/`; the dot prefix prevents independent auto-discovery. Pi selects a trusted
+project package over the user package before binding tools, commands and event handlers.
+Unrelated user packages remain loaded. Keep the manifest paths relative so copied worktrees
+resolve their own entry points. Plain local package paths cannot provide this precedence:
+Pi identifies those packages by absolute path, even when their manifests have the same name.
+
+Upgrade both installed scopes when migrating older auto-discovered entry points. Removal uses
+the old receipts; modified or unowned legacy extension files stop migration before mutation.
+Do not infer overrides from file existence; honor native package trust and explicit resource
+filters. Preserve filters through upgrades. Uninstall removes an owned source even if `pi config`
+has converted it to a filtered object, while preserving declarations that predated installation.
+After native npm updates, remove only this receipt's wrapper dependencies and lock entries.
+The native package precedence journey checks tools, commands, hooks, reload, copied checkouts,
+native local-only updates, disabled/untrusted projects and user fallback against the real Pi CLI.
+
+Aboard lets Pi assign fresh-session IDs and binds the observed ID through its authenticated
+startup lifecycle. Resume and fork retain explicit IDs. This avoids Pi 1.2.0's warning when
+`--session-id` creates an intentionally new session, without filtering provider diagnostics.
+
 The [Pi E2E implementation guide](../tests/e2e/README.md) describes the implemented JSON/RPC
 fixture, which reuses the fake OpenAI Responses endpoint and isolated Pi configuration. It was
 verified against installed Pi 1.2.0. The first tool journey installs the actual catalogue package,

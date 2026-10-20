@@ -68,7 +68,7 @@ export async function runPiCommandGuardJourney(mode: "json" | "rpc", scope: "pro
     assert.equal(fixture.assertions().unexpectedRequests, 0);
 
     await runFixtureInstaller(fixture.workspace, "uninstall", ["command-guard"], { scope });
-    await assert.rejects(access(join(platformRoot, "extensions", "harness-command-guard", "index.ts")));
+    await assert.rejects(access(join(platformRoot, "extensions", ".harness-command-guard", "index.ts")));
     await assert.rejects(access(join(platformRoot, "harness", "command_guard_pi.py")));
     await assert.rejects(access(join(platformRoot, "harness", "pi-transport", "transport.ts")));
     assert.equal(await readFile(policy, "utf8"), POLICY);

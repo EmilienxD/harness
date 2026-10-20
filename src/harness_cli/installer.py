@@ -16,7 +16,7 @@ from collections.abc import Iterable, Sequence
 from pathlib import Path
 from typing import Any
 
-from harness_cli import gitignore, settings_merge
+from harness_cli import gitignore, pi_packages, settings_merge
 from harness_cli.catalogue import CatalogueError, ResolvedPackage, resolve_dependencies, satisfies
 from harness_cli.host_actions import HostActionError, PreparedAction, apply as apply_host_action
 from harness_cli.host_actions import prepare as prepare_host_action
@@ -350,6 +350,9 @@ class CatalogueInstaller:
         # A set opts into preserving installed packages except named updates.
         self.update_packages: set[str] | None = None
         self._preserved: set[str] = set()
+        self._pi_package_directory: tempfile.TemporaryDirectory | None = None
+        self._pi_payloads: dict[tuple[str, str], list[ExpandedFile]] = {}
+        self._pi_caches: dict[tuple[str, str], tuple[Path, Path]] = {}
 
     def _selection_catalogue(self, requested_names: set[str]) -> dict[str, Tool]:
         current = self.installation["packages"]
@@ -409,7 +412,27 @@ class CatalogueInstaller:
 
     def _payloads(self, tool: Tool) -> list[ExpandedFile]:
         scope = "user" if self.target.is_user else "project"
-        return tool.expand(self.target.platform, scope)
+        files = tool.expand(self.target.platform, scope)
+        if self.target.platform is Platform.PI and any(file.root == "extensions" for file in files):
+            key = (tool.name, tool.version)
+            if key not in self._pi_payloads:
+                if self._pi_package_directory is None:
+                    self._pi_package_directory = tempfile.TemporaryDirectory(prefix="harness-pi-packages-")
+                self._pi_payloads[key] = pi_packages.payloads(
+                    tool, files, Path(self._pi_package_directory.name) / str(len(self._pi_payloads)),
+                )
+                archive = self._pi_payloads[key][-1].source
+                self._pi_caches[key] = (archive, pi_packages.cache_path(archive, self.store.path))
+            files.extend(self._pi_payloads[key])
+        return files
+
+    def _fragment(self, tool: Tool, pi_package: dict | None = None) -> dict:
+        fragment = tool.fragment_for(self.target.platform)
+        if self.target.platform is Platform.PI and any(file.root == "extensions" for file in self._payloads(tool)):
+            source = pi_packages.source(tool, self._pi_caches[(tool.name, tool.version)][1])
+            entry = {**pi_package, "source": source} if pi_package else source
+            return settings_merge.merge(fragment, {"packages": [entry]})
+        return fragment
 
     def _skill_links(self, tool: Tool) -> dict[Path, Path]:
         if self.target.platform is not Platform.CLAUDE or self.skill_mode != "symlink":
@@ -732,6 +755,9 @@ class CatalogueInstaller:
             for payload in self._payloads(item.tool)
         )
         paths.update(link for item in resolved for link in self._skill_links(item.tool))
+        paths.update(cache for _archive, cache in self._pi_caches.values())
+        if self.target.platform is Platform.PI:
+            paths.update(pi_packages.npm_metadata_paths(self.target.install_root))
         return paths
 
     def _local_links(self, resolved: list[ResolvedPackage]) -> set[Path]:
@@ -885,6 +911,25 @@ class CatalogueInstaller:
         approved = {_canonical_path(path) for path in overwrite}
         desired = {item.tool.name: item for item in resolved}
         packages = self.installation["packages"]
+        if self.target.platform is Platform.PI:
+            extension_root = self.target.install_root / "extensions"
+            for name, item in desired.items():
+                if not any(file.root == "extensions" for file in self._payloads(item.tool)):
+                    continue
+                for record in packages.get(name, {}).get("files", []):
+                    path = Path(record["path"])
+                    try:
+                        relative = path.relative_to(extension_root)
+                    except ValueError:
+                        continue
+                    if (
+                        relative.parts and not relative.parts[0].startswith(".") and path.is_file()
+                        and (not record.get("owned") or sha256(path) != record.get("digest"))
+                    ):
+                        raise InstallError(
+                            f"Cannot migrate modified or unowned Pi extension {path}; "
+                            "move it out of extensions or restore the installed file before upgrading."
+                        )
         if unowned := self._audit_destinations(resolved, approved):
             raise UnownedFileError(unowned)
         if products := self._audit_host_products(resolved, set(adopt)):
@@ -931,6 +976,9 @@ class CatalogueInstaller:
                         for record in current.get("links", [])
                     )
                     missing_actions = self._missing_host_actions(item.tool)
+                    cache = self._pi_caches.get((item.tool.name, item.tool.version))
+                    if cache and (not cache[1].is_file() or sha256(cache[1]) != sha256(cache[0])):
+                        missing_files = True
                     if missing_files or missing_links or missing_actions:
                         repairs.add(item.tool.name)
                         prepared[item.tool.name] = _prepare_actions(missing_actions)
@@ -964,7 +1012,17 @@ class CatalogueInstaller:
                 )
                 if current is None or current.get("version") != item.tool.version or mode_changed:
                     replacing = current is not None
+                    pi_package = None
                     if current is not None:
+                        if self.target.platform is Platform.PI:
+                            recorded = {
+                                entry.get("source") if isinstance(entry, dict) else entry
+                                for entry in current.get("fragment", {}).get("packages", [])
+                            }
+                            pi_package = next((
+                                deepcopy(entry) for entry in self.target.read_settings().get("packages", [])
+                                if isinstance(entry, dict) and entry.get("source") in recorded
+                            ), None)
                         self._remove(
                             item.tool.name,
                             remove_actions=False,
@@ -976,6 +1034,7 @@ class CatalogueInstaller:
                         host_undo,
                         rollback_prepared.get(item.tool.name, []) if replacing else [],
                         approved,
+                        pi_package,
                     )
                 elif item.tool.name in repairs:
                     self._install(item, prepared.get(item.tool.name, []), host_undo, [], approved)
@@ -1050,11 +1109,18 @@ class CatalogueInstaller:
         host_undo: list[tuple[str, HostAction | PreparedAction]],
         previous_actions: list[PreparedAction | None],
         approved: set[str],
+        pi_package: dict | None = None,
     ) -> None:
         tool = item.tool
         files: list[dict[str, Any]] = []
         prior_receipt = self.installation["packages"].get(tool.name)
-        for payload in self._payloads(tool):
+        payloads = self._payloads(tool)
+        cache = self._pi_caches.get((tool.name, tool.version))
+        if cache:
+            archive, destination = cache
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            _copy_atomic(archive, destination)
+        for payload in payloads:
             destination = self._destination(payload)
             if destination.exists() and payload.starter:
                 other_record = self._owned_file_in_another_installation(str(destination))
@@ -1123,13 +1189,18 @@ class CatalogueInstaller:
                 link.symlink_to(os.path.relpath(target, link.parent), target_is_directory=True)
             links.append({"path": str(link.absolute()), "target": str(target.absolute())})
 
-        raw_fragment = tool.fragment_for(self.target.platform)
+        raw_fragment = self._fragment(tool, pi_package)
         python = _python_command() if "${PYTHON}" in json.dumps(raw_fragment) else None
         fragment = _substitute(raw_fragment, self.target, python)
         if fragment:
             before = self.target.read_settings()
-            _write_json(self.target.settings_path, self.target.adapter.merge_config(before, fragment))
-            fragment = settings_merge.additions(before, fragment)
+            merged = self.target.adapter.merge_config(before, fragment)
+            _write_json(self.target.settings_path, merged)
+            fragment = settings_merge.additions(
+                before, merged if self.target.platform is Platform.PI else fragment,
+            )
+            if self.target.platform is Platform.PI and prior_receipt:
+                fragment = settings_merge.merge(prior_receipt.get("fragment", {}), fragment)
         block = f"{tool.name}:{self.target.platform.value}"
         ignore_files = []
         for path, patterns in self._ignore_locations(tool).items():
@@ -1186,6 +1257,9 @@ class CatalogueInstaller:
         receipt = self.installation["packages"].get(name)
         if receipt is None:
             return
+        if self.target.platform is Platform.PI:
+            for path, metadata in pi_packages.npm_removals(self.target.install_root, receipt.get("fragment", {})).items():
+                _write_json(path, metadata)
         if remove_actions and not self._owned_in_another_installation(name):
             old_actions = rollback_actions or []
             for index, raw in reversed(list(enumerate(receipt.get("actions", [])))):
@@ -1228,7 +1302,7 @@ class CatalogueInstaller:
                 other_fragment = other_receipt.get("fragment")
                 tool = self.available.get(other_name)
                 if tool is not None:
-                    raw = tool.fragment_for(self.target.platform)
+                    raw = self._fragment(tool)
                     if raw:
                         try:
                             other_fragment = _substitute(raw, self.target, _python_command())

@@ -1,5 +1,5 @@
 name = "issue-readers"
-version = "1.6.2"
+version = "1.6.3"
 description = "Prepare issue and commit context for address and review workers"
 requires = ["git", "gh"]
 docs = "https://github.com/EmilienxD/harness/blob/main/README.md#user-invoked-skills"
@@ -69,7 +69,7 @@ platforms = ["chatgpt"]
 
 [[files]]
 src = "pi/extension.ts"
-dest = "harness-issue-readers/index.ts"
+dest = ".harness-issue-readers/index.ts"
 root = "extensions"
 platforms = ["pi"]
 

@@ -26,12 +26,12 @@ def test_slash_command_guard_install_and_remove(tmp_path, monkeypatch, scope):
     tools = discover()
     installer = CatalogueInstaller(tools, target, ReceiptStore.load(tmp_path / "receipts.json"))
     installer.reconcile({"slash-command-guard"})
-    extension = target.destination_path("extensions", "harness-slash-command-guard/index.ts")
+    extension = target.destination_path("extensions", ".harness-slash-command-guard/index.ts")
     assert extension.read_bytes() == (tools["slash-command-guard"].root / "pi/extension.ts").read_bytes()
     installer.reconcile(set())
     assert not extension.exists()
     assert neighbour.is_file()
-    assert target.settings_path.read_text(encoding="utf-8") == settings
+    assert target.read_settings() == json.loads(settings)
 
 
 def test_slash_command_guard_is_pi_only():

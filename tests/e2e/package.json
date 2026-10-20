@@ -19,6 +19,7 @@
     "e2e:pi:build": "esbuild tools/pi-smoke/cli.ts --bundle --platform=node --format=cjs --target=node22 --outfile=dist/tools/pi-smoke/cli.js",
     "e2e:pi": "npm run e2e:pi:build && node dist/tools/pi-smoke/cli.js",
     "test:pi:build": "esbuild test/pi.test.ts --bundle --platform=node --format=cjs --target=node22 --outfile=dist/test/pi.test.js",
+    "test:pi-package-precedence": "esbuild test/pi-package-precedence.test.ts --bundle --platform=node --format=cjs --target=node22 --outfile=dist/test/pi-package-precedence.test.js && node --test dist/test/pi-package-precedence.test.js",
     "test:pi": "npm run test:pi:build && node --test dist/test/pi.test.js",
     "e2e:pi-web-toolkit": "esbuild tools/pi-web-toolkit/cli.ts --bundle --platform=node --format=cjs --target=node22 --outfile=dist/tools/pi-web-toolkit/cli.js && node dist/tools/pi-web-toolkit/cli.js",
     "test:pi-web-toolkit": "esbuild test/pi-web-toolkit.test.ts --bundle --platform=node --format=cjs --target=node22 --outfile=dist/test/pi-web-toolkit.test.js && node --test dist/test/pi-web-toolkit.test.js",

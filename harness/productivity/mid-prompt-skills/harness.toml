@@ -1,5 +1,5 @@
 name = "mid-prompt-skills"
-version = "1.2.0"
+version = "1.2.1"
 description = "Load skills invoked after other prompt text in Claude Code, ChatGPT, and Pi"
 docs = "https://github.com/EmilienxD/harness/blob/main/README.md#hooks"
 
@@ -16,7 +16,7 @@ status = "supported"
 
 [[files]]
 src = "pi/extension.ts"
-dest = "harness-mid-prompt-skills/index.ts"
+dest = ".harness-mid-prompt-skills/index.ts"
 root = "extensions"
 platforms = ["pi"]
 

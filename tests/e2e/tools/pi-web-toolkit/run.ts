@@ -33,7 +33,7 @@ export async function runPiWebToolkitJourney(scope: "project" | "user", mode: "j
     // Current-user CLI installations remain invisible to the missing-executable check.
     const executable = join(bin, process.platform === "win32" ? "web-toolkit.exe" : "web-toolkit");
     const resources = scope === "project" ? join(workspace.projectRoot, ".pi") : workspace.agentDir;
-    const extension = join(resources, "extensions", "harness-web-toolkit", "index.ts");
+    const extension = join(resources, "extensions", ".harness-web-toolkit", "index.ts");
     const settings = join(workspace.projectRoot, ".pi", "settings.json");
     const settingsBefore = await readFile(settings, "utf8");
     await runFixtureInstaller(workspace, "install", ["web-toolkit"], { scope, dryRun: true });
@@ -112,7 +112,7 @@ export async function runPiWebToolkitJourney(scope: "project" | "user", mode: "j
     await runFixtureInstaller(workspace, "uninstall", ["web-toolkit"], { scope });
     assert.equal(await exists(extension), false); assert.equal(await exists(executable), false);
     assert.equal(await exists(join(resources, "skills", "web-toolkit")), false);
-    assert.equal(await readFile(settings, "utf8"), settingsBefore);
+    assert.deepEqual(JSON.parse(await readFile(settings, "utf8")), JSON.parse(settingsBefore));
     return { scope, mode, version: fixture.version, inferenceRequests: observations.inferenceRequests, unexpectedRequests: observations.unexpectedRequests,
       checkpoints: observations.checkpoints, nativeTools: 2, preservedLongPage: true, cancelled: true, removed: true };
   } finally {

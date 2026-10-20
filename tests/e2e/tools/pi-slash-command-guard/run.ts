@@ -13,7 +13,7 @@ export async function runPiSlashCommandGuardJourney(scope: "project" | "user") {
     const { workspace } = fixture;
     const root = await findHarnessRoot();
     const resources = scope === "project" ? join(workspace.projectRoot, ".pi") : workspace.agentDir;
-    const extension = join(resources, "extensions/harness-slash-command-guard/index.ts");
+    const extension = join(resources, "extensions/.harness-slash-command-guard/index.ts");
     const settings = join(workspace.projectRoot, ".pi/settings.json");
     const before = await readFile(settings, "utf8");
     await runFixtureInstaller(workspace, "install", ["slash-command-guard"], { scope, dryRun: true });
@@ -70,8 +70,14 @@ export async function runPiSlashCommandGuardJourney(scope: "project" | "user") {
     assert.equal(fixture.assertions().inferenceRequests, 4);
     await runFixtureInstaller(workspace, "uninstall", ["slash-command-guard"], { scope });
     await assert.rejects(access(extension));
-    await access(join(resources, "extensions/harness-clear-alias/index.ts"));
-    assert.equal(await readFile(settings, "utf8"), before);
+    await access(join(resources, "extensions/.harness-clear-alias/index.ts"));
+    const remaining = JSON.parse(await readFile(settings, "utf8"));
+    if (scope === "project") {
+      assert.equal(remaining.packages.length, 1);
+      assert.match(remaining.packages[0], /^npm:harness-pi-clear-alias@file:/u);
+      delete remaining.packages;
+    }
+    assert.deepEqual(remaining, JSON.parse(before));
     const removed = fixture.rpc();
     assert.equal((await removed.prompt(`/missing ${marker}`)).status, "success");
     await removed.close();

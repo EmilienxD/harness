@@ -55,7 +55,7 @@ export async function runPiSharedSkillsJourney(scope: "project" | "user") {
         installed.push({ name, filePath: join(destination, "SKILL.md"), disableModelInvocation: !AUTOMATIC_SKILLS.has(name) });
       }
     }
-    const extension = join(fixture.workspace.projectRoot, ".pi", "extensions", "harness-e2e-skill-resources");
+    const extension = join(fixture.workspace.projectRoot, ".pi", "extensions", ".harness-e2e-skill-resources");
     await mkdir(extension, { recursive: true });
     await copyFile(join(root, "tests", "e2e", "tools", "pi-shared-skills", "fixtures", "resources.ts.txt"), join(extension, "index.ts"));
     const rpc = fixture.rpc({ timeoutMs: 180_000 });

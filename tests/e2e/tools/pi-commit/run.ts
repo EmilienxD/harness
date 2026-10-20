@@ -107,7 +107,7 @@ export async function runPiCommit(scope: "project" | "user", mode: "json" | "rpc
     else await rpc.prompt("/commit repeat");
     assert.equal(await git("rev-parse", "HEAD"), committed);
     await runFixtureInstaller(fixture.workspace, "uninstall", ["commit"], { scope });
-    await assert.rejects(readFile(join(platform, "extensions", "harness-commit", "index.ts")));
+    await assert.rejects(readFile(join(platform, "extensions", ".harness-commit", "index.ts")));
     await readFile(join(platform, "harness", "pi-transport", "transport.ts"));
     await runFixtureInstaller(fixture.workspace, "uninstall", ["prefer-fewer-comments"], { scope });
     await assert.rejects(readFile(join(platform, "harness", "pi-transport", "transport.ts")));

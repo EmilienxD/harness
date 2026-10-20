@@ -36,7 +36,7 @@ for (const scope of ["project", "user"] as const) {
       assert.equal(fixture.assertions().unexpectedRequests, 0);
       await runFixtureInstaller(workspace, "uninstall", ["tool-inspector"], { scope });
       const base = scope === "project" ? join(workspace.projectRoot, ".pi") : workspace.agentDir;
-      await assert.rejects(access(join(base, "extensions/harness-tool-inspector/index.ts")));
+      await assert.rejects(access(join(base, "extensions/.harness-tool-inspector/index.ts")));
     } finally { await fixture.close(); }
   });
 }
