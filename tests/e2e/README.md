@@ -175,9 +175,10 @@ row hiding for native tools, Background Shell, unmarked custom tools, SDK overri
 self-framed renderers and unavailable-tool fallback rows, plus summary rendering, exact
 restoration, reasoning expansion and images,
 reload and listener disposal. UI calls that replace the native working display fail the check.
-The actual tool-row component renders the latest summary as a transient chat block;
-checks cover streaming arguments, three-second holds after tool completion using a controlled monotonic clock,
-green/red completion dots, long-running calls, coalescing, request/settlement clearing, timer disposal, nested calls, narrow terminals and toggling
+The actual tool-row component renders each call as an independent transient chat block;
+checks cover all streamed calls, overlapping execution, independently staggered three-second
+completion holds using a controlled monotonic clock, green/red completion dots, long-running calls,
+late-update suppression, request/settlement hold preservation, timer disposal, nested calls, narrow terminals and toggling
 during a run. Changing the working message fails.
 These component checks cover rendering; the RPC journey alone cannot certify terminal display.
 The same checks run with a preinstalled legacy renderer to catch live-upgrade regressions;

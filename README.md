@@ -585,16 +585,16 @@ Restart Pi or run `/reload`, then use `/clear`.
 
 `calm` is a Pi-only extension that hides every tool's transcript output and file diffs,
 including built-in, extension, SDK, and MCP tools. Web summaries show the search query or fetched URL.
-A compact block
-in the chat shows just the latest tool call, such as `read src/app.ts` or `bash npm test`.
+Each tool call appears independently in a compact chat block, such as `read src/app.ts`
+or `bash npm test`. Parallel and nested calls can display multiple blocks at once.
 Commands preserve line breaks and wrap to fit the terminal. Summaries are capped at 350
 characters, including a trailing `…` when truncated.
 An animated Braille spinner sits to the left while the tool runs. Completion replaces it
-with a green `•` on success or a red `•` on failure. Each displayed call stays visible while
-running and for three seconds after it completes. After that, the block shows the latest call
-or disappears if the next model request or final completion has already arrived. Rapid calls
-are coalesced to the latest one, so the display never replays a backlog. Agent execution keeps
-running at full speed. Reloading, switching sessions, or disabling Calm resets the display immediately.
+with a green `•` on success or a red `•` on failure. Each call stays visible while
+running and disappears independently three seconds after it completes, even if other calls
+are still running or the agent has already finished. No calls are coalesced or queued for display.
+Agent execution keeps running at full speed. Reloading or switching sessions clears the display;
+disabling Calm immediately restores native tool rows.
 Pi's normal running indicator stays in the input bar.
 Install it globally with:
 

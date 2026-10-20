@@ -155,6 +155,37 @@ for (const renderShell of ["default", "self", undefined]) {
 assert.equal(pi.AgentSession.prototype.getToolDefinition, registryLookup, "tool lookup remains unchanged");
 for (const event of ["agent_start", "agent_end", "agent_settled"]) await emit(extension, event);
 
+// Regression: overlapping calls must each have their own visible block.
+const parallelRows = ["parallel-a", "parallel-b"].map((id) =>
+  rowFor("read", pi.createReadTool(process.cwd()), { path: `${id}.ts` }, id));
+const parallelMessage = { role: "assistant", content: ["parallel-a", "parallel-b"].map((id) =>
+  ({ type: "toolCall", id, name: "read", arguments: { path: `${id}.ts` } })) };
+await emit(extension, "message_update", { message: parallelMessage });
+assert.equal(parallelRows.filter((row) => row.render(100).length > 0).length, 2,
+  "all streamed calls have independent Calm blocks");
+for (const id of ["parallel-a", "parallel-b"]) {
+  await emit(extension, "tool_execution_start", { toolName: "read", toolCallId: id, args: { path: `${id}.ts` } });
+}
+assert.equal(parallelRows.filter((row) => row.render(100).length > 0).length, 2,
+  "both overlapping calls have independent Calm blocks");
+await emit(extension, "tool_execution_end", { toolCallId: "parallel-b", isError: true });
+advance(1000);
+await emit(extension, "tool_execution_end", { toolCallId: "parallel-a", isError: false });
+await emit(extension, "before_provider_request");
+await emit(extension, "agent_settled");
+advance(1999);
+assert.ok(parallelRows.every((row) => row.render(100).length > 0), "settlement preserves both completion holds");
+advance(1);
+assert.ok(parallelRows[0].render(100).length > 0);
+assert.deepEqual(parallelRows[1].render(100), [], "the earlier completion expires first");
+advance(999);
+assert.ok(parallelRows[0].render(100).length > 0);
+advance(1);
+assert.deepEqual(parallelRows[0].render(100), [], "each call expires exactly three seconds after its own completion");
+await emit(extension, "message_update", { message: parallelMessage });
+assert.ok(parallelRows.every((row) => row.render(100).length === 0), "late streaming updates do not resurrect calls");
+await emit(extension, "session_start");
+
 const callRows = new Map();
 const chatContainer = new Container();
 const factories = new Map(cases.map(([name, factory]) => [name, factory]));
@@ -181,13 +212,13 @@ const startCall = async (toolName, args, fields = {}, allowReplacement = true) =
   return callRows.get(id);
 };
 const chatLines = (width = 100) => chatContainer.render(width);
-const assertBlock = (summary) => {
+const assertBlock = (summary, count = 1) => {
   const lines = chatLines().map(stripTerminalSequences);
   assert.ok(lines.length >= 4, "a chat block is visible");
   assert.match(lines[1], /^╭/);
-  assert.equal(lines.filter((line) => line.startsWith("╭")).length, 1, "only one block is visible");
-  const body = lines.slice(2, -1).map((line) => line.slice(4, -2).trimEnd()).join("\n");
-  assert.ok(body.includes(summary), "the chat block contains the expected summary");
+  assert.equal(lines.filter((line) => line.startsWith("╭")).length, count, "each visible call has its own block");
+  const body = lines.map((line) => line.slice(4, -2).trimEnd()).join("\n");
+  assert.ok(body.includes(summary), "the chat blocks contain the expected summary");
   assert.match(lines.at(-1), /^╰/);
 };
 for (const [name, args, summary] of [
@@ -218,15 +249,16 @@ advance(10000);
 assertBlock("read src/app.ts");
 const readId = [...activeCallIds][0];
 const writeRow = await startCall("write", { path: "src/next.ts", content: "private file contents" }, {}, false);
-assertBlock("read src/app.ts");
+assertBlock("read src/app.ts", 2);
+assertBlock("write src/next.ts", 2);
 advance(10000);
-assertBlock("read src/app.ts");
+assertBlock("read src/app.ts", 2);
 await completeCall(readId);
 assert.match(chatLines()[2], /\u001b\[32m•\u001b\[39m/, "success produces a green dot immediately");
-const finishedAnimation = redraws;
+const runningAnimation = redraws;
 advance(2999);
-assertBlock("read src/app.ts");
-assert.equal(redraws, finishedAnimation, "a completed call no longer animates");
+assertBlock("read src/app.ts", 2);
+assert.ok(redraws > runningAnimation, "other running calls keep animating");
 advance(1);
 assertBlock("write src/next.ts");
 assert.ok(!chatLines().join("\n").includes("src/app.ts"), "the previous block disappears");
@@ -240,32 +272,33 @@ assertBlock("write src/next.ts");
 advance(2999);
 assertBlock("write src/next.ts");
 advance(1);
-assert.deepEqual(chatLines(), [], "the next model request clears the block after the three-second minimum");
+assert.deepEqual(chatLines(), [], "the block expires three seconds after completion despite a new model request");
 assert.ok(redraws > beforeClear, "the display timer requests a chat redraw");
 await startCall("edit", { path: "new.ts", oldText: "before", newText: "after" }, { toolCallId: "new" });
 advance(2000);
 await emit(extension, "message_update", { message: { role: "assistant", content: [
-  { type: "toolCall", id: "old", name: "read", arguments: { path: "old.ts" } },
   { type: "toolCall", id: "new", name: "edit", arguments: { path: "streaming.ts", oldText: "before", newText: "after" } },
 ] } });
 assertBlock("edit streaming.ts");
 await startCall("bash", { command: "npm test\nsecond line\u001b" }, { toolCallId: "new/1", parentToolCallId: "new" }, false);
-assertBlock("edit streaming.ts");
+assertBlock("edit streaming.ts", 2);
+assertBlock("bash npm test\nsecond line", 2);
 await completeCall("new");
 advance(2999);
-assertBlock("edit streaming.ts");
+assertBlock("edit streaming.ts", 2);
 advance(1);
 assertBlock("bash npm test\nsecond line");
-await startCall("read", { path: "nested.ts" }, { toolCallId: "new/1/1", parentToolCallId: "new/1" });
-assertBlock("read nested.ts");
+await startCall("read", { path: "nested.ts" }, { toolCallId: "new/1/1", parentToolCallId: "new/1" }, false);
+assertBlock("read nested.ts", 2);
 await emit(extension, "agent_settled", { aborted: true });
-assertBlock("read nested.ts");
-const settledSpinner = chatLines()[2].slice(2, 3);
-assert.match(chatLines()[2], /\u001b\[31m•\u001b\[39m/, "an interrupted call produces a red dot");
+assertBlock("read nested.ts", 2);
+const settledLines = chatLines();
+assert.equal(settledLines.filter((line) => line.includes("\u001b[31m•\u001b[39m")).length, 2,
+  "each interrupted nested call produces a red dot");
 advance(80);
-assert.equal(chatLines()[2].slice(2, 3), settledSpinner, "the spinner stops on completion while the block lingers");
+assert.deepEqual(chatLines(), settledLines, "all spinners stop on settlement");
 advance(2920);
-assert.deepEqual(chatLines(), [], "settlement clears the block after its minimum, including abort");
+assert.deepEqual(chatLines(), [], "each settled call expires after three seconds");
 await startCall("powershell", { command: "Write-Output fixture" });
 assertBlock("powershell Write-Output fixture");
 await completeCall([...activeCallIds].at(-1), true);
@@ -276,16 +309,19 @@ await startCall("find", { pattern: "*.ts", path: "src" });
 assertBlock("find *.ts src");
 await startCall("read", { path: "skip.ts" }, {}, false);
 await startCall("ls", { path: "latest" }, {}, false);
-assertBlock("find *.ts src");
+assertBlock("find *.ts src", 3);
+assertBlock("read skip.ts", 3);
+assertBlock("ls latest", 3);
 for (const id of activeCallIds) if (id !== [...activeCallIds].at(-1)) await completeCall(id);
 advance(3000);
 assertBlock("ls latest");
 await startCall("read", { path: "completed-before-display.ts" }, {}, false);
 await emit(extension, "agent_settled");
 advance(2999);
-assertBlock("ls latest");
+assertBlock("ls latest", 2);
+assertBlock("read completed-before-display.ts", 2);
 advance(1);
-assert.deepEqual(chatLines(), [], "settlement drops pending calls instead of replaying a backlog");
+assert.deepEqual(chatLines(), [], "all settled calls expire independently without a backlog");
 await startCall("read", { path: "slow.ts" });
 advance(20000);
 await emit(extension, "before_provider_request");

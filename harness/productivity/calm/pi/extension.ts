@@ -10,8 +10,8 @@ import {
   calmPresentationIsActive,
   setCalmPresentation,
   setCalmStockExportRendering,
-  getCalmToolCall,
-  setCalmToolCall,
+  getCalmToolCalls,
+  setCalmToolCalls,
   type CalmToolCall,
   setCalmToolSpinner,
 } from "./visibility.ts";
@@ -51,13 +51,12 @@ export default function (pi: ExtensionAPI): void {
   let removeTerminalInputHandler: (() => void) | undefined;
   let exportResetTimer: ReturnType<typeof setTimeout> | undefined;
   let displayTimer: ReturnType<typeof setTimeout> | undefined;
-  let requestedCall: CalmToolCall | undefined;
   let animationTimer: ReturnType<typeof setTimeout> | undefined;
   const spinnerFrames = ["⠴", "⠦", "⠧", "⠇", "⠏", "⠋", "⠙", "⠹", "⠸", "⠼"];
   const updateAnimation = (): void => {
     clearTimeout(animationTimer);
     animationTimer = undefined;
-    const animate = calmPresentationIsActive() && getCalmToolCall()?.status === "running";
+    const animate = calmPresentationIsActive() && getCalmToolCalls().some((call) => call.status === "running");
     setCalmToolSpinner(animate ? spinnerFrames[Math.floor(performance.now() / 80) % spinnerFrames.length]! : "⠴");
     requestToolRender();
     if (animate) {
@@ -67,61 +66,47 @@ export default function (pi: ExtensionAPI): void {
   };
   const toolRows = new Map<string, string>();
   const calls = new Map<string, CalmToolCall>();
-  const presentToolCall = (next: CalmToolCall | undefined): void => {
-    const previous = getCalmToolCall();
-    if (previous === next) return;
-    setCalmToolCall(next);
-    updateAnimation();
-    requestToolRender();
-  };
+  // Late streaming updates must not resurrect completed or expired calls.
+  const completedCalls = new Set<string>();
   const updateToolDisplay = (): void => {
     clearTimeout(displayTimer);
     displayTimer = undefined;
-    const displayed = getCalmToolCall();
-    if (calmPresentationIsActive() && displayed && displayed.callId !== requestedCall?.callId) {
-      if (displayed.status === "running") return;
-      const remaining = 3000 - (performance.now() - displayed.completedAt!);
-      if (remaining > 0) {
-        displayTimer = setTimeout(updateToolDisplay, remaining);
-        displayTimer.unref?.();
-        return;
-      }
+    const now = performance.now();
+    let nextExpiry = Infinity;
+    for (const [id, call] of calls) {
+      if (call.completedAt === undefined) continue;
+      const remaining = call.completedAt + 3000 - now;
+      if (remaining <= 0) calls.delete(id);
+      else nextExpiry = Math.min(nextExpiry, remaining);
     }
-    presentToolCall(requestedCall);
-  };
-  const showToolCall = (next: Omit<CalmToolCall, "status" | "completedAt"> | undefined): void => {
-    const call: CalmToolCall | undefined = next
-      ? { ...calls.get(next.callId), ...next, status: calls.get(next.callId)?.status ?? "running" }
-      : undefined;
-    if (call) calls.set(call.callId, call);
-    requestedCall = call;
-    updateToolDisplay();
+    setCalmToolCalls([...calls.values()]);
     updateAnimation();
+    if (nextExpiry !== Infinity) {
+      displayTimer = setTimeout(updateToolDisplay, nextExpiry);
+      displayTimer.unref?.();
+    }
+  };
+  const showToolCall = (next: Omit<CalmToolCall, "status" | "completedAt">): void => {
+    if (completedCalls.has(next.callId)) return;
+    calls.set(next.callId, { ...next, status: "running" });
+    updateToolDisplay();
   };
   const completeToolCall = (callId: string, isError: boolean): void => {
+    completedCalls.add(callId);
     const call = calls.get(callId);
     if (!call || call.status !== "running") return;
-    const completed: CalmToolCall = { ...call, status: isError ? "error" : "success", completedAt: performance.now() };
-    calls.set(callId, completed);
-    if (requestedCall?.callId === callId) requestedCall = completed;
-    if (getCalmToolCall()?.callId === callId) presentToolCall(completed);
+    calls.set(callId, { ...call, status: isError ? "error" : "success", completedAt: performance.now() });
     updateToolDisplay();
   };
-  const clearToolSummary = (immediate = false): void => {
+  const clearToolSummary = (): void => {
     toolRows.clear();
-    if (immediate) {
-      clearTimeout(displayTimer);
-      displayTimer = undefined;
-      requestedCall = undefined;
-      calls.clear();
-      presentToolCall(undefined);
-      return;
-    }
-    showToolCall(undefined);
+    completedCalls.clear();
+    calls.clear();
+    updateToolDisplay();
   };
 
   pi.on("session_start", (_event, ctx) => {
-    clearToolSummary(true);
+    clearToolSummary();
     setCalmPresentation(loadCalmPreference());
     setCalmStockExportRendering(false);
     ctx.ui.setHiddenThinkingLabel(calmPresentationIsActive() ? "" : undefined);
@@ -143,10 +128,11 @@ export default function (pi: ExtensionAPI): void {
 
   pi.on("message_update", (event) => {
     if (event.message.role !== "assistant") return;
-    const call = event.message.content.filter((block) => block.type === "toolCall").at(-1);
-    if (!call) return;
-    toolRows.set(call.id, call.id);
-    showToolCall({ rowId: call.id, callId: call.id, summary: toolCallSummary(call.name, call.arguments) });
+    for (const call of event.message.content) {
+      if (call.type !== "toolCall") continue;
+      toolRows.set(call.id, call.id);
+      showToolCall({ rowId: call.id, callId: call.id, summary: toolCallSummary(call.name, call.arguments) });
+    }
   });
 
   pi.on("tool_execution_start", (event) => {
@@ -157,22 +143,16 @@ export default function (pi: ExtensionAPI): void {
     showToolCall({ rowId, callId: event.toolCallId, summary: toolCallSummary(event.toolName, event.args) });
   });
 
-  pi.on("before_provider_request", () => { clearToolSummary(); });
   pi.on("tool_execution_end", (event) => {
     completeToolCall(event.toolCallId, event.isError);
   });
   pi.on("agent_settled", () => {
     // An interrupted call without a completion event must never look successful.
     for (const [id, call] of calls) if (call.status === "running") completeToolCall(id, true);
-    clearToolSummary();
-    const displayed = getCalmToolCall();
-    calls.clear();
-    if (displayed) calls.set(displayed.callId, displayed);
   });
 
   pi.on("session_shutdown", (_event, ctx) => {
-    clearToolSummary(true);
-    updateAnimation();
+    clearToolSummary();
     clearTimeout(exportResetTimer);
     exportResetTimer = undefined;
     removeTerminalInputHandler?.();
@@ -183,14 +163,12 @@ export default function (pi: ExtensionAPI): void {
   });
 
   pi.registerCommand("calm", {
-    description: "Toggle Calm: show the latest tool call in a transient chat block and hide all tool output.",
+    description: "Toggle Calm: show each tool call in a transient chat block and hide all tool output.",
     handler: async (_args, ctx) => {
       const active = !calmPresentationIsActive();
       persistCalmPreference(active);
       setCalmPresentation(active);
-      if (active) presentToolCall(undefined);
       updateToolDisplay();
-      updateAnimation();
       ctx.ui.setHiddenThinkingLabel(active ? "" : undefined);
       requestToolRender();
       ctx.ui.notify(`calm mode: ${active ? "enabled" : "disabled"}`, "info");

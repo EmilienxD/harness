@@ -150,10 +150,10 @@ browser profile and daemon identity are isolated from personal installations.
 `calm` additionally ships a Pi-only presentation extension in
 `harness/productivity/calm/`. Its `/calm` command persists an agent-directory preference
 without inference. It hides all tool rows and collapsed thinking labels while retaining
-Pi's normal running indicator. Version 1.2.0 shows the latest requested/executing tool's name
-and command/path in a transient chat block. Version 1.6.0 keeps each displayed call visible
-through execution and for three seconds after its completion, coalesces rapid updates to the latest
-call, and defers request/settlement clearing until that hold elapses. Native tool completion events
+Pi's normal running indicator. Version 1.9.0 shows every requested/executing tool's name
+and command/path in its own transient chat block, including parallel and nested calls.
+Each block stays visible through execution and disappears independently three seconds after
+completion; provider requests and agent settlement preserve these holds. Native tool completion events
 replace the spinner with a green success or red failure dot. Timers never delay tool execution and are cancelled on session
 replacement, reload and shutdown. The local fork preserves the upstream MIT license and carries
 Pi 1.2.0 renderer-copy compatibility plus native PowerShell coverage. Since 1.8.0, the common
