@@ -1002,9 +1002,6 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
       if (!selection) return;
       // Validate the source provider before creation; the target's authority is read again after setup.
       await launchFile.getForWorktree(provider, "interactive", selection.kind === "existing" ? selection.path : workspaceRoot);
-      if (selection.kind === "new" || selection.kind === "existing" && !samePath(selection.path, workspaceRoot)) {
-        warn("Agents use another checkout; Explorer stays here.");
-      }
       const checkoutRoot = await prepareCheckout(checkouts, selection, (message) => output.appendLine(message), () => output.show());
       if (!checkoutRoot) return;
       await window.withProgress({ location: ProgressLocation.Window, title: "Starting agent", cancellable: false }, async () => {

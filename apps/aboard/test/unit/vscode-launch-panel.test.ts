@@ -408,9 +408,9 @@ test("shrinking rows and columns immediately removes extra draft panes without r
   panel.registration.dispose();
 });
 
-test("Run Agent reports nonblocking warnings inline and remains available afterward", async () => {
+test("Run Agent reports launch warnings inline and remains available afterward", async () => {
   let runs = 0;
-  const panel = await mount({ store: store(), providers, launch: async () => {}, runAgent: async warn => { runs++; warn("Agents use another checkout; Explorer stays here."); } });
+  const panel = await mount({ store: store(), providers, launch: async () => {}, runAgent: async warn => { runs++; warn("The agent could not start."); } });
   const ui = await browser(panel);
   ui.elements.get("run")!.onclick!(); await ui.flush();
   assert.equal(runs, 1);
