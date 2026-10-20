@@ -10,25 +10,25 @@ function rowFor(entry: ActivityEntry) {
   return model.item(model.roots()[0]!);
 }
 
-test("an agent row leads with the agent's name so a narrow panel still shows who it was", () => {
+test("an agent row without title metadata does not expose its routing identifier as a name", () => {
   const row = rowFor({
     kind: "agent", id: "agent:10:ended", at: "2026-09-09T10:00:00.000Z" as IsoTimestamp,
     agentId: "10" as AgentId, type: "interactive", description: "aboard-interactive-10",
     outcome: "ended", durationMs: 10_000,
   });
 
-  assert.equal(row.label, "aboard-interactive-10");
+  assert.equal(row.label, "New session");
   assert.equal(row.description, "ended · 10s");
 });
 
-test("an available conversation title leads an activity row while the agent id stays visible", () => {
+test("an activity row shows the conversation title without repeating its routing identifier", () => {
   const row = rowFor({
     kind: "agent", id: "agent:10:ended", at: "2026-09-09T10:00:00.000Z" as IsoTimestamp,
     agentId: "10" as AgentId, type: "interactive", description: "aboard-interactive-10",
     title: "Fix checkout recovery", outcome: "ended",
   });
   assert.equal(row.label, "Fix checkout recovery");
-  assert.match(row.description, /aboard-interactive-10/u);
+  assert.equal(row.description, "ended");
 });
 
 test("an agent row keeps a description that differs from the agent's name", () => {
@@ -38,7 +38,7 @@ test("an agent row keeps a description that differs from the agent's name", () =
     outcome: "failed", issueNumbers: [34],
   });
 
-  assert.equal(row.label, "aboard-address-3");
+  assert.equal(row.label, "New session");
   assert.match(row.description, /^failed · address issue 34 · /u);
 });
 

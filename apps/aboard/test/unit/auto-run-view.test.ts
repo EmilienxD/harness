@@ -65,7 +65,8 @@ function sources(overrides: {
   readonly persisted?: AutoRunRecord | undefined;
   readonly eligibility?: RecoveryEligibility | undefined;
   readonly titles?: Readonly<Record<string, string>>;
-  readonly liveHandoff?: (issueNumber: number) => { readonly type: "address" | "review"; readonly agentId: string } | undefined;
+  readonly liveHandoff?: AutoRunViewSources["liveHandoff"];
+  readonly sessionTitle?: AutoRunViewSources["sessionTitle"];
 } = {}): AutoRunViewSources {
   return {
     starting: () => overrides.starting ?? false,
@@ -75,6 +76,7 @@ function sources(overrides: {
     eligibility: () => overrides.eligibility,
     titles: () => overrides.titles ?? {},
     ...(overrides.liveHandoff === undefined ? {} : { liveHandoff: overrides.liveHandoff }),
+    ...(overrides.sessionTitle === undefined ? {} : { sessionTitle: overrides.sessionTitle }),
   };
 }
 
@@ -359,10 +361,10 @@ test("a run waiting for the user names the acceptance boundary and handoff sessi
     type: "review",
     issueNumber: 35,
   } });
-  const { item } = rootItem({ persisted: waiting, state: state({ waiting: true }) });
+  const { item } = rootItem({ persisted: waiting, state: state({ waiting: true }), sessionTitle: () => "Review checkout recovery" });
   assert.equal(item.contextValue, "aboard.autoRun.waiting");
   assert.match(item.description, /Waiting for acceptance commit · issue #35/);
-  assert.match(item.tooltip, /Handoff session: review review-35 \(session-review-35\)/);
+  assert.match(item.tooltip, /Handoff session: Review checkout recovery/);
   assert.match(item.tooltip, /continues automatically once the checkout is clean/);
 });
 
@@ -454,13 +456,13 @@ test("a row with a live review handoff focuses it on click instead of opening th
   const { model, root } = rootItem({
     persisted: record(),
     state: state(),
-    liveHandoff: (number) => number === 35 ? { type: "review", agentId: "review-35" } : undefined,
+    liveHandoff: (number) => number === 35 ? { type: "review", agentId: "review-35", title: "Review checkout recovery" } : undefined,
   });
   const rows = model.children(root).map((node) => model.item(node));
   // The current issue has a live review: click focuses the terminal.
   assert.deepEqual(rows[1]?.command, { command: "aboard.autoRun.focusWorker", title: "Focus Handoff Session", arguments: [35] });
   assert.equal(rows[1]?.contextValue, "aboard.autoRun.issue.current.handoff");
-  assert.match(rows[1]?.tooltip ?? "", /Handoff session: review review-35/);
+  assert.match(rows[1]?.tooltip ?? "", /Handoff session: Review checkout recovery/);
   // Done and pending rows use the same terminal-only command; without a live
   // handoff the command quietly does nothing.
   assert.deepEqual(rows[0]?.command, { command: "aboard.autoRun.focusWorker", title: "Focus Handoff Session", arguments: [34] });

@@ -98,6 +98,7 @@ export interface AutomatedLaunchOutcome {
 }
 
 export interface ReopenTarget {
+  readonly title?: string;
   readonly harnessPython?: string;
   readonly editorPane?: object;
   readonly model?: string;
@@ -428,6 +429,10 @@ export class DelegationCoordinator {
           attended,
           executionMode,
         );
+      }
+      if (target.title !== undefined) {
+        this.options.fleet.setTitle(target.sessionId, target.title, occurredAt);
+        this.options.terminals.setSessionTitle(target.sessionId, target.title);
       }
       if (this.options.startupTimeoutMs !== undefined) {
         const startup = this.options.terminals.waitForStartup(target.agentId);

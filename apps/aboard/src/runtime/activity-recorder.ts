@@ -46,7 +46,7 @@ export class ActivityRecorder {
     session: AgentSession,
     outcome: AgentOutcome,
     at: IsoTimestamp = this.#now(),
-    options: { readonly reason?: string; readonly terminalId?: TerminalId } = {},
+    options: { readonly reason?: string; readonly terminalId?: TerminalId; readonly conversationStarted?: boolean } = {},
   ): void {
     this.#append(agentActivity(session, outcome, at, options));
   }

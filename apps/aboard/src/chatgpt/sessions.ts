@@ -66,6 +66,9 @@ export class ChatGptSessionProbe {
     if (status === "systemError") {
       return { state: "non-resumable", reason: "the saved Codex conversation is in a system-error state" };
     }
+    if (await this.#firstUserMessage(sessionId, cwd, command) === undefined) {
+      return { state: "non-resumable", reason: "no user message has been sent in this Codex session" };
+    }
     return { state: "resumable" };
   }
 
@@ -73,10 +76,34 @@ export class ChatGptSessionProbe {
     const result = await this.#exchange({ command, cwd, method: "thread/read", params: { threadId: sessionId, includeTurns: false } });
     const thread = record(record(result).thread);
     if (thread.id !== sessionId) return undefined;
-    const value = typeof thread.name === "string" && thread.name.trim() !== "" ? thread.name : thread.preview;
-    if (typeof value !== "string") return undefined;
-    const title = value.trim().split(/\r?\n/u)[0]?.trim();
-    return title === undefined || title.length === 0 ? undefined : title.slice(0, 120);
+    const firstUser = await this.#firstUserMessage(sessionId, cwd, command);
+    if (firstUser === undefined) return undefined;
+    const value = typeof thread.name === "string" && thread.name.trim() !== "" ? thread.name : firstUser;
+    const title = value.trim();
+    return title === undefined || title.length === 0 ? undefined : title;
+  }
+
+  /** Read from the oldest turn until a user message exists, without hydrating all history. */
+  async #firstUserMessage(sessionId: SessionId, cwd: string, command: readonly string[]): Promise<string | undefined> {
+    let cursor: string | undefined;
+    const seen = new Set<string>();
+    for (;;) {
+      const result = record(await this.#exchange({ command, cwd, method: "thread/turns/list",
+        params: { threadId: sessionId, limit: 1, sortDirection: "asc", itemsView: "full", ...(cursor === undefined ? {} : { cursor }) } }));
+      if (!Array.isArray(result.data)) throw new ChatGptSessionProbeError("unreadable", "Codex returned invalid turn history");
+      for (const turn of result.data) {
+        const items = record(turn).items;
+        if (!Array.isArray(items)) throw new ChatGptSessionProbeError("unreadable", "Codex returned a turn without items");
+        const user = items.map(record).find((item) => item.type === "userMessage");
+        if (user === undefined) continue;
+        return Array.isArray(user.content) ? user.content.map(record).flatMap((block) =>
+          block.type === "text" && typeof block.text === "string" ? [block.text] : []).join(" ") : "";
+      }
+      if (typeof result.nextCursor !== "string") return undefined;
+      if (seen.has(result.nextCursor)) throw new ChatGptSessionProbeError("unreadable", "Codex repeated a turn cursor");
+      cursor = result.nextCursor;
+      seen.add(cursor);
+    }
   }
 }
 

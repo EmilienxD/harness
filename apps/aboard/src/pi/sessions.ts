@@ -20,6 +20,12 @@ export async function piSessionDirectory(cwd: string, command: readonly string[]
     ?? join(piAgentDirectory(), "sessions");
 }
 export interface PiSession { readonly path: string; readonly title?: string; }
+
+/** Pi 1.2 persists expanded skills; mirror its native parseSkillBlock display form. */
+function userInput(text: string): string {
+  const skill = text.match(/^<skill name="([^"]+)" location="[^"]+">\r?\n[\s\S]*?\r?\n<\/skill>(?:\r?\n\r?\n([\s\S]+))?$/u);
+  return skill === null ? text : `/skill:${skill[1]}${skill[2]?.trim() ? ` ${skill[2].trim()}` : ""}`;
+}
 export async function inspectPiSession(sessionId: SessionId, cwd: string, command?: readonly string[]): Promise<PiSession | undefined> {
   const root = await piSessionDirectory(cwd, command);
   const entries = await readdir(root, { withFileTypes: true }).catch(() => []);
@@ -31,7 +37,12 @@ export async function inspectPiSession(sessionId: SessionId, cwd: string, comman
   for (const path of paths) {
     if (!path.includes(sessionId)) continue;
     try {
-      const rows = (await readFile(path, "utf8")).trim().split(/\r?\n/u).map((line) => JSON.parse(line) as Record<string, unknown>);
+      const lines = (await readFile(path, "utf8")).trim().split(/\r?\n/u);
+      const rows: Record<string, unknown>[] = [];
+      for (const [index, line] of lines.entries()) {
+        try { rows.push(JSON.parse(line) as Record<string, unknown>); }
+        catch (error) { if (index !== lines.length - 1) throw error; }
+      }
       const header = rows.shift();
       const canonical = (p: string) => process.platform === "win32" ? resolve(p).toLowerCase() : resolve(p);
       if (header?.type !== "session" || header.id !== sessionId || typeof header.cwd !== "string" || canonical(header.cwd) !== canonical(cwd)) continue;
@@ -47,12 +58,13 @@ export async function inspectPiSession(sessionId: SessionId, cwd: string, comman
         if (current === undefined) throw new Error("Missing Pi parent");
       }
       if (!ancestry.some((entry) => entry.type === "message" && typeof entry.message === "object" && entry.message !== null && (entry.message as { role?: unknown }).role === "user")) continue;
-      const named = ancestry.filter((entry) => entry.type === "session_info" && typeof entry.name === "string").at(-1)?.name as string | undefined;
+      // Like Pi's getSessionName(), names are session-wide; an empty latest name clears it.
+      const named = rows.filter((entry) => entry.type === "session_info").at(-1)?.name;
       const firstUser = ancestry.find((entry) => entry.type === "message" && typeof entry.message === "object" && entry.message !== null && (entry.message as { role?: unknown }).role === "user");
       const content = (firstUser?.message as { content?: unknown } | undefined)?.content;
       const preview = typeof content === "string" ? content : Array.isArray(content)
         ? content.filter((block: unknown): block is { type: "text"; text: string } => typeof block === "object" && block !== null && (block as { type?: unknown }).type === "text" && typeof (block as { text?: unknown }).text === "string").map((block) => block.text).join(" ") : undefined;
-      const title = (named?.trim() || preview?.trim())?.split(/\r?\n/u)[0]?.trim().slice(0, 120);
+      const title = ((typeof named === "string" ? named.trim() : undefined) || (preview === undefined ? undefined : userInput(preview).trim()));
       return { path, ...(title ? { title } : {}) };
     } catch { continue; }
   }

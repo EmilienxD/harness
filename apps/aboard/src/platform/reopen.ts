@@ -2,6 +2,7 @@
 import type { InteractiveLaunchHandles, ReopenTarget } from "../bridge/delegation.js";
 import { type AgentId, type AgentPlatformId, type AgentType, type SessionId, type TerminalId } from "../domain/contracts.js";
 import type { FleetRegistry } from "../domain/fleet.js";
+import { sessionTitleLabel } from "../domain/session-title.js";
 import {
   reopenCandidates,
   type ActivityDto,
@@ -70,12 +71,11 @@ export class ReopenCoordinator {
       this.options.fleet.list(),
       (terminalId) => this.options.terminals.isOpen(terminalId),
     );
-    return Promise.all(candidates.map(async (candidate): Promise<ReopenOption> => {
-      // A live session needs no transcript test: its conversation is in front of
-      // the user, and reopening it means focusing the terminal it is already in.
-      if (candidate.origin === "live") return { candidate, resumable: true };
+    const inspected = await Promise.all(candidates.map(async (candidate): Promise<ReopenOption | undefined> => {
       try {
         const resumable = await this.options.isResumable(candidate.platform, candidate.sessionId, candidate.cwd, candidate.type);
+        // An open provider terminal can still be an empty TUI or contain only local commands.
+        if (candidate.origin === "live" && !resumable) return undefined;
         return resumable ? { candidate, resumable } : { candidate, resumable, reason: "no-transcript" };
       } catch (error) {
         return {
@@ -86,6 +86,7 @@ export class ReopenCoordinator {
         };
       }
     }));
+    return inspected.filter((option): option is ReopenOption => option !== undefined);
   }
 
   /** Reopens one candidate: focus if it is live, relaunch through `--resume` otherwise. */
@@ -116,6 +117,7 @@ export class ReopenCoordinator {
       agentId: candidate.agentId,
       type: candidate.type,
       sessionId: candidate.sessionId,
+      ...(candidate.title === undefined ? {} : { title: candidate.title }),
       ...(candidate.issueNumbers === undefined ? {} : { issueNumbers: candidate.issueNumbers }),
       ...(candidate.chromeEnabled === true ? { chromeEnabled: true as const } : {}),
       ...(candidate.cwd === undefined ? {} : { cwd: candidate.cwd }),
@@ -162,14 +164,14 @@ export function describeReopenOutcome(outcome: ReopenOutcome): string {
         ? "aboard has no recorded sessions to reopen."
         : `No recorded session matches ${outcome.selector ?? "that"}.`;
     case "focused":
-      return `Focused the running ${outcome.candidate.type} terminal (agent ${outcome.candidate.agentId}).`;
+      return `Focused ${sessionTitleLabel(outcome.candidate.title)}.`;
     case "reopened":
-      return `Reopened the ${outcome.candidate.type} session (agent ${outcome.candidate.agentId}) and handed it back to you.`;
+      return `Reopened ${sessionTitleLabel(outcome.candidate.title)} and handed it back to you.`;
     case "unresumable":
-      if (outcome.reason === "execution-active") return `Agent ${outcome.candidate.agentId} has a running or uncertain execution; resume refused.`;
+      if (outcome.reason === "execution-active") return `${sessionTitleLabel(outcome.candidate.title)} has a running or uncertain execution; resume refused.`;
       return outcome.reason === "inspection-failed"
-        ? `The conversation for agent ${outcome.candidate.agentId} could not be inspected: ${outcome.diagnostic ?? "unknown platform error"}`
-        : `The selected agent platform no longer has the conversation for agent ${outcome.candidate.agentId}, so it cannot be reopened.`;
+        ? `${sessionTitleLabel(outcome.candidate.title)} could not be inspected: ${outcome.diagnostic ?? "unknown platform error"}`
+        : `The selected agent platform no longer has ${sessionTitleLabel(outcome.candidate.title)}, so it cannot be reopened.`;
   }
 }
 

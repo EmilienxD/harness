@@ -7,6 +7,7 @@ import { basename } from "node:path";
 import { samePath } from "../git/worktree.js";
 import { createBackgroundProcess } from "./background.js";
 import { normalizeFileReferences } from "./prompt-paths.js";
+import { sessionTitleLabel } from "../domain/session-title.js";
 
 import {
   agentLabel,
@@ -377,10 +378,10 @@ export class TerminalController {
   public setSessionTitle(sessionId: SessionId, title: string): void {
     const record = this.#latest((candidate) => candidate.sessionId === sessionId);
     if (record?.status !== "open" || record.backend === "process" || record.handle === undefined) return;
-    const clean = title.replace(/[\u0000-\u001f\u007f]/gu, " ").trim().slice(0, 120);
+    const clean = title.trim();
     if (clean) {
       const checkout = samePath(record.cwd, this.options.environment().workspaceRoot) ? "" : ` · ${basename(record.cwd.replaceAll("\\", "/"))}`;
-      this.options.host.setTitle?.(record.handle, `${clean}${checkout}`);
+      this.options.host.setTitle?.(record.handle, sessionTitleLabel(`${clean}${checkout}`));
     }
   }
 

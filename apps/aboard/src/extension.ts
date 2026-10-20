@@ -410,10 +410,19 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
     return platform.isResumable(sessionId, cwd, command);
   };
   const titleProbe = new ChatGptSessionProbe();
-  let refreshingTitles = false;
-  const refreshActivityTitles = async (includeHistory = true): Promise<void> => {
-    if (!initialized || refreshingTitles) return;
-    refreshingTitles = true;
+  const readSessionTitle = async (entry: { readonly platform: AgentPlatformId; readonly sessionId: SessionId; readonly cwd?: string; readonly type: AgentSession["identity"]["type"] }): Promise<string | undefined> => {
+    const { platform, sessionId } = entry;
+    const cwd = entry.cwd ?? workspaceRoot;
+    if (platform === "claude") return claudeSessionTitle(sessionId, cwd);
+    const configured = await launchFile.getForWorktree(platform, entry.type, cwd).catch(() => undefined);
+    const settings = configured?.platform === platform ? configured.settings : undefined;
+    const command = typeof settings === "object" && settings !== null && "declaredCommand" in settings
+      ? (settings as { readonly declaredCommand?: readonly string[] }).declaredCommand : undefined;
+    return platform === "pi"
+      ? (await inspectPiSession(sessionId, cwd, command))?.title
+      : titleProbe.title(sessionId, cwd, command);
+  };
+  const readActivityTitles = async (includeHistory: boolean): Promise<void> => {
     const candidates = new Map((includeHistory ? activity.entries() : []).flatMap((entry) => entry.kind !== "agent" || entry.reopen === undefined ? [] : [[entry.reopen.sessionId, {
       ...entry.reopen, type: entry.type,
     }] as const]));
@@ -422,27 +431,27 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
         platform: session.platform, sessionId: session.sessionId, cwd: session.cwd ?? workspaceRoot, type: session.identity.type,
       });
     }
-    try {
-      await Promise.allSettled([...candidates.values()].map(async (entry) => {
-        const { platform, sessionId } = entry;
-        const cwd = entry.cwd ?? workspaceRoot;
-        let title: string | undefined;
-        if (platform === "claude") title = await claudeSessionTitle(sessionId, cwd);
-        else {
-          const configured = await launchFile.getForWorktree(platform, entry.type, cwd).catch(() => undefined);
-          const settings = configured?.platform === platform ? configured.settings : undefined;
-          const command = typeof settings === "object" && settings !== null && "declaredCommand" in settings
-            ? (settings as { readonly declaredCommand?: readonly string[] }).declaredCommand : undefined;
-          title = platform === "pi"
-            ? (await inspectPiSession(sessionId, cwd, command))?.title
-            : await titleProbe.title(sessionId, cwd, command);
-        }
-        if (title !== undefined) {
-          activity.setTitle(sessionId, title);
-          terminals.setSessionTitle(sessionId, title);
-        }
-      }));
-    } finally { refreshingTitles = false; }
+    await Promise.allSettled([...candidates.values()].map(async (entry) => {
+      const title = await readSessionTitle(entry);
+      if (title !== undefined) {
+        fleet.setTitle(entry.sessionId, title, new Date().toISOString() as IsoTimestamp);
+        activity.setTitle(entry.sessionId, title);
+        terminals.setSessionTitle(entry.sessionId, title);
+      }
+    }));
+  };
+  let refreshingTitles: Promise<void> | undefined;
+  const refreshActivityTitles = async (includeHistory = true): Promise<void> => {
+    if (!initialized) return;
+    if (refreshingTitles !== undefined) {
+      if (!includeHistory) return;
+      await refreshingTitles;
+      return refreshActivityTitles(includeHistory);
+    }
+    const refresh = readActivityTitles(includeHistory);
+    refreshingTitles = refresh;
+    try { await refresh; }
+    finally { refreshingTitles = undefined; }
   };
   const titleTimer = setInterval(() => { void refreshActivityTitles(false); }, 10_000);
   context.subscriptions.push({ dispose: () => clearInterval(titleTimer) });
@@ -451,23 +460,27 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
   const rememberEndedSession = async (
     session: AgentSession,
     endedAt: IsoTimestamp,
-    outcome: Extract<AgentOutcome, "ended" | "failed" | "killed" | "interrupted"> = "ended",
+    outcome: AgentOutcome = "ended",
     reason?: string,
   ): Promise<void> => {
     if (!initialized) return;
     // Capture this before the async transcript read: process-end settlement may
     // release the still-open terminal while the check is in flight.
     const terminalId = terminals.liveTerminalForAgent(session.identity.agentId);
-    const conversationStarted = !isInteractiveLaunch(session)
-      // A runtime-assigned id is proof that Codex created the conversation.
-      || (session.platform === "chatgpt" && session.sessionBinding === "bound")
-      || await sessionIsResumable(session.platform, session.sessionId, session.cwd ?? workspaceRoot, session.identity.type);
+    const conversationStarted = await sessionIsResumable(session.platform, session.sessionId, session.cwd ?? workspaceRoot, session.identity.type)
+      .catch((error: unknown) => {
+        output.appendLine(`Could not inspect ended agent ${session.identity.agentId}: ${error instanceof Error ? error.message : "unknown platform error"}`);
+        return session.title !== undefined;
+      });
     if (!shouldRecordEndedSession(session, conversationStarted)) {
       output.appendLine(`Discarded empty session for agent ${session.identity.agentId}; no agent conversation started.`);
       return;
     }
     const classified = isInteractiveLaunch(session) ? outcome : outcome === "ended" ? "succeeded" : outcome;
-    activity.recordAgent(session, classified, endedAt, {
+    const title = conversationStarted ? await readSessionTitle({ platform: session.platform, sessionId: session.sessionId,
+      cwd: session.cwd ?? workspaceRoot, type: session.identity.type }).catch(() => session.title) : undefined;
+    activity.recordAgent(title === undefined ? session : { ...session, title }, classified, endedAt, {
+      conversationStarted,
       ...(reason === undefined ? {} : { reason }),
       ...(terminalId === undefined ? {} : { terminalId }),
     });
@@ -536,11 +549,11 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
     onFinished: (session, result) => {
       if (!initialized) return;
       const at = new Date().toISOString() as IsoTimestamp;
-      activity.recordAgent(
+      void rememberEndedSession(
         session,
-        result.outcome === "succeeded" ? "succeeded" : result.failure.type === "killed" ? "cancelled" : "failed",
         at,
-        result.outcome === "failed" ? { reason: result.failure.type } : {},
+        result.outcome === "succeeded" ? "succeeded" : result.failure.type === "killed" ? "cancelled" : "failed",
+        result.outcome === "failed" ? result.failure.type : undefined,
       );
     },
   });
@@ -582,7 +595,7 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
       lease.releaseForTerminalOutcome(agentId, at, "launch failed before the session started");
       // Recorded before the fleet forgets it: a launch that died on its way up
       // leaves nothing else behind but the terminal holding the error text.
-      if (initialized) activity.recordAgent(failed, "launch-failed", at, { reason: cause });
+      if (initialized) activity.recordAgent(failed, "launch-failed", at, { reason: cause, conversationStarted: false });
       fleet.remove(agentId, at);
     }
     releaseAbandonedTerminal(agentId);
@@ -1193,7 +1206,11 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
     }, branchCleanup),
 
     registerReopenCommand({
-      registerCommand: (command, callback) => commands.registerCommand(command, (...args) => requireInitialized() ? callback(...args) : undefined),
+      registerCommand: (command, callback) => commands.registerCommand(command, async (...args) => {
+        if (!requireInitialized()) return;
+        await refreshActivityTitles();
+        return callback(...args);
+      }),
       // `matchOnDetail` so "ended", or an age, filters the list, which is how a
       // user with a long history finds the one they mean.
       pick: async (items, placeHolder) => window.showQuickPick([...items], { placeHolder, matchOnDescription: true, matchOnDetail: true }),

@@ -53,9 +53,12 @@ test("a transcript holding only session metadata is not resumable", async () => 
   assert.equal(await sessionIsResumable(sessionId, "C:\\work", config), false);
 });
 
-test("a conversation record makes the session resumable, user message or not", async () => {
+test("local commands do not make a session reopenable until the first user message", async () => {
   const config = await transcript([MODE, BRIDGE_SESSION, SYSTEM, ""]);
-  assert.equal(await sessionIsResumable(sessionId, "C:\\work", config), true);
+  assert.equal(await sessionIsResumable(sessionId, "C:\\work", config), false);
+  const started = await transcript([MODE, SYSTEM, JSON.stringify({ type: "user", uuid: "user", parentUuid: null,
+    message: { role: "user", content: "Repair login" } }), ""]);
+  assert.equal(await sessionIsResumable(sessionId, "C:\\work", started), true);
 });
 
 test("a missing transcript resolves to a fresh launch rather than a failure", async () => {

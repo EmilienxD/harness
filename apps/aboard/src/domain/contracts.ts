@@ -85,7 +85,7 @@ export interface AgentIdentity {
   readonly type: AgentType;
 }
 
-/** The label users see for an agent in the fleet tree and its Claude session title. */
+/** Stable launch description retained for runtime diagnostics. */
 export function agentLabel(identity: AgentIdentity): string {
   return `aboard-${identity.type}-${identity.agentId}`;
 }
@@ -176,6 +176,8 @@ export interface AgentSession {
   readonly identity: AgentIdentity;
   readonly sessionId: SessionId;
   readonly sessionBinding: "provisional" | "bound";
+  /** Full provider title, or the first user message while no provider title exists. */
+  readonly title?: string;
   readonly terminal: TerminalReference;
   readonly lifecycle: AgentLifecycle;
   readonly resultDelivery: ResultDelivery;
