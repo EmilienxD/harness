@@ -502,7 +502,6 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
       const notice = parsed.diagnostics.map((diagnostic) => diagnostic.message).join(" ");
       if (notice.length > 0) output.appendLine(`Launch configuration: ${notice}`);
       if (notice.length > 0 && notice !== launchFileNotice) void window.showWarningMessage(notice);
-      if (launchFileNotice !== undefined && notice.length === 0) void window.showInformationMessage("Launch configuration is valid. New and reopened sessions use it.");
       launchFileNotice = notice.length === 0 ? undefined : notice;
     } catch (error) {
       const notice = error instanceof Error ? error.message : "Invalid .harness/config.json";

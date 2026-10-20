@@ -122,7 +122,7 @@ export function registerNativeFleetUi(context: ExtensionContext, options: Native
     if (session === undefined) {
       const choices = fleet.list().filter((candidate) => isHeadlessExecution(candidate.identity.type, candidate.executionMode))
         .map((candidate) => ({ label: sessionTitleLabel(candidate.title), description: agentPlatformName(candidate.platform), ...(candidate.title === undefined ? {} : { detail: candidate.title }), session: candidate }));
-      if (choices.length === 0) { void window.showInformationMessage("No background agents are available to watch."); return; }
+      if (choices.length === 0) return;
       session = (await window.showQuickPick(choices, { placeHolder: "Choose a background agent to watch" }))?.session;
     }
     if (session !== undefined && isHeadlessExecution(session.identity.type, session.executionMode)) watchSession(session);
