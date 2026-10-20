@@ -52,6 +52,25 @@ def test_pi_extension_uses_native_package_identity_and_preserves_personal_settin
     assert archive.is_file(), "Copied worktrees can still reference this immutable archive"
 
 
+@pytest.mark.parametrize("newline", ["\n", "\r\n"])
+@pytest.mark.parametrize("bom", [b"", b"\xef\xbb\xbf"])
+def test_pi_install_and_removal_preserve_settings_line_endings_and_bom(tmp_path, newline, bom):
+    tool = probe_tool(tmp_path)
+    target = Target.for_project(tmp_path / "project", Platform.PI)
+    target.settings_path.parent.mkdir(parents=True)
+    original = bom + ('{\n  "theme": "personal"\n}\n'.replace("\n", newline)).encode("utf-8")
+    target.settings_path.write_bytes(original)
+    installer = CatalogueInstaller({tool.name: tool}, target, ReceiptStore.load(tmp_path / "receipts.json"))
+
+    installer.reconcile({tool.name})
+    installed = target.settings_path.read_bytes()
+    assert installed.startswith(bom + b"{")
+    assert installed.count(b"\r\n") == (installed.count(b"\n") if newline == "\r\n" else 0)
+    assert target.read_settings()["theme"] == "personal"
+    installer.reconcile(set())
+    assert target.settings_path.read_bytes() == original
+
+
 def test_upgrade_removes_legacy_discovery_entry_and_rejects_modified_entry(tmp_path):
     tool = probe_tool(tmp_path)
     target = Target.for_project(tmp_path / "project", Platform.PI)

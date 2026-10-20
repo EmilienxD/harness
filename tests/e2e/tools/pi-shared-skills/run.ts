@@ -55,7 +55,7 @@ export async function runPiSharedSkillsJourney(scope: "project" | "user") {
         installed.push({ name, filePath: join(destination, "SKILL.md"), disableModelInvocation: !AUTOMATIC_SKILLS.has(name) });
       }
     }
-    const extension = join(fixture.workspace.projectRoot, ".pi", "extensions", ".harness-e2e-skill-resources");
+    const extension = join(fixture.workspace.projectRoot, ".pi", "extensions", "e2e-skill-resources");
     await mkdir(extension, { recursive: true });
     await copyFile(join(root, "tests", "e2e", "tools", "pi-shared-skills", "fixtures", "resources.ts.txt"), join(extension, "index.ts"));
     const rpc = fixture.rpc({ timeoutMs: 180_000 });
@@ -65,6 +65,7 @@ export async function runPiSharedSkillsJourney(scope: "project" | "user") {
       const command = commands.find((item) => item.name === `skill:${skill.name}` && item.source === "skill");
       assert.equal(resolve(command?.sourceInfo?.path ?? ""), resolve(skill.filePath), "Native discovery did not find installed skill");
     }
+    assert.ok(commands.some(command => command.name === "e2e-skill-resources" && command.source === "extension"), "The fixture inspection command was not discovered");
     assert.equal((await rpc.prompt("/e2e-skill-resources")).status, "handled");
     const resources = JSON.parse(await readFile(join(fixture.workspace.projectRoot, "skill-resources.json"), "utf8")) as { skills: typeof installed; diagnostics: unknown[] };
     assert.deepEqual(resources.diagnostics, [], "Native skill loading produced diagnostics");

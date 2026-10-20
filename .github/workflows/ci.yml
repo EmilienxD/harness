@@ -86,7 +86,7 @@ jobs:
     needs: changes
     if: needs.changes.outputs.shared_e2e == 'true'
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 10
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
@@ -104,8 +104,9 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.13"
-      - run: python -m pip install PyYAML==6.0.3
-      - run: npm install --global @anthropic-ai/claude-code@2.1.270 @openai/codex@0.154.0
+      - run: python -m pip install PyYAML==6.0.3 uv==0.11.7
+      - run: uv sync --frozen --project ../..
+      - run: npm install --global @anthropic-ai/claude-code@2.1.270 @openai/codex@0.154.0 @earendil-works/pi-coding-agent@1.2.0
       - run: npm ci
       - run: npm run check
       - run: npm test

@@ -7,7 +7,7 @@ prompt-text assertions. Read the repository's `harness-e2e` skill before changin
 
 ## Run Pi checks
 
-Prerequisites: Node.js >=22.19.0, npm, and Pi 1.2.x on `PATH`. The current tested version is
+Prerequisites: Node.js >=22.19.0, npm, uv, a synced root Python environment (`uv sync`), and Pi 1.2.x on `PATH`. The current tested version is
 `@earendil-works/pi-coding-agent` 1.2.0. The adapter checks version and required CLI flags;
 an unsupported installation fails instead of silently skipping the real journey.
 
@@ -16,6 +16,8 @@ From `tests/e2e/`:
 ```powershell
 npm ci
 npm run check
+npm run test:pi-all
+# Or select individual journeys:
 npm run e2e:pi
 npm run test:pi
 npm run test:pi-package-precedence
@@ -45,6 +47,10 @@ npm run e2e:flush-out-useless-tests
 extension commands, reload, exact persisted-session resume, native project skill discovery,
 provider-error classification, abort, redacted diagnostics, and cleanup. The complete `npm test`
 suite includes these Pi checks and also requires the installed Claude Code and Codex CLIs.
+`test:pi-all` runs the full Pi suite serially. The shared installer uses shipped host-runtime pins by
+default; checkout-runtime substitution is an explicit development variant, not release acceptance.
+The shared CI job installs all three CLIs and uv, syncs the Python environment, and bounds test-file
+concurrency so process-heavy journeys do not all contend at once.
 
 `e2e:flush-out-useless-tests` installs the real local catalogue package through Harness, then
 runs project JSON/RPC and user RPC journeys. It checks a real Node test baseline, native skill
@@ -404,17 +410,32 @@ the Windows headless integration, not Pi TUI, POSIX or real Discord service acce
 
 ## Pi persistent subagents
 
-`test:pi-subagents` installs the real `subagents` package at project scope with `--local`, so the
-checkout runtime becomes an isolated uv tool entry point exactly as in production. A project
+`test:pi-subagents` installs the real `subagents` package at project scope into an isolated uv tool
+environment. The auto journey runs with both the checkout runtime (`--local`) and the manifest's
+published Git pin; the latter catches stale runtime pins that local-source tests cannot detect.
+The interactive journey uses the shipped runtime pin. The shared fixture installer defaults to
+shipped pins; local-runtime testing must opt in explicitly. A project
 `.harness/config.json` gives children the same isolated, trusted Pi invocation; the session and agent
 directories are inherited. The auto journey runs a JSON parent that writes an inbox request,
 launches a real `pi --mode json` child under the runtime supervisor, waits in `agent_before_settle`,
 and integrates the answer. The interactive journey runs an RPC parent; `capture-terminal.mjs`
 stands in for the visible terminal and hands the launch specification to the test, which opens the
-child as an RPC session with the runtime's environment. The child's previous-message reply makes
+child as an RPC session with the runtime's environment and requested model/thinking flags. The child's previous-message reply makes
 zero inference requests and the result starts the idle parent's next turn. Each journey asserts
 exactly four inference requests, the succeeded and acknowledged request, one persisted result
 message matching its delivery ID, the child's native session file and no remaining request file.
+Combined auto and interactive journeys start through `/skill:grill-me-in-cloud`, obtain the inbox
+without invoking a delegation command first, request `gpt-6.1-sol` at medium effort, integrate the
+child result, and publish a round. The model ID is registered only against the loopback fake endpoint. Both check the
+child's persisted model/thinking metadata, the board payload, request cleanup and exactly five
+inference calls, with project guards and user-scope background shell, Calm and input extensions loaded.
+
+To run the combined journeys against the real local Grill app, database and storage instead of the
+transport fixture, start the local stack described in `apps/grill/README.md`, set
+`HARNESS_GRILL_URL` to its `http://127.0.0.1:<port>` origin and `HARNESS_GRILL_CODE` to its test code,
+then run `npm run e2e:pi-subagents:live`. This command accepts loopback services only, keeps inference
+on the fake endpoint, and deletes only each journey's UUID-owned board session afterward.
+
 The shutdown regression also runs a real JSON Pi parent with an automatic Codex child using
 `gpt-6.1-sol` at medium effort, with both catalogue targets installed from the checkout runtime.
 Its hook adapter deliberately withholds the child's `Stop` result and runs the actual `SessionEnd`
@@ -424,7 +445,8 @@ inbox and exactly four fake-API requests. The shared Claude/Codex subagent journ
 checks this shutdown order on both the initial automatic launch and its continuation.
 
 This certifies Windows headless integration, not the Pi TUI, POSIX, or Claude/Codex parents with
-Pi children through real CLIs.
+Pi children through real CLIs. Unpublished runtime changes use checkout-source acceptance;
+advance the manifest's immutable source pin when releasing those changes.
 
 ## Pi path guards
 

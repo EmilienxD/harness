@@ -179,9 +179,12 @@ def _write_json(path: Path, value: dict[str, Any]) -> None:
     if path.is_symlink():
         raise InstallError(f"refusing to replace symlink {path}")
     path.parent.mkdir(parents=True, exist_ok=True)
+    previous = path.read_bytes() if path.is_file() else b""
+    newline = "\r\n" if b"\r\n" in previous else "\n"
+    encoding = "utf-8-sig" if previous.startswith(b"\xef\xbb\xbf") else "utf-8"
     temporary = path.with_name(f".{path.name}.harness-{os.getpid()}-{next(tempfile._get_candidate_names())}")
     try:
-        temporary.write_text(settings_merge.dumps(value), encoding="utf-8")
+        temporary.write_bytes(settings_merge.dumps(value).replace("\n", newline).encode(encoding))
         os.replace(temporary, path)
     finally:
         temporary.unlink(missing_ok=True)

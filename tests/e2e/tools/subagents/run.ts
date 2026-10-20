@@ -324,9 +324,11 @@ export async function runSubagentsJourney(platform: Platform, mode: "interactive
     };
   } finally {
     releaseInterruption?.();
-    await cleanupExecutions?.();
-    await server?.close();
-    await rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
+    try { await cleanupExecutions?.(); }
+    finally {
+      try { await server?.close(); }
+      finally { await rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 }); }
+    }
   }
 }
 
@@ -358,8 +360,13 @@ async function executionSnapshot(python: string, cwd: string, env: NodeJS.Proces
 export async function killProcessTree(pid: number, allowExited = false): Promise<void> {
   if (process.platform === "win32") {
     try { await execFileAsync("taskkill",["/PID",String(pid),"/T","/F"],{windowsHide:true,timeout:10_000}); }
-    catch (error) {
-      if (!allowExited || (error as { code?: number }).code !== 128) throw new Error("Could not terminate an owned real CLI process tree");
+    catch {
+      // A supervisor can exit (or reap its child) between the snapshot and taskkill.
+      // Accept only observed absence, not a locale/version-dependent taskkill exit code.
+      let exited = false;
+      try { process.kill(pid, 0); }
+      catch (error) { exited = (error as NodeJS.ErrnoException).code === "ESRCH"; }
+      if (!allowExited || !exited) throw new Error("Could not terminate an owned real CLI process tree");
     }
     return;
   }

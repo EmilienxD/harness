@@ -17,18 +17,20 @@ export async function findHarnessRoot(start = process.cwd()): Promise<string> {
   }
 }
 
-/** Install actual local catalogue payloads, with all state confined to the Pi fixture. */
+/** Install checkout catalogue payloads with shipped runtime pins; confine state to the fixture. */
 export async function runFixtureInstaller(workspace: PiWorkspace, operation: "install" | "uninstall" | "upgrade" | "list" | "info", packages: readonly string[] = [], options: {
   readonly scope?: "project" | "user";
   readonly platform?: "pi" | "chatgpt" | "claude";
   readonly dryRun?: boolean;
+  /** Defaults to shipped pins; false explicitly opts into checkout runtimes. */
+  readonly pinnedRuntimes?: boolean;
   /** An owned fixture catalogue can provide a selectable consumer of an internal package. */
   readonly catalogueRoot?: string;
 } = {}): Promise<Record<string, unknown>> {
   const root = await findHarnessRoot();
   const scope = options.scope ?? "project";
   const targetArgs = operation === "info" ? [] : ["--platform", options.platform ?? "pi", "--scope", scope, ...(scope === "project" ? ["--root", workspace.projectRoot] : [])];
-  const args = ["run", "--offline", "--no-sync", "--project", root, "python", "-m", "harness_cli", "--local", options.catalogueRoot ?? root, operation, ...packages,
+  const args = ["run", "--offline", "--no-sync", "--project", root, "python", "-m", "harness_cli", ...((options.pinnedRuntimes ?? !options.catalogueRoot) ? [] : ["--local", options.catalogueRoot ?? root]), operation, ...packages,
     ...targetArgs, "--json",
     ...(options.dryRun ? ["--dry-run"] : []),
   ];
