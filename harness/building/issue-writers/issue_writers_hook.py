@@ -107,11 +107,18 @@ def chatgpt_prompt(payload: dict) -> None:
         try:
             contexts.append(core.prepare_drafting_context(cwd, session_id))
         except Exception as exc:  # Drafting cannot safely continue without it.
-            sys.stderr.write(f"issue drafting setup failed: {exc}")
-            raise SystemExit(2) from exc
+            reject(f"issue drafting setup failed: {exc}", CHATGPT)
 
     if contexts:
         additional_context("\n\n".join(contexts))
+
+
+def reject(message: str, provider: str) -> None:
+    if provider == CHATGPT:
+        json.dump({"decision": "block", "reason": message}, sys.stdout)
+        raise SystemExit(0)
+    sys.stderr.write(message)
+    raise SystemExit(2)
 
 
 # entry point
@@ -132,11 +139,7 @@ def entrypoint(argv: list[str] | None = None) -> None:
     except SystemExit:
         raise
     except Exception as exc:
-        if provider == CHATGPT:
-            # ChatGPT has no fallback skill: a crash must block, not pass through.
-            sys.stderr.write(f"harness issues hook failed in ChatGPT: {exc}")
-            raise SystemExit(2) from exc
-        raise
+        reject(f"harness issues hook failed ({type(exc).__name__}): {exc}", provider)
 
 
 if __name__ == "__main__":

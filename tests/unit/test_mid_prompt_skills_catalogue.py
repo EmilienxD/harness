@@ -19,7 +19,6 @@ def test_mid_prompt_skills_pi_install_and_remove(tmp_path, monkeypatch, scope):
     target.settings_path.write_text(settings, encoding="utf-8")
     tools = discover()
     tool = tools["mid-prompt-skills"]
-    assert tool.version == "1.2.1"
     for provider in (Platform.PI, Platform.CLAUDE, Platform.CHATGPT):
         assert tool.support_for(provider).status is SupportStatus.SUPPORTED
     installer = CatalogueInstaller(tools, target, ReceiptStore.load(tmp_path / "receipts.json"))

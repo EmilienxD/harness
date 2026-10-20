@@ -1,5 +1,5 @@
 name = "mid-prompt-skills"
-version = "1.2.1"
+version = "1.2.2"
 description = "Load skills invoked after other prompt text in Claude Code, ChatGPT, and Pi"
 docs = "https://github.com/EmilienxD/harness/blob/main/README.md#hooks"
 

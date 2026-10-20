@@ -108,6 +108,56 @@ def blocked(prompt, cwd, monkeypatch, capsys):
 
 
 
+@pytest.mark.parametrize("provider", ["claude", "chatgpt"])
+@pytest.mark.parametrize("skill", ["address", "review"])
+@pytest.mark.parametrize("error", [
+    hook.Blocked("prerequisite unavailable"),
+    subprocess.TimeoutExpired(["git"], 30),
+    RuntimeError("unexpected dependency failure"),
+    OSError("dependency unavailable"),
+])
+def test_all_preparation_errors_block(provider, skill, error, monkeypatch, capsys, tmp_path):
+    monkeypatch.setattr(sys, "argv", [str(HOOK), f"--{provider}"])
+    monkeypatch.setattr(sys, "stdin", io.StringIO(json.dumps({
+        "hook_event_name": "UserPromptSubmit", "prompt": f"${skill}-this 42", "cwd": str(tmp_path),
+    })))
+
+    def fail(*args):
+        raise error
+
+    monkeypatch.setattr(hook, f"build_{skill}_context", fail)
+    if provider == "claude":
+        with pytest.raises(SystemExit) as stopped:
+            hook.main()
+        assert stopped.value.code == 2
+        captured = capsys.readouterr()
+        assert not captured.out
+        reason = captured.err
+    else:
+        hook.main()
+        captured = capsys.readouterr()
+        assert not captured.err
+        result = json.loads(captured.out)
+        assert result["decision"] == "block"
+        reason = result["reason"]
+    if isinstance(error, subprocess.TimeoutExpired):
+        assert "timed out" in reason
+    else:
+        assert str(error) in reason
+
+
+@pytest.mark.parametrize("raw", ["{", "[]", '{"hook_event_name":"UserPromptSubmit"}'])
+def test_codex_invalid_input_blocks_instead_of_passing_through(raw, monkeypatch, capsys):
+    monkeypatch.setattr(sys, "argv", [str(HOOK), "--chatgpt"])
+    monkeypatch.setattr(sys, "stdin", io.StringIO(raw))
+    hook.main()
+    captured = capsys.readouterr()
+    assert not captured.err
+    result = json.loads(captured.out)
+    assert result["decision"] == "block"
+    assert result["reason"]
+
+
 @pytest.mark.parametrize("prompt, argument", [
     ("/address-this 42", "42"),
     ("Please handle this with /address-this 42", "42"),

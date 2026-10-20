@@ -684,14 +684,24 @@ def main() -> int:
     sys.stderr.reconfigure(encoding="utf-8")
     signal.signal(signal.SIGTERM, lambda *_: (_ for _ in ()).throw(KeyboardInterrupt()))
     provider = "chatgpt" if "--chatgpt" in sys.argv else "claude"
+    payload = {}
     try:
-        print(json.dumps(handle(json.load(sys.stdin), provider) or {}))
+        payload = json.load(sys.stdin)
+        if not isinstance(payload, dict):
+            raise ValueError("hook input must be a JSON object")
+        print(json.dumps(handle(payload, provider) or {}))
         return 0
     except KeyboardInterrupt:
         return 130
     except Exception as error:
-        print(str(error), file=sys.stderr)
-        return 1
+        reason = f"Cloud interview hook failed ({type(error).__name__}): {error}"
+        if provider == "chatgpt":
+            event = payload.get("hook_event_name") if isinstance(payload, dict) else None
+            output = {"continue": False, "stopReason": reason, "systemMessage": reason} if event == "PostToolUse" else {"decision": "block", "reason": reason}
+            print(json.dumps(output))
+            return 0
+        print(reason, file=sys.stderr)
+        return 2
 
 
 if __name__ == "__main__":

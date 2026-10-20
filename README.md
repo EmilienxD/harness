@@ -111,6 +111,8 @@ separate integration. See the [policy and Pi coverage](docs/user/tools/guards/pr
 
 Claude Code invokes a skill as `/skill-name`; ChatGPT uses `$skill-name`; Pi uses `/skill:skill-name` for its supported skills. Deterministic commands such as `/commit` are consumed by hooks or native Pi commands before a model call.
 
+For Codex, deterministic command failures reject the prompt rather than falling back to a model call. Guard errors deny the proposed action. A post-tool failure is surfaced as tool feedback; it cannot undo an action that has already run. Optional notifications and reminders remain best effort.
+
 **User-invoked** skills run only when you explicitly ask for them. **Model-invoked** skills may also be selected automatically when their description fits the work. Harness strongly favors the first group: you decide when a workflow starts, when a draft is published, and when another agent is launched.
 
 ### User-invoked skills

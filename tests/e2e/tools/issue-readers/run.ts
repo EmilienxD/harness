@@ -101,6 +101,53 @@ export async function runIssueReadersJourney(platform: IssuePlatform): Promise<I
   }
 }
 
+export async function runIssueReadersBlockedJourney(failure: "dirty" | "exception" | "timeout", skill: "address" | "review") {
+  await validateCodexCli();
+  const root = await canonicalMkdtemp(join(tmpdir(), "harness-issue-readers-block-e2e-"));
+  const projectRoot = join(root, "project");
+  let server: Awaited<ReturnType<typeof startFakeOpenAiServer>> | undefined;
+  try {
+    await mkdir(projectRoot);
+    await stageIssueReaders("chatgpt", await findHarnessRoot(process.cwd()), projectRoot, await pythonCommand());
+    await writeFile(join(projectRoot, "implementation.txt"), "before\n", "utf8");
+    await initializeRepository(projectRoot);
+    const bin = join(root, "bin");
+    await mkdir(bin);
+    if (failure === "dirty") {
+      await writeFile(join(projectRoot, "implementation.txt"), "uncommitted\n", "utf8");
+    } else {
+      await writeFile(join(bin, "sitecustomize.py"), [
+        "import subprocess",
+        "_run = subprocess.run",
+        "def run(args, *positional, **keywords):",
+        '    if isinstance(args, (list, tuple)) and args[:2] == ["git", "status"]:',
+        failure === "timeout" ? "        raise subprocess.TimeoutExpired(args, 30)" : '        raise RuntimeError("fixture git failure")',
+        "    return _run(args, *positional, **keywords)",
+        "subprocess.run = run",
+        "",
+      ].join("\n"), "utf8");
+    }
+    server = await startFakeOpenAiServer({
+      scenarioCatalogHash,
+      transition: () => { throw new Error("blocked prompt reached inference"); },
+    });
+    const codexHome = await prepareCodexHome({ root, baseUrl: server.baseUrl, trustedProjects: [projectRoot], extraConfig: ["[features]", "hooks = true"] });
+    const env = isolatedCodexEnvironment({ ...process.env, PYTHONPATH: bin, PYTHONIOENCODING: "utf-8" }, codexHome, server.authToken, bin);
+    const result = await runCodex(codexArgs([`$${skill}-this 42`]), projectRoot, env, 30_000);
+    if (result.timedOut) throw new Error("Codex did not settle after the issue-reader rejection");
+    return {
+      code: result.code,
+      inferenceRequests: server.assertions().inferenceRequests,
+      unexpectedRequests: server.assertions().unexpectedRequests,
+      output: result.stdout,
+      fileContent: await readFile(join(projectRoot, "implementation.txt"), "utf8"),
+    };
+  } finally {
+    await server?.close();
+    await rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+  }
+}
+
 async function stageIssueReaders(platform: IssuePlatform, harnessRoot: string, projectRoot: string, python: string): Promise<void> {
   const source = join(harnessRoot, "harness", "building", "issue-readers");
   if (platform === "claude") {

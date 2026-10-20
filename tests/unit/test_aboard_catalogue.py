@@ -28,14 +28,20 @@ def test_auto_hook_blocks_standalone_invocation(tmp_path, platform, prompt):
     for name in ("ABOARD_BRIDGE_PORT", "ABOARD_BRIDGE_TOKEN", "ABOARD_SESSION_ID"):
         environment.pop(name, None)
     result = subprocess.run(
-        [sys.executable, str(script)],
+        [sys.executable, str(script), f"--{platform}"],
         input=json.dumps({"prompt": prompt, "hook_event_name": "UserPromptSubmit"}),
         capture_output=True,
         text=True,
         env=environment,
     )
-    assert result.returncode == 2
-    assert "requires an active Aboard session" in result.stderr
+    assert result.returncode == (0 if platform == "chatgpt" else 2)
+    if platform == "chatgpt":
+        output = json.loads(result.stdout)
+        assert output["decision"] == "block"
+        assert "requires an active Aboard session" in output["reason"]
+        assert not result.stderr
+    else:
+        assert "requires an active Aboard session" in result.stderr
 
 
 def test_auto_installs_one_shared_skill_body_for_both_platforms(tmp_path):
@@ -51,7 +57,7 @@ def test_auto_installs_one_shared_skill_body_for_both_platforms(tmp_path):
 
 
 @pytest.mark.parametrize("prompt", ["/auto --dry", "$auto --dry", "[$auto](C:/project/.agents/skills/auto/SKILL.md) --dry"])
-def test_auto_hook_prefers_the_runtime_session_id_from_chatgpt(tmp_path, monkeypatch, prompt):
+def test_auto_hook_prefers_the_runtime_session_id_from_chatgpt(tmp_path, monkeypatch, capsys, prompt):
     target = install("auto", tmp_path, "chatgpt")
     script = target.install_root / "hooks" / "auto_hook.py"
     spec = importlib.util.spec_from_file_location("auto_chatgpt_hook_test", script)
@@ -80,11 +86,13 @@ def test_auto_hook_prefers_the_runtime_session_id_from_chatgpt(tmp_path, monkeyp
         "hook_event_name": "UserPromptSubmit",
         "session_id": "runtime-assigned",
     })))
-    monkeypatch.setattr(hook.sys, "stderr", io.StringIO())
+    monkeypatch.setattr(hook.sys, "argv", [str(script), "--chatgpt"])
 
-    assert hook.main() == 2
+    assert hook.main() == 0
+    output = json.loads(capsys.readouterr().out)
+    assert output["decision"] == "block"
+    assert output["reason"] == "handled"
     assert captured["sessionId"] == "runtime-assigned"
-    assert captured["prompt"] == "/auto --dry"
 
 
 def test_issue_readers_owns_both_worker_skills():
