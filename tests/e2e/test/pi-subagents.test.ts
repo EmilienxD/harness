@@ -67,3 +67,16 @@ test("an interactive Pi child replies without inference and wakes its live paren
   assert.equal(result.inferenceRequests, 4);
   assert.equal(result.unexpectedRequests, 0);
 });
+
+for (const route of ["auto", "interactive"] as const) {
+  test(`Pi discovers a BOM request from a ${route === "auto" ? "failed" : "successful"} shell tool in ${route} mode`, { timeout: 300_000 }, async () => {
+    const result = await runPiSubagentsJourney(route, { pinnedRuntimes: false, shellWrite: true, failedWrite: route === "auto" });
+    assert.equal(result.parentFinal, parentDone(route));
+    assert.equal(result.request.state, "succeeded");
+    assert.equal(result.request.acknowledged, true);
+    assert.equal(result.deliveredResults, 1);
+    assert.equal(result.requestFilesRemaining, 0);
+    assert.equal(result.inferenceRequests, 4);
+    assert.equal(result.unexpectedRequests, 0);
+  });
+}

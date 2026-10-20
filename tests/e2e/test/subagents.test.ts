@@ -48,6 +48,20 @@ test("automatic Codex SessionEnd cannot discard the supervisor's successful repl
 });
 
 for (const platform of ["claude", "chatgpt"] as const) {
+  test(`a failed shell command still submits its request through real ${platform} CLIs`, { timeout: 180_000 }, async () => {
+    const result = await runSubagentsJourney(platform, "auto", false, false, { failedWrite: true });
+    assert.deepEqual(result.completedClis, ["child", "parent"]);
+    assert.equal(result.requestFilesRemaining, 0);
+    assert.equal(result.unexpectedRequests, 0);
+  });
+  test(`Stop discovers a shell-created request through real ${platform} CLIs without PostToolUse`, { timeout: 180_000 }, async () => {
+    const result = await runSubagentsJourney(platform, "auto", false, false, { stopFallback: true });
+    assert.deepEqual(result.completedClis, ["child", "parent"]);
+    assert.equal(result.requestFilesRemaining, 0);
+    assert.equal(result.unexpectedRequests, 0);
+    assert.ok(result.checkpoints.includes("parent-waiting"));
+    assert.ok(result.checkpoints.includes("parent-received-reply"));
+  });
   test(`subagents rejects unknown ${platform} histories at its fake API`, async () => {
     const server = platform === "claude"
       ? await startFakeAnthropicServer({ repoRoot: process.cwd(), scenarioCatalogHash, parseRequest: parseAnthropicMessagesRequest, transition: claudeTransition })

@@ -1,6 +1,4 @@
 import { promises as fs } from "node:fs";
-import { homedir } from "node:os";
-import { dirname, resolve } from "node:path";
 import { requestCommand } from "../../harness/pi-transport/transport.ts";
 
 // The uv-installed runtime owns requests, executions and delivery; this file only translates Pi events.
@@ -10,7 +8,6 @@ const NOTICE = "harness-subagents-notice";
 const SECTION = "harness-subagents";
 const PREVIOUS = "reply-to-agent-with-previous-message";
 const PREVIOUS_INVOCATION = new RegExp(`(?<!\\S)/skill:${PREVIOUS}(?=\\s|$)`, "u");
-const WRITE_TOOLS = new Set(["write", "edit"]);
 const FAILED_STOPS = new Set(["error", "aborted", "length"]);
 const MARKER_POLL_MS = 500;
 // The marker is only a wake-up hint; the database is rechecked periodically as well.
@@ -26,19 +23,10 @@ type State = {
 };
 
 const errorText = (error: unknown) => error instanceof Error ? error.message : String(error);
-const samePath = (left: string, right: string) => process.platform === "win32" ? left.toLowerCase() === right.toLowerCase() : left === right;
 const assistantText = (message: any) => typeof message?.content === "string" ? message.content
   : (message?.content ?? []).filter((block: any) => block.type === "text").map((block: any) => block.text).join("");
 const assistants = (ctx: any) => ctx.sessionManager.getBranch()
   .filter((entry: any) => entry.type === "message" && entry.message?.role === "assistant").map((entry: any) => entry.message);
-
-/** Match Pi's own write path handling closely enough to recognize the inbox. */
-function requestPath(value: unknown, cwd: string): string | undefined {
-  if (typeof value !== "string" || !value.trim()) return undefined;
-  let path = value.trim().replace(/^@/u, "");
-  if (path === "~" || path.startsWith("~/") || path.startsWith("~\\")) path = homedir() + path.slice(1);
-  return resolve(cwd, path);
-}
 
 export default function (pi: any): void {
   let controller = new AbortController();
@@ -225,17 +213,15 @@ export default function (pi: any): void {
   });
 
   pi.on("tool_result", async (event: any, ctx: any) => {
-    if (!state?.inbox || event.isError || !WRITE_TOOLS.has(event.toolName)) return;
-    const path = requestPath(event.input?.path, ctx.cwd);
-    if (!path || !samePath(dirname(path), state.inbox)) return;
+    if (!state?.inbox) return;
     let text: string;
     try {
-      const result = await call("inbox_write", ctx, { paths: [path] }, 120_000);
-      watch();
+      const result = await call("inbox_scan", ctx, {}, 120_000);
+      if (result.pending) watch();
       if (!result.context) return;
       text = result.context;
     } catch (error) {
-      text = `Harness subagents could not process ${path}: ${errorText(error)}`;
+      text = `Harness subagents could not scan the inbox: ${errorText(error)}`;
     }
     return {
       content: [...event.content, { type: "text", text }],
@@ -248,10 +234,19 @@ export default function (pi: any): void {
   });
 
   pi.on("agent_before_settle", async (event: any, ctx: any) => {
-    if (!state || live(ctx) || event.outcome !== "completed") return;
+    if (!state || event.outcome !== "completed") return;
     const deadline = Date.now() + state.stopWaitMs;
     const signal = controller.signal;
     try {
+      const scanned = await call("inbox_scan", ctx, {}, 120_000);
+      if (scanned.pending) watch();
+      if (scanned.context && scanned.changed) {
+        return {
+          entries: [{ type: "custom_message", customType: NOTICE, content: scanned.context, display: true }],
+          continue: true,
+        };
+      }
+      if (live(ctx)) return;
       await acknowledge(ctx);
       while (!signal.aborted) {
         const result = await call("claim_delivery", ctx);

@@ -410,6 +410,14 @@ the Windows headless integration, not Pi TUI, POSIX or real Discord service acce
 
 ## Pi persistent subagents
 
+Checkout-runtime regressions publish BOM-prefixed requests through native shell tools in JSON auto
+and RPC interactive sessions, including a command that writes its request before failing. They
+verify one launched child, one acknowledged result, an empty request inbox and four inference
+requests. The shared Claude/Codex journey also publishes shell-created BOM requests without an
+explicit `harness ask`; lifecycle hooks must discover and launch them.
+Separate Claude/Codex cases disable tool-completion hooks and verify that Stop discovers
+the request, launches the child and delivers its result.
+
 `test:pi-subagents` installs the real `subagents` package at project scope into an isolated uv tool
 environment. The auto journey runs with both the checkout runtime (`--local`) and the manifest's
 published Git pin; the latter catches stale runtime pins that local-source tests cannot detect.

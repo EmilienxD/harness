@@ -397,19 +397,35 @@ class TestBridge:
         assert invoked["ok"] and invoked["context"]
         assert plain["ok"] and plain["context"] is None
 
-    def test_inbox_write_launches_only_requests_in_the_owned_inbox(self, project, launches):
+    def test_inbox_scan_launches_only_published_requests_in_the_owned_inbox(self, project, launches):
         sessions.register_observed("parent", project, "pi")
+        sessions.register_observed("other", project, "pi")
         inbox = enable_delegation("parent", "work-with-agent").inbox
-        outside = project / "notes.md"
-        outside.write_text("---\ntask: general\nmode: auto\n---\nWork.", encoding="utf-8")
-        inside = inbox / "work.md"
-        inside.write_text("---\ntask: general\nmode: auto\n---\nWork.", encoding="utf-8")
+        foreign = enable_delegation("other", "work-with-agent").inbox
+        body = "---\ntask: general\nmode: auto\n---\nWork."
+        outside = foreign / "work.md"
+        outside.write_text(body, encoding="utf-8")
+        (inbox / "work.md").write_text(body, encoding="utf-8-sig")
+        partial = inbox / "work.tmp"
+        partial.write_text("---\ntask:", encoding="utf-8")
 
-        ignored = bridge("inbox_write", harnessSessionId="parent", paths=[str(outside)])
-        launched = bridge("inbox_write", harnessSessionId="parent", paths=[str(inside)])
+        launched = bridge("inbox_scan", harnessSessionId="parent")
+        repeated = bridge("inbox_scan", harnessSessionId="parent")
 
-        assert ignored["ok"] and ignored["context"] is None
-        assert launched["ok"] and launched["context"]
+        assert launched["ok"] and launched["context"] and launched["pending"]
+        assert repeated["ok"] and repeated["context"] is None
+        assert len(launches) == 1
+        assert outside.exists() and partial.exists()
+
+    def test_resume_scans_queued_requests(self, project, launches):
+        install_skill(project / ".pi" / "skills", "subagents-toolkit")
+        started = bridge("session_start", cwd=str(project), sessionId="parent", reason="startup")
+        inbox = Path(started["inbox"])
+        (inbox / "work.md").write_text("---\ntask: general\nmode: auto\n---\nWork.", encoding="utf-8")
+
+        resumed = bridge("session_start", cwd=str(project), sessionId="parent", reason="reload")
+
+        assert resumed["ok"] and resumed["pending"] and resumed["recovered"]
         assert len(launches) == 1
 
     def test_results_replay_until_acknowledged(self, project, launches):

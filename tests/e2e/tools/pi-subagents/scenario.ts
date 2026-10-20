@@ -40,7 +40,7 @@ function inbox(request: OpenAiResponsesRequest): string {
   return match[1]!;
 }
 
-export function subagentsScenario(options: { explicitModel?: boolean; grilling?: boolean; childProvider?: "pi" | "chatgpt" } = {}) {
+export function subagentsScenario(options: { explicitModel?: boolean; grilling?: boolean; childProvider?: "pi" | "chatgpt"; shellWrite?: boolean; failedWrite?: boolean } = {}) {
   return {
     scenarioCatalogHash: createHash("sha256").update(JSON.stringify({ NAME, routes: ["auto", "interactive"], options, version: 2 })).digest("hex"),
     transition(request: OpenAiResponsesRequest): OpenAiScenarioResponse {
@@ -61,16 +61,19 @@ export function subagentsScenario(options: { explicitModel?: boolean; grilling?:
       if (calls.length > (options.grilling ? 2 : 1) || results.length !== calls.length) reject("$.input", "parent tool history is incomplete");
       const requestPath = `${inbox(request)}${inbox(request).includes("\\") ? "\\" : "/"}${REQUEST_FILE}`;
       const requestContent = requestBody(route, options.explicitModel, options.childProvider);
+      const tool = options.shellWrite ? (request.tools.some((item) => item.name === "powershell") ? "powershell" : "bash") : "write";
+      const command = `node -e "require('fs').writeFileSync(Buffer.from('${Buffer.from(requestPath).toString("base64")}','base64').toString(),Buffer.from('${Buffer.from("\ufeff" + requestContent).toString("base64")}','base64'))"${options.failedWrite ? "; exit 7" : ""}`;
+      const input = options.shellWrite ? { command } : { path: requestPath, content: requestContent };
       if (calls.length === 0) {
-        if (!request.tools.some((tool) => tool.type === "function" && tool.name === "write")) reject("$.tools", "the native write tool is not offered");
+        if (!request.tools.some((item) => item.type === "function" && item.name === tool)) reject("$.tools", "the request writing tool is not offered");
         return {
           scenario: `${NAME}-${route}`, checkpoint: "parent-write",
-          output: { type: "function_call", id: `fc_harness_subagents_${route}`, call_id: callId, name: "write", arguments: JSON.stringify({ path: requestPath, content: requestContent }), status: "completed" },
+          output: { type: "function_call", id: `fc_harness_subagents_${route}`, call_id: callId, name: tool, arguments: JSON.stringify(input), status: "completed" },
         };
       }
-      if (calls[0]!.call_id !== callId || results[0]!.call_id !== callId || calls[0]!.name !== "write") reject("$.input", "unknown parent tool identity");
+      if (calls[0]!.call_id !== callId || results[0]!.call_id !== callId || calls[0]!.name !== tool) reject("$.input", "unknown parent tool identity");
       const written = JSON.parse(String(calls[0]!.arguments));
-      if (written.path !== requestPath || written.content !== requestContent) reject("$.input", "unexpected delegation request mutation");
+      if (JSON.stringify(written) !== JSON.stringify(input)) reject("$.input", "unexpected delegation request mutation");
       const delivered = request.input.slice(request.input.indexOf(results[0]!) + 1).some((item) => text(item).includes(childAnswer(route)));
       if (options.grilling && delivered) {
         const source = users.join("\n").split("\n").map((line) => line.trim()).find((line) => /[\\/]round-\d{3}\.json$/u.test(line));

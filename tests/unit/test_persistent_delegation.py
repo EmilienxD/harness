@@ -711,6 +711,34 @@ def test_concurrent_requests_allocate_stable_distinct_parent_scoped_identifiers(
     assert not list(inbox.iterdir())
 
 
+def test_overlapping_whole_inbox_scans_launch_each_request_once(tmp_path, monkeypatch):
+    from concurrent.futures import ThreadPoolExecutor
+    from threading import Barrier
+
+    monkeypatch.setenv("HARNESS_STATE_DIR", str(tmp_path / "state"))
+    sessions.register_observed("parent", tmp_path, "claude")
+    inbox = enable_delegation("parent", "work-with-agent").inbox
+    for i in range(4):
+        (inbox / f"{i}.md").write_text("---\ntask: general\nmode: auto\n---\nWork.", encoding="utf-8")
+    (inbox / "invalid.md").write_text("---\ntask: unknown\nmode: auto\n---\nWork.", encoding="utf-8")
+    gate = Barrier(4)
+    launched = []
+    def scan(_index):
+        gate.wait(timeout=10)
+        return process_inbox("parent", launch=lambda request, *_args: launched.append(request.path.name) or request.path.stem)
+
+    with ThreadPoolExecutor(max_workers=4) as workers:
+        results = [result for batch in workers.map(scan, range(4)) for result in batch]
+
+    assert sorted(launched) == [f"{i}.md" for i in range(4)]
+    assert sum(result.status == "launched" for result in results) == 4
+    assert sum(result.status == "failed" for result in results) == 1
+    with sessions._connect() as db:
+        assert db.execute("SELECT COUNT(*) FROM requests").fetchone()[0] == 5
+        assert db.execute("SELECT COUNT(*) FROM executions").fetchone()[0] == 4
+    assert not list(inbox.iterdir())
+
+
 def test_crash_after_spawn_intent_retains_uncertainty_and_never_relaunches(
     tmp_path, monkeypatch
 ):

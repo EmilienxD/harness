@@ -70,6 +70,8 @@ export async function runPiSubagentsJourney(route: Route, options: {
   pinnedRuntimes?: boolean;
   fullStack?: boolean;
   explicitModel?: boolean;
+  shellWrite?: boolean;
+  failedWrite?: boolean;
   localBoard?: { origin: string; code: string };
 } = {}): Promise<PiSubagentsResult> {
   if (options.localBoard && (!options.fullStack || new URL(options.localBoard.origin).origin !== options.localBoard.origin || new URL(options.localBoard.origin).hostname !== "127.0.0.1")) {
@@ -77,12 +79,18 @@ export async function runPiSubagentsJourney(route: Route, options: {
   }
   const transport = options.fullStack && !options.localBoard ? await startGrillBoard() : undefined;
   const board = options.localBoard ?? transport;
-  const fixture = await createPiFixture(subagentsScenario({ explicitModel: options.explicitModel ?? false, grilling: !!board })).catch(async (error) => { await transport?.close(); throw error; });
+  const fixture = await createPiFixture(subagentsScenario({ explicitModel: options.explicitModel ?? false, grilling: !!board, shellWrite: options.shellWrite ?? false, failedWrite: options.failedWrite ?? false })).catch(async (error) => { await transport?.close(); throw error; });
   const parentId = randomUUID();
   let child: PiRpcClient | undefined;
   try {
     const root = await findHarnessRoot();
     const { projectRoot: project, env, sessionsDir } = fixture.workspace;
+    if (options.shellWrite) {
+      const path = join(project, ".pi", "settings.json");
+      const settings = JSON.parse(await readFile(path, "utf8"));
+      settings.defaultTools.push(process.platform === "win32" ? "powershell" : "bash");
+      await writeFile(path, JSON.stringify(settings));
+    }
     const python = join(root, ".venv", process.platform === "win32" ? "Scripts/python.exe" : "bin/python");
     const bin = join(fixture.root, "uv-bin");
     await mkdir(bin);
