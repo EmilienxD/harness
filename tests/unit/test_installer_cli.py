@@ -1,6 +1,8 @@
 import json
 import subprocess
 
+import pytest
+
 from harness_cli.cli import main
 from harness_cli.host_actions import PreparedAction
 
@@ -143,6 +145,130 @@ def test_symlink_mode_shares_skill_directories_between_providers(tmp_path, monke
     capsys.readouterr()
     assert not claude.exists() and not claude.is_symlink()
     assert not canonical.exists()
+
+
+@pytest.mark.parametrize("mode", [[], ["--skill-mode", "symlink"]])
+def test_install_in_git_worktree_preserves_inherited_skill_links(
+    tmp_path, monkeypatch, capsys, mode,
+):
+    from harness_cli.receipts import ReceiptStore
+
+    source = tmp_path / "source"
+    worktree = tmp_path / "worktree"
+    monkeypatch.setenv("HARNESS_STATE_DIR", str(tmp_path / "state"))
+    subprocess.run(["git", "init", "-q", str(source)], check=True)
+    subprocess.run(["git", "-C", str(source), "config", "core.symlinks", "true"], check=True)
+    assert main([
+        "install", "caveman", "--root", str(source), "--skill-mode", "symlink", "--json",
+    ]) == 0
+    capsys.readouterr()
+    subprocess.run(["git", "-C", str(source), "add", "."], check=True)
+    subprocess.run([
+        "git", "-C", str(source), "-c", "user.name=Test", "-c", "user.email=test@example.com",
+        "commit", "-qm", "Installed skills",
+    ], check=True)
+    subprocess.run([
+        "git", "-C", str(source), "worktree", "add", "-q", "--detach", str(worktree),
+    ], check=True)
+    link = worktree / ".claude/skills/caveman"
+    assert link.is_symlink()
+    target = worktree / ".agents/skills/caveman"
+    before = (target / "SKILL.md").read_bytes()
+    args = ["install", "caveman", "--root", str(worktree), "--json", *mode]
+
+    assert main(args) == 0
+    assert json.loads(capsys.readouterr().out)["ok"] is True
+    assert link.resolve() == target.resolve()
+    assert (target / "SKILL.md").read_bytes() == before
+    receipt = ReceiptStore.load().installation(worktree, "claude")["packages"]["caveman"]
+    assert receipt["skillMode"] == "symlink"
+    assert receipt["links"][0]["owned"] is False
+
+    assert main(args) == 0
+    assert json.loads(capsys.readouterr().out)["summary"]["changes"] == 0
+    assert main(["uninstall", "caveman", "--root", str(worktree), "--json"]) == 0
+    capsys.readouterr()
+    assert link.is_symlink()
+    assert (target / "SKILL.md").read_bytes() == before
+    assert (source / ".claude/skills/caveman").is_symlink()
+
+
+@pytest.mark.parametrize("mode", [[], ["--skill-mode", "symlink"]])
+@pytest.mark.parametrize("unsafe", ["unrelated", "parent", "target", "modified"])
+def test_inherited_skill_link_safety(tmp_path, monkeypatch, capsys, unsafe, mode):
+    import shutil
+    from pathlib import Path
+
+    monkeypatch.setenv("HARNESS_STATE_DIR", str(tmp_path / "state"))
+    root = tmp_path / "project"
+    canonical = root / ".agents/skills/caveman"
+    canonical.mkdir(parents=True)
+    payload = Path(__file__).resolve().parents[2] / "harness/productivity/caveman/SKILL.md"
+    shutil.copyfile(payload, canonical / "SKILL.md")
+    link = root / ".claude/skills/caveman"
+    link.parent.mkdir(parents=True)
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "SKILL.md").write_text("outside", encoding="utf-8")
+    if unsafe == "unrelated":
+        link.symlink_to(outside, target_is_directory=True)
+    elif unsafe == "parent":
+        link.parent.rmdir()
+        link.parent.symlink_to(outside, target_is_directory=True)
+        (outside / "caveman").symlink_to(canonical, target_is_directory=True)
+    else:
+        if unsafe == "target":
+            shutil.rmtree(canonical)
+            canonical.symlink_to(outside, target_is_directory=True)
+        else:
+            (canonical / "SKILL.md").write_text("local changes", encoding="utf-8")
+        link.symlink_to(canonical, target_is_directory=True)
+
+    before = (link / "SKILL.md").read_bytes()
+    assert main([
+        "install", "caveman", "--root", str(root), "--platform", "claude", "--json", *mode,
+    ]) == 1
+    assert json.loads(capsys.readouterr().out)["ok"] is False
+    assert (link / "SKILL.md").read_bytes() == before
+    assert (outside / "SKILL.md").read_text(encoding="utf-8") == "outside"
+    assert not (tmp_path / "state/receipts.json").exists()
+
+
+def test_inherited_skill_link_survives_upgrade_and_rejects_copy_conversion(
+    tmp_path, monkeypatch, capsys,
+):
+    import shutil
+    from dataclasses import replace
+    from harness_cli.manifest import discover
+    from harness_cli.receipts import ReceiptStore
+
+    monkeypatch.setenv("HARNESS_STATE_DIR", str(tmp_path / "state"))
+    available = discover()
+    monkeypatch.setattr("harness_cli.installer_cli.discover", lambda: available)
+    canonical = tmp_path / ".agents/skills/caveman"
+    canonical.mkdir(parents=True)
+    for payload in available["caveman"].expand("claude"):
+        if payload.root == "skills":
+            destination = tmp_path / ".agents/skills" / payload.dest
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(payload.source, destination)
+    link = tmp_path / ".claude/skills/caveman"
+    link.parent.mkdir(parents=True)
+    link.symlink_to(canonical, target_is_directory=True)
+    args = ["install", "caveman", "--root", str(tmp_path), "--platform", "claude", "--json"]
+    assert main(args) == 0
+    capsys.readouterr()
+    available["caveman"] = replace(available["caveman"], version="99.0.0")
+    assert main(args) == 0
+    capsys.readouterr()
+    receipt = ReceiptStore.load().installation(tmp_path, "claude")["packages"]["caveman"]
+    assert receipt["version"] == "99.0.0"
+    assert receipt["links"][0]["owned"] is False
+    before = (tmp_path / "state/receipts.json").read_bytes()
+    assert main([*args, "--skill-mode", "copy"]) == 1
+    assert "unowned skill symlink" in json.loads(capsys.readouterr().out)["results"][0]["error"]
+    assert link.is_symlink()
+    assert (tmp_path / "state/receipts.json").read_bytes() == before
 
 
 def test_skill_mode_can_switch_between_copy_and_symlink(tmp_path, monkeypatch, capsys):

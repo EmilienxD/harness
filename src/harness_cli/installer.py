@@ -346,8 +346,10 @@ class CatalogueInstaller:
             raise ValueError(f"invalid skill installation mode: {skill_mode}")
         receipts = target.installation(self.store).get("packages", {})
         self.skill_mode = skill_mode or (
-            "symlink" if any(receipt.get("skillMode") == "symlink" for receipt in receipts.values())
-            else "copy"
+            "symlink" if (
+                any(receipt.get("skillMode") == "symlink" for receipt in receipts.values())
+                or self._has_shared_skill_links()
+            ) else "copy"
         )
         # None reconciles the whole catalogue (the explicit upgrade command).
         # A set opts into preserving installed packages except named updates.
@@ -356,6 +358,23 @@ class CatalogueInstaller:
         self._pi_package_directory: tempfile.TemporaryDirectory | None = None
         self._pi_payloads: dict[tuple[str, str], list[ExpandedFile]] = {}
         self._pi_caches: dict[tuple[str, str], tuple[Path, Path]] = {}
+
+    def _has_shared_skill_links(self) -> bool:
+        """Recover the shared layout when a checkout has no local skill receipts."""
+        if self.target.platform is not Platform.CLAUDE:
+            return False
+        scope = "user" if self.target.is_user else "project"
+        names = {
+            payload.dest.split("/", 1)[0]
+            for tool in self.available.values()
+            for payload in tool.expand(Platform.CLAUDE, scope)
+            if payload.root == "skills"
+        }
+        return any(
+            (link := self.target.scope_root / ".claude" / "skills" / name).is_symlink()
+            and link.resolve() == (self.target.scope_root / ".agents" / "skills" / name).resolve()
+            for name in names
+        )
 
     def _selection_catalogue(self, requested_names: set[str]) -> dict[str, Tool]:
         current = self.installation["packages"]
@@ -466,13 +485,16 @@ class CatalogueInstaller:
             return codex.destination_path("skills", payload.dest)
         link, _, rest = payload.dest.partition("/")
         link_path = self.target.scope_root / ".claude" / "skills" / link
-        if link_path.is_symlink() and any(
-            record.get("path") == str(link_path.absolute())
-            and link_path.resolve() == Path(record["target"]).resolve()
-            for receipt in self.installation["packages"].values()
-            for record in receipt.get("links", [])
-        ):
-            return link_path / rest
+        if link_path.is_symlink():
+            for receipt in self.installation["packages"].values():
+                for record in receipt.get("links", []):
+                    if (
+                        record.get("path") == str(link_path.absolute())
+                        and link_path.resolve() == Path(record["target"]).resolve()
+                    ):
+                        if not record.get("owned", True):
+                            raise InstallError(f"refusing to replace unowned skill symlink {link_path}")
+                        return link_path / rest
         return self.target.destination_path(payload.root, payload.dest)
 
     def explicit_packages(self) -> set[str]:
@@ -840,12 +862,6 @@ class CatalogueInstaller:
                 if link.is_symlink():
                     if link.resolve() != target.resolve():
                         raise InstallError(f"refusing to replace unrelated symlink {link}")
-                    if not any(
-                        record.get("path") == str(link.absolute())
-                        for receipt in packages.values()
-                        for record in receipt.get("links", [])
-                    ):
-                        raise InstallError(f"refusing to take over unowned symlink {link}")
                 elif link.exists() and not any(
                     record.get("path") == str(link.absolute()) or
                     Path(record.get("path", "")).is_relative_to(link)
@@ -1177,11 +1193,16 @@ class CatalogueInstaller:
                 "owned": True,
             })
 
-        links: list[dict[str, str]] = []
+        links: list[dict[str, Any]] = []
         for link, target in self._skill_links(tool).items():
+            owned = not link.is_symlink()
             if link.is_symlink():
                 if link.resolve() != target.resolve():
                     raise InstallError(f"refusing to replace unrelated symlink {link}")
+                owned = any(
+                    record.get("path") == str(link.absolute()) and record.get("owned", True)
+                    for record in (prior_receipt or {}).get("links", [])
+                )
             else:
                 if link.exists():
                     try:
@@ -1190,7 +1211,9 @@ class CatalogueInstaller:
                         raise InstallError(f"skill directory contains unmanaged files: {link}") from exc
                 link.parent.mkdir(parents=True, exist_ok=True)
                 link.symlink_to(os.path.relpath(target, link.parent), target_is_directory=True)
-            links.append({"path": str(link.absolute()), "target": str(target.absolute())})
+            links.append({
+                "path": str(link.absolute()), "target": str(target.absolute()), "owned": owned,
+            })
 
         raw_fragment = self._fragment(tool, pi_package)
         python = _python_command() if "${PYTHON}" in json.dumps(raw_fragment) else None
@@ -1288,7 +1311,11 @@ class CatalogueInstaller:
                     current = current.parent
         for record in receipt.get("links", []):
             link = Path(record["path"])
-            if link.is_symlink() and link.resolve() == Path(record["target"]).resolve():
+            if (
+                record.get("owned", True)
+                and link.is_symlink()
+                and link.resolve() == Path(record["target"]).resolve()
+            ):
                 link.unlink()
                 try:
                     link.parent.rmdir()
