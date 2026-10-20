@@ -111,6 +111,29 @@ test("user turns get only a live running count, excluding foreground and complet
     assert.equal(remind(), undefined);
   });
 });
+test("TUI running-count widget uses dim styling and clears after the last job stops", async () => {
+  await fixture(async (f) => {
+    const widgets = [], styles = [];
+    f.ctx.mode = "tui";
+    f.ctx.ui = {
+      theme: { fg: (color, text) => {
+        styles.push(color);
+        return `\x1b[90m${text}\x1b[39m`;
+      } },
+      setWidget: (id, lines) => widgets.push({ id, lines }),
+    };
+    await f.handlers.get("session_start")({}, f.ctx);
+    const first = (await f.call(shell, { command: command(1e4), run_in_background: true })).details;
+    const second = (await f.call(shell, { command: command(1e4), run_in_background: true })).details;
+    assert.deepEqual(styles, ["dim", "dim"]);
+    assert.ok(widgets.at(-1).lines.every(line => line.startsWith("\x1b[90m") && line.endsWith("\x1b[39m")));
+    await f.call("cancel_background_shell", { id: first.id });
+    assert.deepEqual(styles, ["dim", "dim", "dim"]);
+    await f.call("cancel_background_shell", { id: second.id });
+    assert.equal(widgets.at(-1).id, "harness-background-shell");
+    assert.equal(widgets.at(-1).lines, undefined);
+  });
+});
 test("short IDs retry collisions and are not reused after foreground receipts disappear", async () => {
   await fixture(async (f) => {
     const original = crypto.randomUUID;
@@ -495,8 +518,8 @@ test("arrow press/release pairs move one row; release never navigates or closes 
     panel.dispose();
   }
 });
-test("cancelled and completed jobs stay visible until /ps closes and disappear from the reopened selector", async () => {
-  const jobs = ["running", "running", "completed", "failed"].map((state, i) => ({
+test("all terminal states stay visible until /ps closes and disappear from the reopened selector", async () => {
+  const jobs = ["running", "running", "completed", "failed", "timed_out", "cancelled", "running", "running", "running"].map((state, i) => ({
     id: `bg-retained-${i}`,
     title: `Retained job ${i}`,
     command: `command-${i}`,
@@ -527,8 +550,13 @@ test("cancelled and completed jobs stay visible until /ps closes and disappear f
     await pause(10);
     assert.equal(jobs[0].state, "cancelled");
     assert.ok(!panel.render(100).some((line) => line.includes("Retained job 2")), "A job that finished before /ps opened is not listed");
-    jobs[1].state = "completed";
-    assert.ok(panel.render(100).some((line) => line.includes("Retained job 1 · completed")), "A job finishing while the menu is open is shown as completed");
+    for (const i of [2, 3, 4, 5]) {
+      assert.ok(!panel.render(100).some((line) => line.includes(`Retained job ${i}`)), "Jobs already finished when /ps opens are not listed");
+    }
+    for (const [i, state] of [[1, "completed"], [6, "failed"], [7, "timed_out"]]) {
+      jobs[i].state = state;
+      assert.ok(panel.render(100).some((line) => line.includes(`Retained job ${i} · ${state}`)), "Jobs finishing while the menu is open remain inspectable");
+    }
     assert.ok(panel.render(100).some((line) => line.includes("Retained job 0")), "Cancelling does not remove the row while the menu is open");
     panel.dispose();
     panel = create();
@@ -536,8 +564,9 @@ test("cancelled and completed jobs stay visible until /ps closes and disappear f
     assert.ok(!reopened.some((line) => line.includes("Retained job 0")));
     assert.ok(!reopened.some((line) => line.includes("Retained job 1")), "Completed jobs disappear on reopening");
     assert.ok(!reopened.some((line) => line.includes("Retained job 2")));
-    assert.ok(reopened.some((line) => line.includes("Retained job 3")), "Failed jobs remain selectable");
-    assert.equal(source.list().length, 4, "Filtering the selector preserves job records and logs");
+    for (const i of [3, 4, 5, 6, 7]) assert.ok(!reopened.some((line) => line.includes(`Retained job ${i}`)), "Every terminal state disappears on reopening");
+    assert.ok(reopened.some((line) => line.includes("Retained job 8")), "Running jobs remain selectable");
+    assert.equal(source.list().length, 9, "Filtering the selector preserves job records and logs");
   } finally {
     panel.dispose();
   }

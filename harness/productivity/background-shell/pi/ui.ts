@@ -90,7 +90,7 @@ export class JobPanel implements Component {
   private viewportRows = 1;
   constructor(private source: Source, private tui: TUI, private theme: Theme,
     private keys: Pick<KeybindingsManager, "matches">, private done: (value: void) => void) {
-    for (const job of source.list()) if (job.state === "cancelled" || job.state === "completed") this.settled.add(job.id);
+    for (const job of source.list()) if (job.state !== "running") this.settled.add(job.id);
     const jobs = this.visibleJobs();
     this.index = Math.max(0, jobs.findIndex(job => job.state === "running"));
     this.selected = jobs[this.index]?.id;
