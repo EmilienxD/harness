@@ -153,6 +153,70 @@ def test_interactive_session_termination_cancels_without_reply_authorization(tmp
     assert replay is not None and replay.delivery_id == delivery.delivery_id
 
 
+@pytest.mark.parametrize("provider", ["claude", "chatgpt"])
+@pytest.mark.parametrize("backend", ["standalone", "aboard"])
+@pytest.mark.parametrize("success", [True, False])
+def test_auto_session_end_defers_to_its_supervisor(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, provider: str,
+    backend: str, success: bool,
+) -> None:
+    from subagents_runtime.hooks import handle
+
+    parent, request, child = setup_request(tmp_path, monkeypatch)
+    with sessions._connect() as connection:
+        execution_id = connection.execute(
+            "SELECT id FROM executions WHERE session_id=? AND request_id=?", (child, request),
+        ).fetchone()[0]
+        connection.execute("UPDATE executions SET backend=?,state='running' WHERE id=?", (backend, execution_id))
+    monkeypatch.setenv("HARNESS_EXECUTION_ID", execution_id)
+    # The durable request, not an inherited/default execution-mode variable, owns the mode.
+    monkeypatch.delenv("HARNESS_EXECUTION_MODE", raising=False)
+    payload = {"session_id": child, "cwd": str(tmp_path), "hook_event_name": "SessionEnd", "reason": "other"}
+
+    handle(payload, provider=provider)
+
+    with sessions._connect() as connection:
+        assert connection.execute(
+            "SELECT state,reply,delivery_id FROM requests WHERE id=?", (request,),
+        ).fetchone() == ("pending", None, None)
+    assert claim_parent_delivery(parent, "Stop") is None
+    assert report_child_stop(
+        child, "Native final answer." if success else "", success=success,
+        reason=None if success else "Provider exited with code 1", execution_id=execution_id,
+    ) is True
+    handle(payload, provider=provider)
+    expected = ("succeeded", "Native final answer.") if success else ("failed", None)
+    with sessions._connect() as connection:
+        assert connection.execute(
+            "SELECT state,reply FROM requests WHERE id=?", (request,),
+        ).fetchone() == expected
+    assert claim_parent_delivery(parent, "Stop") is not None
+
+
+@pytest.mark.parametrize("mode,supervised", [("auto", False), ("interactive", False), ("interactive", True)])
+def test_session_end_still_cancels_children_without_an_auto_supervisor(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, mode: str, supervised: bool,
+) -> None:
+    from subagents_runtime.hooks import handle
+
+    _parent, request, child = setup_request(tmp_path, monkeypatch, mode=mode)
+    if supervised:
+        with sessions._connect() as connection:
+            execution_id = connection.execute(
+                "SELECT id FROM executions WHERE session_id=? AND request_id=?", (child, request),
+            ).fetchone()[0]
+        monkeypatch.setenv("HARNESS_EXECUTION_ID", execution_id)
+    else:
+        monkeypatch.delenv("HARNESS_EXECUTION_ID", raising=False)
+
+    handle({"session_id": child, "cwd": str(tmp_path), "hook_event_name": "SessionEnd", "reason": "other"})
+
+    with sessions._connect() as connection:
+        assert connection.execute(
+            "SELECT state,reply FROM requests WHERE id=?", (request,),
+        ).fetchone() == ("cancelled", None)
+
+
 def test_delivery_acknowledges_only_after_a_later_observed_parent_event(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     parent, request, child = setup_request(tmp_path, monkeypatch)
     report_child_stop(child, "Durable.", success=True)

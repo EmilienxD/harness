@@ -818,6 +818,26 @@ def send_previous_reply(
     signal_parent(parent)
 
 
+def report_child_session_end(
+    child_session_id: str, *, reason: str, execution_id: str | None = None,
+) -> bool:
+    """Leave supervised automatic results to the process owner, not shutdown hooks."""
+    with _sessions_module()._connect() as connection:
+        row = _active_request(connection, child_session_id, execution_id)
+        if row is not None and row[1] == "auto" and execution_id is not None:
+            supervised = connection.execute(
+                "SELECT 1 FROM executions WHERE session_id=? AND request_id=? "
+                "AND (id=? OR input_execution_id=?)",
+                (child_session_id, row[0], execution_id, execution_id),
+            ).fetchone()
+            if supervised is not None:
+                return False
+    return report_child_stop(
+        child_session_id, "", success=False, reason=reason, cancelled=True,
+        execution_id=execution_id,
+    )
+
+
 def report_child_stop(
     child_session_id: str,
     message: str,

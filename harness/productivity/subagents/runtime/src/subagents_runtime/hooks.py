@@ -24,6 +24,7 @@ from subagents_runtime.delegation import (
     observe_parent_event,
     process_inbox,
     reconcile_inbox,
+    report_child_session_end,
     report_child_stop,
     send_previous_reply,
     wait_parent_delivery,
@@ -401,14 +402,17 @@ def handle(
                 return None
             return (_context(event, feedback) if selected_provider == "claude"
                     else {"decision": "block", "reason": feedback})
-        reported = report_child_stop(
-            session_id,
-            message,
-            success=success,
-            reason=None if success else str(payload.get("reason") or event),
-            cancelled=event == "SessionEnd",
-            execution_id=execution_id,
-        )
+        if event == "SessionEnd":
+            reported = report_child_session_end(
+                session_id, reason=str(payload.get("reason") or event),
+                execution_id=execution_id,
+            )
+        else:
+            reported = report_child_stop(
+                session_id, message, success=success,
+                reason=None if success else str(payload.get("reason") or event),
+                execution_id=execution_id,
+            )
         if event == "SessionEnd":
             from subagents_runtime.inbox_cleanup import cleanup_inboxes
 
