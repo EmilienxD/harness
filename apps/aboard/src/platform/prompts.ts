@@ -282,15 +282,6 @@ export function appendAutoRunGuidance(
   };
 }
 
-/** Short, single-line handoff; Claude expands the reference before inference. */
-export function grillResponsePrompt(provider: AgentPlatformId, reference: string): string {
-  switch (provider) {
-    case "claude": return `Use my Grill responses in ${reference} to continue this conversation.`;
-    case "chatgpt":
-    case "pi": return `Read the file ${reference} containing my Grill responses, then use them to continue this conversation.`;
-  }
-}
-
 /** The prompt emitted when a task has spilled into a temporary file. */
 export function promptFileReference(path: string): string {
   return `Perform the task described in @${path}.`;

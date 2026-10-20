@@ -159,15 +159,16 @@ test("resuming in an open terminal pastes a multiline message and submits it onc
 });
 
 test("live Codex replies normalize file references while Claude replies retain their syntax", async () => {
-  for (const provider of ["claude", "chatgpt"] as const) {
+  for (const provider of ["claude", "chatgpt"] as const) for (const normalizeFileReferences of [true, false]) {
     const { controller, host } = setup();
     const created = controller.create({ agentId: agent("child"), sessionId: session("conversation"), agentType: "general", provider });
     host.created[0]!.terminal.sent.length = 0;
-    await controller.sendResumeMessage(created.terminalId, '@"src/core.py" @owner');
+    await controller.sendResumeMessage(created.terminalId, '@"src/core.py" @owner', { normalizeFileReferences });
     const paste = host.created[0]!.terminal.sent[0]!.text;
-    assert.deepEqual(paste.match(/@[^\s\u001b]+/gu), provider === "claude" ? ['@"src/core.py"', "@owner"] : ["@owner"]);
+    const normalized = provider === "chatgpt" && normalizeFileReferences;
+    assert.deepEqual(paste.match(/@[^\s\u001b]+/gu), normalized ? ["@owner"] : ['@"src/core.py"', "@owner"]);
     const [path] = [...paste.matchAll(/"([^"]+)"/gu)].map((match) => match[1]);
-    assert.equal(path, provider === "chatgpt" && process.platform === "win32" ? "src\\core.py" : "src/core.py");
+    assert.equal(path, normalized && process.platform === "win32" ? "src\\core.py" : "src/core.py");
   }
 });
 

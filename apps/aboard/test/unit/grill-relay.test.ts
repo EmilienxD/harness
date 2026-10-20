@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, sep } from "node:path";
 import test from "node:test";
@@ -9,7 +9,6 @@ import type { AgentId, AgentPlatformId, AgentSession, IsoTimestamp, SessionId, T
 import { FleetRegistry } from "../../src/domain/fleet.js";
 import { PromptSubmissions } from "../../src/platform/prompt-submissions.js";
 import type { TerminalController } from "../../src/platform/terminals.js";
-import { GrillResponseFiles } from "../../src/grill/response-files.js";
 
 const terminals = { liveTerminalForAgent: () => undefined } as unknown as TerminalController;
 const environment = { HARNESS_GRILL_URL: "https://grill.example.test", HARNESS_GRILL_CODE: "1234" };
@@ -136,7 +135,7 @@ function liveSession(agentId: string, platform: AgentPlatformId, sessionId: stri
 
 /** Drives a relay against a scripted board so a delivery's acknowledgement can be observed. */
 function harness(t: { after(fn: () => void): void }, confirmationTimeoutMs: number, target: AgentPlatformId = "claude",
-  options: { readonly writeFails?: boolean; readonly bindingChanges?: boolean; readonly sendFails?: boolean } = {}) {
+  options: { readonly bindingChanges?: boolean; readonly sendFails?: boolean } = {}) {
   const claude = "5f0c2d1e-9a8b-4c7d-8e6f-1a2b3c4d5e6f";
   const chatgpt = "codex-thread";
   const pi = "pi-session";
@@ -146,13 +145,9 @@ function harness(t: { after(fn: () => void): void }, confirmationTimeoutMs: numb
     fleet.transition(session.identity.agentId, { status: "running", startedAt: at }, at);
   }
   const typed: string[] = [];
-  const root = mkdtempSync(join(tmpdir(), "aboard-grill-relay-test-"));
-  t.after(() => rmSync(root, { recursive: true, force: true }));
-  const responseFiles = new GrillResponseFiles(root);
-  let written = false;
   const fakeTerminals = {
     liveTerminalForAgent: (agentId: string) => `terminal-${agentId}`,
-    get: (terminalId: string) => ({ backend: "terminal", sessionId: options.bindingChanges && written
+    get: (terminalId: string) => ({ backend: "terminal", sessionId: options.bindingChanges
       ? "changed-session" : terminalId === "terminal-1" ? claude : terminalId === "terminal-2" ? chatgpt : pi }),
     sendResumeMessage: async (_terminalId: string, message: string) => {
       if (options.sendFails) throw new Error("Terminal closed");
@@ -174,18 +169,12 @@ function harness(t: { after(fn: () => void): void }, confirmationTimeoutMs: numb
   const relay = createGrillCloudRelay({
     fleet, terminals: fakeTerminals, prompts, workspaceRoot: "C:/work/unloopedit", home: "C:/nonexistent-home", log: () => undefined,
     environment, activeIntervalMs: 10, idleIntervalMs: 10, confirmationTimeoutMs,
-    responseFiles: { write: async (contents) => {
-      if (options.writeFails) throw new Error("Response file write failed");
-      const path = await responseFiles.write(contents);
-      written = true;
-      return path;
-    } },
   });
   assert.ok(relay);
-  t.after(() => { relay.dispose(); globalThis.fetch = realFetch; });
+  t.after(() => { relay.dispose(); prompts.submitted(targetSession as SessionId); globalThis.fetch = realFetch; });
   relay.start();
   const acknowledged = () => syncs.flatMap((sync) => sync.acknowledgements);
-  return { claude: claude as SessionId, target: targetSession as SessionId, prompts, typed, syncs, acknowledged, root, payload, relay };
+  return { claude: claude as SessionId, target: targetSession as SessionId, prompts, typed, syncs, acknowledged, payload, relay };
 }
 
 async function until(condition: () => boolean): Promise<void> {
@@ -208,7 +197,6 @@ test("a delivery is acknowledged only after Claude confirms the typed prompt", a
   await until(() => board.acknowledged().length === 1);
   assert.deepEqual(board.acknowledged(), [{ delivery_id: "d-1", status: "submitted-to-terminal" }]);
   assert.equal(board.typed.length, 1);
-  assert.equal(readdirSync(board.root).length, 1);
   assert.deepEqual(board.syncs[0]?.sessions, [
     { provider: "claude", session_id: board.claude },
     { provider: "chatgpt", session_id: "codex-thread" },
@@ -233,23 +221,18 @@ test("a typed prompt Claude never confirms is reported as failed", async (t) => 
 });
 
 for (const provider of ["claude", "chatgpt", "pi"] as const) {
-  test(`${provider} receives a single-line handoff and its response file survives confirmation and disposal`, async (t) => {
+  test(`${provider} receives the reviewed payload verbatim`, async (t) => {
     const board = harness(t, 60_000, provider);
     await until(() => board.typed.length === 1);
-    assert.equal(/[\r\n]/u.test(board.typed[0]!), false);
-    const [name] = readdirSync(board.root);
-    assert.ok(name);
-    const path = join(board.root, name);
-    assert.equal(readFileSync(path, "utf8"), board.payload);
+    assert.equal(board.typed[0], board.payload);
     assert.equal(board.prompts.submitted(board.target), true);
     await until(() => board.acknowledged().length === 1);
     board.relay.dispose();
-    assert.equal(readFileSync(path, "utf8"), board.payload);
     assert.equal(board.typed.length, 1);
   });
 }
 
-for (const failure of ["writeFails", "bindingChanges", "sendFails"] as const) {
+for (const failure of ["bindingChanges", "sendFails"] as const) {
   test(`a ${failure} failure does not submit or leave a pending confirmation`, async (t) => {
     const board = harness(t, 60_000, "chatgpt", { [failure]: true });
     await until(() => board.acknowledged().length === 1);

@@ -456,11 +456,11 @@ export class TerminalController {
   }
 
   /** Paste into the provider composer, then allow paste detection to finish before Enter. */
-  public async sendResumeMessage(terminalId: TerminalId, message: string): Promise<void> {
+  public async sendResumeMessage(terminalId: TerminalId, message: string, options: { readonly normalizeFileReferences?: boolean } = {}): Promise<void> {
     const record = this.#requireRecord(terminalId);
     if (record.backend === "process") throw new Error("Resume messages require an interactive terminal");
     validateResumeMessage(message);
-    if (record.provider === "chatgpt") message = normalizeFileReferences(message, record.cwd);
+    if (record.provider === "chatgpt" && options.normalizeFileReferences !== false) message = normalizeFileReferences(message, record.cwd);
     this.#requireOpenHandle(terminalId).sendText(`\u001b[200~${message.replace(/\r\n?/gu, "\n")}\u001b[201~`, false);
     // Codex treats Enter within 120 ms of a paste burst as a pasted newline.
     // Wait longer for larger writes so the tail can reach its composer first.

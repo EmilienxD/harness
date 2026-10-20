@@ -920,12 +920,13 @@ Delivery follows these boundaries:
    can recover its own outstanding claim. Credentials travel only through internal transport.
 2. An external atomic journal binds a random persistent instance ID to the exact session file.
    A process lock excludes simultaneous resumptions; dead-process reclamation is serialized.
-   Before submission it records the delivery ID, round, content hash and activation identity.
+   Before submission it records the delivery ID, round, content hash, last session entry ID and activation identity.
    Only one user message is submitted per tick, because asynchronous input preflight can delay
    Pi's busy state. Slash/skill expansion is disabled for answers.
-3. The injected user message carries a delivery correlation marker. Acknowledgement requires
-   a matching persisted user entry in the exact JSONL file, with the native session header and
-   complete content hash checked. A custom session receipt links the delivery to that entry.
+3. The injected user message is exactly the reviewed board prompt. Acknowledgement requires
+   a matching persisted user entry after the recorded session entry in the exact JSONL file,
+   with the native session header and complete content hash checked. A custom session receipt
+   links the delivery to that entry without adding metadata to the user message.
    Reload can acknowledge an accepted message after an outage without resending it. An
    in-memory matching user message also prevents resubmission while awaiting persistence.
 4. Shutdown, reload, new/fork and tree navigation stop the old relay and abort transport.
