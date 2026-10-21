@@ -24,11 +24,13 @@ import {
 } from "@/lib/grill-api.server";
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import { PROVIDERS } from "@/lib/grill-contract";
+import { assetResponse, mediaMatches } from "@/lib/grill-assets.server";
 
 export const Route = createFileRoute("/api/v1/$")({
   server: {
     handlers: {
       GET: ({ request, params }) => handle(request, params._splat ?? "", "GET"),
+      HEAD: ({ request, params }) => handle(request, params._splat ?? "", "HEAD"),
       POST: ({ request, params }) => handle(request, params._splat ?? "", "POST"),
       PUT: ({ request, params }) => handle(request, params._splat ?? "", "PUT"),
       DELETE: ({ request, params }) => handle(request, params._splat ?? "", "DELETE"),
@@ -90,7 +92,7 @@ async function handle(request: Request, path: string, method: string): Promise<R
 
   if (path === "sessions" && method === "GET") return listSessions();
   if (path === "capabilities" && method === "GET")
-    return json({ schema_version: 1, providers: PROVIDERS, pi_relay: 1 });
+    return json({ schema_version: 1, providers: PROVIDERS, pi_relay: 1, video_assets: 1 });
 
   const sessionMatch = /^sessions\/([^/]+)\/(.+)$/u.exec(path);
   if (sessionMatch && method === "GET")
@@ -112,7 +114,7 @@ async function handle(request: Request, path: string, method: string): Promise<R
   }
 
   const assetMatch = /^assets\/([0-9a-f-]+)$/u.exec(path);
-  if (assetMatch && method === "GET") return serveAsset(assetMatch[1] ?? "");
+  if (assetMatch && (method === "GET" || method === "HEAD")) return serveAsset(assetMatch[1] ?? "", method);
 
   if (path === "publications/prepare" && method === "POST") return preparePublication(request);
   const publicationMatch = /^publications\/([0-9a-f-]+)(?:\/(commit))?$/u.exec(path);
@@ -287,18 +289,14 @@ async function deleteSession(provider: string, sessionId: string): Promise<Respo
   return json({ ok: true });
 }
 
-async function serveAsset(assetId: string): Promise<Response> {
+async function serveAsset(assetId: string, method: string): Promise<Response> {
   const { data: asset } = await supabaseAdmin
     .from("grill_round_assets")
     .select("object_path,media_type,sha256")
     .eq("id", assetId)
     .maybeSingle();
   if (!asset) return problem(404, "asset_not_found", "Asset not found.");
-  const { data, error } = await supabaseAdmin.storage.from(BUCKET).download(asset.object_path);
-  if (error || !data) return problem(404, "asset_missing", "Asset is unavailable.");
-  return new Response(data, {
-    headers: { "Content-Type": asset.media_type, "Cache-Control": "private, no-store", ETag: `"${asset.sha256}"` },
-  });
+  return assetResponse(asset, supabaseAdmin.storage.from(BUCKET), method);
 }
 
 async function preparePublication(request: Request): Promise<Response> {
@@ -360,7 +358,7 @@ async function preparePublication(request: Request): Promise<Response> {
   return publicationResponse(publication);
 }
 
-/** The hook decodes HTML entities while discovering images, so the stored markup may still encode them. */
+/** The hook decodes HTML entities while discovering assets, so the stored markup may still encode them. */
 function referenceVariants(reference: string): string[] {
   if (!reference.includes("&")) return [reference];
   return [reference, ...["&amp;", "&#38;", "&#x26;"].map((entity) => reference.split("&").join(entity))];
@@ -405,21 +403,6 @@ async function publicationStatus(id: string): Promise<Response> {
   return data ? json({ publication: data }) : problem(404, "publication_not_found", "Publication not found.");
 }
 
-function imageMatches(bytes: Buffer, type: string): boolean {
-  if (type === "image/png") return bytes.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]));
-  if (type === "image/jpeg") return bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff;
-  if (type === "image/gif") return ["GIF87a", "GIF89a"].includes(bytes.subarray(0, 6).toString("ascii"));
-  if (type === "image/webp")
-    return bytes.subarray(0, 4).toString("ascii") === "RIFF" && bytes.subarray(8, 12).toString("ascii") === "WEBP";
-  if (type === "image/avif")
-    return (
-      bytes.subarray(4, 8).toString("ascii") === "ftyp" &&
-      ["avif", "avis"].includes(bytes.subarray(8, 12).toString("ascii"))
-    );
-  if (type === "image/svg+xml") return /<svg(?:\s|>)/iu.test(bytes.subarray(0, 4096).toString("utf8"));
-  return false;
-}
-
 async function commitPublication(request: Request, id: string): Promise<Response> {
   const key = request.headers.get("idempotency-key")?.trim();
   const { data: publication } = await supabaseAdmin.from("grill_publications").select("*").eq("id", id).maybeSingle();
@@ -441,15 +424,15 @@ async function commitPublication(request: Request, id: string): Promise<Response
   const verified = [];
   for (const item of manifest) {
     const { data: blob, error } = await supabaseAdmin.storage.from(BUCKET).download(item.object_path);
-    if (error || !blob) return problem(422, "missing_image", `Missing upload for ${item.reference}.`);
+    if (error || !blob) return problem(422, "missing_asset", `Missing upload for ${item.reference}.`);
+    if (blob.size !== item.byte_size)
+      return problem(422, "asset_size_mismatch", `Size mismatch for ${item.reference}.`);
     const bytes = Buffer.from(await blob.arrayBuffer());
-    if (bytes.length !== item.byte_size)
-      return problem(422, "image_size_mismatch", `Size mismatch for ${item.reference}.`);
-    if (!imageMatches(bytes, item.media_type))
-      return problem(422, "unsupported_image", `Media type mismatch for ${item.reference}.`);
+    if (!mediaMatches(bytes, item.media_type))
+      return problem(422, "unsupported_asset", `Media type mismatch for ${item.reference}.`);
     const digest = createHash("sha256").update(bytes).digest("hex");
     if (digest.toLowerCase() !== item.sha256.toLowerCase())
-      return problem(422, "image_hash_mismatch", `Checksum mismatch for ${item.reference}.`);
+      return problem(422, "asset_hash_mismatch", `Checksum mismatch for ${item.reference}.`);
     verified.push({
       id: item.id,
       original_reference: item.reference,

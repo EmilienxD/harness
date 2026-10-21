@@ -17,6 +17,13 @@ begin
   if not exists (select 1 from storage.buckets where id = 'grill-assets' and public = false) then
     raise exception 'grill-assets must exist and remain private';
   end if;
+  if not exists (
+    select 1 from storage.buckets where id = 'grill-assets'
+      and file_size_limit = 20971520
+      and allowed_mime_types @> array['video/mp4', 'video/webm']::text[]
+  ) then
+    raise exception 'grill-assets needs the video asset migration';
+  end if;
 end $$;
 
 select public.grill_touch_session(gen_random_uuid());

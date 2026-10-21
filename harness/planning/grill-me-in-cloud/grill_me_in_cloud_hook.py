@@ -9,8 +9,10 @@ import re
 import secrets
 import shutil
 import signal
+import subprocess
 import sys
 import tempfile
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -24,14 +26,16 @@ from pathlib import Path
 DEFAULT_GRILL_URL = "https://grill-me-in-cloud.vercel.app"
 SCHEMA_VERSION = 1
 MAX_IMAGE_BYTES = 6 * 1024 * 1024
-MAX_ROUND_BYTES = 24 * 1024 * 1024
-MAX_IMAGES = 20
+MAX_VIDEO_BYTES = 20 * 1024 * 1024
+MAX_ROUND_BYTES = 50 * 1024 * 1024
+MAX_ASSETS = 20
 # Lowercase letters and digits without the look-alikes 0/o and 1/i/l.
 INBOX_ALPHABET = "abcdefghjkmnpqrstuvwxyz23456789"
 MEDIA_TYPES = {
     ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
     ".webp": "image/webp", ".gif": "image/gif", ".avif": "image/avif",
     ".svg": "image/svg+xml",
+    ".mp4": "video/mp4", ".webm": "video/webm",
 }
 
 
@@ -154,7 +158,7 @@ def _srcset_urls(value: str) -> list[str]:
     return urls
 
 
-class _ImageReferences(HTMLParser):
+class _MediaReferences(HTMLParser):
     def __init__(self) -> None:
         super().__init__(convert_charrefs=True)
         self.references: list[str] = []
@@ -162,8 +166,10 @@ class _ImageReferences(HTMLParser):
     def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
         values = {name.lower(): value for name, value in attrs if value is not None}
         lowered = tag.lower()
-        if lowered == "img" and values.get("src"):
+        if lowered in {"img", "video", "source"} and values.get("src"):
             self.references.append(values["src"])
+        if lowered == "video" and values.get("poster"):
+            self.references.append(values["poster"])
         if lowered in {"img", "source"} and values.get("srcset"):
             self.references.extend(_srcset_urls(values["srcset"]))
 
@@ -172,7 +178,7 @@ def discover_references(payload: dict) -> list[str]:
     references: list[str] = []
     seen: set[str] = set()
     for question in payload["questions"]:
-        parser = _ImageReferences()
+        parser = _MediaReferences()
         parser.feed(question["explanation_html"])
         parser.close()
         for reference in parser.references:
@@ -182,8 +188,16 @@ def discover_references(payload: dict) -> list[str]:
     return references
 
 
-def _sniff_image(path: Path, declared: str) -> bool:
-    sample = path.read_bytes()[:4096]
+def _sniff_media(path: Path, declared: str) -> bool:
+    with path.open("rb") as file:
+        sample = file.read(4096)
+    if declared == "video/mp4":
+        return len(sample) >= 16 and sample[4:8] == b"ftyp" and sample[8:12] in {
+            b"isom", b"iso2", b"iso3", b"iso4", b"iso5", b"iso6", b"iso8", b"iso9",
+            b"mp41", b"mp42", b"avc1", b"M4V ", b"dash",
+        }
+    if declared == "video/webm":
+        return sample.startswith(b"\x1a\x45\xdf\xa3") and b"webm" in sample
     if declared == "image/png":
         return sample.startswith(b"\x89PNG\r\n\x1a\n")
     if declared == "image/jpeg":
@@ -211,29 +225,66 @@ def validate_assets(payload: dict, assets_dir: Path, assets_prefix: str) -> list
         if parsed.scheme.lower() in {"http", "https", "data"}:
             continue
         if parsed.scheme or parsed.netloc or not reference.startswith(assets_prefix):
-            raise RoundError(f"Unsupported local image reference: {reference}")
+            raise RoundError(f"Unsupported local asset reference: {reference}")
         relative = urllib.parse.unquote(parsed.path[len(assets_prefix):])
         if not relative or parsed.query or parsed.fragment or Path(relative).is_absolute():
-            raise RoundError(f"Invalid local image reference: {reference}")
+            raise RoundError(f"Invalid local asset reference: {reference}")
         candidate = (root / Path(relative)).resolve(strict=False)
         if not candidate.is_relative_to(root) or not candidate.is_file():
-            raise RoundError(f"Local image is missing or escapes the round assets directory: {reference}")
+            raise RoundError(f"Local asset is missing or escapes the round assets directory: {reference}")
         media_type = MEDIA_TYPES.get(candidate.suffix.lower()) or mimetypes.guess_type(candidate.name)[0]
-        if media_type not in MEDIA_TYPES.values() or not _sniff_image(candidate, media_type):
-            raise RoundError(f"Unsupported image or media type mismatch: {reference}")
+        if media_type and media_type.startswith("video/") and candidate.suffix.lower() not in {".mp4", ".webm"}:
+            raise RoundError(f"Video previews must use .mp4 or .webm: {reference}")
+        if media_type not in MEDIA_TYPES.values() or not _sniff_media(candidate, media_type):
+            raise RoundError(f"Unsupported asset or media type mismatch: {reference}")
         size = candidate.stat().st_size
-        if size > MAX_IMAGE_BYTES:
-            raise RoundError(f"Image exceeds 6 MiB: {reference}")
+        is_video = media_type.startswith("video/")
+        limit = MAX_VIDEO_BYTES if is_video else MAX_IMAGE_BYTES
+        if not size or size > limit:
+            raise RoundError(f"{'Video' if is_video else 'Image'} must be nonempty and at most {limit // (1024 * 1024)} MiB: {reference}")
         total += size
         if total > MAX_ROUND_BYTES:
-            raise RoundError("Round images exceed 24 MiB")
-        if len(manifest) >= MAX_IMAGES:
-            raise RoundError("Round contains more than 20 local images")
+            raise RoundError("Round assets exceed 50 MiB")
+        if len(manifest) >= MAX_ASSETS:
+            raise RoundError("Round contains more than 20 local assets")
+        with candidate.open("rb") as file:
+            digest = hashlib.file_digest(file, "sha256").hexdigest()
         manifest.append({
             "reference": reference, "path": candidate, "media_type": media_type,
-            "byte_size": size, "sha256": hashlib.sha256(candidate.read_bytes()).hexdigest(),
+            "byte_size": size, "sha256": digest,
         })
     return manifest
+
+
+def prepare_video(source: Path, destination: Path, deadline: float) -> None:
+    """Prepare browser-ready previews locally; FFmpeg is supplied by the user, never installed here."""
+    executable = shutil.which("ffmpeg")
+    if not executable:
+        raise RoundError("Video previews require ffmpeg on PATH. Make the installed FFmpeg available and republish the round.")
+    codec = (
+        ["-c:v", "libvpx-vp9", "-deadline", "realtime", "-cpu-used", "8", "-crf", "32", "-b:v", "0", "-c:a", "libopus"]
+        if source.suffix.lower() == ".webm" else
+        ["-c:v", "libx264", "-preset", "veryfast", "-crf", "23", "-c:a", "aac", "-movflags", "+faststart"]
+    )
+    command = [
+        executable, "-hide_banner", "-loglevel", "error", "-nostdin", "-y",
+        "-protocol_whitelist", "file,pipe", "-i", str(source),
+        "-map", "0:v:0", "-map", "0:a:0?", "-map_metadata", "-1", "-sn", "-dn",
+        "-vf", "scale=w='min(1280,iw)':h='min(720,ih)':force_original_aspect_ratio=decrease:force_divisible_by=2",
+        "-fpsmax", "30", "-pix_fmt", "yuv420p", "-threads", "2", *codec, "-b:a", "128k", str(destination),
+    ]
+    try:
+        result = subprocess.run(command, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                                stderr=subprocess.PIPE, timeout=max(0.1, deadline - time.monotonic()),
+                                **({"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}))
+    except subprocess.TimeoutExpired as error:
+        raise RoundError("Video preparation exceeded 60 seconds. Shorten or compress the clips and republish.") from error
+    except OSError as error:
+        raise RoundError(f"Cannot run the installed FFmpeg: {error}") from error
+    if result.returncode:
+        raise RoundError(f"FFmpeg could not prepare {source.name}. Check that the file is a playable video and FFmpeg supports its codecs.")
+    if not destination.is_file() or not 0 < destination.stat().st_size <= MAX_VIDEO_BYTES:
+        raise RoundError(f"Prepared video must be nonempty and at most 20 MiB: {source.name}. Shorten or compress it and republish.")
 
 
 @dataclass
@@ -321,9 +372,9 @@ class HostedClient:
                 response.read()
         except urllib.error.HTTPError as error:
             if error.code != 409:
-                raise HostedError(f"Image upload failed ({error.code})", "upload_failed", error.code) from error
+                raise HostedError(f"Asset upload failed ({error.code})", "upload_failed", error.code) from error
         except (urllib.error.URLError, TimeoutError) as error:
-            raise HostedError(f"Image upload failed: {error}", "upload_failed") from error
+            raise HostedError(f"Asset upload failed: {error}", "upload_failed") from error
 
     def session(self, provider: str, session_id: str) -> dict | None:
         path = f"/api/v1/sessions/{urllib.parse.quote(provider, safe='')}/{urllib.parse.quote(session_id, safe='')}"
@@ -454,10 +505,24 @@ class InterviewRuntime:
         directory = self.root / "outbox" / self.key(provider, session) / publication_key
         directory.mkdir(parents=True, exist_ok=False)
         assets = []
-        for index, item in enumerate(manifest):
-            destination = directory / f"asset-{index:03d}{item['path'].suffix.lower()}"
-            shutil.copyfile(item["path"], destination)
-            assets.append({key: value for key, value in item.items() if key != "path"} | {"file": destination.name})
+        deadline = time.monotonic() + 60
+        try:
+            for index, item in enumerate(manifest):
+                destination = directory / f"asset-{index:03d}{item['path'].suffix.lower()}"
+                if item["media_type"].startswith("video/"):
+                    prepare_video(item["path"], destination, deadline)
+                else:
+                    shutil.copyfile(item["path"], destination)
+                with destination.open("rb") as file:
+                    digest = hashlib.file_digest(file, "sha256").hexdigest()
+                assets.append({key: value for key, value in item.items() if key != "path"} | {
+                    "file": destination.name, "byte_size": destination.stat().st_size, "sha256": digest,
+                })
+            if sum(asset["byte_size"] for asset in assets) > MAX_ROUND_BYTES:
+                raise RoundError("Prepared round assets exceed 50 MiB. Shorten or compress the clips and republish.")
+        except BaseException:
+            shutil.rmtree(directory)
+            raise
         staged = {
             "provider": provider, "session_id": session, "title": title,
             "schema_version": SCHEMA_VERSION, "idempotency_key": publication_key,
@@ -524,10 +589,12 @@ class InterviewRuntime:
         assets = interview.directory / "assets" / f"round-{old_sequence:03d}"
         manifest = validate_assets(payload, assets, f"assets/round-{old_sequence:03d}/")
         identity = project_identity(project, home) if project is not None else None
-        # The board makes its newest commit the active round, so a queued older round must never follow this one.
+        publication = self._stage(provider, session, payload, manifest, title, identity)
+        # Prepare successfully before replacing older queued work. The newest commit becomes the active round.
         for queued in self._outboxes(provider, session):
-            shutil.rmtree(queued.parent)
-        return self._publish_staged(self._stage(provider, session, payload, manifest, title, identity))
+            if queued != publication:
+                shutil.rmtree(queued.parent)
+        return self._publish_staged(publication)
 
 
 STOP = "Tell the user in one line and stop."
@@ -541,7 +608,7 @@ def instructions(interview: Interview) -> str:
     return (
         "Publish the next grill round by writing its complete JSON directly to this reserved path:\n"
         f"{interview.source}\n"
-        f"Write supporting images first under {interview.assets} and reference them with the URL prefix "
+        f"Write supporting images and MP4/WebM videos first under {interview.assets} and reference them with the URL prefix "
         f"{interview.assets_url}.\n"
         "The system owns and creates both directories and their parents outside the project. They are reserved "
         "to your session and you are their sole writer; create the files directly at these exact paths without "
@@ -660,7 +727,7 @@ def _publish(payload: dict, provider: str, session: str, project: Path, runtime:
     except RoundError as error:
         return context(
             event,
-            f"Round rejected: {error}\nFix it and write the complete round, images included, to the new paths below.\n\n"
+            f"Round rejected: {error}\nFix it and write the complete round, assets included, to the new paths below.\n\n"
             f"{instructions(runtime.current(provider, session))}",
         )
     except HostedError as error:
