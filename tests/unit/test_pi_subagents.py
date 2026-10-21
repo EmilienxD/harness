@@ -512,12 +512,20 @@ class TestBridge:
 
 
 def test_catalogue_installs_the_pi_extension_with_shared_skills():
-    tool = discover()["subagents"]
+    catalogue = discover()
+    tool = catalogue["subagents"]
     entries = {entry.dest: entry for entry in tool.expand("pi")}
 
     assert tool.support_for("pi").status is SupportStatus.SUPPORTED
     assert entries[".harness-subagents/index.ts"].root == "extensions"
-    assert "subagents-toolkit/SKILL.md" in entries
+    assert "subagents-toolkit/SKILL.md" not in entries
+    toolkit = catalogue["pi-subagents-toolkit"]
+    assert not toolkit.selectable
+    assert {entry.dest for entry in toolkit.expand("pi")} == {
+        "subagents-toolkit/SKILL.md", "subagents-toolkit/builtin-tasks.yaml",
+    }
+    assert any(dependency.name == toolkit.name and dependency.lifecycle == "coupled"
+               for dependency in tool.dependencies)
     assert not any(dest.endswith("openai.yaml") for dest in entries)
     transport = next(dependency for dependency in tool.dependencies if dependency.name == "pi-transport")
     assert [platform.value for platform in transport.platforms] == ["pi"]

@@ -17,7 +17,7 @@ export async function runPiEnvironmentContextJourney(scope: "project" | "user") 
   try {
     const { workspace } = fixture;
     const resources = scope === "project" ? join(workspace.projectRoot, ".pi") : workspace.agentDir;
-    const extension = join(resources, "extensions/.harness-environment-context/index.ts");
+    const extension = join(resources, "npm/node_modules/harness-pi-environment-context/extensions/.harness-environment-context/index.ts");
     const settings = join(resources, "settings.json");
     const originalSettings = JSON.parse(await readFile(settings, "utf8"));
     await runFixtureInstaller(workspace, "install", ["environment-context"], { scope, dryRun: true });

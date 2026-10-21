@@ -22,7 +22,7 @@ def test_background_shell_installs_and_removes_without_touching_instructions(tmp
     receipts = ReceiptStore.load(tmp_path / "receipts.json")
     installer = CatalogueInstaller(discover(), target, receipts)
     installer.reconcile({"background-shell"})
-    extension = target.destination_path("extensions", ".harness-background-shell/index.ts")
+    extension = target.install_root / "npm/node_modules/harness-pi-background-shell/extensions/.harness-background-shell/index.ts"
     ui = extension.with_name("ui.ts")
     assert extension.is_file()
     assert ui.is_file()

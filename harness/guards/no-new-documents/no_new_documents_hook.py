@@ -34,8 +34,9 @@ PROVIDER = CLAUDE
 
 
 def _config_sources(root: Path) -> list[Path]:
+    personal = Path(os.environ.get("HARNESS_PI_SUPPORT_DIR", Path(__file__).parent)) / CONFIG_NAME
     candidates = [
-        Path(__file__).with_name(CONFIG_NAME),
+        personal if personal.is_file() else Path(__file__).with_name(CONFIG_NAME),
         Path.home() / ".harness" / "guards" / CONFIG_NAME,
         root / ".harness" / "guards" / CONFIG_NAME,
     ]

@@ -11,7 +11,7 @@ export async function runPiMidPromptSkills(scope: "project" | "user", mode: "jso
   try {
     const { workspace } = fixture;
     const resourcesRoot = scope === "project" ? join(workspace.projectRoot, ".pi") : workspace.agentDir;
-    const extension = join(resourcesRoot, "extensions", ".harness-mid-prompt-skills", "index.ts");
+    const extension = join(resourcesRoot, "npm/node_modules/harness-pi-mid-prompt-skills", "extensions", ".harness-mid-prompt-skills", "index.ts");
     const settings = join(workspace.projectRoot, ".pi", "settings.json");
     const originalSettings = await readFile(settings, "utf8");
     // Skill commands hidden from the UI must still work, as with Pi's native explicit loader.

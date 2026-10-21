@@ -175,11 +175,11 @@ def _substitute(value: Any, target: Target, python: tuple[str, list[str]] | None
     return value
 
 
-def _write_json(path: Path, value: dict[str, Any]) -> None:
+def _write_json(path: Path, value: dict[str, Any], style: bytes | None = None) -> None:
     if path.is_symlink():
         raise InstallError(f"refusing to replace symlink {path}")
     path.parent.mkdir(parents=True, exist_ok=True)
-    previous = path.read_bytes() if path.is_file() else b""
+    previous = style if style is not None else path.read_bytes() if path.is_file() else b""
     newline = "\r\n" if b"\r\n" in previous else "\n"
     encoding = "utf-8-sig" if previous.startswith(b"\xef\xbb\xbf") else "utf-8"
     temporary = path.with_name(f".{path.name}.harness-{os.getpid()}-{next(tempfile._get_candidate_names())}")
@@ -377,6 +377,8 @@ class CatalogueInstaller:
         )
 
     def _selection_catalogue(self, requested_names: set[str]) -> dict[str, Tool]:
+        self._pi_payloads.clear()
+        self._pi_caches.clear()
         current = self.installation["packages"]
         self._preserved = (
             (set(current) & set(self.available)) - self.update_packages
@@ -391,6 +393,17 @@ class CatalogueInstaller:
             )
         }
         while True:
+            if self.target.platform is Platform.PI:
+                # Rebuild the full consumer chain, including constraint-promoted helpers.
+                while True:
+                    consumers = {
+                        name for name in self._preserved
+                        if any(dependency.name not in self._preserved and dependency.name in current
+                               for dependency in self.available[name].dependencies)
+                    }
+                    if not consumers:
+                        break
+                    self._preserved.difference_update(consumers)
             available = dict(self.available)
             for name in self._preserved:
                 receipt = current[name]
@@ -435,23 +448,39 @@ class CatalogueInstaller:
     def _payloads(self, tool: Tool) -> list[ExpandedFile]:
         scope = "user" if self.target.is_user else "project"
         files = tool.expand(self.target.platform, scope)
-        if self.target.platform is Platform.PI and any(file.root == "extensions" for file in files):
+        if self.target.platform is Platform.PI and any(file.root in {"extensions", "support"} for file in files):
             key = (tool.name, tool.version)
             if key not in self._pi_payloads:
                 if self._pi_package_directory is None:
                     self._pi_package_directory = tempfile.TemporaryDirectory(prefix="harness-pi-packages-")
-                self._pi_payloads[key] = pi_packages.payloads(
-                    tool, files, Path(self._pi_package_directory.name) / str(len(self._pi_payloads)),
-                )
-                archive = self._pi_payloads[key][-1].source
+                directory = Path(self._pi_package_directory.name) / tool.name
+                dependencies = []
+                for dependency in tool.dependencies:
+                    selected = self.available[dependency.name]
+                    receipt = self.installation["packages"].get(dependency.name, {})
+                    if dependency.name in self._preserved and receipt.get("piPackage"):
+                        archive = Path(receipt["piPackage"].split("@file:", 1)[1])
+                    else:
+                        self._payloads(selected)
+                        cached = self._pi_caches.get((selected.name, selected.version))
+                        if cached is None:
+                            continue
+                        archive = cached[0]
+                    dependencies.extend(pi_packages.support_files(archive, directory / "dependencies" / selected.name))
+                self._pi_payloads[key] = pi_packages.payloads(tool, files, directory, dependencies)
+                archive = directory / "package.tgz"
                 self._pi_caches[key] = (archive, pi_packages.cache_path(archive, self.store.path))
-            files.extend(self._pi_payloads[key])
+            files = self._pi_payloads[key]
         return files
+
+    def _pi_source(self, tool: Tool) -> str | None:
+        self._payloads(tool)
+        cache = self._pi_caches.get((tool.name, tool.version))
+        return pi_packages.source(tool, cache[1]) if cache else None
 
     def _fragment(self, tool: Tool, pi_package: dict | None = None) -> dict:
         fragment = tool.fragment_for(self.target.platform)
-        if self.target.platform is Platform.PI and any(file.root == "extensions" for file in self._payloads(tool)):
-            source = pi_packages.source(tool, self._pi_caches[(tool.name, tool.version)][1])
+        if self.target.platform is Platform.PI and (source := self._pi_source(tool)):
             entry = {**pi_package, "source": source} if pi_package else source
             return settings_merge.merge(fragment, {"packages": [entry]})
         return fragment
@@ -600,6 +629,9 @@ class CatalogueInstaller:
         """Reject receipt paths that could make an operation touch elsewhere."""
         root = self.target.scope_root.resolve()
         for package, receipt in packages.items():
+            native = receipt.get("piPackage") if self.target.platform is Platform.PI else None
+            if native and (not isinstance(native, str) or not native.startswith(f"npm:harness-pi-{package}@file:")):
+                raise InstallError(f"invalid Pi package source in receipt for {package}")
             for record in [*receipt.get("files", []), *receipt.get("gitignoreFiles", []), *receipt.get("links", [])]:
                 path = Path(record["path"])
                 try:
@@ -729,6 +761,8 @@ class CatalogueInstaller:
                 changes.append(Change("ownership", item.tool.name, item.ownership))
             elif item.tool.name in self._preserved:
                 continue
+            elif self.target.platform is Platform.PI and receipt.get("piPackage") != self._pi_source(item.tool):
+                changes.append(Change("update", item.tool.name, "Pi package contents changed"))
             elif any(
                 record.get("owned") and not Path(record["path"]).is_file()
                 for record in receipt.get("files", [])
@@ -783,6 +817,7 @@ class CatalogueInstaller:
         paths.update(cache for _archive, cache in self._pi_caches.values())
         if self.target.platform is Platform.PI:
             paths.update(pi_packages.npm_metadata_paths(self.target.install_root))
+            paths.update(path for path in (self.target.install_root / "npm").rglob("*") if path.is_file())
         return paths
 
     def _local_links(self, resolved: list[ResolvedPackage]) -> set[Path]:
@@ -930,25 +965,6 @@ class CatalogueInstaller:
         approved = {_canonical_path(path) for path in overwrite}
         desired = {item.tool.name: item for item in resolved}
         packages = self.installation["packages"]
-        if self.target.platform is Platform.PI:
-            extension_root = self.target.install_root / "extensions"
-            for name, item in desired.items():
-                if not any(file.root == "extensions" for file in self._payloads(item.tool)):
-                    continue
-                for record in packages.get(name, {}).get("files", []):
-                    path = Path(record["path"])
-                    try:
-                        relative = path.relative_to(extension_root)
-                    except ValueError:
-                        continue
-                    if (
-                        relative.parts and not relative.parts[0].startswith(".") and path.is_file()
-                        and (not record.get("owned") or sha256(path) != record.get("digest"))
-                    ):
-                        raise InstallError(
-                            f"Cannot migrate modified or unowned Pi extension {path}; "
-                            "move it out of extensions or restore the installed file before upgrading."
-                        )
         if unowned := self._audit_destinations(resolved, approved):
             raise UnownedFileError(unowned)
         if products := self._audit_host_products(resolved, set(adopt)):
@@ -997,6 +1013,8 @@ class CatalogueInstaller:
                     missing_actions = self._missing_host_actions(item.tool)
                     cache = self._pi_caches.get((item.tool.name, item.tool.version))
                     if cache and (not cache[1].is_file() or sha256(cache[1]) != sha256(cache[0])):
+                        missing_files = True
+                    if self.target.platform is Platform.PI and current.get("piPackage") != self._pi_source(item.tool):
                         missing_files = True
                     if missing_files or missing_links or missing_actions:
                         repairs.add(item.tool.name)
@@ -1135,12 +1153,39 @@ class CatalogueInstaller:
         prior_receipt = self.installation["packages"].get(tool.name)
         payloads = self._payloads(tool)
         cache = self._pi_caches.get((tool.name, tool.version))
+        raw_fragment = self._fragment(tool, pi_package)
+        python = _python_command() if "${PYTHON}" in json.dumps(raw_fragment) else None
+        fragment = _substitute(raw_fragment, self.target, python)
+        before = self.target.read_settings()
+        style = self.target.settings_path.read_bytes() if self.target.settings_path.is_file() else b""
+        base = before
+        if cache and prior_receipt:
+            recorded = prior_receipt.get("fragment", {}).get("packages", [])
+            owned_sources = {entry.get("source") if isinstance(entry, dict) else entry for entry in recorded}
+            previous = next((entry for entry in before.get("packages", [])
+                             if (entry.get("source") if isinstance(entry, dict) else entry) in owned_sources), None)
+            if isinstance(previous, dict) and pi_package is None:
+                fragment["packages"] = [{**previous, "source": self._pi_source(tool)}]
+            base = self.target.adapter.unmerge_config(before, prior_receipt.get("fragment", {}))
+        merged = self.target.adapter.merge_config(base, fragment) if fragment else base
         if cache:
             archive, destination = cache
             destination.parent.mkdir(parents=True, exist_ok=True)
             _copy_atomic(archive, destination)
+            try:
+                pi_packages.run("install", self._pi_source(tool), self.target.scope_root, self.target.is_user)
+            except pi_packages.PiPackageError as exc:
+                raise InstallError(str(exc)) from exc
         for payload in payloads:
             destination = self._destination(payload)
+            if cache and destination.is_relative_to(pi_packages.package_root(self.target.install_root, tool.name)):
+                if not destination.is_file():
+                    raise InstallError(f"Pi did not install the expected package file: {destination}")
+                files.append({
+                    "path": str(destination.resolve()), "digest": sha256(destination), "starter": False,
+                    "owned": True,
+                })
+                continue
             if destination.exists() and payload.starter:
                 other_record = self._owned_file_in_another_installation(str(destination))
                 managed_digest = other_record.get("digest") if other_record else None
@@ -1215,18 +1260,19 @@ class CatalogueInstaller:
                 "path": str(link.absolute()), "target": str(target.absolute()), "owned": owned,
             })
 
-        raw_fragment = self._fragment(tool, pi_package)
-        python = _python_command() if "${PYTHON}" in json.dumps(raw_fragment) else None
-        fragment = _substitute(raw_fragment, self.target, python)
         if fragment:
-            before = self.target.read_settings()
-            merged = self.target.adapter.merge_config(before, fragment)
-            _write_json(self.target.settings_path, merged)
+            if cache:
+                _write_json(self.target.settings_path, merged, style)
+            else:
+                _write_json(self.target.settings_path, merged)
             fragment = settings_merge.additions(
                 before, merged if self.target.platform is Platform.PI else fragment,
             )
             if self.target.platform is Platform.PI and prior_receipt:
-                fragment = settings_merge.merge(prior_receipt.get("fragment", {}), fragment)
+                previous_fragment = deepcopy(prior_receipt.get("fragment", {}))
+                if cache and prior_receipt.get("piPackage") != self._pi_source(tool):
+                    previous_fragment.pop("packages", None)
+                fragment = settings_merge.merge(previous_fragment, fragment)
         block = f"{tool.name}:{self.target.platform.value}"
         ignore_files = []
         for path, patterns in self._ignore_locations(tool).items():
@@ -1270,6 +1316,7 @@ class CatalogueInstaller:
             "fragment": fragment,
             "gitignoreFiles": ignore_files,
             "actions": [{"type": action.type, **action.data} for action in tool.actions],
+            **({"piPackage": self._pi_source(tool)} if cache else {}),
         }
 
     def _remove(
@@ -1283,9 +1330,24 @@ class CatalogueInstaller:
         receipt = self.installation["packages"].get(name)
         if receipt is None:
             return
-        if self.target.platform is Platform.PI:
-            for path, metadata in pi_packages.npm_removals(self.target.install_root, receipt.get("fragment", {})).items():
-                _write_json(path, metadata)
+        native = receipt.get("piPackage") if self.target.platform is Platform.PI else None
+        if native:
+            for record in receipt.get("files", []):
+                path = Path(record["path"])
+                if (path.is_relative_to(pi_packages.package_root(self.target.install_root, name))
+                        and path.is_file() and sha256(path) != record.get("digest")):
+                    raise InstallError(f"refusing to remove modified Pi package file {path}")
+            owned_sources = {
+                entry.get("source") if isinstance(entry, dict) else entry
+                for entry in receipt.get("fragment", {}).get("packages", [])
+            }
+            if native in owned_sources:
+                style = self.target.settings_path.read_bytes() if self.target.settings_path.is_file() else b""
+                try:
+                    pi_packages.run("remove", native, self.target.scope_root, self.target.is_user)
+                except pi_packages.PiPackageError as exc:
+                    raise InstallError(str(exc)) from exc
+                _write_json(self.target.settings_path, self.target.read_settings(), style)
         if remove_actions and not self._owned_in_another_installation(name):
             old_actions = rollback_actions or []
             for index, raw in reversed(list(enumerate(receipt.get("actions", [])))):
@@ -1295,6 +1357,8 @@ class CatalogueInstaller:
                     host_undo.append(("apply", restore))
         for record in receipt.get("files", []):
             path = Path(record["path"])
+            if native and path.is_relative_to(pi_packages.package_root(self.target.install_root, name)):
+                continue
             if (
                 not self._file_owned_in_another_installation(record["path"])
                 and record["owned"]

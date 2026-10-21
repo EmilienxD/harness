@@ -64,14 +64,17 @@ each skill, reads bundled references and the websearch source index with real to
 and receipt-driven removal. Scripted fixture actions certify resource integration;
 they do not evaluate unscripted workflow judgment or external services.
 
-Pi extension entry points install under `extensions/.harness-*` and load through per-tool
-native package identities. `test:pi-package-precedence` installs two versions at user and
-project scopes and verifies one project tool/command/hook, reload, copied checkouts, package
-filters, untrusted projects and user fallback after removal. It also runs native npm updates
-with npm networking disabled and checks receipt-driven dependency/lock cleanup preserves
-another installed package. Archives and settings remain inside the fixture.
-Python helpers, TypeScript support, and user policy starters install under `harness/`, outside extension discovery. Command-guard
-journeys check fresh project and user installations create no `hooks/` directory. They also run
+Pi extension packages install through `pi install` under
+`npm/node_modules/harness-pi-<tool>/` in the selected Pi directory. Each archive contains its
+extensions, skills and required Python/TypeScript helpers; resource paths remain inside the
+package. `test:pi-package-precedence` verifies matching user/project identities, reload,
+copied checkouts, filters, untrusted projects and user fallback. It also runs native npm updates
+with npm networking disabled, reinstalls the archive directly through Pi, and checks native
+removal preserves another package and its npm metadata. Archives and settings stay in the fixture.
+Editable user policies remain under `<agent-dir>/harness/`; project policies use `.harness/guards/`.
+The coupled subagent toolkit skill stays in conventional `skills/`, where both Pi and its
+independent Python runtime read the same task registry.
+Command-guard journeys check fresh project and user installations create no `hooks/` directory. They also run
 the installed Pi startup warning detector in an isolated subprocess and require zero warnings.
 JSON/RPC suppress interactive deprecation warnings, so silence alone is not evidence. A positive
 control checks the detector recognizes legacy directories at both scopes.
@@ -421,6 +424,10 @@ the request, launches the child and delivers its result.
 `test:pi-subagents` installs the real `subagents` package at project scope into an isolated uv tool
 environment. The auto journey runs with both the checkout runtime (`--local`) and the manifest's
 published Git pin; the latter catches stale runtime pins that local-source tests cannot detect.
+The npm packaging checks found that the current `c650a6f` pin predates the extension's
+`inbox_scan` operation. Four shipped-pin subagent journeys fail until the runtime changes in
+local commit `ba136dd` are published and pinned. Checkout-runtime delegation and the combined
+cloud interview stack pass; those development results do not certify the shipped runtime pin.
 The interactive journey uses the shipped runtime pin. The shared fixture installer defaults to
 shipped pins; local-runtime testing must opt in explicitly. A project
 `.harness/config.json` gives children the same isolated, trusted Pi invocation; the session and agent

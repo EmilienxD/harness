@@ -22,6 +22,7 @@ test("native Pi packages select the project copy once and restore the user copy 
     await cp(join(await findHarnessRoot(), "harness/productivity/clear-alias"),
       join(catalogueRoot, "harness/productivity/clear-alias"), { recursive: true });
     await runFixtureInstaller(fixture.workspace, "install", ["clear-alias"], { scope: "user", catalogueRoot });
+    const nativeSources = new Map<string, string>();
     for (const scope of ["user", "project"] as const) {
       await writeFile(join(toolRoot, "harness.toml"), `name = "scope-probe"
 version = "${scope === "user" ? "1.0.0" : "2.0.0"}"
@@ -32,25 +33,38 @@ status = "supported"
 src = "extension.ts"
 dest = ".harness-scope-probe/index.ts"
 root = "extensions"
+[[files]]
+src = "helper.ts"
+dest = "scope-probe.ts"
+root = "support"
 `);
+      await writeFile(join(toolRoot, "helper.ts"), `export const selectedScope = "${scope}";\n`);
       await writeFile(join(toolRoot, "extension.ts"), `
 import {appendFileSync, writeFileSync} from "node:fs";
 import {join} from "node:path";
+import {selectedScope} from "../../harness/scope-probe.ts";
 export default function(pi) {
-  pi.on("session_start", (_event, ctx) => appendFileSync(join(ctx.cwd, "scope-hooks.log"), "${scope}\\n"));
+  pi.on("session_start", (_event, ctx) => appendFileSync(join(ctx.cwd, "scope-hooks.log"), selectedScope + "\\n"));
   pi.registerTool({name:"scope_probe",label:"Scope probe",description:"Resource scope acceptance probe",
     parameters:{type:"object",properties:{}},
     async execute(_id, _params, _signal, _update, ctx) {
-      writeFileSync(join(ctx.cwd,"scope-tool.txt"),"${scope}");
-      return {content:[{type:"text",text:"${scope}"}]};
+      writeFileSync(join(ctx.cwd,"scope-tool.txt"),selectedScope);
+      return {content:[{type:"text",text:selectedScope}]};
     }});
   pi.registerCommand("scope-probe", {description:"Inspect selected scope",handler:async (_args,ctx) => {
-    writeFileSync(join(ctx.cwd,"scope-command.txt"),"${scope}");
+    writeFileSync(join(ctx.cwd,"scope-command.txt"),selectedScope);
   }});
   pi.registerCommand("scope-reload", {description:"Reload resources",handler:async (_args,ctx) => {await ctx.reload();}});
 }
 `);
       await runFixtureInstaller(fixture.workspace, "install", ["scope-probe"], { scope, catalogueRoot });
+      const platform = scope === "user" ? fixture.workspace.agentDir : join(fixture.workspace.projectRoot, ".pi");
+      const settings = JSON.parse(await readFile(join(platform, "settings.json"), "utf8"));
+      nativeSources.set(scope, settings.packages.find((entry: string) => entry.startsWith("npm:harness-pi-scope-probe@")));
+      const manifest = JSON.parse(await readFile(join(platform, "npm/node_modules/harness-pi-scope-probe/package.json"), "utf8"));
+      assert.deepEqual(manifest.pi.extensions, ["extensions/.harness-scope-probe"]);
+      await assert.rejects(readFile(join(platform, "harness/scope-probe.ts")));
+      await assert.rejects(readFile(join(platform, "harness/packages/scope-probe.tgz")));
     }
     const updateCommand = spawnableCommand("pi", ["update", "--extensions", "--approve"]);
     const updating = promisify(execFile)(updateCommand.file, [...updateCommand.args], {
@@ -61,6 +75,7 @@ export default function(pi) {
     updating.child.stdin?.end();
     await updating;
     const read = (name: string) => readFile(join(fixture.workspace.projectRoot, name), "utf8");
+    await mkdir(join(fixture.workspace.agentDir, "extensions"), { recursive: true });
     await writeFile(join(fixture.workspace.agentDir, "extensions", "user-extra.ts"), `
 import {writeFileSync} from "node:fs";
 import {join} from "node:path";
@@ -114,6 +129,14 @@ handler:async (_args,ctx) => writeFileSync(join(ctx.cwd,"user-extra.txt"),"prese
     assert.equal(await read("scope-command.txt"), "user");
     await writeFile(settingsPath, JSON.stringify(settings));
 
+    // A bundled helper change replaces the archive even when the consumer version is unchanged.
+    await writeFile(join(toolRoot, "helper.ts"), 'export const selectedScope = "project";\nexport const revision = 2;\n');
+    await runFixtureInstaller(fixture.workspace, "upgrade", [], { scope: "project", catalogueRoot });
+    const updatedSettings = JSON.parse(await readFile(settingsPath, "utf8"));
+    assert.notEqual(updatedSettings.packages[0], nativeSources.get("project"));
+    nativeSources.set("project", updatedSettings.packages[0]);
+    assert.match(await readFile(join(fixture.workspace.projectRoot, ".pi/npm/node_modules/harness-pi-scope-probe/harness/scope-probe.ts"), "utf8"), /revision = 2/u);
+
     await runFixtureInstaller(fixture.workspace, "uninstall", ["scope-probe"], { scope: "project", catalogueRoot });
     const npmProject = JSON.parse(await readFile(join(fixture.workspace.projectRoot, ".pi/npm/package.json"), "utf8"));
     assert.equal(npmProject.dependencies?.["harness-pi-scope-probe"], undefined);
@@ -135,5 +158,27 @@ handler:async (_args,ctx) => writeFileSync(join(ctx.cwd,"user-extra.txt"),"prese
     }
     assert.equal(fixture.assertions().inferenceRequests, 4);
     assert.equal(fixture.assertions().unexpectedRequests, 0);
+
+    // Pi can recreate and remove the complete package without Harness copying any files.
+    for (const operation of ["install", "remove"] as const) {
+      const command = spawnableCommand("pi", [operation, nativeSources.get("project")!, "--local", "--approve"]);
+      const running = promisify(execFile)(command.file, [...command.args], {
+        cwd: fixture.workspace.projectRoot, env: { ...fixture.workspace.env, npm_config_offline: "true", npm_config_audit: "false" },
+        encoding: "utf8", windowsHide: true, timeout: 30_000, maxBuffer: 1024 * 1024,
+      });
+      running.child.stdin?.end();
+      await running;
+      if (operation === "install") {
+        const restored = fixture.rpc();
+        assert.equal((await restored.prompt("/scope-probe")).status, "handled");
+        assert.equal(await read("scope-command.txt"), "project");
+        await restored.close();
+      } else {
+        await assert.rejects(readFile(join(fixture.workspace.projectRoot, ".pi/npm/node_modules/harness-pi-scope-probe/package.json")));
+        const settings = JSON.parse(await readFile(join(fixture.workspace.projectRoot, ".pi/settings.json"), "utf8"));
+        assert.ok(!settings.packages?.includes(nativeSources.get("project")));
+      }
+    }
+    assert.equal(fixture.assertions().inferenceRequests, 4);
   } finally { await fixture.close(); }
 });

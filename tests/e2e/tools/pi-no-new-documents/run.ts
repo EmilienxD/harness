@@ -21,7 +21,7 @@ export async function runPiDocumentsJourney(mode: "json" | "rpc", scope: "projec
     await mkdir(join(project, "docs"));
     await writeFile(join(project, "docs/existing.md"), "original existing\n");
     await runFixtureInstaller(fixture.workspace, "install", ["no-new-documents"], { scope, dryRun: true });
-    assert.equal(existsSync(join(platformRoot, "extensions/.harness-no-new-documents/index.ts")), false);
+    assert.equal(existsSync(join(platformRoot, "npm/node_modules/harness-pi-no-new-documents/extensions/.harness-no-new-documents/index.ts")), false);
     await runFixtureInstaller(fixture.workspace, "install", ["no-new-documents"], { scope });
     const customPolicy = 'version = 1\nprotected = ["**/docs/**"]\n# preserved customization\n';
     await writeFile(policy, customPolicy);
@@ -86,12 +86,12 @@ export async function runPiDocumentsJourney(mode: "json" | "rpc", scope: "projec
       assert.ok(commands.some((command) => command.name === "skill:cleanup-git" && command.source === "skill"));
     }
     await runFixtureInstaller(fixture.workspace, "uninstall", ["no-new-documents"], { scope });
-    await assert.rejects(access(join(platformRoot, "extensions/.harness-no-new-documents/index.ts")));
+    await assert.rejects(access(join(platformRoot, "npm/node_modules/harness-pi-no-new-documents/extensions/.harness-no-new-documents/index.ts")));
     if (composition) {
-      await access(join(platformRoot, "harness/pi-transport/transport.ts"));
+      await access(join(platformRoot, "npm/node_modules/harness-pi-pi-transport/harness/pi-transport/transport.ts"));
       await runFixtureInstaller(fixture.workspace, "uninstall", ["cleanup-git"], { scope });
     }
-    await assert.rejects(access(join(platformRoot, "harness/pi-transport/transport.ts")));
+    await assert.rejects(access(join(platformRoot, "npm/node_modules/harness-pi-pi-transport/harness/pi-transport/transport.ts")));
     assert.equal(await readFile(policy, "utf8"), customPolicy);
     return { version: fixture.version, mode, scope, inferenceRequests: fixture.assertions().inferenceRequests };
   } finally { await fixture.close(); }
@@ -174,7 +174,7 @@ export async function runPiDocumentsSafetyJourney() {
     assert.equal(outcomeCount, 2);
     assert.equal(fixture.assertions().inferenceRequests, 3);
     // Missing installed transport must deny native calls and consume commands without inference.
-    await unlink(join(project, ".pi/harness/no_new_documents_pi.py"));
+    await unlink(join(project, ".pi/npm/node_modules/harness-pi-no-new-documents/harness/no_new_documents_pi.py"));
     const unavailable = await fixture.runJson({ prompt: marker });
     assert.equal(unavailable.status, "success");
     assert.deepEqual(unavailable.toolExecutions.map((tool) => tool.isError), [true, true]);

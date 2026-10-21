@@ -156,7 +156,7 @@ export async function runPiBackgroundShellJourney(scope: "project" | "user", she
     const before = await readFile(settings, "utf8");
     const instruction = join(project, "AGENTS.md");
     await writeFile(instruction, "Personal fixture instructions.\n");
-    const extension = join(scope === "project" ? join(project, ".pi") : workspace.agentDir, "extensions/.harness-background-shell/index.ts");
+    const extension = join(scope === "project" ? join(project, ".pi") : workspace.agentDir, "npm/node_modules/harness-pi-background-shell/extensions/.harness-background-shell/index.ts");
     await runFixtureInstaller(workspace, "install", ["background-shell"], { scope, dryRun: true });
     assert.equal(existsSync(extension), false);
     await runFixtureInstaller(workspace, "install", ["background-shell"], { scope });

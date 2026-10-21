@@ -1391,6 +1391,7 @@ def test_every_catalogue_manifest_loads():
             "setup-text-replacements", "todo-hitl", "tool-inspector", "writing-for-agents", "stop-overthinking", "zoom-out",
             "polished-code-blocks",
             "web-toolkit",
+            "pi-subagents-toolkit",
         },
         "guards": {
             "command-guard", "slash-command-guard", "exclude-unwanted-tools", "no-new-documents", "on-edit-block", "on-edit-reminder", "on-read-reminder",

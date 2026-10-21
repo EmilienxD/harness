@@ -62,7 +62,7 @@ export async function runPiIssueReaders(scope: "project" | "user", mode: "json" 
     await runFixtureInstaller(fixture.workspace, "uninstall", ["issue-readers"], { scope });
     // User-owned starter bodies survive receipt removal.
     await access(join(platform, "skills", "address-this", "SKILL.md"));
-    await assert.rejects(access(join(platform, "harness", "pi-issue-workflows", "workflows.ts")));
+    await assert.rejects(access(join(platform, "npm/node_modules/harness-pi-pi-issue-workflows", "harness", "pi-issue-workflows", "workflows.ts")));
     assert.equal(fixture.assertions().unexpectedRequests, 0);
     return { version: fixture.version, scope, mode, inferenceRequests: before };
   } finally { await fixture.close(); }
@@ -101,9 +101,12 @@ export async function runPiIssueWriters(scope: "project" | "user") {
   try {
     const gh = await setup(fixture, ["issue-writers", "issue-readers"], scope);
     const platform = scope === "project" ? join(fixture.workspace.projectRoot, ".pi") : fixture.workspace.agentDir;
+    const originalSkills = new Map<string, string>();
     for (const scenario of scenarios) {
-      const skill = join(platform, "skills", scenario.name, "SKILL.md");
-      await writeFile(skill, (await readFile(skill, "utf8")) + `\n[E2E:pi-${scenario.name}]\n`);
+      const skill = join(platform, "npm/node_modules/harness-pi-issue-writers", "skills", scenario.name, "SKILL.md");
+      const original = await readFile(skill, "utf8");
+      originalSkills.set(skill, original);
+      await writeFile(skill, original + `\n[E2E:pi-${scenario.name}]\n`);
     }
     const probe = join(fixture.workspace.projectRoot, ".pi", "extensions", "issue-test-lifecycle");
     await mkdir(probe, { recursive: true });
@@ -129,13 +132,14 @@ export async function runPiIssueWriters(scope: "project" | "user") {
       assert.equal((await fixture.runJson({ prompt: `/skill:${scenario.name} fixture` })).status, "success");
     }
     assert.equal(fixture.assertions().inferenceRequests, 5);
-    await unlink(join(platform, "harness", "issue_writers_pi.py"));
+    await unlink(join(platform, "npm/node_modules/harness-pi-issue-writers", "harness", "issue_writers_pi.py"));
     assert.equal((await rpc.prompt("/skill:draft-issues fixture")).status, "handled");
     assert.equal(fixture.assertions().inferenceRequests, 5);
+    for (const [skill, original] of originalSkills) await writeFile(skill, original);
     await runFixtureInstaller(fixture.workspace, "uninstall", ["issue-writers"], { scope });
-    await access(join(platform, "harness", "pi-issue-workflows", "workflows.ts"));
+    await access(join(platform, "npm/node_modules/harness-pi-pi-issue-workflows", "harness", "pi-issue-workflows", "workflows.ts"));
     await runFixtureInstaller(fixture.workspace, "uninstall", ["issue-readers"], { scope });
-    await assert.rejects(access(join(platform, "harness", "pi-issue-workflows", "workflows.ts")));
+    await assert.rejects(access(join(platform, "npm/node_modules/harness-pi-pi-issue-workflows", "harness", "pi-issue-workflows", "workflows.ts")));
     assert.equal(fixture.assertions().unexpectedRequests, 0);
     return { version: fixture.version, scope, inferenceRequests: 5 };
   } finally { await fixture.close(); }

@@ -26,7 +26,7 @@ def test_clear_alias_install_and_remove(tmp_path, monkeypatch, scope):
     tools = discover()
     installer = CatalogueInstaller(tools, target, ReceiptStore.load(tmp_path / "receipts.json"))
     installer.reconcile({"clear-alias"})
-    extension = target.destination_path("extensions", ".harness-clear-alias/index.ts")
+    extension = target.install_root / "npm/node_modules/harness-pi-clear-alias/extensions/.harness-clear-alias/index.ts"
     assert extension.read_bytes() == (tools["clear-alias"].root / "pi/extension.ts").read_bytes()
     installer.reconcile(set())
     assert not extension.exists()

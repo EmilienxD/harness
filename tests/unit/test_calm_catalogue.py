@@ -23,7 +23,7 @@ def test_calm_install_and_removal_preserve_preferences_and_settings(tmp_path, mo
     target.settings_path.write_text(settings, encoding="utf-8")
     installer = CatalogueInstaller(discover(), target, ReceiptStore.load(tmp_path / "receipts.json"))
     installer.reconcile({"calm"})
-    extension = target.destination_path("extensions", ".harness-calm/index.ts")
+    extension = target.install_root / "npm/node_modules/harness-pi-calm/extensions/.harness-calm/index.ts"
     assert extension.is_file()
     assert (extension.parent / "LICENSE").is_file()
     assert (extension.parent / "built-in-tool-shells.ts").is_file()

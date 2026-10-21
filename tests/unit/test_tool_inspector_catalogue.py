@@ -22,7 +22,7 @@ def test_tool_inspector_install_and_remove(tmp_path, monkeypatch, scope):
     neighbour.write_text("export default function () {}", encoding="utf-8")
     installer = CatalogueInstaller(discover(), target, ReceiptStore.load(tmp_path / "receipts.json"))
     installer.reconcile({"tool-inspector"})
-    directory = target.destination_path("extensions", ".harness-tool-inspector")
+    directory = target.install_root / "npm/node_modules/harness-pi-tool-inspector/extensions/.harness-tool-inspector"
     assert {p.name for p in directory.iterdir()} == {"index.ts", "startup.ts", "report.ts", "schema.ts"}
     installer.reconcile(set())
     assert not (directory / "index.ts").exists()

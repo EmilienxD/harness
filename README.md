@@ -67,10 +67,10 @@ directory selected by `PI_CODING_AGENT_DIR`. Review project resources before gra
 Pi extensions use native package identities: a trusted project's enabled copy replaces the
 same tool at user scope, while other user extensions remain available. Removing the project
 copy restores the user copy on the next launch or `/reload`. Explicit project package filters
-also take precedence. Harness supplies the packages
-locally; no npm registry installation is needed. When upgrading an older installation, upgrade
-both scopes where the same extension is installed. Modified legacy extension files must be
-restored or moved out of `extensions` before migration can finish.
+also take precedence. Harness builds complete local npm packages and calls `pi install` and
+`pi remove`; Pi manages their files and npm metadata. The cached `.tgz` is the installation
+source and contains the extension, skills and required helpers. No registry publication is needed.
+This layout assumes fresh Pi installations.
 Audit runs in the current session; Pi explorer delegation remains pending. UI prototypes
 require available browser tools, Lavish requires `npx` and external browser review, GitHub
 lookup requires authenticated `gh`, and text replacements remain Windows-only.
@@ -94,9 +94,9 @@ uv run harness install on-read-reminder on-edit-reminder on-edit-block --platfor
 
 Run `/reload` in Pi, approve the project resources, and configure the corresponding
 `.harness/guards/*.toml` policies. The empty starters leave the guards inactive until rules
-are added. Extension entry points live in `.pi/extensions/.harness-*` and load through native
-package declarations; Python helpers live in `.pi/harness`.
-User installs use the effective Pi agent directory, with policy starters beside the helpers in `harness/`.
+are added. Extensions and their helpers live inside `.pi/npm/node_modules/harness-pi-<tool>/`.
+User installs use the effective Pi agent directory; editable policy starters stay outside npm
+packages under `<agent-dir>/harness/`.
 Pi guards require uv or Python 3.11+. They cover native reads/edits/writes, including nested
 calls, and recognized shell reads; shell mutations need separate controls.
 
@@ -480,8 +480,6 @@ uv run harness install environment-context --platform pi --scope user
 ```
 
 Restart Pi or run `/reload`. Use `--scope project` for a project-only installation.
-If migrating from the standalone `extensions/harness-environment-context.ts`, move that file
-outside `extensions/` after installing the package so only the receipt-owned copy loads.
 The extension uses local OS/session metadata and read-only Git commands; it makes no model
 requests of its own. Git state is a snapshot and should be rechecked before destructive actions.
 
@@ -565,9 +563,7 @@ The exclusion list is fixed in the package payload; it does not edit `settings.j
 uv run harness install exclude-unwanted-tools --platform pi --scope user
 ```
 
-Restart Pi or run `/reload` to activate it. This preserves the behavior of the original
-standalone `exclude-unwanted-tools.ts`; if migrating from that file, remove the standalone
-copy after installing the package so there is only one owner of the filter.
+Restart Pi or run `/reload` to activate it.
 
 **Compatibility:** verified against Pi 1.2.0. This adapter patches the private
 `AgentSession._isAllowedTool` method because changing active tools alone does not remove

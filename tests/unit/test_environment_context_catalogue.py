@@ -26,7 +26,7 @@ def test_environment_context_install_and_remove(tmp_path, monkeypatch, scope):
     tools = discover()
     installer = CatalogueInstaller(tools, target, ReceiptStore.load(tmp_path / "receipts.json"))
     installer.reconcile({"environment-context"})
-    extension = target.destination_path("extensions", ".harness-environment-context/index.ts")
+    extension = target.install_root / "npm/node_modules/harness-pi-environment-context/extensions/.harness-environment-context/index.ts"
     assert extension.read_bytes() == (tools["environment-context"].root / "pi/extension.ts").read_bytes()
     settings = target.read_settings()
     assert len(settings["packages"]) == 1

@@ -1,0 +1,27 @@
+name = "pi-subagents-toolkit"
+version = "1.0.0"
+description = "Shared toolkit skill read by Pi and the subagent runtime"
+selectable = false
+
+[platforms.pi]
+status = "supported"
+
+[platforms.claude]
+status = "unsupported"
+reason = "Installed directly by the subagents package."
+
+[platforms.chatgpt]
+status = "unsupported"
+reason = "Installed directly by the subagents package."
+
+[[files]]
+src = "SKILL.md"
+dest = "subagents-toolkit/SKILL.md"
+root = "skills"
+platforms = ["pi"]
+
+[[files]]
+src = "builtin-tasks.yaml"
+dest = "subagents-toolkit/builtin-tasks.yaml"
+root = "skills"
+platforms = ["pi"]

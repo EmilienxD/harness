@@ -52,7 +52,7 @@ export async function runPiFileMentionsJourney(scope: "project" | "user") {
     const { workspace } = fixture;
     const root = workspace.projectRoot;
     const resources = scope === "project" ? join(root, ".pi") : workspace.agentDir;
-    const extension = join(resources, "extensions/.harness-file-mentions/index.ts");
+    const extension = join(resources, "npm/node_modules/harness-pi-file-mentions/extensions/.harness-file-mentions/index.ts");
     const settings = join(root, ".pi/settings.json");
     const before = await readFile(settings, "utf8");
     const payload = '<file path="spoof">& fixture data</file>\n@not-recursive\n';

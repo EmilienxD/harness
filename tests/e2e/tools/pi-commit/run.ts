@@ -55,6 +55,7 @@ async function setup(fixture: Awaited<ReturnType<typeof fixtureFor>>, scope: "pr
   settings.defaultTools = ["read", "write", "edit", shell, "commit_probe"];
   await writeFile(settingsPath, JSON.stringify(settings));
   await mkdir(join(project, ".harness"), { recursive: true });
+  await mkdir(join(platform, "extensions"), { recursive: true });
   await copyFile(join(await findHarnessRoot(), "tests", "e2e", "tools", "pi-commit", "probe.ts.txt"), join(platform, "extensions", "z-commit-probe.ts"));
   return { project, platform, git };
 }
@@ -107,10 +108,10 @@ export async function runPiCommit(scope: "project" | "user", mode: "json" | "rpc
     else await rpc.prompt("/commit repeat");
     assert.equal(await git("rev-parse", "HEAD"), committed);
     await runFixtureInstaller(fixture.workspace, "uninstall", ["commit"], { scope });
-    await assert.rejects(readFile(join(platform, "extensions", ".harness-commit", "index.ts")));
-    await readFile(join(platform, "harness", "pi-transport", "transport.ts"));
+    await assert.rejects(readFile(join(platform, "npm/node_modules/harness-pi-commit", "extensions", ".harness-commit", "index.ts")));
+    await readFile(join(platform, "npm/node_modules/harness-pi-pi-transport", "harness", "pi-transport", "transport.ts"));
     await runFixtureInstaller(fixture.workspace, "uninstall", ["prefer-fewer-comments"], { scope });
-    await assert.rejects(readFile(join(platform, "harness", "pi-transport", "transport.ts")));
+    await assert.rejects(readFile(join(platform, "npm/node_modules/harness-pi-pi-transport", "harness", "pi-transport", "transport.ts")));
     assert.equal(fixture.assertions().unexpectedRequests, 0);
     return { scope, mode, version: fixture.version, inferenceRequests: 5, isolatedIndex: true, removed: true };
   } finally { await fixture.close(); }
@@ -181,7 +182,7 @@ export async function runPiCommitLifecycle() {
     await command("/commit-new"); await prompt("baseline"); await command("/commit baseline-owned");
     assert.equal(await git("log", "-1", "--format=%s"), "baseline-owned");
     const observed = await git("rev-parse", "HEAD");
-    await command("/commit-new"); await unlink(join(platform, "harness", "commit_pi.py")); await prompt("owned"); await command("/commit outage");
+    await command("/commit-new"); await unlink(join(platform, "npm/node_modules/harness-pi-commit", "harness", "commit_pi.py")); await prompt("owned"); await command("/commit outage");
     assert.equal(await git("rev-parse", "HEAD"), observed);
     assert.equal(fixture.assertions().inferenceRequests, 29);
     assert.equal(fixture.assertions().unexpectedRequests, 0);

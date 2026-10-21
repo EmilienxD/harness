@@ -603,8 +603,9 @@ def rules_sources(root: Path) -> list[Path]:
     """Bundled defaults, then shared user and project rules."""
     sources: list[Path] = []
     seen: set[Path] = set()
+    personal = Path(os.environ.get("HARNESS_PI_SUPPORT_DIR", Path(__file__).parent)) / RULES_NAME
     candidates = [
-        Path(__file__).with_name(RULES_NAME),
+        personal if personal.is_file() else Path(__file__).with_name(RULES_NAME),
         Path.home() / ".harness" / "guards" / RULES_NAME,
         root / ".harness" / "guards" / RULES_NAME,
     ]

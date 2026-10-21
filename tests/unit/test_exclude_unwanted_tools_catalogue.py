@@ -23,7 +23,7 @@ def test_exclude_unwanted_tools_install_and_remove(tmp_path, monkeypatch, scope)
     tools = discover()
     installer = CatalogueInstaller(tools, target, ReceiptStore.load(tmp_path / "receipts.json"))
     installer.reconcile({"exclude-unwanted-tools"})
-    extension = target.destination_path("extensions", ".harness-exclude-unwanted-tools/index.ts")
+    extension = target.install_root / "npm/node_modules/harness-pi-exclude-unwanted-tools/extensions/.harness-exclude-unwanted-tools/index.ts"
     assert extension.read_bytes() == (tools["exclude-unwanted-tools"].root / "pi/extension.ts").read_bytes()
     installer.reconcile(set())
     assert not extension.exists()

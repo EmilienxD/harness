@@ -4,6 +4,7 @@ from __future__ import annotations
 import hashlib
 import importlib.util
 import json
+import os
 import re
 import sys
 import time
@@ -114,7 +115,8 @@ def evaluate(request: dict) -> dict:
             return response
         paths = [request["input"]["path"]]
     rules, notes = [], []
-    sources = [Path(module.__file__).with_name(module.RULES_NAME),
+    personal = Path(os.environ.get("HARNESS_PI_SUPPORT_DIR", Path(module.__file__).parent)) / module.RULES_NAME
+    sources = [personal if personal.is_file() else Path(module.__file__).with_name(module.RULES_NAME),
                Path.home() / ".harness" / "guards" / module.RULES_NAME,
                root / ".harness" / "guards" / module.RULES_NAME]
     for source in dict.fromkeys(p.resolve() for p in sources):

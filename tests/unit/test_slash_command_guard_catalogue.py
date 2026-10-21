@@ -26,7 +26,7 @@ def test_slash_command_guard_install_and_remove(tmp_path, monkeypatch, scope):
     tools = discover()
     installer = CatalogueInstaller(tools, target, ReceiptStore.load(tmp_path / "receipts.json"))
     installer.reconcile({"slash-command-guard"})
-    extension = target.destination_path("extensions", ".harness-slash-command-guard/index.ts")
+    extension = target.install_root / "npm/node_modules/harness-pi-slash-command-guard/extensions/.harness-slash-command-guard/index.ts"
     assert extension.read_bytes() == (tools["slash-command-guard"].root / "pi/extension.ts").read_bytes()
     installer.reconcile(set())
     assert not extension.exists()

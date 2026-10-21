@@ -23,7 +23,7 @@ def test_mid_prompt_skills_pi_install_and_remove(tmp_path, monkeypatch, scope):
         assert tool.support_for(provider).status is SupportStatus.SUPPORTED
     installer = CatalogueInstaller(tools, target, ReceiptStore.load(tmp_path / "receipts.json"))
     installer.reconcile({tool.name})
-    extension = target.destination_path("extensions", ".harness-mid-prompt-skills/index.ts")
+    extension = target.install_root / "npm/node_modules/harness-pi-mid-prompt-skills/extensions/.harness-mid-prompt-skills/index.ts"
     assert extension.read_bytes() == (tool.root / "pi" / "extension.ts").read_bytes()
     assert not target.destination_path("support", "mid_prompt_skills_hook.py").exists()
     assert not (target.install_root / "hooks").exists()

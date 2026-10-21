@@ -15,27 +15,38 @@ This is a design baseline, not runtime certification. Before implementation, ver
 Pi exports and CLI against that baseline and record the version used for acceptance checks.
 Rolling reference refreshes do not widen the supported runtime range automatically.
 
-Harness extension packages use one native npm identity per catalogue tool. The installer
-generates a manifest in `<platform>/npm/node_modules/harness-pi-<tool>/` and a backup tarball
-in `<platform>/harness/packages/`. Its native `npm:harness-pi-<tool>@file:<absolute archive>`
-source references an immutable, content-addressed tarball in `pi-packages/` beside the receipt
-store. Retain these cache files after uninstall: copied worktrees can still reference them.
-An absolute source avoids npm's working-directory-dependent resolution of relative tarballs.
-Its explicit extension paths reach receipt-owned `.harness-*` entries
-under `extensions/`; the dot prefix prevents independent auto-discovery. Pi selects a trusted
-project package over the user package before binding tools, commands and event handlers.
-Unrelated user packages remain loaded. Keep the manifest paths relative so copied worktrees
-resolve their own entry points. Plain local package paths cannot provide this precedence:
-Pi identifies those packages by absolute path, even when their manifests have the same name.
+Harness extension and helper packages use one native npm identity per catalogue tool.
+Harness builds a complete npm archive containing the extension, skills and required helper
+code, then runs `pi install npm:harness-pi-<tool>@file:<absolute archive>` (`--local --approve`
+for projects). Pi installs the package under `<platform>/npm/node_modules/harness-pi-<tool>/`
+and manages its npm metadata. Removal runs `pi remove` for the receipt-owned source.
+The archive is an installation source in the immutable, content-addressed `pi-packages/`
+cache beside the receipt store. Retain it after uninstall because copied worktrees can still
+reference it. There is no second archive under the Pi configuration directory.
 
-Upgrade both installed scopes when migrating older auto-discovered entry points. Removal uses
-the old receipts; modified or unowned legacy extension files stop migration before mutation.
-Do not infer overrides from file existence; honor native package trust and explicit resource
-filters. Preserve filters through upgrades. Uninstall removes an owned source even if `pi config`
-has converted it to a filtered object, while preserving declarations that predated installation.
-After native npm updates, remove only this receipt's wrapper dependencies and lock entries.
-The native package precedence journey checks tools, commands, hooks, reload, copied checkouts,
-native local-only updates, disabled/untrusted projects and user fallback against the real Pi CLI.
+Manifest resource paths stay inside the package and remain relative. Required helper code
+is bundled from the selected dependency versions so direct Pi installation works independently
+of Harness's file copier. Updating a helper rebuilds its installed consumers. Editable policy
+starters remain outside npm storage: project policies under `.harness/guards/` and personal
+Pi policies under `<agent-dir>/harness/`. Python transport supplies that personal policy
+location through `HARNESS_PI_SUPPORT_DIR`; helpers fall back to bundled defaults.
+
+The subagent toolkit is a separate, coupled skill dependency (`pi-subagents-toolkit`). It
+installs its canonical skill and task registry under conventional `skills/subagents-toolkit/`,
+where both Pi and the independent Python runtime read them. The subagent npm package contains
+the extension and remaining skills; it has no duplicate toolkit copy. Harness removes the
+companion skill when no installed consumer requires it, as it does other shared skill dependencies.
+The current subagent runtime pin predates the extension's `inbox_scan` operation. Checkout-runtime
+acceptance passes, while four shipped-pin journeys require publishing and pinning the existing
+runtime changes from local commit `ba136dd`; native npm packaging does not resolve that release gap.
+
+Pi selects a trusted project package over the matching user npm identity before binding tools,
+commands and event handlers. Unrelated user packages remain loaded. Plain local package paths
+have distinct absolute-path identities even when their manifests share a name. Honor native
+package trust and resource filters, preserve filters through upgrades, and retain declarations
+that predate Harness installation. The native package precedence journey verifies reload,
+copied checkouts, local-only updates, direct Pi install/remove, disabled or untrusted projects,
+and user fallback. This layout assumes fresh Pi installations and provides no migration path.
 
 Aboard lets Pi assign fresh-session IDs and binds the observed ID through its authenticated
 startup lifecycle. Resume and fork retain explicit IDs. This avoids Pi 1.2.0's warning when
@@ -187,7 +198,7 @@ notifications, not messages already queued in Pi. Submission and session deliver
 `notification_state` values, with `message_end` confirming session delivery. Only synchronous
 submission rejections are retried with capped backoff and on settlement; Pi's void send API
 exposes no per-message asynchronous failure result. Ambiguous submissions are not blindly resent.
-It has no npm or shared Python dependency and installs through ordinary extension file mappings,
+It has no runtime npm or shared Python dependency and installs as a native Pi npm package,
 without instruction or configuration fragments. Background jobs are scoped to the live session;
 reload, tree navigation, session changes, and shutdown cancel jobs and discard logs.
 Command guards still evaluate the original shell call; background receipts are not completed
@@ -270,9 +281,9 @@ without adding it to an existing installation's selections automatically.
 | Logical destination | Project installation | User installation |
 | --- | --- | --- |
 | `platform` | `<project>/.pi` | `<agent-dir>` |
-| `skills` | `.pi/skills` | `<agent-dir>/skills` |
-| `extensions` | `.pi/extensions` | `<agent-dir>/extensions` |
-| `support` (Python/TypeScript helpers and user policy starters) | `.pi/harness` | `<agent-dir>/harness` |
+| `skills` (skill-only tools) | `.pi/skills` | `<agent-dir>/skills` |
+| Packaged `extensions`, `skills`, `support` | `.pi/npm/node_modules/harness-pi-<tool>/{extensions,skills,harness}` | `<agent-dir>/npm/node_modules/harness-pi-<tool>/{extensions,skills,harness}` |
+| Editable user policy starters | Project policies use `workspace` | `<agent-dir>/harness` |
 | `workspace` (shared policies) | `<project>/.harness/...` | Existing user Harness configuration paths |
 
 `<agent-dir>` defaults to `~/.pi/agent` and respects `PI_CODING_AGENT_DIR`, as documented in
@@ -287,10 +298,8 @@ the first tool journey verifies that separation. A Pi user receipt also records 
 namespace, keeping it separate from a project rooted in the same agent directory.
 Claude/ChatGPT receipt identities are unchanged.
 
-The table describes the intended full layout. The current slice supports skill and extension payloads without
-configuration fragments. Pi user `workspace` payloads and configuration fragments explicitly
-fail until shared-workspace ownership and native settings reconciliation are implemented;
-the three path guards keep user starters beside helpers rather than using user workspace mappings.
+Pi user `workspace` payloads remain unsupported. User policy starters use the external
+`support` destination; executable helpers use the package-internal `harness/` directory.
 
 Source packages retain their root-level shared skill/core files and shallow `pi/` overlays:
 
@@ -305,11 +314,14 @@ harness/<category>/<tool>/
 
 Installed Pi resources:
 .pi/skills/<skill>/SKILL.md
-.pi/extensions/harness-<tool>/index.ts
-.pi/harness/<tool>_hook.py
-.pi/harness/pi-transport/transport.ts
-.pi/harness/pi-path-guards/path_guards.ts and path_guards.py
-.pi/harness/pi-issue-workflows/workflows.ts
+.pi/npm/node_modules/harness-pi-<tool>/
+    package.json
+    extensions/.harness-<tool>/index.ts
+    skills/<skill>/SKILL.md
+    harness/<tool>_hook.py
+    harness/pi-transport/transport.ts
+    harness/pi-path-guards/path_guards.ts and path_guards.py
+    harness/pi-issue-workflows/workflows.ts
 ```
 
 The file mappings install the entry point as `index.ts`; source overlays never appear inside
@@ -319,17 +331,12 @@ Map only each skill's shared files, excluding ChatGPT metadata. Prefer Pi-owned 
 and Claude symlink installations. Use startup diagnostics to identify the selected skill source.
 Do not silently disable the user's own shared skill discovery.
 
-Use conventional resource directories for the first release; most packages need no Pi settings
-fragment. Before adding fragments, move configuration addition/shared-removal accounting behind
-the adapter: `installer.py` currently calls `settings_merge.additions` and `remove_shared`
-directly. Pi settings resource filters and package objects need native identity semantics, not
-Claude hook-array reconciliation. Preserve unrelated resource filters, models, tools, and settings.
-Harness must not own Pi authentication, trust decisions, native sessions, or unrelated extensions.
-[Pi Packages](PI-REFERENCES/docs/packages.md) remain an optional later distribution format;
-Harness continues to own the files it installs rather than introducing a second installer owner.
-
-Pi itself is an external prerequisite for this release. The current host-action schema supports
-pinned Python tools and VSIXs; adding npm/CLI ownership would be a separate design change.
+Pi owns package installation, removal and npm metadata. Harness records selected sources,
+merges resource filters, manages editable starters and host actions, and restores local files
+and settings if a native command fails. Preserve unrelated models, tools and settings.
+Harness must not own Pi authentication, native sessions or unrelated extensions.
+See [Pi Packages](PI-REFERENCES/docs/packages.md) for the native lifecycle and identity rules.
+Pi itself remains an external prerequisite.
 
 ## Shared Pi support and Python reuse
 
@@ -757,7 +764,7 @@ at 2 MiB and ten seconds, with cancellation on session replacement/shutdown. Gua
 errors deny native edits; reminder errors append diagnostics while preserving successful results.
 Original tool content and structured output are preserved.
 
-User policy starters live beside Python helpers under `<PI_CODING_AGENT_DIR>/harness/`
+User policy starters live outside npm packages under `<PI_CODING_AGENT_DIR>/harness/`
 (default `~/.pi/agent/harness/`). This avoids
 adding user workspace ownership to this slice. Shared home and project policies still load later.
 Branch receipts record observed ranges and content digests, complete denial deliveries, and
@@ -832,7 +839,7 @@ blocks covered calls. Native approval/rejection and their `/skill:` forms make z
 Publication uses exclusive hard-link creation followed by draft removal, so an existing destination
 cannot be overwritten by a concurrent approval. Unsupported hard links leave the draft for correction.
 Native custom messages persist outcomes on the active branch; current pending drafts are refreshed
-from disk before model turns. Pi user policy starters live beside the installed helpers in `harness/`; shared home and
+from disk before model turns. Pi user policy starters live outside npm packages in `<agent-dir>/harness/`; shared home and
 project policies also apply. Arbitrary scripts, third-party mutators, trusted extension command dispatch
 and direct extension I/O remain outside the protection boundary.
 

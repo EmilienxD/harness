@@ -29,7 +29,7 @@ export async function runPiCalmJourney(scope: "project" | "user") {
   try {
     const { workspace } = fixture;
     const resources = scope === "project" ? join(workspace.projectRoot, ".pi") : workspace.agentDir;
-    const extension = join(resources, "extensions", ".harness-calm", "index.ts");
+    const extension = join(resources, "npm/node_modules/harness-pi-calm", "extensions", ".harness-calm", "index.ts");
     const preference = join(workspace.agentDir, "calm");
     const settings = join(workspace.projectRoot, ".pi", "settings.json");
     const before = await readFile(settings, "utf8");

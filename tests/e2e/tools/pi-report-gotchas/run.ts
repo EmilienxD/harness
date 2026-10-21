@@ -62,7 +62,7 @@ export async function runPiGotchasJourney(scope: "project" | "user", mode: "json
     const queue = join(state, "pi", "queue");
     const submitted = join(state, "pi", "submitted");
     const platform = scope === "project" ? join(project, ".pi") : fixture.workspace.agentDir;
-    const skill = join(platform, "skills", TOOL, "SKILL.md");
+    const skill = join(platform, "npm/node_modules/harness-pi-report-gotchas", "skills", TOOL, "SKILL.md");
     const settings = await readFile(join(project, ".pi", "settings.json"), "utf8");
     await runFixtureInstaller(fixture.workspace, "install", [TOOL], { scope, dryRun: true });
     await assert.rejects(access(skill));
@@ -71,7 +71,7 @@ export async function runPiGotchasJourney(scope: "project" | "user", mode: "json
     assert.equal((repeat.results as { status: string }[]).find(result => result.status !== "unchanged"), undefined);
     Object.assign(fixture.workspace.env, discord.env);
     assert.equal(await readFile(skill, "utf8"), await readFile(join(root, "harness", "productivity", TOOL, "SKILL.md"), "utf8"));
-    await assert.rejects(access(join(platform, "skills", TOOL, "chatgpt")));
+    await assert.rejects(access(join(platform, "npm/node_modules/harness-pi-report-gotchas", "skills", TOOL, "chatgpt")));
     const probe = join(project, ".pi", "extensions", "gotchas-probe");
     await mkdir(probe, { recursive: true });
     await copyFile(join(root, "tests", "e2e", "tools", "pi-report-gotchas", "probe.ts.txt"), join(probe, "index.ts"));
@@ -139,7 +139,7 @@ export async function runPiGotchasJourney(scope: "project" | "user", mode: "json
     const empty = await next.prompt(marker("empty"));
     assert.equal(empty.status, "success"); assert.equal(empty.toolExecutions[0]?.isError, true);
     assert.equal((await files(submitted)).length, beforeEmpty);
-    const helper = join(platform, "harness", "report_gotchas_pi.py");
+    const helper = join(platform, "npm/node_modules/harness-pi-report-gotchas", "harness", "report_gotchas_pi.py");
     await rename(helper, helper + ".off");
     const unavailable = await next.prompt(marker("long"));
     assert.equal(unavailable.status, "success"); assert.equal(unavailable.toolExecutions[0]?.isError, true);
@@ -190,8 +190,8 @@ export async function runPiGotchasJourney(scope: "project" | "user", mode: "json
     await next.close();
     await runFixtureInstaller(fixture.workspace, "uninstall", [TOOL], { scope });
     await assert.rejects(access(skill)); await assert.rejects(access(helper));
-    await assert.rejects(access(join(platform, "extensions", ".harness-report-gotchas", "index.ts")));
-    await assert.rejects(access(join(platform, "harness", "pi-transport", "transport.ts")));
+    await assert.rejects(access(join(platform, "npm/node_modules/harness-pi-report-gotchas", "extensions", ".harness-report-gotchas", "index.ts")));
+    await assert.rejects(access(join(platform, "npm/node_modules/harness-pi-pi-transport", "harness", "pi-transport", "transport.ts")));
     await assert.rejects(access(join(bin, process.platform === "win32" ? "harness-report-gotchas.exe" : "harness-report-gotchas")));
     assert.equal((await files(submitted)).length, 5);
     assert.equal(await readFile(join(project, ".pi", "settings.json"), "utf8"), settings);
