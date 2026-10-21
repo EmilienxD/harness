@@ -8,7 +8,7 @@
       "questions": [{
         "id": "Q1",
         "question": "When should the round become visible?",
-        "explanation_html": "<p>Commit after <img src=\"assets/round-001/flow.png\" alt=\"Publication flow\"> is durable.</p>",
+        "explanation_html": "<p>Commit after <img src=\"assets/round-001/flow.png\" alt=\"Publication flow\"> is durable.</p><figure data-grill-diagram=\"publication-flow\"><pre class=\"mermaid\">flowchart LR\n A[Write assets] --&gt; B[Publish round]</pre><figcaption>Assets are ready before the round appears.</figcaption></figure>",
         "recommendation": "A",
         "options": [{ "letter": "A", "label": "After upload", "detail": "Avoid broken images." }]
       }]

@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { extractAuthoredDiagrams } from "./grill-diagrams.ts";
 
 export const SCHEMA_VERSION = 1 as const;
 // Reserved draft identity for round-wide notes; generated question IDs are always Q<number>.
@@ -31,6 +32,11 @@ export const questionSchema = z
     options: z.array(optionSchema).min(1).max(4),
   })
   .superRefine((question, context) => {
+    try {
+      extractAuthoredDiagrams(question.explanation_html);
+    } catch (error) {
+      context.addIssue({ code: "custom", path: ["explanation_html"], message: (error as Error).message });
+    }
     const letters = question.options.map((_option, index) => String.fromCharCode(65 + index));
     if (question.options.some((option, index) => option.letter !== letters[index])) {
       context.addIssue({ code: "custom", message: "Option letters must be consecutive from A" });

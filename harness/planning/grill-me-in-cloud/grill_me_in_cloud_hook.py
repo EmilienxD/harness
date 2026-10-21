@@ -120,6 +120,7 @@ def validate_round(data: object) -> dict:
         for field in ("question", "explanation_html"):
             if not isinstance(question.get(field), str) or not question[field].strip():
                 raise RoundError(f"{qid}: {field} must be nonempty text")
+        discover_diagrams(question["explanation_html"])
         if "init_js" in question and not isinstance(question["init_js"], str):
             raise RoundError(f"{qid}: init_js must be text")
         options = question.get("options")
@@ -135,6 +136,71 @@ def validate_round(data: object) -> dict:
         if question.get("recommendation") not in letters:
             raise RoundError(f"{qid}: recommendation must name an available option")
     return data
+
+
+class _DiagramParser(HTMLParser):
+    """Read only explicit diagram figures; unrelated explanation HTML stays untouched."""
+
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self.diagrams: list[dict[str, str]] = []
+        self.ids: set[str] = set()
+        self.stack: list[str] = []
+        self.diagram: dict[str, str] | None = None
+        self.sources = 0
+        self.captions = 0
+        self.part: str | None = None
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        values = dict(attrs)
+        if "data-grill-diagram" in values:
+            identity = values["data-grill-diagram"] or ""
+            if self.diagram is not None or tag != "figure" or not re.fullmatch(r"[A-Za-z][A-Za-z0-9_-]{0,63}", identity) or identity in self.ids:
+                raise RoundError("Diagram figures need unique IDs starting with a letter (up to 64 letters, digits, _ or -)")
+            self.ids.add(identity)
+            self.diagram = {"id": identity, "source": "", "caption": ""}
+            self.stack = []
+            self.sources = self.captions = 0
+            return
+        if self.diagram is None:
+            return
+        if self.stack and self.stack[0] == "pre":
+            raise RoundError("Diagram pre.mermaid must contain escaped source text")
+        if not self.stack and tag == "pre" and "mermaid" in (values.get("class") or "").split():
+            self.sources += 1
+            self.part = "source"
+        elif not self.stack and tag == "figcaption":
+            self.captions += 1
+            self.part = "caption"
+        elif not self.stack:
+            self.part = None
+        if tag not in {"area", "base", "br", "col", "embed", "hr", "img", "input", "link", "meta", "param", "source", "track", "wbr"}:
+            self.stack.append(tag)
+
+    def handle_endtag(self, tag: str) -> None:
+        if self.diagram is None:
+            return
+        if tag == "figure" and not self.stack:
+            diagram = self.diagram
+            if self.sources != 1 or self.captions != 1 or not diagram["source"].strip() or not diagram["caption"].strip():
+                raise RoundError(f"Diagram {diagram['id']} needs one direct pre.mermaid containing escaped source text and one nonempty figcaption")
+            self.diagrams.append({key: value.replace("\r\n", "\n").replace("\r", "\n").strip() for key, value in diagram.items()})
+            self.diagram = None
+        elif self.stack and self.stack[-1] == tag:
+            self.stack.pop()
+
+    def handle_data(self, data: str) -> None:
+        if self.diagram is not None and self.stack and self.part:
+            self.diagram[self.part] += data
+
+
+def discover_diagrams(html: str) -> list[dict[str, str]]:
+    parser = _DiagramParser()
+    parser.feed(html)
+    parser.close()
+    if parser.diagram is not None:
+        raise RoundError("Diagram figure must have a closing tag")
+    return parser.diagrams
 
 
 def _srcset_urls(value: str) -> list[str]:

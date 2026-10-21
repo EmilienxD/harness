@@ -61,6 +61,50 @@ def test_round_contract_and_html_image_discovery():
         validate_round(round_data() | {"questions": [round_data()["questions"][0]] * 2})
 
 
+def diagram_figure(identity="flow", source="flowchart LR\n A --&gt; B", caption="Publish last"):
+    return f'<figure data-grill-diagram="{identity}"><pre class="mermaid">{source}</pre><figcaption>{caption}</figcaption></figure>'
+
+
+def test_diagram_extraction_decodes_source_and_keeps_explicit_identity():
+    html = '<p>Context</p>' + diagram_figure("second", 'flowchart LR\r\n A["Read &amp; write&lt;br/&gt;assets"] --&gt; B', '<strong>Publish</strong> last') + diagram_figure("first")
+    assert grill_me_in_cloud_hook.discover_diagrams(html) == [
+        {"id": "second", "source": 'flowchart LR\n A["Read & write<br/>assets"] --> B', "caption": "Publish last"},
+        {"id": "first", "source": "flowchart LR\n A --> B", "caption": "Publish last"},
+    ]
+    payload = round_data(html)
+    assert validate_round(payload) == payload
+    assert grill_me_in_cloud_hook.discover_diagrams('<pre class="mermaid">legacy</pre><code>&lt;figure data-grill-diagram="sample"&gt;</code><script>const sample = `<figure data-grill-diagram="script">`</script>') == []
+
+
+@pytest.mark.parametrize("html", [
+    diagram_figure() + diagram_figure(), diagram_figure("1bad"), diagram_figure("bad id"),
+    diagram_figure("x", " "), diagram_figure("x", "graph TD", " "), diagram_figure("x", "A<br>B"),
+    '<div data-grill-diagram="x"></div>',
+    '<figure data-grill-diagram="outer">' + diagram_figure("inner") + '</figure>',
+])
+def test_diagram_validation_rejects_ambiguous_or_incomplete_figures(html):
+    with pytest.raises(RoundError):
+        validate_round(round_data(html))
+
+
+@pytest.mark.parametrize("provider", ["claude", "chatgpt", "pi"])
+def test_diagrams_publish_without_assets_or_initialization_javascript(tmp_path, provider):
+    project = tmp_path / "project"
+    project.mkdir()
+    client = HostedBoard()
+    runtime = InterviewRuntime(tmp_path / "runtime", client)
+    interview = runtime.start(provider, "session", project)
+    payload = round_data(diagram_figure() + diagram_figure("other"))
+    del payload["questions"][0]["init_js"]
+    payload["questions"].append(payload["questions"][0] | {"id": "Q2"})
+    interview.source.write_text(json.dumps(payload), encoding="utf-8")
+    runtime.publish(provider, "session")
+    prepared = next(body for method, path, body in client.requests if method == "POST" and path.endswith("/prepare"))
+    assert prepared["payload"] == payload
+    assert prepared["assets"] == []
+    assert client.uploads == []
+
+
 def test_assets_are_bounded_to_the_round_and_content_checked(tmp_path):
     assets = tmp_path / "assets"
     assets.mkdir()

@@ -66,8 +66,25 @@ Every visual explains the decision rather than decorating it:
 
 - **Comparisons** align the same criteria and show costs as plainly as benefits.
 - **Tables** hold rows that share fields; say what the table shows before it. The board scrolls every table horizontally when it is too wide, so never force cell widths or wrapping.
-- **Diagrams** show one concept each in inline SVG (`viewBox`, `width="100%"`, `<title>`), with page variables, short labels, and prose outside. SVGs loaded through `<img>` cannot read page variables, so give them literal fallbacks such as `var(--surface, #fbfaf6)`.
+- **Diagrams** use the Mermaid figure convention below for relationships, flows, and architecture. Use inline SVG (`viewBox`, `width="100%"`, `<title>`) for illustrations that need explicit visual composition, with page variables, short labels, and prose outside. SVGs loaded through `<img>` cannot read page variables, so give them literal fallbacks such as `var(--surface, #fbfaf6)`.
 - **Images**, such as real project screenshots for UI decisions, use the assets URL prefix and useful alt text.
 - **Videos** use the same assets directory and URL prefix as images: `<video src="assets/round-001/demo.mp4" controls playsinline preload="none" aria-label="Checkout interaction preview"></video>`. Use MP4 or WebM, target clips under a minute, and explain what to compare in nearby prose or a `<figcaption>`. Optional `poster` images and `<source src>` references use the same asset workflow. The publisher checks the installed `ffmpeg` on PATH and prepares browser-ready clips locally before uploading; keep each source and prepared video within 20 MiB, images within 6 MiB, and each round within 50 MiB / 20 assets. Write all assets before the round JSON.
 - **Demos** use native controls wired in `init_js`, which runs once after mounting with `root` as the question's explanation element; `<script>` tags never run. Query within `root`, prefix IDs with the question ID (`Q1-preview`), keep the explanation clear without interaction, and leave answering to the board's form.
 - **Custom CSS** is scoped under `#explanation-Q1`; custom grids use `minmax(0, 1fr)` and `min-width: 0`. Check narrow widths and that SVG labels fit their shapes.
+
+### Mermaid figures
+
+Embed each diagram in `explanation_html` using this HTML (JSON-escape it when writing the round):
+
+```html
+<figure data-grill-diagram="publication-flow">
+  <pre class="mermaid">flowchart LR
+    A[Write assets] --&gt; B[Publish round]
+    B --&gt; C[User reviews]</pre>
+  <figcaption>Assets are ready before the user sees the round.</figcaption>
+</figure>
+```
+
+Give each figure a stable, descriptive `data-grill-diagram` ID unique within its question: start with a letter, then use letters, digits, `_` or `-`, up to 64 characters. Keep the same ID when moving a diagram or retaining its meaning in a later round. Different questions may reuse an ID.
+
+Each figure has one direct `<pre class="mermaid">` with nonempty Mermaid source and one direct, nonempty `<figcaption>` explaining what the diagram helps decide. HTML-escape source characters (`&amp;`, `&lt;`, `&gt;`); keep source as text inside the `<pre>`. Grill owns conversion, editor setup, and diagram controls: supply source and caption without initialization JavaScript or external Mermaid scripts. Existing `init_js` remains available for other interactive demos.
