@@ -159,15 +159,16 @@ test("resuming in an open terminal pastes a multiline message and submits it onc
 });
 
 test("live Codex replies normalize file references while Claude replies retain their syntax", async () => {
-  for (const provider of ["claude", "chatgpt"] as const) {
+  for (const provider of ["claude", "chatgpt"] as const) for (const normalizeFileReferences of [true, false]) {
     const { controller, host } = setup();
     const created = controller.create({ agentId: agent("child"), sessionId: session("conversation"), agentType: "general", provider });
     host.created[0]!.terminal.sent.length = 0;
-    await controller.sendResumeMessage(created.terminalId, '@"src/core.py" @owner');
+    await controller.sendResumeMessage(created.terminalId, '@"src/core.py" @owner', { normalizeFileReferences });
     const paste = host.created[0]!.terminal.sent[0]!.text;
-    assert.deepEqual(paste.match(/@[^\s\u001b]+/gu), provider === "claude" ? ['@"src/core.py"', "@owner"] : ["@owner"]);
+    const normalized = provider === "chatgpt" && normalizeFileReferences;
+    assert.deepEqual(paste.match(/@[^\s\u001b]+/gu), normalized ? ["@owner"] : ['@"src/core.py"', "@owner"]);
     const [path] = [...paste.matchAll(/"([^"]+)"/gu)].map((match) => match[1]);
-    assert.equal(path, provider === "chatgpt" && process.platform === "win32" ? "src\\core.py" : "src/core.py");
+    assert.equal(path, normalized && process.platform === "win32" ? "src\\core.py" : "src/core.py");
   }
 });
 
@@ -687,4 +688,13 @@ test("auto-run exploration is a background process while auto-run workers keep a
   const created = host.created.at(-1)?.terminal;
   assert.deepEqual(created?.shows, []);
   assert.deepEqual(created?.sent.map((entry) => entry.text), ["cd -LiteralPath 'C:\\work\\aboard'", "claude \"/address-this\""]);
+});
+
+
+test("conversation title updates preserve the checkout indicator for worktree terminals", () => {
+  const { controller, host } = setup();
+  controller.create({ agentId: agent("worktree"), sessionId: session("worktree-session"), agentType: "interactive", provider: "chatgpt", cwd: "C:/work/aboard-2" });
+  controller.setSessionTitle(session("worktree-session"), "Fix search");
+  assert.equal(host.titles.get(host.created[0]!.terminal), "Fix search · aboard-2");
+  controller.dispose();
 });

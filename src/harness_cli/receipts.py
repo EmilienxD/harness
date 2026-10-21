@@ -97,6 +97,7 @@ class ReceiptStore:
                     not isinstance(record, dict)
                     or not isinstance(record.get("path"), str)
                     or not isinstance(record.get("target"), str)
+                    or ("owned" in record and not isinstance(record["owned"], bool))
                     for record in links
                 ):
                     raise ValueError(f"invalid Harness receipt store at {selected}")

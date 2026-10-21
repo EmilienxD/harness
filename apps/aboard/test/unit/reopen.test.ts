@@ -5,6 +5,26 @@ import { ReopenCoordinator, describeReopenOutcome } from "../../src/platform/reo
 import type { AgentId, IsoTimestamp, SessionId, TerminalId } from "../../src/domain/contracts.js";
 import { FleetRegistry } from "../../src/domain/fleet.js";
 
+test("an open terminal is omitted from reopen until a user message starts its conversation", async () => {
+  const fleet = new FleetRegistry();
+  fleet.register({
+    platform: "pi", identity: { agentId, type: "interactive" }, sessionId, sessionBinding: "bound",
+    terminal: { terminalId: "empty" as TerminalId, name: "Pi" },
+    lifecycle: { status: "starting", startedAt: at }, resultDelivery: { mode: "none" },
+    telemetry: { totalTokens: 0, totalDurationMs: 0, totalToolUseCount: 0, compactionCount: 0 },
+  }, at);
+  let started = false;
+  const coordinator = new ReopenCoordinator({
+    activity: { entries: () => ({ version: 1, entries: [] }) }, fleet,
+    terminals: { isOpen: () => true, liveTerminalFor: () => "empty" as TerminalId, show() {} },
+    launcher: { reopen: async () => { throw new Error("must not launch"); } },
+    isResumable: async () => started,
+  });
+  assert.deepEqual(await coordinator.list(), []);
+  started = true;
+  assert.equal((await coordinator.list()).length, 1);
+});
+
 const agentId = "interactive-1" as AgentId;
 const sessionId = "af817a6c-cd41-41e2-a4db-44d3f43cd560" as SessionId;
 const at = "2026-09-08T10:00:00.000Z" as IsoTimestamp;

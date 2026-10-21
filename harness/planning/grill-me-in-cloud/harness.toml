@@ -1,5 +1,5 @@
 name = "grill-me-in-cloud"
-version = "2.2.3"
+version = "2.3.0"
 description = "Publishes visual design interviews to a persistent hosted board"
 docs = "https://github.com/EmilienxD/harness/blob/main/README.md#user-invoked-skills"
 requires = []
@@ -19,7 +19,7 @@ status = "supported"
 
 [[files]]
 src = "pi/extension.ts"
-dest = "harness-grill-me-in-cloud/index.ts"
+dest = ".harness-grill-me-in-cloud/index.ts"
 root = "extensions"
 platforms = ["pi"]
 

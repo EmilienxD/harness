@@ -119,8 +119,12 @@ export class PiRpcClient {
   #prompting = false;
   #closing: Promise<void> | undefined;
 
-  constructor(workspace: PiWorkspace, options: { readonly sessionId?: string; readonly timeoutMs?: number } = {}) {
-    const command = spawnableCommand("pi", [...baseArgs(workspace, "rpc"), "--session-id", options.sessionId ?? randomUUID()]);
+  constructor(workspace: PiWorkspace, options: { readonly sessionId?: string; readonly timeoutMs?: number; readonly model?: string; readonly thinkingLevel?: string } = {}) {
+    if (options.model && !options.model.startsWith(`${PROVIDER}/`)) throw new Error("Pi fixture model overrides must use its fake provider");
+    if (options.thinkingLevel && !["off", "minimal", "low", "medium", "high", "xhigh"].includes(options.thinkingLevel)) throw new Error("Invalid Pi fixture thinking level");
+    const command = spawnableCommand("pi", [...baseArgs(workspace, "rpc"), "--session-id", options.sessionId ?? randomUUID(),
+      ...(options.model ? ["--model", options.model] : []), ...(options.thinkingLevel ? ["--thinking", options.thinkingLevel] : []),
+    ]);
     this.#child = spawn(command.file, [...command.args], { cwd: workspace.projectRoot, env: workspace.env, shell: false, windowsHide: true, detached: process.platform !== "win32", stdio: ["pipe", "pipe", "pipe"] });
     this.#child.stdout.on("data", (chunk: Buffer) => {
       this.#bytes += chunk.length;

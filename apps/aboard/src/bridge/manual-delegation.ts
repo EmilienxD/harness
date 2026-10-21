@@ -198,11 +198,19 @@ function contains(root: string, candidate: string): boolean {
 async function registeredWorktree(root: string, candidate: string): Promise<boolean> {
   try {
     const canonical = await realpath(candidate);
-    const { stdout } = await promisify(execFile)("git", ["-C", root, "worktree", "list", "--porcelain", "-z"], { windowsHide: true, timeout: 10_000 });
+    const git = promisify(execFile);
+    const { stdout } = await git("git", ["-C", root, "worktree", "list", "--porcelain", "-z"], { windowsHide: true, timeout: 10_000 });
     for (const field of stdout.split("\0")) {
       if (!field.startsWith("worktree ")) continue;
       try {
-        if (relative(await realpath(field.slice(9)), canonical) === "") return true;
+        if (!contains(await realpath(field.slice(9)), canonical)) continue;
+        // Registrations outlive deleted worktrees. The candidate must still share
+        // this repository's metadata, not merely occupy one of its old paths.
+        const commonDirectories = await Promise.all([root, canonical].map(async (cwd) => {
+          const result = await git("git", ["-C", cwd, "rev-parse", "--path-format=absolute", "--git-common-dir"], { windowsHide: true, timeout: 10_000 });
+          return realpath(result.stdout.trim());
+        }));
+        return relative(commonDirectories[0]!, commonDirectories[1]!) === "";
       } catch { /* Removed worktrees do not grant launch access. */ }
     }
   } catch { /* No usable repository/worktree fact: retain the workspace fence. */ }
@@ -229,7 +237,7 @@ export function createDelegationRoutes(
       request.authorizationScope === "delegation"
       && options.workspaceRoot !== undefined
       && !contains(options.workspaceRoot, parsed.cwd)
-      && !(parsed.executionMode === "loop" && await registeredWorktree(options.workspaceRoot, parsed.cwd))
+      && !await registeredWorktree(options.workspaceRoot, parsed.cwd)
     ) return protocolError(403, "forbidden", "The delegation credential cannot launch outside its workspace");
     const fingerprint = createHash("sha256").update(JSON.stringify(parsed)).digest("hex");
     const existing = launches.get(parsed.requestId);

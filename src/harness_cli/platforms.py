@@ -158,13 +158,58 @@ class PiAdapter(PlatformAdapter):
         }
 
     def prepare_config(self, base: dict, fragment: dict) -> dict:
-        if fragment:
-            raise ValueError("Pi configuration fragments are not supported yet")
+        if set(fragment) - {"packages"}:
+            raise ValueError("Pi configuration fragments support only native packages")
+        if "packages" in fragment and (
+            not isinstance(fragment["packages"], list)
+            or not all(isinstance(entry, (str, dict)) for entry in fragment["packages"])
+        ):
+            raise ValueError("Pi packages must be a list of package sources")
         return super().prepare_config(base, fragment)
+
+    @staticmethod
+    def _package_source(entry: object) -> str | None:
+        value = entry.get("source") if isinstance(entry, dict) else entry
+        return value if isinstance(value, str) else None
 
     def merge_config(self, base: dict, fragment: dict) -> dict:
         self.prepare_config(base, fragment)
-        return copy.deepcopy(base)
+        fragment = copy.deepcopy(fragment)
+        existing = base.get("packages", [])
+        if not isinstance(existing, list):
+            raise ValueError("Pi packages must be a list of package sources")
+        configured_sources = {
+            self._package_source(entry) for entry in existing
+        }
+        if "packages" in fragment:
+            for entry in fragment["packages"]:
+                source = self._package_source(entry)
+                if source and source.startswith("npm:harness-pi-"):
+                    identity = source.split("@", 1)[0]
+                    if any(
+                        other and other != source and other.split("@", 1)[0] == identity
+                        for other in configured_sources
+                    ):
+                        raise ValueError(f"Pi package {identity} is already configured with another source")
+            fragment["packages"] = [
+                entry for entry in fragment["packages"]
+                if self._package_source(entry) not in configured_sources
+            ]
+            if not fragment["packages"]:
+                del fragment["packages"]
+        return settings_merge.merge(base, fragment)
+
+    def unmerge_config(self, base: dict, fragment: dict) -> dict:
+        fragment = copy.deepcopy(fragment)
+        if "packages" in fragment:
+            owned = {self._package_source(entry) for entry in fragment["packages"]}
+            # pi config can turn an owned source string into an object with
+            # resource filters. Its source still belongs to the same receipt.
+            fragment["packages"] = [
+                entry for entry in base.get("packages", [])
+                if self._package_source(entry) in owned
+            ]
+        return settings_merge.unmerge(base, fragment)
 
 
 ADAPTERS: dict[Platform, PlatformAdapter] = {

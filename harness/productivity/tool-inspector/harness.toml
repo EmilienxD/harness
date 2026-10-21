@@ -1,5 +1,5 @@
 name = "tool-inspector"
-version = "1.0.3"
+version = "1.0.4"
 description = "Show Pi's installed tools at startup and inspect their contracts with /tools"
 docs = "https://github.com/EmilienxD/harness/blob/main/README.md#tool-inspector"
 
@@ -16,24 +16,24 @@ status = "supported"
 
 [[files]]
 src = "pi/extension.ts"
-dest = "harness-tool-inspector/index.ts"
+dest = ".harness-tool-inspector/index.ts"
 root = "extensions"
 platforms = ["pi"]
 
 [[files]]
 src = "pi/startup.ts"
-dest = "harness-tool-inspector/startup.ts"
+dest = ".harness-tool-inspector/startup.ts"
 root = "extensions"
 platforms = ["pi"]
 
 [[files]]
 src = "pi/report.ts"
-dest = "harness-tool-inspector/report.ts"
+dest = ".harness-tool-inspector/report.ts"
 root = "extensions"
 platforms = ["pi"]
 
 [[files]]
 src = "pi/schema.ts"
-dest = "harness-tool-inspector/schema.ts"
+dest = ".harness-tool-inspector/schema.ts"
 root = "extensions"
 platforms = ["pi"]

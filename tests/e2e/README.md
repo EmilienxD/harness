@@ -7,7 +7,7 @@ prompt-text assertions. Read the repository's `harness-e2e` skill before changin
 
 ## Run Pi checks
 
-Prerequisites: Node.js >=22.19.0, npm, and Pi 1.2.x on `PATH`. The current tested version is
+Prerequisites: Node.js >=22.19.0, npm, uv, a synced root Python environment (`uv sync`), and Pi 1.2.x on `PATH`. The current tested version is
 `@earendil-works/pi-coding-agent` 1.2.0. The adapter checks version and required CLI flags;
 an unsupported installation fails instead of silently skipping the real journey.
 
@@ -16,8 +16,11 @@ From `tests/e2e/`:
 ```powershell
 npm ci
 npm run check
+npm run test:pi-all
+# Or select individual journeys:
 npm run e2e:pi
 npm run test:pi
+npm run test:pi-package-precedence
 npm run test:pi-shared-skills
 npm run test:pi-path-guards
 npm run test:pi-command-guard
@@ -35,6 +38,8 @@ npm run test:chrome-devtools
 npm run test:pi-background-shell
 npm run test:pi-calm
 npm run test:pi-mid-prompt-skills
+npm run test:pi-file-mentions
+npm run test:pi-environment-context
 npm run e2e:flush-out-useless-tests
 ```
 
@@ -42,6 +47,10 @@ npm run e2e:flush-out-useless-tests
 extension commands, reload, exact persisted-session resume, native project skill discovery,
 provider-error classification, abort, redacted diagnostics, and cleanup. The complete `npm test`
 suite includes these Pi checks and also requires the installed Claude Code and Codex CLIs.
+`test:pi-all` runs the full Pi suite serially. The shared installer uses shipped host-runtime pins by
+default; checkout-runtime substitution is an explicit development variant, not release acceptance.
+The shared CI job installs all three CLIs and uv, syncs the Python environment, and bounds test-file
+concurrency so process-heavy journeys do not all contend at once.
 
 `e2e:flush-out-useless-tests` installs the real local catalogue package through Harness, then
 runs project JSON/RPC and user RPC journeys. It checks a real Node test baseline, native skill
@@ -55,9 +64,17 @@ each skill, reads bundled references and the websearch source index with real to
 and receipt-driven removal. Scripted fixture actions certify resource integration;
 they do not evaluate unscripted workflow judgment or external services.
 
-Pi extension entry points install under `extensions/`; their Python helpers, TypeScript support,
-and user policy starters install under `harness/`, outside extension discovery. Command-guard
-journeys check fresh project and user installations create no `hooks/` directory. They also run
+Pi extension packages install through `pi install` under
+`npm/node_modules/harness-pi-<tool>/` in the selected Pi directory. Each archive contains its
+extensions, skills and required Python/TypeScript helpers; resource paths remain inside the
+package. `test:pi-package-precedence` verifies matching user/project identities, reload,
+copied checkouts, filters, untrusted projects and user fallback. It also runs native npm updates
+with npm networking disabled, reinstalls the archive directly through Pi, and checks native
+removal preserves another package and its npm metadata. Archives and settings stay in the fixture.
+Editable user policies remain under `<agent-dir>/harness/`; project policies use `.harness/guards/`.
+The coupled subagent toolkit skill stays in conventional `skills/`, where both Pi and its
+independent Python runtime read the same task registry.
+Command-guard journeys check fresh project and user installations create no `hooks/` directory. They also run
 the installed Pi startup warning detector in an isolated subprocess and require zero warnings.
 JSON/RPC suppress interactive deprecation warnings, so silence alone is not evidence. A positive
 control checks the detector recognizes legacy directories at both scopes.
@@ -89,6 +106,32 @@ credentials, selectors, proxies, and cloud credentials are excluded. Launches us
 disable telemetry/version checks/MCP and unrelated built-in extensions, and trust only the
 generated project through process-local `--approve`. Automatic compaction, retries, and cache
 warming are disabled. Trust is never persisted for an unrelated project.
+
+## Pi environment context
+
+`npm run test:pi-environment-context` installs the real Pi-only catalogue package at both
+project and user scopes. Real Pi 1.2.0 JSON/RPC runs cover non-Git and local Git working
+directories, reload without inference, native write effects, dry-run/repeat installs, and
+receipt-driven removal. A fixture extension records final section names and sizes at agent start,
+plus native session metadata; checks do not compare prompt wording. Each scope requires
+seven inference requests and zero unexpected requests. Unit fixtures separately verify
+full Git counts, staged/unstaged overlap, conflicts, renames, individual untracked files,
+and list truncation. No personal Pi configuration or paid inference is used.
+
+## Pi file mentions
+
+`npm run test:pi-file-mentions` installs the real `file-mentions` package at project and user
+scopes and runs JSON/RPC prompts through Pi 1.2.0. The endpoint checks structured resource paths,
+fixture bytes, escaping, duplicate counts, fresh content, shallow directory entries, explicit
+skips and bounded listings, rather than instruction wording. A separate child loads the installed
+extension with Pi's real loader and user-message component: it verifies content stays in model
+input while rendering only the original user block, including old snapshots and reload. Statuses
+use separate native info notifications with literal relative paths, including unusual characters;
+RPC journeys verify notification payloads and ordering after user-message start. Native tool writes produce fixture receipts; each scope requires exactly
+10 inference requests, zero unexpected requests, unchanged
+settings and receipt-driven removal. Unit checks additionally cover images, code exclusions,
+UTF-8 validation, aggregate/reference budgets and canonical symlink deduplication. No personal
+Pi configuration or paid model service is used.
 
 ## Chrome DevTools
 
@@ -141,9 +184,10 @@ row hiding for native tools, Background Shell, unmarked custom tools, SDK overri
 self-framed renderers and unavailable-tool fallback rows, plus summary rendering, exact
 restoration, reasoning expansion and images,
 reload and listener disposal. UI calls that replace the native working display fail the check.
-The actual tool-row component renders the latest summary as a transient chat block;
-checks cover streaming arguments, three-second holds after tool completion using a controlled monotonic clock,
-green/red completion dots, long-running calls, coalescing, request/settlement clearing, timer disposal, nested calls, narrow terminals and toggling
+The actual tool-row component renders each call as an independent transient chat block;
+checks cover all streamed calls, overlapping execution, independently staggered three-second
+completion holds using a controlled monotonic clock, green/red completion dots, long-running calls,
+late-update suppression, request/settlement hold preservation, timer disposal, nested calls, narrow terminals and toggling
 during a run. Changing the working message fails.
 These component checks cover rendering; the RPC journey alone cannot certify terminal display.
 The same checks run with a preinstalled legacy renderer to catch live-upgrade regressions;
@@ -157,13 +201,17 @@ project and user scope and launches real Pi RPC sessions. The project Bash journ
 not end the job. A second prompt succeeds while it runs. A completion notification then wakes
 the agent, whose real `write` tool saves the observed exit status and output to a fixture receipt.
 The inference server routes from call/result history and completion data, without polling jobs
-or using prompt wording assertions. Windows user-scope acceptance also exercises native PowerShell.
+or using prompt wording assertions. The running command is inspected with omitted, false and true
+`show_output` values through `get_background_shell_status`; status is always returned, output is
+opt-in. User turns receive a hidden count-only reminder, and both replacement tools require an ID.
+Windows user-scope acceptance also exercises native PowerShell. A synchronized background worker
+finishes during a real foreground command; its steering message must reach the next model request
+before the ongoing task's next write, with one final response and no completion-only follow-up.
 
-Automatic-handoff cases verify a foreground wait limit returns before completion, the worker
+Automatic-handoff cases (the fixture sets `backgroundShell.foregroundTimeout`) verify the foreground limit returns before completion, the worker
 launches once, its log includes output from before and after handoff, and another prompt can
 run while it continues. A nested caller aborts its own signal after handoff to verify background
-ownership. Hard deadlines are checked before and after handoff, including equal wait/execution
-deadlines; commands that settle in the foreground must not send a completion notification.
+ownership. Hard `timeout` deadlines are checked before and after handoff, including a timeout equal to the foreground limit; commands that settle in the foreground must not send a completion notification.
 
 Further cases cover nonzero native exit codes, explicit termination deadlines, large output and
 log limits, command-guard denial before launch, invalid arguments, process-tree cancellation,
@@ -171,10 +219,13 @@ reload, tree-navigation, session-switch and shutdown cleanup, nested execution a
 exact inference counts, unchanged project settings/instructions, and
 receipt-driven uninstall. All provider traffic stays on the authenticated fake loopback endpoint.
 The `/ps` command is discovered and handled without inference. A tool cancellation returns its
-final state directly without an automatic duplicate. Project acceptance also runs eleven
-component/real-process checks against the installed Pi SDK: selector navigation, cancellation
+final state directly through `cancel_background_shell` without an automatic duplicate when
+cancelled before submission; Pi-owned queued messages cannot be retracted. Project
+acceptance also runs component/real-process checks against the installed Pi SDK: split-tool schemas,
+optional output, running-count reminders, six-character ID collisions/non-reuse, selector navigation, cancellation
 and reopening, editor replacement/restoration, bounded wrapping/scrolling, key-release filtering,
-native fullscreen Page Up/Down and wheel dispatch, pending-result consumption, and delivery retry.
+native fullscreen Page Up/Down and wheel dispatch, pre-submission consumption, receipt confirmation,
+queued-message non-retraction, ambiguous-submission deduplication, and synchronous rejection retry.
 `npm run e2e:pi-background-shell` is the corresponding CLI journey.
 
 ## Reusable boundaries
@@ -362,19 +413,55 @@ the Windows headless integration, not Pi TUI, POSIX or real Discord service acce
 
 ## Pi persistent subagents
 
-`test:pi-subagents` installs the real `subagents` package at project scope with `--local`, so the
-checkout runtime becomes an isolated uv tool entry point exactly as in production. A project
+Checkout-runtime regressions publish BOM-prefixed requests through native shell tools in JSON auto
+and RPC interactive sessions, including a command that writes its request before failing. They
+verify one launched child, one acknowledged result, an empty request inbox and four inference
+requests. The shared Claude/Codex journey also publishes shell-created BOM requests without an
+explicit `harness ask`; lifecycle hooks must discover and launch them.
+Separate Claude/Codex cases disable tool-completion hooks and verify that Stop discovers
+the request, launches the child and delivers its result.
+
+`test:pi-subagents` installs the real `subagents` package at project scope into an isolated uv tool
+environment. The auto journey runs with both the checkout runtime (`--local`) and the manifest's
+published Git pin; the latter catches stale runtime pins that local-source tests cannot detect.
+The npm packaging checks found that the current `c650a6f` pin predates the extension's
+`inbox_scan` operation. Four shipped-pin subagent journeys fail until the runtime changes in
+local commit `ba136dd` are published and pinned. Checkout-runtime delegation and the combined
+cloud interview stack pass; those development results do not certify the shipped runtime pin.
+The interactive journey uses the shipped runtime pin. The shared fixture installer defaults to
+shipped pins; local-runtime testing must opt in explicitly. A project
 `.harness/config.json` gives children the same isolated, trusted Pi invocation; the session and agent
 directories are inherited. The auto journey runs a JSON parent that writes an inbox request,
 launches a real `pi --mode json` child under the runtime supervisor, waits in `agent_before_settle`,
 and integrates the answer. The interactive journey runs an RPC parent; `capture-terminal.mjs`
 stands in for the visible terminal and hands the launch specification to the test, which opens the
-child as an RPC session with the runtime's environment. The child's previous-message reply makes
+child as an RPC session with the runtime's environment and requested model/thinking flags. The child's previous-message reply makes
 zero inference requests and the result starts the idle parent's next turn. Each journey asserts
 exactly four inference requests, the succeeded and acknowledged request, one persisted result
 message matching its delivery ID, the child's native session file and no remaining request file.
+Combined auto and interactive journeys start through `/skill:grill-me-in-cloud`, obtain the inbox
+without invoking a delegation command first, request `gpt-6.1-sol` at medium effort, integrate the
+child result, and publish a round. The model ID is registered only against the loopback fake endpoint. Both check the
+child's persisted model/thinking metadata, the board payload, request cleanup and exactly five
+inference calls, with project guards and user-scope background shell, Calm and input extensions loaded.
+
+To run the combined journeys against the real local Grill app, database and storage instead of the
+transport fixture, start the local stack described in `apps/grill/README.md`, set
+`HARNESS_GRILL_URL` to its `http://127.0.0.1:<port>` origin and `HARNESS_GRILL_CODE` to its test code,
+then run `npm run e2e:pi-subagents:live`. This command accepts loopback services only, keeps inference
+on the fake endpoint, and deletes only each journey's UUID-owned board session afterward.
+
+The shutdown regression also runs a real JSON Pi parent with an automatic Codex child using
+`gpt-6.1-sol` at medium effort, with both catalogue targets installed from the checkout runtime.
+Its hook adapter deliberately withholds the child's `Stop` result and runs the actual `SessionEnd`
+handler before process exit. Acceptance requires a pending request at shutdown, the supervisor's
+successful reply, one persisted and acknowledged Pi delivery, a native Codex session, an empty
+inbox and exactly four fake-API requests. The shared Claude/Codex subagent journey additionally
+checks this shutdown order on both the initial automatic launch and its continuation.
+
 This certifies Windows headless integration, not the Pi TUI, POSIX, or Claude/Codex parents with
-Pi children through real CLIs.
+Pi children through real CLIs. Unpublished runtime changes use checkout-source acceptance;
+advance the manifest's immutable source pin when releasing those changes.
 
 ## Pi path guards
 

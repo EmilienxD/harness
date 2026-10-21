@@ -7,6 +7,7 @@ import test from "node:test";
 import { DelegationCoordinator, type DelegationConfigurationSource } from "../../src/bridge/delegation.js";
 import { ChatGptAgentPlatform } from "../../src/chatgpt/platform.js";
 import { ClaudeAgentPlatform } from "../../src/claude/platform.js";
+import { PiAgentPlatform } from "../../src/pi/platform.js";
 import { FileLaunchConfigurationSource } from "../../src/platform/launch-configuration.js";
 import type { ResolvedPrompt } from "../../src/platform/prompts.js";
 import { TerminalController, type StartupProofTracker, type TerminalCreationOptions, type TerminalHandle, type TerminalHost } from "../../src/platform/terminals.js";
@@ -723,3 +724,48 @@ test("a review delegation carries [AI]-chrome to its adapter and survives persis
   });
   assert.equal((await run).result.outcome, "succeeded");
 });
+
+
+for (const provider of ["claude", "chatgpt", "pi"] as const) {
+  test(`${provider} manual launch and reopen keep the target checkout and read its latest configuration`, async (t) => {
+    const root = await mkdtemp(join(tmpdir(), "aboard-checkout-provider-"));
+    t.after(() => rm(root, { recursive: true, force: true }));
+    const workspaceRoot = join(root, "main");
+    const cwd = join(root, "main-1");
+    const sessionDirectory = join(root, "sessions");
+    for (const folder of [workspaceRoot, cwd]) await mkdir(join(folder, ".harness"), { recursive: true });
+    await mkdir(sessionDirectory);
+    const sessionId = "af817a6c-cd41-41e2-a4db-44d3f43cd560" as SessionId;
+    if (provider === "pi") await writeFile(join(sessionDirectory, `fixture_${sessionId}.jsonl`), [
+      { type: "session", version: 3, id: sessionId, cwd },
+      { type: "message", id: "user", parentId: null, message: { role: "user", content: "fixture" } },
+      { type: "session_info", id: "title", parentId: "user", name: "Fixture conversation" },
+    ].map((row) => JSON.stringify(row)).join("\n"));
+    const config = (program: string) => JSON.stringify({ version: 1, providers: { [provider]: { command: [program, ...(provider === "pi" ? ["--session-dir", sessionDirectory] : [])] } } });
+    await writeFile(join(workspaceRoot, ".harness", "config.json"), config("source-command"));
+    await writeFile(join(cwd, ".harness", "config.json"), config("checkout-command"));
+    const platform: AgentPlatform = provider === "claude"
+      ? new ClaudeAgentPlatform({ lifecycleAssets: { settings: "hooks.json", script: "hook.py" }, commandRunner: async () => ({ code: 0, stdout: "2.1.100", stderr: "" }), resumable: async () => true })
+      : provider === "chatgpt"
+        ? new ChatGptAgentPlatform({ lifecycleAssets: { settings: "hooks.json", script: "hook.py" }, commandRunner: async () => ({ code: 0, stdout: "codex-cli 0.153.4", stderr: "" }), sessionProbe: { inspect: async () => ({ state: "resumable" }) }, policyProbe: { require: async () => {} } })
+        : new PiAgentPlatform({ lifecycleAssets: { settings: "unused", script: "unused" }, commandRunner: async () => ({ code: 0, stdout: "1.2.0", stderr: "" }) });
+    const host = new FakeTerminalHost();
+    let number = 0;
+    const terminals = new TerminalController({ host, shell: "powershell", environment: () => ({ port: 4823, token: "token", workspaceRoot }), terminalIdFactory: () => `terminal-${++number}` as TerminalId });
+    const fleet = new FleetRegistry();
+    const source = new FileLaunchConfigurationSource(join(workspaceRoot, ".harness", "config.json"));
+    const coordinator = new DelegationCoordinator({ workspaceRoot, fleet, lease: new WriteLease(), terminals, configurations: source,
+      platforms: new Map([[provider, platform]]), prompts: { resolve: async () => undefined }, spills: { prepare: async () => {}, write: async () => "unused" }, shell: "powershell", agentIdFactory: () => "manual-agent" as AgentId });
+    const launched = await coordinator.launchInteractive({ type: "interactive", description: "Manual checkout", configuration: await source.getForWorktree(provider, "interactive", cwd), isolation: { cwd, protectedPaths: [], writableRoots: [] } }, "user");
+    assert.equal(fleet.get(launched.agentId)?.cwd, cwd);
+    assert.equal(fleet.get(launched.agentId)?.autoRunRestricted, undefined);
+    assert.equal(host.options[0]?.cwd, cwd);
+    assert.match(host.terminals[0]!.sent.at(-1)!, /checkout-command/);
+    await writeFile(join(cwd, ".harness", "config.json"), config("updated-checkout-command"));
+    await coordinator.reopen({ platform: provider, agentId: "reopened-checkout" as AgentId, type: "interactive", sessionId, cwd });
+    assert.equal(host.options[1]?.cwd, cwd);
+    assert.match(host.terminals[1]!.sent.at(-1)!, /updated-checkout-command/);
+    assert.equal(fleet.get("reopened-checkout" as AgentId)?.cwd, cwd);
+    terminals.dispose();
+  });
+}

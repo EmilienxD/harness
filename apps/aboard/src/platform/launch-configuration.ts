@@ -1,5 +1,6 @@
 import { readFile } from "node:fs/promises";
-import { join } from "node:path";
+import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
+import { ProcessGitClient } from "../git/client.js";
 
 import type { DelegationConfigurationSource } from "../bridge/delegation.js";
 import { parseClaudeLaunchFile } from "../claude/launch-configuration.js";
@@ -182,8 +183,25 @@ export class FileLaunchConfigurationSource implements DelegationConfigurationSou
   public async getDelegationFor(platform: AgentPlatformId, task: DelegationTask): Promise<ConfiguredLaunch> {
     return (await this.load()).value.delegationConfigurationFor(platform, task);
   }
+  public async getForWorktree(platform: AgentPlatformId, type: AgentType, cwd: string): Promise<ConfiguredLaunch> {
+    return (await this.#forCheckout(cwd)).getFor(platform, type);
+  }
   public async getDelegationForWorktree(platform: AgentPlatformId, task: DelegationTask, cwd: string): Promise<ConfiguredLaunch> {
-    const source = new FileLaunchConfigurationSource({ ...this.#paths, project: join(cwd, ".harness", "config.json") });
-    return source.getDelegationFor(platform, task);
+    return (await this.#forCheckout(cwd)).getDelegationFor(platform, task);
+  }
+
+  async #forCheckout(cwd: string): Promise<FileLaunchConfigurationSource> {
+    const projectRoot = dirname(dirname(this.#paths.project));
+    const contains = (parent: string, child: string): boolean => {
+      const offset = relative(resolve(parent), resolve(child));
+      return offset === "" || offset !== ".." && !offset.startsWith(`..${sep}`) && !isAbsolute(offset);
+    };
+    const inProject = contains(projectRoot, cwd);
+    // A delegation can start below the checkout root. Resolve its Git checkout,
+    // not cwd/.harness, and never fall back to the other window's configuration.
+    const checkoutRoot = await new ProcessGitClient(cwd).checkoutRoot().catch(() => inProject ? projectRoot : cwd);
+    // Preserve explicitly opened subfolder projects, including non-Git folders.
+    if (inProject && contains(checkoutRoot, projectRoot)) return new FileLaunchConfigurationSource(this.#paths);
+    return new FileLaunchConfigurationSource({ ...this.#paths, project: join(checkoutRoot, ".harness", "config.json") });
   }
 }

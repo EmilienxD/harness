@@ -5,7 +5,7 @@ import { basename, join, parse, relative, sep } from "node:path";
 import type { FleetRegistry } from "../domain/fleet.js";
 import type { AgentPlatformId, SessionId } from "../domain/contracts.js";
 import type { PromptSubmissions } from "../platform/prompt-submissions.js";
-import type { TerminalController } from "../platform/terminals.js";
+import { validateResumeMessage, type TerminalController } from "../platform/terminals.js";
 
 type Presence = { readonly provider: AgentPlatformId; readonly session_id: string };
 type Delivery = { readonly delivery_id: string; readonly provider: AgentPlatformId; readonly session_id: string; readonly prompt: string };
@@ -142,9 +142,11 @@ export class GrillCloudRelay {
       if (terminalId === undefined) throw new Error("Provider terminal is no longer open");
       const terminal = this.options.terminals.get(terminalId);
       if (terminal.backend !== "terminal" || terminal.sessionId !== delivery.session_id) throw new Error("Terminal binding changed before submission");
+      validateResumeMessage(delivery.prompt);
+      if (this.#stopped) throw new Error("Grill relay stopped before submission");
       const expectation = this.options.prompts.expect(session.sessionId, this.#confirmationTimeoutMs);
       try {
-        await this.options.terminals.sendResumeMessage(terminalId, delivery.prompt);
+        await this.options.terminals.sendResumeMessage(terminalId, delivery.prompt, { normalizeFileReferences: false });
       } catch (error) {
         expectation.cancel();
         throw error;

@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://github.com/EmilienxD/harness/protocol/grill/v1/round.schema.json",
+  "$id": "https://github.com/EmilienxD/harness/docs/protocol/grill/v1/round.schema.json",
   "title": "Harness hosted grill round v1",
   "$comment": "Question IDs must also be unique; option letters must be consecutive from A; recommendation must name one option.",
   "type": "object",

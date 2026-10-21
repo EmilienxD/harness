@@ -1,10 +1,11 @@
 name = "subagents"
-version = "2.10.2"
+version = "2.11.1"
 description = "Persistent conversation delegation with mode-preserving resume"
 docs = "https://github.com/EmilienxD/harness/blob/main/README.md#user-invoked-skills"
 dependencies = [
     "prototype>=1.1.0,<2.0.0", "websearch>=1.1.0,<2.0.0", "grill-me>=1.0.3,<2.0.0", "issue-readers>=1.0.0,<2.0.0",
     { name = "pi-transport", version = ">=1.1.0,<2.0.0", lifecycle = "coupled", platforms = ["pi"] },
+    { name = "pi-subagents-toolkit", version = ">=1.0.0,<2.0.0", lifecycle = "coupled", platforms = ["pi"] },
 ]
 
 [platforms.claude]
@@ -20,7 +21,7 @@ status = "supported"
 
 [[files]]
 src = "pi/extension.ts"
-dest = "harness-subagents/index.ts"
+dest = ".harness-subagents/index.ts"
 root = "extensions"
 platforms = ["pi"]
 
@@ -28,11 +29,13 @@ platforms = ["pi"]
 src = "subagents-toolkit/builtin-tasks.yaml"
 dest = "subagents-toolkit/builtin-tasks.yaml"
 root = "skills"
+platforms = ["claude", "chatgpt"]
 
 [[files]]
 src = "subagents-toolkit/SKILL.md"
 dest = "subagents-toolkit/SKILL.md"
 root = "skills"
+platforms = ["claude", "chatgpt"]
 
 [[files]]
 src = "subagents-toolkit/chatgpt/openai.yaml"
@@ -153,4 +156,4 @@ platforms = ["chatgpt"]
 [[actions]]
 type = "uv-tool"
 package = "harness-subagents-runtime"
-source = "git+https://github.com/EmilienxD/harness@8fe1743ee19ed3ededb5e7296ca846290225c882#subdirectory=harness/productivity/subagents/runtime"
+source = "git+https://github.com/EmilienxD/harness@c650a6f8317646ec2ae817798d69c9d3efe5756f#subdirectory=harness/productivity/subagents/runtime"

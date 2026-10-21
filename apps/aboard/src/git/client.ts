@@ -374,7 +374,7 @@ export class ProcessGitClient implements GitClient {
   }
 
   public async worktrees(): Promise<readonly GitWorktree[]> {
-    const output = await this.tryRun(["worktree", "list", "--porcelain"]);
+    const output = await this.tryRun(["worktree", "list", "--porcelain", "-z"]);
     if (output === undefined) return [];
     const worktrees: GitWorktree[] = [];
     let path: string | undefined;
@@ -384,12 +384,28 @@ export class ProcessGitClient implements GitClient {
       path = undefined;
       branch = undefined;
     };
-    for (const line of output.split(/\r?\n/u)) {
-      if (line.startsWith("worktree ")) { flush(); path = line.slice("worktree ".length).trim(); }
-      else if (line.startsWith("branch ")) branch = line.slice("branch ".length).trim().replace(/^refs\/heads\//u, "");
+    for (const line of output.split("\0")) {
+      if (line.startsWith("worktree ")) { flush(); path = line.slice("worktree ".length); }
+      else if (line.startsWith("branch ")) branch = line.slice("branch ".length).replace(/^refs\/heads\//u, "");
     }
     flush();
     return worktrees;
+  }
+
+  public async checkoutRoot(): Promise<string> {
+    return this.run(["rev-parse", "--show-toplevel"]);
+  }
+
+  public async validateBranchName(branch: string): Promise<void> {
+    // check-ref-format --branch accepts @{-n}; manual launches require a literal name.
+    if (branch.startsWith("-") || branch.includes("@{")) throw new Error("Enter a literal Git branch name.");
+    try { await this.run(["check-ref-format", "--branch", branch]); }
+    catch { throw new Error(`Invalid Git branch name: ${branch}`); }
+  }
+
+  public async resolveCommit(ref: string): Promise<string> {
+    try { return await this.run(["rev-parse", "--verify", "--end-of-options", `${ref}^{commit}`]); }
+    catch { throw new Error(`Cannot resolve starting commit ${ref}. The repository needs an initial commit.`); }
   }
 
   public async addWorktree(path: string, branch: string, startPoint?: string): Promise<void> {

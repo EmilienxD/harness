@@ -15,16 +15,16 @@ export class NewWorkspaceLauncher {
     log: (message: string) => void;
   }) {}
 
-  async launch(request: Pick<LauncherRequest, "preset">): Promise<void> {
+  async launch(request: Pick<LauncherRequest, "preset">, projectRoot: string = this.options.projectRoot): Promise<void> {
     if (this.#busy) return;
     this.#busy = true;
     try {
-      await window.withProgress({ location: ProgressLocation.Notification, title: "Launching agent workspace", cancellable: false }, async (progress) => {
+      await window.withProgress({ location: ProgressLocation.Window, title: "Launching agent workspace", cancellable: false }, async (progress) => {
         const plan = validateWorkspaceLaunchPlan({ preset: request.preset, empty: false, manual: true }, this.options.providers);
         progress.report({ message: "Opening the new workspace…" });
-        const handoff = await this.options.files.create(this.options.projectRoot, plan);
+        const handoff = await this.options.files.create(projectRoot, plan);
         const startup = new WorkspaceStartup(this.options.storageRoot, handoff);
-        try { await commands.executeCommand("vscode.openFolder", Uri.file(handoff.workspaceFile), { forceNewWindow: true }); }
+        try { await commands.executeCommand("vscode.openFolder", Uri.file(handoff.workspaceFile), { forceNewWindow: true, noRecentEntry: true }); }
         catch (error) {
           // Reserve an unopened request so a delayed activation cannot replay it.
           await startup.wait({ activationTimeoutMs: 0 }).catch(() => undefined);
@@ -33,11 +33,11 @@ export class NewWorkspaceLauncher {
         progress.report({ message: "Starting terminals in the new window…" });
         const result = await startup.wait();
         for (const failure of result.failed) this.options.log(`Workspace launch ${handoff.requestId}: ${failure.provider}: ${failure.message}`);
-        await presentWorkspaceBatchResult(result, (message) => window.showErrorMessage(message));
+        await presentWorkspaceBatchResult(result, async (message) => { throw new Error(message); });
       });
     } catch (error) {
       this.options.log(`Workspace launch: ${error instanceof Error ? error.message : String(error)}`);
-      await window.showErrorMessage(error instanceof Error ? error.message : "Unable to launch agent workspace");
+      throw error;
     } finally { this.#busy = false; }
   }
 }

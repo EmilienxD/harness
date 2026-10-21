@@ -10,6 +10,7 @@ from scripts import ci_changes
     ("paths", "expected"),
     [
         (["docs/user/index.md", "docs/CLAUDE-REFERENCES/hooks.md"], (False, False, False)),
+        (["docs/protocol/grill/v1/round.schema.json"], (False, False, False)),
         (["apps/grill/src/routes/index.tsx"], (False, False, False)),
         (["apps/aboard/README.md"], (False, False, False)),
         (["README.md", "LICENSE"], (False, True, False)),

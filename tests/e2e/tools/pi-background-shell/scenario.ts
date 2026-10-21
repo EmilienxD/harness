@@ -25,6 +25,18 @@ export function backgroundScenario(steps: (route: string, request: OpenAiRespons
       const notification = scoped.input.flatMap((item) => text(item.content).split("\n")).map((line) => {
         try { return JSON.parse(line) as { type?: string; jobs?: Record<string, unknown>[] }; } catch { return {}; }
       }).find((value) => value.type === "shell_job_completion");
+      if (route === "busy") {
+        const results = scoped.input.filter(item => item.type === "function_call_output");
+        if (results.length >= 2) {
+          assert.ok(notification, "Completion must reach the ongoing task before its next model request");
+          const receipt = JSON.parse(String(results[0]!.output)) as { id: string };
+          assert.equal(notification.jobs?.length, 1);
+          assert.equal(notification.jobs[0]!.id, receipt.id);
+          assert.equal(notification.jobs[0]!.state, "completed");
+          assert.equal(notification.jobs[0]!.exit_code, 0);
+        }
+        return launch.transition(scoped);
+      }
       if (!notification) return launch.transition(scoped);
       const jobs = notification.jobs!;
       assert.equal(jobs.length, 1);

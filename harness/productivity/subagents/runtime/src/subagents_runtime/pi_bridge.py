@@ -1,6 +1,6 @@
 """Versioned operations for the native Pi extension over the shared delegation runtime.
 
-Pi passes normalized facts (native session ID, observed writes, final messages) instead of
+Pi passes lifecycle events (native session ID, tool completion, final messages) instead of
 emulating Claude/Codex hook payloads. Every response is one JSON object on stdout.
 """
 
@@ -23,8 +23,7 @@ from subagents_runtime.delegation import (
     enable_delegation,
     ensure_inbox,
     has_pending_children,
-    process_inbox,
-    reconcile_inbox,
+    scan_inbox,
     report_child_stop,
     results_marker,
     send_previous_reply,
@@ -33,7 +32,6 @@ from subagents_runtime.delegation import (
 from subagents_runtime.hooks import (
     PREVIOUS_REPLY_SKILL,
     SKILL_NAME,
-    _inbox_for_path,
     _parent_terminal_message,
     _processing_context,
     _registered_skill,
@@ -102,7 +100,7 @@ def session_start(request: dict[str, Any]) -> dict[str, Any]:
         ).fetchone()
     recovered = []
     if enabled:
-        recovered = reconcile_inbox(session_id, launch=sessions.launch_delegated)
+        recovered = scan_inbox(session_id)
         with sessions._connect() as connection:
             children = connection.execute(
                 "SELECT DISTINCT child_session_id FROM requests WHERE parent_session_id=? AND child_session_id IS NOT NULL AND state IN ('launching','pending','uncertain')",
@@ -159,18 +157,14 @@ def previous_reply(request: dict[str, Any]) -> dict[str, Any]:
     return {"notice": notice}
 
 
-def inbox_write(request: dict[str, Any]) -> dict[str, Any]:
+def inbox_scan(request: dict[str, Any]) -> dict[str, Any]:
     session_id, _parent, _mode = _session(request)
-    paths = request.get("paths")
-    if not isinstance(paths, list) or not all(isinstance(path, str) and path for path in paths):
-        raise BridgeError("paths must be a list of file paths")
-    processed = []
-    for value in paths:
-        path = Path(value).resolve()
-        owner = _inbox_for_path(session_id, path)
-        if owner is not None:
-            processed.extend(process_inbox(owner, launch=sessions.launch_delegated, request_paths={path}))
-    return {"context": _processing_context(processed) if processed else None}
+    processed = scan_inbox(session_id)
+    return {
+        "context": _processing_context(processed) if processed else None,
+        "changed": any(item.status in {"launched", "failed"} for item in processed),
+        "pending": has_pending_children(session_id),
+    }
 
 
 def settled(request: dict[str, Any]) -> dict[str, Any]:
@@ -227,7 +221,9 @@ OPERATIONS = {
     "session_start": session_start,
     "prompt": prompt,
     "previous_reply": previous_reply,
-    "inbox_write": inbox_write,
+    "inbox_scan": inbox_scan,
+    # Sessions with an older loaded extension can still use the upgraded runtime.
+    "inbox_write": inbox_scan,
     "settled": settled,
     "shutdown": shutdown,
     "claim_delivery": claim_delivery,

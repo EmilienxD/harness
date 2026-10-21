@@ -217,8 +217,11 @@ def test_install_registers_native_shell_matchers_and_editable_policy(
         (None, "[1, 2]"),
     ],
 )
-def test_malformed_hook_input_is_ignored(payload, raw):
-    assert run_payload(payload, raw=raw) == (0, None, "")
+def test_malformed_hook_input_is_denied(payload, raw):
+    code, output, stderr = run_payload(payload, raw=raw)
+    assert code == 0
+    assert stderr == ""
+    assert output["hookSpecificOutput"]["permissionDecision"] == "deny"
 
 
 @pytest.mark.parametrize("policy_contents", [None, "([invalid\n"])

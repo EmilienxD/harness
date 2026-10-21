@@ -399,6 +399,7 @@ export function parseAgentSession(value: unknown): ValidationResult<AgentSession
     ? record.sessionBinding
     : (issues.push("session.sessionBinding must be provisional or bound"), undefined);
   const terminal = parseTerminal(record.terminal, "session.terminal", issues);
+  const title = record.title === undefined ? undefined : readNonEmptyString(record.title, "session.title", issues);
   const lifecycle = parseLifecycle(record.lifecycle, "session.lifecycle", issues);
   const resultDelivery = parseResultDelivery(
     record.resultDelivery,
@@ -493,6 +494,7 @@ export function parseAgentSession(value: unknown): ValidationResult<AgentSession
     sessionId,
     sessionBinding,
     terminal,
+    ...(title === undefined ? {} : { title }),
     lifecycle,
     resultDelivery,
     ...(executionMode === undefined ? {} : { executionMode }),
@@ -611,6 +613,7 @@ export function parseFleetPersistenceDto(
           : { sequence, occurredAt, type: event.type, agentId: agentId as AgentId, delivery };
       }
 
+      case "title-updated":
       case "telemetry-updated": {
         const agentId = readNonEmptyString(event.agentId, `${path}.agentId`, innerIssues);
         return agentId === undefined

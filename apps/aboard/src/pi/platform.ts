@@ -12,11 +12,11 @@ export class PiAgentPlatform implements AgentPlatform {
   public readonly id = "pi" as const;
   public readonly displayName = "Pi";
   public readonly icon = "terminal";
-  public readonly capabilities = { sessionIdentity: "client-assigned" as const, promptDelivery: ["none", "inline", "spilled"] as const, lifecycle: ["start", "stop", "end", "compaction", "failure"] as const, models: [], reasoningEfforts: PI_EFFORTS };
+  public readonly capabilities = { sessionIdentity: "runtime-assigned" as const, promptDelivery: ["none", "inline", "spilled"] as const, lifecycle: ["start", "stop", "end", "compaction", "failure"] as const, models: [], reasoningEfforts: PI_EFFORTS };
   public readonly lifecycleAssets: PlatformLifecycleAssets;
   public constructor(private readonly options: { readonly commandRunner: CommandRunner; readonly lifecycleAssets: PlatformLifecycleAssets }) { this.lifecycleAssets = options.lifecycleAssets; }
-  public createSession(): PlatformSessionIdentity { return { sessionId: randomUUID() as SessionId, binding: "bound" }; }
-  public bindSession(current: PlatformSessionIdentity, observed: SessionId): SessionId | undefined { return current.sessionId === observed ? observed : undefined; }
+  public createSession(): PlatformSessionIdentity { return { sessionId: randomUUID() as SessionId, binding: "provisional" }; }
+  public bindSession(current: PlatformSessionIdentity, observed: SessionId): SessionId | undefined { return current.binding === "provisional" ? observed : current.sessionId === observed ? observed : undefined; }
   public normalizeLifecycle(kind: PlatformLifecycleKind, payload: unknown) { return normalizePiLifecycle(kind, payload); }
   /** Pi worktrees use working-directory guidance; native guards retain command/tool restrictions. */
   public requireEnforceableRestrictions(_restrictions: LaunchRestrictions): void {}

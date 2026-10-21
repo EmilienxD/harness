@@ -223,8 +223,10 @@ def check(payload: dict) -> str | None:
 def main() -> int:
     try:
         payload = json.load(sys.stdin)
-        reason = check(payload) if isinstance(payload, dict) else None
-    except (ValueError, OSError) as error:
+        if not isinstance(payload, dict):
+            raise ValueError("hook input must be a JSON object")
+        reason = check(payload)
+    except Exception as error:
         reason = f"Loop guard could not check this action: {error}" if os.environ.get("HARNESS_EXECUTION_MODE") == "loop" else None
     if reason:
         print(json.dumps({"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny", "permissionDecisionReason": reason}}))

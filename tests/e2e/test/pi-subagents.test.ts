@@ -8,22 +8,54 @@ test("pi-subagents rejects unknown histories at its fake API", () => {
   assert.throws(() => scenario.transition({ model: "pi-e2e", input: [{ role: "user", content: "Unrelated." }], tools: [], codeMode: false, sessionId: null, requestKind: null }), /routing marker/u);
 });
 
-test("a headless Pi parent waits for its Pi auto child and integrates the result", { timeout: 300_000 }, async () => {
-  const result = await runPiSubagentsJourney("auto");
-  assert.equal(result.parentStatus, "success");
-  assert.equal(result.parentFinal, parentDone("auto"));
-  assert.deepEqual(result.request, { state: "succeeded", mode: "auto", provider: "pi", reply: childAnswer("auto"), acknowledged: true, boundToNativeSession: true });
-  assert.equal(result.deliveredResults, 1);
-  assert.equal(result.deliveryMatchesRequest, true);
-  assert.equal(result.childSessionSaved, true);
-  assert.equal(result.requestFilesRemaining, 0);
-  // Parent write, parent wait, child answer, parent integration.
-  assert.equal(result.inferenceRequests, 4);
-  assert.equal(result.unexpectedRequests, 0);
+test("combined live acceptance rejects remote services before creating a fixture", async () => {
+  await assert.rejects(runPiSubagentsJourney("auto", { fullStack: true, localBoard: { origin: "https://grill.example.test", code: "9110" } }), /loopback/u);
+  await assert.rejects(runPiSubagentsJourney("auto", { localBoard: { origin: "http://127.0.0.1:18080", code: "9110" } }), /loopback/u);
 });
 
+for (const route of ["auto", "interactive"] as const) {
+  test(`a cloud interview delegates the requested model and effort in ${route} mode with the installed extension stack`, { timeout: 300_000 }, async () => {
+    const result = await runPiSubagentsJourney(route, { pinnedRuntimes: true, fullStack: true, explicitModel: true });
+    assert.equal(result.parentStatus, "success");
+    assert.equal(result.parentFinal, parentDone(route));
+    assert.equal(result.request.state, "succeeded");
+    assert.equal(result.request.provider, "pi");
+    assert.equal(result.request.mode, route);
+    assert.equal(result.request.boundToNativeSession, true);
+    assert.equal(result.request.acknowledged, true);
+    assert.equal(result.deliveryMatchesRequest, true);
+    assert.equal(result.deliveredResults, 1);
+    assert.equal(result.publishedRounds, 1);
+    assert.equal(result.requestedModel, "gpt-6.1-sol");
+    assert.equal(result.requestedEffort, "medium");
+    assert.equal(result.childModel, "gpt-6.1-sol");
+    assert.equal(result.childThinkingLevel, "medium");
+    assert.equal(result.childSessionSaved, true);
+    assert.equal(result.requestFilesRemaining, 0);
+    assert.equal(result.inferenceRequests, 5);
+    assert.equal(result.unexpectedRequests, 0);
+    if (route === "interactive") assert.equal(result.previousReplyInferenceRequests, 0);
+  });
+}
+
+for (const pinnedRuntimes of [false, true]) {
+  test(`a headless Pi parent integrates its auto child using ${pinnedRuntimes ? "the shipped runtime pin" : "the checkout runtime"}`, { timeout: 300_000 }, async () => {
+    const result = await runPiSubagentsJourney("auto", { pinnedRuntimes });
+    assert.equal(result.parentStatus, "success");
+    assert.equal(result.parentFinal, parentDone("auto"));
+    assert.deepEqual(result.request, { state: "succeeded", mode: "auto", provider: "pi", reply: childAnswer("auto"), acknowledged: true, boundToNativeSession: true });
+    assert.equal(result.deliveredResults, 1);
+    assert.equal(result.deliveryMatchesRequest, true);
+    assert.equal(result.childSessionSaved, true);
+    assert.equal(result.requestFilesRemaining, 0);
+    // Parent write, parent wait, child answer, parent integration.
+    assert.equal(result.inferenceRequests, 4);
+    assert.equal(result.unexpectedRequests, 0);
+  });
+}
+
 test("an interactive Pi child replies without inference and wakes its live parent", { timeout: 300_000 }, async () => {
-  const result = await runPiSubagentsJourney("interactive");
+  const result = await runPiSubagentsJourney("interactive", { pinnedRuntimes: true });
   assert.equal(result.previousReplyInferenceRequests, 0);
   assert.equal(result.parentStatus, "success");
   assert.equal(result.parentFinal, parentDone("interactive"));
@@ -35,3 +67,16 @@ test("an interactive Pi child replies without inference and wakes its live paren
   assert.equal(result.inferenceRequests, 4);
   assert.equal(result.unexpectedRequests, 0);
 });
+
+for (const route of ["auto", "interactive"] as const) {
+  test(`Pi discovers a BOM request from a ${route === "auto" ? "failed" : "successful"} shell tool in ${route} mode`, { timeout: 300_000 }, async () => {
+    const result = await runPiSubagentsJourney(route, { pinnedRuntimes: false, shellWrite: true, failedWrite: route === "auto" });
+    assert.equal(result.parentFinal, parentDone(route));
+    assert.equal(result.request.state, "succeeded");
+    assert.equal(result.request.acknowledged, true);
+    assert.equal(result.deliveredResults, 1);
+    assert.equal(result.requestFilesRemaining, 0);
+    assert.equal(result.inferenceRequests, 4);
+    assert.equal(result.unexpectedRequests, 0);
+  });
+}

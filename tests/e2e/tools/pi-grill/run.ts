@@ -33,12 +33,13 @@ export async function runPiGrill(options: { scope: "project" | "user"; mode?: "r
   const origin = options.origin ?? board!.origin;
   const code = options.code ?? board!.code;
   const sessionId = randomUUID();
+  const answerPayloads = new Set<string>();
   let fixture: Awaited<ReturnType<typeof createPiFixture>>;
   const transition = (request: OpenAiResponsesRequest): OpenAiScenarioResponse => {
     const reject = (detail: string): never => { throw new OpenAiProtocolError("$.input", detail, "pi-grill"); };
     if (request.model !== "pi-e2e") reject("unknown model");
     // Route from the newest actual user input, ignoring additive package context.
-    const users = request.input.filter((item) => item.role === "user" && (contentText(item.content).includes(marker) || contentText(item.content).startsWith("[harness-grill-delivery:")));
+    const users = request.input.filter((item) => item.role === "user" && (contentText(item.content).includes(marker) || answerPayloads.has(contentText(item.content))));
     const user = users.at(-1);
     if (!user) reject("unknown grilling route");
     const userText = contentText(user!.content);
@@ -47,12 +48,12 @@ export async function runPiGrill(options: { scope: "project" | "user"; mode?: "r
     const calls = history.filter((item) => item.type === "function_call");
     const outputs = history.filter((item) => item.type === "function_call_output");
     if (calls.length !== outputs.length) reject("incomplete tool history");
-    const answer = userText.startsWith("[harness-grill-delivery:");
+    const answer = answerPayloads.has(userText);
     const invalid = userText.includes("[E2E:invalid-round]");
     let steps: Array<{ path: string; content: string }>;
     if (answer) {
       // Compile only queued answers; compare structured effect, not agent instruction text.
-      const answers = userText.split("\n").slice(1).filter((line) => line.startsWith("- Q"));
+      const answers = userText.split("\n").filter((line) => line.startsWith("- Q"));
       steps = [{ path: "cloud-answer.txt", content: answers.join("\n") + "\n" }];
     } else {
       const source = userText.split("\n").map((line) => line.trim()).find((line) => /[\\/]round-\d{3}\.json$/.test(line));
@@ -90,7 +91,7 @@ export async function runPiGrill(options: { scope: "project" | "user"; mode?: "r
     Object.assign(fixture.workspace.env, { HARNESS_GRILL_URL: origin, HARNESS_GRILL_CODE: code });
     await runFixtureInstaller(fixture.workspace, "install", ["grill-me-in-cloud"], { scope: options.scope });
     const platform = options.scope === "project" ? join(fixture.workspace.projectRoot, ".pi") : fixture.workspace.agentDir;
-    await access(join(platform, "extensions", "harness-grill-me-in-cloud", "index.ts"));
+    await access(join(platform, "npm/node_modules/harness-pi-grill-me-in-cloud", "extensions", ".harness-grill-me-in-cloud", "index.ts"));
     const probe = join(fixture.workspace.projectRoot, ".pi", "extensions", "grill-lifecycle-test");
     await mkdir(probe, { recursive: true });
     await writeFile(join(probe, "index.ts"), `export default function(pi) {
@@ -165,6 +166,7 @@ export async function runPiGrill(options: { scope: "project" | "user"; mode?: "r
     await api(`rounds/${roundId}/answers/Q2`, "PUT", { selected_option: "A", note: null, state: "draft" });
     const preview = await api(`rounds/${roundId}/prompt-preview`, "POST", {});
     assert.equal(preview.prompt, "- Q1: B. Fixture choice");
+    answerPayloads.add(preview.prompt);
     const { snapshot } = await api(`rounds/${roundId}/prompt-snapshots`, "POST", { reason: "aboard", expected_prompt: preview.prompt });
     if (options.faults && board) board.setFailAck(true);
     const { delivery } = await api(`prompt-snapshots/${snapshot.id}/deliveries`, "POST", {});
@@ -185,41 +187,52 @@ export async function runPiGrill(options: { scope: "project" | "user"; mode?: "r
     assert.equal(state.sessionId, sessionId);
     assert.ok(containsPath(fixture.workspace.sessionsDir, state.sessionFile));
     const persisted = (await readFile(state.sessionFile, "utf8")).split("\n").filter(Boolean).map((line) => JSON.parse(line));
-    const messages = persisted.filter((entry: any) => entry.type === "message" && entry.message.role === "user" && contentText(entry.message.content).startsWith(`[harness-grill-delivery:${delivery.id}]\n`));
+    const messages = persisted.filter((entry: any) => entry.type === "message" && entry.message.role === "user" && contentText(entry.message.content) === snapshot.prompt);
     assert.equal(messages.length, 1);
     const receipt = persisted.find((entry: any) => entry.type === "custom" && entry.customType === "harness-grill-cloud-v1" && entry.data?.deliveryId === delivery.id);
     assert.equal(receipt?.data.userEntryId, messages[0].id);
+    // A separately reviewed send with identical answers must create its own user entry.
+    const { snapshot: resendSnapshot } = await api(`rounds/${roundId}/prompt-snapshots`, "POST", { reason: "aboard", expected_prompt: preview.prompt });
+    const { delivery: resend } = await api(`prompt-snapshots/${resendSnapshot.id}/deliveries`, "POST", {});
+    await waitFor(async () => (await api(`deliveries/${resend.id}`)).delivery.status === "submitted-to-terminal", "identical answer resend");
+    await waitFor(async () => fixture.assertions().inferenceRequests === 7 + offset, "resend settlement");
+    const resentEntries = (await readFile(state.sessionFile, "utf8")).split("\n").filter(Boolean).map((line) => JSON.parse(line));
+    const resendReceipt = resentEntries.find((entry: any) => entry.type === "custom" && entry.customType === "harness-grill-cloud-v1" && entry.data?.deliveryId === resend.id);
+    assert.ok(resendReceipt);
+    assert.notEqual(resendReceipt.data.userEntryId, receipt.data.userEntryId);
+    const resentMessage = resentEntries.find((entry: any) => entry.id === resendReceipt.data.userEntryId);
+    assert.equal(contentText(resentMessage.message.content), resendSnapshot.prompt);
     await rivalRpc?.close();
-    assert.equal(fixture.assertions().inferenceRequests, 5 + offset);
+    assert.equal(fixture.assertions().inferenceRequests, 7 + offset);
     // A competing relay must not claim or submit an already confirmed answer.
     const competing = await api("aboard/sync", "POST", { instance_id: `e2e-competing-${randomUUID()}`, sessions: [{ provider: "pi", session_id: sessionId }], acknowledgements: [] });
     assert.equal(competing.deliveries.length, 0);
     assert.equal((await receiver.prompt("/e2e-grill-reload")).status, "handled");
-    assert.equal(fixture.assertions().inferenceRequests, 5 + offset);
+    assert.equal(fixture.assertions().inferenceRequests, 7 + offset);
     detail = await api(`sessions/pi/${sessionId}`);
     assert.equal(detail.rounds.length, options.faults && board ? 2 : 1);
     assert.equal((await receiver.prompt("/e2e-grill-fork")).status, "handled");
     const child = (await receiver.request("get_state")).data as any;
     assert.notEqual(child.sessionId, sessionId);
     assert.equal((await receiver.prompt("/e2e-grill-reload")).status, "handled");
-    assert.equal(fixture.assertions().inferenceRequests, 5 + offset);
+    assert.equal(fixture.assertions().inferenceRequests, 7 + offset);
     assert.equal((await receiver.request("switch_session", { sessionPath: state.sessionFile })).success, true);
     assert.equal((await receiver.prompt("/e2e-grill-tree")).status, "handled");
     assert.equal((await receiver.prompt("/e2e-grill-reload")).status, "handled");
-    assert.equal(fixture.assertions().inferenceRequests, 5 + offset);
+    assert.equal(fixture.assertions().inferenceRequests, 7 + offset);
     const disconnected = await api("pi/sync", "POST", { instance_id: `e2e-abandoned-${randomUUID()}`, sessions: [{ provider: "pi", session_id: sessionId, active_round_id: randomUUID(), accepting: true }], acknowledgements: [] });
     assert.equal(disconnected.deliveries.length, 0);
     assert.equal((await receiver.prompt("/grill-cloud-stop")).status, "handled");
     assert.equal((await receiver.prompt("/e2e-grill-reload")).status, "handled");
-    assert.equal(fixture.assertions().inferenceRequests, 5 + offset);
+    assert.equal(fixture.assertions().inferenceRequests, 7 + offset);
     assert.equal((await receiver.prompt("/e2e-grill-new")).status, "handled");
-    assert.equal(fixture.assertions().inferenceRequests, 5 + offset);
+    assert.equal(fixture.assertions().inferenceRequests, 7 + offset);
     await receiver.close();
     await runFixtureInstaller(fixture.workspace, "uninstall", ["grill-me-in-cloud"], { scope: options.scope });
-    await assert.rejects(access(join(platform, "extensions", "harness-grill-me-in-cloud", "index.ts")));
-    await assert.rejects(access(join(platform, "harness", "pi-transport", "transport.ts")));
+    await assert.rejects(access(join(platform, "npm/node_modules/harness-pi-grill-me-in-cloud", "extensions", ".harness-grill-me-in-cloud", "index.ts")));
+    await assert.rejects(access(join(platform, "npm/node_modules/harness-pi-pi-transport", "harness", "pi-transport", "transport.ts")));
     assert.equal(fixture.assertions().unexpectedRequests, 0);
-    return { version: fixture.version, scope: options.scope, mode: options.mode ?? "rpc", inferenceRequests: 5 + offset, hosted: board ? "fault-fixture" : new URL(origin).hostname };
+    return { version: fixture.version, scope: options.scope, mode: options.mode ?? "rpc", inferenceRequests: 7 + offset, hosted: board ? "fault-fixture" : new URL(origin).hostname };
   } finally {
     await fixture.close();
     try {

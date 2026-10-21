@@ -1,5 +1,5 @@
 name = "report-gotchas"
-version = "1.2.2"
+version = "1.2.3"
 description = "Send noteworthy agent handoff gotchas to Discord"
 docs = "https://github.com/EmilienxD/harness/blob/main/README.md#model-invoked-skills"
 requires = ["git"]
@@ -23,7 +23,7 @@ lifecycle = "coupled"
 
 [[files]]
 src = "pi/extension.ts"
-dest = "harness-report-gotchas/index.ts"
+dest = ".harness-report-gotchas/index.ts"
 root = "extensions"
 platforms = ["pi"]
 

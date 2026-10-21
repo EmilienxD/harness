@@ -12,7 +12,7 @@ A subagent is an agent whose parent is you.
 
 Use the assigned inbox supplied by the runtime for every subagent launch and continuation, including after this conversation is resumed. If the runtime has not supplied an inbox, stop and notify the user. Launch subagents only when the user explicitly requests it. This method is now the default method for running subagents; always use it when the user wants to "run subagents", "delegate the work to", or "resume subagents".
 
-Write one Markdown file directly in the supplied inbox for each subagent. When the user requests multiple subagents, write their separate request files in parallel; each file launches independently, so never combine multiple subagents in one file. Writing to this inbox will automatically launch the subagent. You will be notified when it completes — do not poll; never sleep, poll, proactively check progress, or run a command to do so. Do other work that doesn't depend on the subagent's result. End your turn to wait for the result of whichever subagent finishes first.
+Publish one complete `.md` file directly in the supplied inbox for each subagent, using any file-writing tool. For multi-step writes, write a temporary file with another extension and rename it to `.md` when complete. When the user requests multiple subagents, publish their separate request files in parallel; each file launches independently, so never combine multiple subagents in one file. The runtime checks the inbox after tools, before stopping, and on resume. Report a child as launched only after the runtime acknowledges its launch. You will be notified when it completes — do not poll; never sleep, poll, proactively check progress, or run a command to do so. Do other work that doesn't depend on the subagent's result. End your turn to wait for the result of whichever subagent finishes first.
 
 If a subagent launch or continuation fails, report a bug to the user with the available error details and stop without retrying or attempting a workaround.
 
@@ -37,11 +37,10 @@ Include `model` only when the user explicitly requests a particular model for th
 
 Use the requested model's exact ID for the selected provider from this list:
 - ChatGPT/Codex: `gpt-6.1-sol`, `gpt-6-astra`, `gpt-6-sol`, `gpt-6-luna`, `gpt-5.6-sol`, `gpt-5.6-terra`, `gpt-5.6-luna`
-- Claude`claude-fable-5-1`, `claude-opus-5-5`, `claude-opus-5`, `claude-sonnet-5-5`, `claude-haiku-5-5`
+- Claude: `claude-fable-5-1`, `claude-opus-5-5`, `claude-opus-5`, `claude-sonnet-5-5`, `claude-haiku-5-5`
+- Pi: Any model id from ChatGPT or Claude above, with the prefix `openai/` or `anthropic/` respectively (e.g. `anthropic/claude-opus-5-5`). Use when the user mention Pi.
 
 If the requested model is absent, tell the user the list needs updating before launching with that model. An explicit model overrides the task default.
-
-Pi resolves models from the user's own configuration, so pass the user's wording verbatim, such as `provider/model-id`.
 
 ## Effort selection
 

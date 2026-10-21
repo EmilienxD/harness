@@ -43,11 +43,13 @@ test("Pi preserves interactive resources and isolates exploration through native
   const config = parseLaunchFile(JSON.stringify({ version: 1, autoRun: { provider: "pi" } })).value;
   const platform = new PiAgentPlatform({ lifecycleAssets: { settings: "unused", script: "abd_pi.ts" }, commandRunner: async () => ({ code: 0, stdout: "1.2.0", stderr: "" }) });
   const identity = platform.createSession();
-  assert.equal(identity.binding, "bound");
+  assert.equal(identity.binding, "provisional");
   const common = { agentId: "agent-1" as AgentId, sessionId: identity.sessionId, shell: "powershell" as const };
   const interactive = platform.planLaunch({ ...common, agentType: "interactive", configuration: config.configurationFor("pi", "interactive").settings });
   assert.equal(interactive.args.includes("--no-extensions"), false);
   assert.equal(interactive.args.includes("--mode"), false);
+  assert.equal(interactive.args.includes("--session-id"), false);
+  assert.equal(interactive.providerEnvironment?.ABOARD_PI_ASSIGN_SESSION, "1");
   const explore = platform.planLaunch({ ...common, agentType: "explore", executionMode: "auto", configuration: config.configurationFor("pi", "explore").settings, prompt: "Inspect source" });
   assert.equal(explore.writeCapability, "read-only");
   assert.equal(explore.args.includes("--no-extensions"), true);
@@ -66,7 +68,9 @@ test("Pi preserves interactive resources and isolates exploration through native
   }
   const fork = platform.planLaunch({ ...common, sessionId: platform.createSession().sessionId, forkSessionId: identity.sessionId, agentType: "interactive", configuration: config.configurationFor("pi", "interactive").settings });
   assert.equal(fork.args[fork.args.indexOf("--fork") + 1], identity.sessionId);
-  assert.equal(platform.bindSession(identity, "stale" as SessionId), undefined);
+  assert.equal(fork.args[fork.args.indexOf("--session-id") + 1], fork.sessionId);
+  assert.equal(platform.bindSession(identity, "native" as SessionId), "native");
+  assert.equal(platform.bindSession({ ...identity, binding: "bound" }, "stale" as SessionId), undefined);
   await platform.preflight(interactive);
 });
 

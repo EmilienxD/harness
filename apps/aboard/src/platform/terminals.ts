@@ -3,8 +3,11 @@ import {
   type ShellKind,
 } from "./shell.js";
 import { randomUUID } from "node:crypto";
+import { basename } from "node:path";
+import { samePath } from "../git/worktree.js";
 import { createBackgroundProcess } from "./background.js";
 import { normalizeFileReferences } from "./prompt-paths.js";
+import { sessionTitleLabel } from "../domain/session-title.js";
 
 import {
   agentLabel,
@@ -375,8 +378,11 @@ export class TerminalController {
   public setSessionTitle(sessionId: SessionId, title: string): void {
     const record = this.#latest((candidate) => candidate.sessionId === sessionId);
     if (record?.status !== "open" || record.backend === "process" || record.handle === undefined) return;
-    const clean = title.replace(/[\u0000-\u001f\u007f]/gu, " ").trim().slice(0, 120);
-    if (clean) this.options.host.setTitle?.(record.handle, clean);
+    const clean = title.trim();
+    if (clean) {
+      const checkout = samePath(record.cwd, this.options.environment().workspaceRoot) ? "" : ` · ${basename(record.cwd.replaceAll("\\", "/"))}`;
+      this.options.host.setTitle?.(record.handle, sessionTitleLabel(`${clean}${checkout}`));
+    }
   }
 
   public liveTerminalForAgent(agentId: AgentId): TerminalId | undefined {
@@ -450,11 +456,11 @@ export class TerminalController {
   }
 
   /** Paste into the provider composer, then allow paste detection to finish before Enter. */
-  public async sendResumeMessage(terminalId: TerminalId, message: string): Promise<void> {
+  public async sendResumeMessage(terminalId: TerminalId, message: string, options: { readonly normalizeFileReferences?: boolean } = {}): Promise<void> {
     const record = this.#requireRecord(terminalId);
     if (record.backend === "process") throw new Error("Resume messages require an interactive terminal");
     validateResumeMessage(message);
-    if (record.provider === "chatgpt") message = normalizeFileReferences(message, record.cwd);
+    if (record.provider === "chatgpt" && options.normalizeFileReferences !== false) message = normalizeFileReferences(message, record.cwd);
     this.#requireOpenHandle(terminalId).sendText(`\u001b[200~${message.replace(/\r\n?/gu, "\n")}\u001b[201~`, false);
     // Codex treats Enter within 120 ms of a paste burst as a pasted newline.
     // Wait longer for larger writes so the tail can reach its composer first.

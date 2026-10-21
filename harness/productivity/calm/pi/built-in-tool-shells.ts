@@ -8,7 +8,7 @@
 // results remain owned by Pi; image components remain visible.
 import { ToolExecutionComponent } from "@earendil-works/pi-coding-agent";
 import { truncateToWidth, wrapTextWithAnsi, type Component } from "@earendil-works/pi-tui";
-import { calmHidesTranscriptChrome, getCalmToolCall, getCalmToolSpinner, type CalmToolCall } from "./visibility.ts";
+import { calmHidesTranscriptChrome, getCalmToolCalls, getCalmToolSpinner, type CalmToolCall } from "./visibility.ts";
 
 type ToolRowPresentationState = {
   toolCallId: string;
@@ -19,7 +19,7 @@ type ToolRowPresentationState = {
 
 type CalmBuiltInToolShellPatch = {
   hidesShell: () => boolean;
-  latestCall: () => CalmToolCall | undefined;
+  calls: () => readonly CalmToolCall[];
   spinnerFrame: () => string;
   originalRender: ToolExecutionComponent["render"];
   renderCurrent: (component: ToolExecutionComponent, width: number) => string[];
@@ -50,13 +50,13 @@ export function installCalmBuiltInToolShellLayout(): () => void {
 
   const patch: CalmBuiltInToolShellPatch = reusable ?? {
     hidesShell,
-    latestCall: getCalmToolCall,
+    calls: getCalmToolCalls,
     spinnerFrame: getCalmToolSpinner,
     originalRender,
     renderCurrent: (component, width) => originalRender.call(component, width),
   };
   patch.hidesShell = hidesShell;
-  patch.latestCall = getCalmToolCall;
+  patch.calls = getCalmToolCalls;
   patch.spinnerFrame = getCalmToolSpinner;
   // Reload refreshes this callback, so a live process uses the new drawing code.
   patch.renderCurrent = (component, width): string[] => {
@@ -67,8 +67,8 @@ export function installCalmBuiltInToolShellLayout(): () => void {
     }
 
     const lines: string[] = [];
-    const call = patch.latestCall();
-    if (call?.rowId === state.toolCallId && width > 0) {
+    for (const call of patch.calls()) {
+      if (call.rowId !== state.toolCallId || width <= 0) continue;
       if (width < 7) {
         lines.push(...wrapTextWithAnsi(call.summary, width).map((line) => truncateToWidth(line, width)));
       }

@@ -1,4 +1,5 @@
 import { DEFAULT_ISSUE_CONTEXT_DEPTH, isAutoRunExplorationComment } from "../domain/auto-run.js";
+import type { AgentPlatformId } from "../domain/contracts.js";
 
 export interface IssueCommentSnapshot {
   readonly authorLogin?: string | undefined;

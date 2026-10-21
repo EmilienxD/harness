@@ -1,6 +1,7 @@
 import { EventEmitter, ProgressLocation, ThemeIcon, TreeItem, TreeItemCollapsibleState, Uri, commands, env, window, workspace, type Disposable, type ExtensionContext, type OutputChannel, type TreeDataProvider } from "vscode";
 
 import { agentPlatformName, isHeadlessExecution, type AgentSession, type TerminalId } from "../domain/contracts.js";
+import { sessionTitleLabel } from "../domain/session-title.js";
 
 import type { TerminalController } from "../platform/terminals.js";
 import type { FleetRegistry } from "../domain/fleet.js";
@@ -72,10 +73,10 @@ export function registerNativeFleetUi(context: ExtensionContext, options: Native
     const agentId = session.identity.agentId;
     const existing = watches.get(agentId);
     if (existing !== undefined) { existing.channel.show(true); return; }
-    const channel = window.createOutputChannel(`aboard: ${session.identity.type} ${agentId} progress`);
+    const channel = window.createOutputChannel(`aboard: ${sessionTitleLabel(session.title)} progress`);
     const current: { readonly channel: OutputChannel; timer: ReturnType<typeof setInterval> | undefined } = { channel, timer: undefined };
     watches.set(agentId, current);
-    channel.appendLine(`Watching ${session.identity.type} (${agentPlatformName(session.platform)})`);
+    channel.appendLine(`Watching ${session.title ?? "new session"} (${agentPlatformName(session.platform)})`);
     channel.appendLine(`Session: ${session.sessionId}`);
     channel.show(true);
     let tail: ProgressTail | undefined;
@@ -120,8 +121,8 @@ export function registerNativeFleetUi(context: ExtensionContext, options: Native
     let session = value?.kind === "agent" ? value.session : undefined;
     if (session === undefined) {
       const choices = fleet.list().filter((candidate) => isHeadlessExecution(candidate.identity.type, candidate.executionMode))
-        .map((candidate) => ({ label: `${candidate.identity.type} · ${candidate.identity.agentId}`, description: agentPlatformName(candidate.platform), session: candidate }));
-      if (choices.length === 0) { void window.showInformationMessage("No background agents are available to watch."); return; }
+        .map((candidate) => ({ label: sessionTitleLabel(candidate.title), description: agentPlatformName(candidate.platform), ...(candidate.title === undefined ? {} : { detail: candidate.title }), session: candidate }));
+      if (choices.length === 0) return;
       session = (await window.showQuickPick(choices, { placeHolder: "Choose a background agent to watch" }))?.session;
     }
     if (session !== undefined && isHeadlessExecution(session.identity.type, session.executionMode)) watchSession(session);
@@ -150,7 +151,7 @@ export function registerNativeFleetUi(context: ExtensionContext, options: Native
   const engine = options.autoRun.engine;
   let autoRunStarting = false;
   const forecast = new AutoRunForecastController(() => renderAutoRun());
-  const handoffFor = (issueNumber: number): { readonly terminalId: TerminalId; readonly type: "address" | "review"; readonly agentId: string } | undefined => {
+  const handoffFor = (issueNumber: number): { readonly terminalId: TerminalId; readonly type: "address" | "review"; readonly agentId: string; readonly title?: string } | undefined => {
     const persisted = engine.persisted();
     const recorded = persisted?.workerSession?.issueNumber === issueNumber
       && (persisted.workerSession.type === "address" || persisted.workerSession.type === "review")
@@ -163,7 +164,7 @@ export function registerNativeFleetUi(context: ExtensionContext, options: Native
       if (session.identity.type !== "address" && session.identity.type !== "review") continue;
       if (session.issueNumbers?.includes(issueNumber) !== true) continue;
       if (!isTerminalOpen(session.terminal.terminalId)) continue;
-      return { terminalId: session.terminal.terminalId, type: session.identity.type, agentId: session.identity.agentId };
+      return { terminalId: session.terminal.terminalId, type: session.identity.type, agentId: session.identity.agentId, ...(session.title === undefined ? {} : { title: session.title }) };
     }
     return undefined;
   };
@@ -175,6 +176,8 @@ export function registerNativeFleetUi(context: ExtensionContext, options: Native
     eligibility: () => engine.eligibility(),
     titles: () => engine.observedTitles(),
     liveHandoff: (issueNumber) => handoffFor(issueNumber),
+    sessionTitle: (sessionId) => fleet.list().find((session) => session.sessionId === sessionId)?.title
+      ?? options.activity.entries().find((entry): entry is Extract<ActivityEntry, { kind: "agent" }> => entry.kind === "agent" && entry.reopen?.sessionId === sessionId)?.title,
   };
   const autoRunModel = new AutoRunTreeModel(autoRunSources);
   const autoRunChanges = new EventEmitter<AutoRunNode | undefined>();
@@ -468,7 +471,7 @@ export function registerNativeFleetUi(context: ExtensionContext, options: Native
 
   const leaseSaveWarnings = new LeaseSaveWarnings();
   disposables.push(workspace.onDidSaveTextDocument(() => {
-    const warning = leaseSaveWarnings.next(lease);
+    const warning = leaseSaveWarnings.next(lease, fleet);
     if (warning !== undefined) void window.showWarningMessage(warning);
   }));
 

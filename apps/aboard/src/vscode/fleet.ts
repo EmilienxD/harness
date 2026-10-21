@@ -1,8 +1,10 @@
-import { agentLabel, agentPlatformName, isHeadlessExecution, type AgentId, type AgentSession, type IsoTimestamp, type TerminalId, type WorkerFailureType } from "../domain/contracts.js";
+import { agentPlatformName, isHeadlessExecution, type AgentId, type AgentSession, type IsoTimestamp, type TerminalId, type WorkerFailureType } from "../domain/contracts.js";
 import type { FleetEvent, FleetRegistry } from "../domain/fleet.js";
 import type { LeaseAuditEvent, WriteLease } from "../domain/lease.js";
 import type { AutoRunState } from "../auto/engine.js";
 import { formatIssueNumbers } from "../shared/issues.js";
+import { basename } from "node:path";
+import { sessionTitleLabel } from "../domain/session-title.js";
 
 export type FleetTreeNode =
   { readonly kind: "agent"; readonly session: AgentSession; readonly leaseHolder: boolean };
@@ -48,14 +50,15 @@ export class FleetTreeModel {
 
     const { session } = node;
     const background = isBackground(session);
-    const goal = session.issueNumbers === undefined ? "" : ` ${formatIssueNumbers(session.issueNumbers)}`;
     const markers = [
       providerLabel(session.platform),
       session.lifecycle.status,
+      session.cwd === undefined ? "" : basename(session.cwd.replaceAll("\\", "/")),
+      session.issueNumbers === undefined ? "" : formatIssueNumbers(session.issueNumbers),
       node.leaseHolder ? "lease holder" : "",
     ].filter(Boolean);
     return {
-      label: `${agentLabel(session.identity)}${goal}`,
+      label: sessionTitleLabel(session.title),
       description: markers.join(" · "),
       tooltip: agentTooltip(session, node.leaseHolder),
       icon: agentIcon(session),
@@ -100,9 +103,9 @@ export function registerFleetCommands(host: AgentCommandHost, terminals: AgentTe
       const session = sessionOf(value);
       if (session === undefined) return;
       if (terminals.isOpen?.(session.terminal.terminalId) === false) return host.info("That session's terminal has already closed.");
-      if (await host.confirm(`Kill ${session.identity.type}?`, "Kill")) terminals.kill(session.terminal.terminalId);
+      if (await host.confirm(`Kill ${sessionTitleLabel(session.title)}?`, "Kill")) terminals.kill(session.terminal.terminalId);
     }),
-    host.register("aboard.forceReleaseLease", async () => { const holder = lease.current(); if (holder === undefined) return host.info("No write lease is held."); if (await host.confirm(`Force release the write lease held by ${holder.agentId}?`, "Release")) lease.forceRelease(now().toISOString() as IsoTimestamp, "user force release from VS Code"); }),
+    host.register("aboard.forceReleaseLease", async () => { const holder = lease.current(); if (holder === undefined) return host.info("No write lease is held."); if (await host.confirm(`Force release the write lease held by ${sessionTitleLabel(fleet.get(holder.agentId)?.title)}?`, "Release")) lease.forceRelease(now().toISOString() as IsoTimestamp, "user force release from VS Code"); }),
   ];
   return { dispose: () => registrations.forEach((entry) => entry.dispose()) };
 }
@@ -130,9 +133,11 @@ function isAgentNode(value: unknown): value is Extract<FleetTreeNode, { kind: "a
 // reliable source yet, and a wrong number is worse than no number.
 function agentTooltip(session: AgentSession, leaseHolder: boolean): string {
   return [
+    ...(session.title === undefined ? [] : [session.title]),
     `Provider: ${providerLabel(session.platform)}`,
     `Mode: ${isBackground(session) ? "Background" : "Interactive"}`,
     `Session: ${session.sessionId}`,
+    session.cwd === undefined ? "" : `Checkout: ${session.cwd}`,
     `Status: ${session.lifecycle.status}`,
     leaseHolder ? "Holds the write lease" : "",
   ].filter(Boolean).join("\n");
@@ -141,10 +146,10 @@ function agentTooltip(session: AgentSession, leaseHolder: boolean): string {
 export interface FleetNotificationHost { warning(message: string): void; error(message: string): void; }
 export class FleetNotifications {
   readonly #fleetRegistration: { dispose(): void };
-  public constructor(fleet: FleetRegistry, private readonly host: FleetNotificationHost) {
+  public constructor(private readonly fleet: FleetRegistry, private readonly host: FleetNotificationHost) {
     this.#fleetRegistration = fleet.onDidChange((event) => notify(event, fleet, host));
   }
-  public leaseConflict(holder: AgentId, acquiredAt: IsoTimestamp): void { this.host.warning(`Write lease conflict: ${holder} has held the lease since ${acquiredAt}.`); }
+  public leaseConflict(holder: AgentId, acquiredAt: IsoTimestamp): void { this.host.warning(`Write lease conflict: ${sessionTitleLabel(this.fleet.get(holder)?.title)} has held the lease since ${acquiredAt}.`); }
   public scaffoldConflict(message: string): void { this.host.warning(message); }
   public dispose(): void { this.#fleetRegistration.dispose(); }
 }
@@ -153,7 +158,7 @@ function notify(event: FleetEvent, fleet: FleetRegistry, host: FleetNotification
   if (event.type !== "lifecycle-transitioned" || (event.to !== "completed" && event.to !== "failed")) return;
   const session = fleet.get(event.agentId);
 
-  if (session?.lifecycle.status === "failed") host.error(`${session.identity.type} failed: ${failureLabel(session.lifecycle.failure.type)}.`);
+  if (session?.lifecycle.status === "failed") host.error(`${sessionTitleLabel(session.title)} failed: ${failureLabel(session.lifecycle.failure.type)}.`);
 }
 function failureLabel(type: WorkerFailureType): string { return type.replaceAll("-", " "); }
 
@@ -183,7 +188,7 @@ export function renderFleetStatus(
       "aboard",
       `Bridge: 127.0.0.1:${port}`,
       `Live agents: ${live.length}`,
-      `Write lease: ${holder ?? "free"}`,
+      `Write lease: ${holder === undefined ? "free" : sessionTitleLabel(fleet.get(holder)?.title)}`,
       "",
       ...autoRunLines,
     ].join("\n"),
@@ -191,20 +196,20 @@ export function renderFleetStatus(
   };
 }
 
-export function saveLeaseWarning(lease: WriteLease): string | undefined {
+export function saveLeaseWarning(lease: WriteLease, fleet?: FleetRegistry): string | undefined {
   const holder = lease.current();
-  return holder === undefined ? undefined : `You saved a file while ${holder.agentId} holds the aboard write lease. Your edit was saved, but concurrent changes may conflict.`;
+  return holder === undefined ? undefined : `You saved a file while ${sessionTitleLabel(fleet?.get(holder.agentId)?.title)} holds the aboard write lease. Your edit was saved, but concurrent changes may conflict.`;
 }
 
 /** Emits at most once for each acquisition; a later holder gets its own warning. */
 export class LeaseSaveWarnings {
   #warned: { readonly agentId: AgentId; readonly acquiredAt: IsoTimestamp } | undefined;
 
-  public next(lease: WriteLease): string | undefined {
+  public next(lease: WriteLease, fleet?: FleetRegistry): string | undefined {
     const holder = lease.current();
     if (holder === undefined) { this.#warned = undefined; return undefined; }
     if (this.#warned?.agentId === holder.agentId && this.#warned.acquiredAt === holder.acquiredAt) return undefined;
     this.#warned = holder;
-    return saveLeaseWarning(lease);
+    return saveLeaseWarning(lease, fleet);
   }
 }

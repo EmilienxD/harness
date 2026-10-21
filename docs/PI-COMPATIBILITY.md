@@ -68,7 +68,7 @@ Evidence anchors used throughout:
 | Delegation and continuation | `harness/productivity/subagents/runtime/src/subagents_runtime/sessions.py:455`, `harness/productivity/subagents/runtime/src/subagents_runtime/hooks.py:210` | [CLI](PI-REFERENCES/docs/cli.md), [RPC](PI-REFERENCES/docs/rpc.md), [SDK](PI-REFERENCES/docs/sdk.md) |
 | Loop report/wait protocol | `harness/productivity/subagents/runtime/src/subagents_runtime/loop.py:213` | `agent_before_settle` and `agent_settled` in [extension API](PI-REFERENCES/src/core/extensions/types.ts) |
 | Aboard integration | `apps/aboard/src/platform/agent-platform.ts:46`, `apps/aboard/src/platform/prompt-submissions.ts:16` | [CLI integration](PI-REFERENCES/docs/cli-integration.md), [RPC extension UI](PI-REFERENCES/docs/rpc-extension-ui.md) |
-| Hosted Grill constraints | `apps/grill/src/lib/grill-contract.ts:4`, `apps/grill/supabase/migrations/0000_create_hosted_grill_board.sql:5`, `protocol/grill/v1/states.json:3` | [Extensions](PI-REFERENCES/docs/extensions.md), [Session format](PI-REFERENCES/docs/session-format.md) |
+| Hosted Grill constraints | `apps/grill/src/lib/grill-contract.ts:4`, `apps/grill/supabase/migrations/0000_create_hosted_grill_board.sql:5`, `docs/protocol/grill/v1/states.json:3` | [Extensions](PI-REFERENCES/docs/extensions.md), [Session format](PI-REFERENCES/docs/session-format.md) |
 | Safety | `apps/aboard/src/domain/capability.ts:4` | [Security](PI-REFERENCES/docs/security.md), [Containerization](PI-REFERENCES/docs/containerization.md) |
 
 The local mirrors track upstream `main` and will change; the revision link above fixes the basis of this report. References provide API evidence, not model-quality, performance, or subscription-policy guarantees.

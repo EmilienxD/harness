@@ -4,12 +4,18 @@ import type { TerminalHost } from "../platform/terminals.js";
 
 export function captureEditorPanes(): readonly object[] { return [...window.tabGroups.all]; }
 
-/** Keep terminal panes open to files without changing manual locks or other editor types. */
+/** Bound editor tab widths and keep terminal panes open to files without changing manual locks. */
 export async function prepareAgentTerminalGroups(): Promise<void> {
   const configuration = workspace.getConfiguration("workbench.editor");
   const autoLockGroups = configuration.get<Record<string, boolean>>("autoLockGroups", {});
-  if (autoLockGroups.terminal === false) return;
-  await configuration.update("autoLockGroups", { ...autoLockGroups, terminal: false }, ConfigurationTarget.Workspace);
+  if (autoLockGroups.terminal !== false) {
+    await configuration.update("autoLockGroups", { ...autoLockGroups, terminal: false }, ConfigurationTarget.Workspace);
+  }
+  // Native ellipsis preserves full session titles and respects the user's fixed
+  // min/max widths (160px maximum by default), without provider-specific slicing.
+  if (configuration.get<string>("tabSizing") !== "fixed") {
+    await configuration.update("tabSizing", "fixed", ConfigurationTarget.Workspace);
+  }
 }
 
 /** Apply the preset grid once for a layout launch; subsequent terminal launches keep it. */

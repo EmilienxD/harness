@@ -7,6 +7,7 @@ from harness_cli.installer import CatalogueInstaller, Target
 from harness_cli.manifest import SupportStatus, discover
 from harness_cli.platforms import Platform, get_adapter
 from harness_cli.receipts import ReceiptStore
+from harness_cli.pi_packages import package_root
 
 
 GUARDS = {"on-read-reminder", "on-edit-reminder", "on-edit-block"}
@@ -68,10 +69,10 @@ def test_fresh_pi_catalogue_installs_without_a_hooks_directory(tmp_path, monkeyp
 
     assert selected <= set(installer.installation["packages"])
     assert not (target.install_root / "hooks").exists()
-    assert (target.install_root / "harness/pi-transport/transport.ts").is_file()
-    assert (target.install_root / "extensions/harness-command-guard/index.ts").is_file()
+    assert (package_root(target.install_root, "pi-transport") / "harness/pi-transport/transport.ts").is_file()
+    assert (package_root(target.install_root, "command-guard") / "extensions/.harness-command-guard/index.ts").is_file()
     for name in selected:
-        for payload in available[name].expand(Platform.PI, scope):
+        for payload in installer._payloads(available[name]):
             assert payload.root != "hooks", name
             assert target.destination_path(payload.root, payload.dest).is_file(), (name, payload.dest)
 
@@ -99,7 +100,7 @@ def test_tools_install_only_their_required_shared_helpers(tmp_path, name):
     installer.reconcile({name})
 
     assert set(installer.installation["packages"]) == expected
-    support = tmp_path / "project/.pi/harness"
+    support = package_root(installer.target.install_root, name) / "harness"
     assert (support / "pi-transport/transport.ts").is_file()
     assert (support / "pi-path-guards/path_guards.ts").is_file() == (name in GUARDS)
     assert (support / "pi-path-guards/path_guards.py").is_file() == (name in GUARDS)
@@ -117,12 +118,12 @@ def test_shared_transport_survives_removal_of_other_helper_families(tmp_path):
     )
     installer.reconcile({"on-edit-block", "issue-readers", "command-guard"})
     installer.reconcile({"issue-readers", "command-guard"})
-    support = tmp_path / "project/.pi/harness"
-    assert not (support / "pi-path-guards").exists()
-    assert (support / "pi-issue-workflows/workflows.ts").is_file()
-    assert (support / "pi-transport/transport.ts").is_file()
+    platform = installer.target.install_root
+    assert not package_root(platform, "pi-path-guards").exists()
+    assert (package_root(platform, "issue-readers") / "harness/pi-issue-workflows/workflows.ts").is_file()
+    assert (package_root(platform, "command-guard") / "harness/pi-transport/transport.ts").is_file()
     installer.reconcile({"command-guard"})
-    assert not (support / "pi-issue-workflows").exists()
-    assert (support / "pi-transport/transport.ts").is_file()
+    assert not package_root(platform, "pi-issue-workflows").exists()
+    assert (package_root(platform, "command-guard") / "harness/pi-transport/transport.ts").is_file()
     installer.reconcile(set())
-    assert not (support / "pi-transport").exists()
+    assert not package_root(platform, "pi-transport").exists()

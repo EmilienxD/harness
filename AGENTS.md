@@ -76,7 +76,9 @@ outside that scope and `docs/PI-REFERENCES/README.md` to reach the relevant offi
   Add Pi mappings and bump package versions when the corresponding payload/support ships.
 - Reuse shared skills and Python cores. Put native Pi translation in shallow `pi/` overlays and
   map executable entry points to `extensions` and Python/TypeScript helpers to `support`
-  (`.pi/harness/` for projects, `<PI_CODING_AGENT_DIR>/harness/` for users).
+  inside complete npm packages installed and removed through Pi. Bundle selected helper dependencies
+  under each package's `harness/`; keep editable project policies in `.harness/guards/` and user
+  policy starters in `<PI_CODING_AGENT_DIR>/harness/`.
 - Handle providers explicitly; replace binary Claude/ChatGPT fallbacks when extending a boundary.
 - Reconstruct Pi state from active session ancestry and observed tool outcomes, including nested
   calls. Required guard loading and tool coverage need evidence before a restricted launch.

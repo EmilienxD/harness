@@ -1,4 +1,6 @@
 import { spawn } from "node:child_process";
+import { join } from "node:path";
+import { getAgentDir } from "@earendil-works/pi-coding-agent";
 
 const MAX_BYTES = 2 * 1024 * 1024;
 
@@ -14,7 +16,8 @@ function run(argv: string[], payload: string, cwd: string | undefined, signal: A
     const child = spawn(argv[0], argv.slice(1), {
       cwd, windowsHide: true, stdio: ["pipe", "pipe", "pipe"],
       detached: process.platform !== "win32",
-      env: { ...process.env, PYTHONUTF8: "1", PYTHONIOENCODING: "utf-8" },
+      env: { ...process.env, PYTHONUTF8: "1", PYTHONIOENCODING: "utf-8",
+        HARNESS_PI_SUPPORT_DIR: join(getAgentDir(), "harness") },
     });
     // Stop the interpreter launcher and its Git/GitHub children together.
     const stop = () => {

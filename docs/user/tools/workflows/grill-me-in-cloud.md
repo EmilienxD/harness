@@ -2,7 +2,7 @@
 
 ## When to use
 
-Use `grill-me-in-cloud` when a branching design interview benefits from a persistent visual board that can show comparisons, code excerpts, images, and interactive explanations.
+Use `grill-me-in-cloud` when a branching design interview benefits from a persistent visual board that can show comparisons, code excerpts, images, video previews, and interactive explanations.
 
 ## Invocation
 
@@ -23,3 +23,5 @@ Use `/grill-cloud-stop` to disconnect the Pi interview. Its board history and an
 ## Example
 
 `/grill-me-in-cloud Review the checkout redesign` opens a hosted decision round for that proposal.
+
+Video previews use the same local asset workflow as images. The publisher checks for the installed `ffmpeg` on PATH and prepares MP4/WebM clips locally; it never bundles FFmpeg. Videos support native inline controls and optional poster images. Each source and prepared clip is limited to 20 MiB, with 50 MiB / 20 assets per round. Personal deployments need the current app and video asset migration.

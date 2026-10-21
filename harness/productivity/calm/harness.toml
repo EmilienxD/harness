@@ -1,6 +1,6 @@
 name = "calm"
-version = "1.8.0"
-description = "Keep Pi quiet while showing the latest tool call in a transient chat block"
+version = "1.9.0"
+description = "Keep Pi quiet while showing each tool call in its own transient chat block"
 docs = "https://github.com/EmilienxD/harness/blob/main/README.md#calm"
 
 [platforms.claude]
@@ -16,36 +16,36 @@ status = "supported"
 
 [[files]]
 src = "pi/extension.ts"
-dest = "harness-calm/index.ts"
+dest = ".harness-calm/index.ts"
 root = "extensions"
 platforms = ["pi"]
 
 [[files]]
 src = "pi/built-in-tool-shells.ts"
-dest = "harness-calm/built-in-tool-shells.ts"
+dest = ".harness-calm/built-in-tool-shells.ts"
 root = "extensions"
 platforms = ["pi"]
 
 [[files]]
 src = "pi/collapsed-thinking.ts"
-dest = "harness-calm/collapsed-thinking.ts"
+dest = ".harness-calm/collapsed-thinking.ts"
 root = "extensions"
 platforms = ["pi"]
 
 [[files]]
 src = "pi/preference.ts"
-dest = "harness-calm/preference.ts"
+dest = ".harness-calm/preference.ts"
 root = "extensions"
 platforms = ["pi"]
 
 [[files]]
 src = "pi/visibility.ts"
-dest = "harness-calm/visibility.ts"
+dest = ".harness-calm/visibility.ts"
 root = "extensions"
 platforms = ["pi"]
 
 [[files]]
 src = "LICENSE"
-dest = "harness-calm/LICENSE"
+dest = ".harness-calm/LICENSE"
 root = "extensions"
 platforms = ["pi"]

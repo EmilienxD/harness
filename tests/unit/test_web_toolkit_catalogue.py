@@ -78,9 +78,11 @@ def test_pi_installs_native_extension_without_fallback_skill(tmp_path, installed
 
     catalogue.reconcile({"web-toolkit"})
 
-    assert sorted(path.relative_to(target.install_root).as_posix() for path in target.install_root.rglob("*") if path.is_file()) == [
-        "extensions/harness-web-toolkit/index.ts"
-    ]
+    package = target.install_root / "npm/node_modules/harness-pi-web-toolkit"
+    assert (package / "extensions/.harness-web-toolkit/index.ts").is_file()
+    assert (package / "package.json").is_file()
+    assert not (target.install_root / "extensions").exists()
+    assert not (target.install_root / "harness/packages").exists()
     catalogue.reconcile(set())
     assert not (target.install_root / "skills/web-toolkit").exists()
-    assert not (target.install_root / "extensions/harness-web-toolkit").exists()
+    assert not package.exists()

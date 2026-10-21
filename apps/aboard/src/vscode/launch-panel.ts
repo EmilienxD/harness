@@ -1,14 +1,20 @@
 import { randomBytes } from "node:crypto";
+import { homedir } from "node:os";
 import type { Disposable, WebviewView, WebviewViewProvider } from "vscode";
 import { validateWorkspacePreset, type WorkspacePreset, type WorkspacePresetStore } from "../domain/workspace-presets.js";
+import { validateCheckoutSelection, type CheckoutChoices, type CheckoutSelection } from "../platform/checkouts.js";
 
 export const LAUNCH_VIEW_ID = "aboard.launch";
-export interface LauncherRequest { preset: WorkspacePreset; destination: "current" | "new" }
+
+export interface LauncherRequest { preset: WorkspacePreset; destination: "current" | "new"; checkout?: CheckoutSelection }
 export interface LaunchPanelOptions {
   store: WorkspacePresetStore;
   providers: readonly { id: string; displayName: string; icon: string }[];
   launch(request: LauncherRequest): Promise<void>;
-  runAgent(): Promise<void>;
+  runAgent(warn: (message: string) => void): Promise<void>;
+  checkoutChoices?(): Promise<CheckoutChoices>;
+  currentPath?: string;
+  validateBranch?(branch: string): Promise<string | undefined>;
 }
 export interface LaunchPanelHost { registerWebviewViewProvider(viewId: string, provider: WebviewViewProvider): Disposable }
 
@@ -17,7 +23,7 @@ export function registerLaunchPanel(host: LaunchPanelHost, options: LaunchPanelO
   let busy = false;
   const providerIds = options.providers.map((provider) => provider.id);
   async function state(view: WebviewView): Promise<void> {
-    await view.webview.postMessage({ type: "state", providers: options.providers, presets: options.store.presets, preferredPreset: options.store.preferredPreset, busy });
+    await view.webview.postMessage({ type: "state", providers: options.providers, presets: options.store.presets, preferredPreset: options.store.preferredPreset, busy, currentPath: options.currentPath, homeDirectory: homedir(), windowsPaths: process.platform === "win32", checkouts: await options.checkoutChoices?.() });
   }
   disposables.push(host.registerWebviewViewProvider(LAUNCH_VIEW_ID, {
     resolveWebviewView(view) {
@@ -27,6 +33,14 @@ export function registerLaunchPanel(host: LaunchPanelHost, options: LaunchPanelO
         if (!raw || typeof raw !== "object") return;
         const message = raw as Record<string, unknown>;
         if (message.type === "ready" || message.type === "refresh") { await state(view); return; }
+        if (message.type === "validateBranch" && typeof message.branch === "string") {
+          const branch = message.branch.trim();
+          let error: string | undefined;
+          try { error = await options.validateBranch?.(branch); }
+          catch (cause) { error = cause instanceof Error ? cause.message : "Unable to validate branch"; }
+          await view.webview.postMessage({ type: "branchValidation", branch, requestId: message.requestId, error });
+          return;
+        }
         if (busy) return;
         busy = true;
         await view.webview.postMessage({ type: "busy", busy });
@@ -40,12 +54,21 @@ export function registerLaunchPanel(host: LaunchPanelHost, options: LaunchPanelO
           }
           else if (message.type === "delete") await options.store.delete(id);
           else if (message.type === "preferred") await options.store.setPreferred(id);
-          else if (message.type === "run") await options.runAgent();
+          else if (message.type === "run") await options.runAgent((message) => { void view.webview.postMessage({ type: "error", message }); });
           else if (message.type === "launch") {
             if (message.destination !== "current" && message.destination !== "new") throw new Error("Choose Current window or New window.");
             const preset = validateWorkspacePreset(message.preset, providerIds);
             if (options.store.presets.some((item) => item.id === preset.id)) await options.store.setPreferred(preset.id);
-            await options.launch({ preset, destination: message.destination });
+            const selected = validateCheckoutSelection(message.checkout);
+            const checkout: CheckoutSelection = selected.kind === "new" ? { kind: "new", branch: selected.branch } : selected;
+            if (checkout.kind === "new") {
+              const error = await options.validateBranch?.(checkout.branch);
+              if (error) {
+                await view.webview.postMessage({ type: "branchValidation", branch: checkout.branch, error });
+                return;
+              }
+            }
+            await options.launch({ preset, destination: message.destination, ...(message.checkout === undefined ? {} : { checkout }) });
           }
         } catch (error) {
           await view.webview.postMessage({ type: "error", message: error instanceof Error ? error.message : String(error) });
@@ -61,14 +84,18 @@ export function registerLaunchPanel(host: LaunchPanelHost, options: LaunchPanelO
 
 function launcherHtml(nonce: string): string {
   return `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'nonce-${nonce}'; script-src 'nonce-${nonce}';"><style nonce="${nonce}">
-body{font-family:var(--vscode-font-family);font-size:var(--vscode-font-size);color:var(--vscode-foreground);padding:8px 12px}button,select,input{font:inherit;border:1px solid var(--vscode-input-border,transparent);padding:6px;color:var(--vscode-input-foreground);background:var(--vscode-input-background);max-width:100%;box-sizing:border-box}button{cursor:pointer;background:var(--vscode-button-secondaryBackground);color:var(--vscode-button-secondaryForeground)}button:hover{filter:brightness(1.1)}button:focus-visible,input:focus,select:focus{outline:1px solid var(--vscode-focusBorder)}button:disabled{opacity:.5;cursor:default}.primary{background:var(--vscode-button-background);color:var(--vscode-button-foreground)}label{display:block;margin:10px 0 4px}select{width:100%}.row{display:flex;gap:6px;flex-wrap:wrap;margin:8px 0}.launch-actions,.preset-actions{flex-wrap:nowrap;gap:4px}.launch-actions button,.preset-actions button{flex:1;min-width:0;padding:6px 4px;white-space:nowrap}.dimensions{display:flex;gap:12px}.dimensions label{flex:1}.dimensions input{display:block;width:100%;margin-top:4px}#preview{display:grid;gap:4px;margin:12px 0}#preview button{min-height:55px;white-space:pre-line;border:1px solid var(--vscode-panel-border)}#preview button.selected{outline:2px solid var(--vscode-focusBorder)}#error,#shrink{color:var(--vscode-errorForeground);white-space:pre-wrap}.assignment{display:flex;gap:4px;margin:5px 0}.assignment select{flex:1;min-width:0}.assignment button{flex:none}.preset-combo{position:relative}.preset-entry{display:flex}.preset-entry input{flex:1;min-width:0;width:100%}.preset-entry button{flex:none}#presetOptions{position:absolute;left:0;right:0;z-index:10;max-height:260px;overflow-y:auto;background:var(--vscode-dropdown-background);border:1px solid var(--vscode-dropdown-border,var(--vscode-panel-border))}.preset-option{display:block;width:100%;text-align:left;border:0;white-space:normal;background:var(--vscode-dropdown-background);color:var(--vscode-dropdown-foreground)}.preset-option:hover,.preset-option[aria-selected=true]{background:var(--vscode-list-activeSelectionBackground);color:var(--vscode-list-activeSelectionForeground)}[hidden]{display:none!important}</style></head><body>
+body{font-family:var(--vscode-font-family);font-size:var(--vscode-font-size);color:var(--vscode-foreground);padding:8px 12px}button,select,input{font:inherit;border:1px solid var(--vscode-input-border,transparent);padding:6px;color:var(--vscode-input-foreground);background:var(--vscode-input-background);max-width:100%;box-sizing:border-box}button{cursor:pointer;background:var(--vscode-button-secondaryBackground);color:var(--vscode-button-secondaryForeground)}button:hover{filter:brightness(1.1)}button:focus-visible,input:focus,select:focus{outline:1px solid var(--vscode-focusBorder)}button:disabled{opacity:.5;cursor:default}.primary{background:var(--vscode-button-background);color:var(--vscode-button-foreground)}label{display:block;margin:10px 0 4px}select,#branch{width:100%}.row{display:flex;gap:6px;flex-wrap:wrap;margin:8px 0}.launch-actions,.preset-actions{gap:6px}.launch-actions button,.preset-actions button{flex:0 0 auto;min-width:max-content;padding:6px 10px;white-space:nowrap}.dimensions{display:flex;gap:12px}.dimensions label{flex:1}.dimensions input{display:block;width:100%;margin-top:4px}#preview{display:grid;gap:4px;margin:12px 0}#preview button{min-height:55px;white-space:pre-line;border:1px solid var(--vscode-panel-border)}#preview button.selected{outline:2px solid var(--vscode-focusBorder)}#error,#branchError,#checkoutWarning{color:var(--vscode-editorWarning-foreground,#cca700);white-space:pre-wrap}.assignment{display:flex;gap:4px;margin:5px 0}.assignment select{flex:1;min-width:0}.assignment button{flex:none}.preset-combo{position:relative}.preset-entry{display:flex}.preset-entry input{flex:1;min-width:0;width:100%}.preset-entry button{flex:none}#presetOptions{position:absolute;left:0;right:0;z-index:10;max-height:260px;overflow-y:auto;background:var(--vscode-dropdown-background);border:1px solid var(--vscode-dropdown-border,var(--vscode-panel-border))}.preset-option{display:block;width:100%;text-align:left;border:0;white-space:normal;background:var(--vscode-dropdown-background);color:var(--vscode-dropdown-foreground)}.preset-option:hover,.preset-option[aria-selected=true]{background:var(--vscode-list-activeSelectionBackground);color:var(--vscode-list-activeSelectionForeground)}[hidden]{display:none!important}</style></head><body>
 <div class="row launch-actions"><button id="run" class="primary">Run Agent</button><button id="launch" class="primary">Launch layout</button></div>
-<label for="destination">Workspace</label><select id="destination"><option value="current">Current window</option><option value="new" selected>New window</option></select>
+<label for="destination">Window</label><select id="destination"><option value="current">Current window</option><option value="new" selected>New window</option></select>
+<label for="checkout">Checkout</label><select id="checkout"><option value="current">Current checkout</option></select>
+<p id="checkoutSummary" role="status"></p>
+<div id="newCheckout" hidden><label for="branch">Branch</label><input id="branch" autocomplete="off" placeholder="feature/my-change" aria-describedby="branchError"><p id="branchError" role="alert" hidden></p></div>
+<p id="checkoutWarning" role="status" hidden>Agents will run in another checkout. This window’s Explorer will stay on the current checkout.</p>
 <label for="preset">Preset</label><div id="presetCombo" class="preset-combo"><div class="preset-entry"><input id="preset" role="combobox" aria-expanded="false" aria-controls="presetOptions" aria-autocomplete="none" autocomplete="off" maxlength="160"><button id="presetToggle" type="button" aria-label="Choose preset" aria-controls="presetOptions" aria-expanded="false">&#9662;</button></div><div id="presetOptions" role="listbox" aria-label="Presets" hidden></div></div>
 <div class="row preset-actions"><button id="save" class="primary">Save</button><button id="saveAs">Create</button><button id="delete">Delete</button><button id="reset">Reset</button></div>
 <div class="dimensions"><label>Columns<input id="columns" type="number" min="1" max="9"></label><label>Rows<input id="rows" type="number" min="1" max="9"></label></div>
 <div id="preview" aria-label="Initial pane arrangement"></div>
-<div id="assignments" aria-label="Selected pane assignments"></div><div class="row"><button id="add">Add tab</button></div><div id="shrink" role="alert" hidden></div><div id="shrinkActions" class="row" hidden><button id="moveOverflow">Move affected tabs to pane 1</button><button id="removeOverflow">Remove affected assignments</button><button id="cancelShrink">Keep grid</button></div>
+<div id="assignments" aria-label="Selected pane assignments"></div><div class="row"><button id="add">Add tab</button></div>
 <p id="error" role="alert" hidden></p><p id="progress" role="status" hidden>Launching…</p>
 <script nonce="${nonce}">${browserScript}</script></body></html>`;
 }
@@ -76,14 +103,55 @@ body{font-family:var(--vscode-font-family);font-size:var(--vscode-font-size);col
 const browserScript = String.raw`
 const vscode = acquireVsCodeApi();
 const $ = id => document.getElementById(id);
-let state, draft, selectedPane = 0, dirty = false, pendingGrid, busy = false, menuOpen = false, activeOption = 0;
+let state, draft, selectedPane = 0, dirty = false, busy = false, menuOpen = false, activeOption = 0;
 const clone = value => JSON.parse(JSON.stringify(value));
 const send = message => vscode.postMessage(message);
 $('destination').value = 'new';
+$('checkout').value = 'current';
+let checkoutValue = 'current', branchRequestId = 0, validatedBranch = '', branchError = '', branchPending = false;
+function displayPath(text) {
+  if (!state?.homeDirectory) return text;
+  const home = state.homeDirectory.replaceAll('\\', '/').split('/').map(part => part.replace(/[.*+?^$()|{}[\]\\]/g, '\\$&')).join('[\\\\/]');
+  return text.replace(new RegExp(home + '(?=$|[\\\\/])', state.windowsPaths ? 'gi' : 'g'), '~');
+}
+function renderCheckout() {
+  const choices = state?.checkouts;
+  const selected = checkoutValue;
+  const pathKey = path => state.windowsPaths ? path.replaceAll('\\', '/').toLowerCase() : path;
+  const current = choices?.entries.find(entry => state.currentPath && pathKey(entry.path) === pathKey(state.currentPath));
+  const checkoutName = entry => entry.path.replaceAll('\\', '/').replace(/\/$/, '').split('/').pop() + ' (' + (entry.branch || 'Detached HEAD') + ')';
+  $('checkout').replaceChildren(option('current', current ? checkoutName(current) : 'Current checkout'), ...(choices?.nextPath ? [option('new', 'New worktree…')] : []), ...(choices?.entries || []).filter(entry => !current || entry !== current).map(entry => {
+    const item = option('existing:' + entry.path, checkoutName(entry));
+    item.disabled = !entry.available || !!entry.reserved;
+    return item;
+  }));
+  $('checkout').value = selected;
+  $('newCheckout').hidden = selected !== 'new';
+  const entry = selected === 'current' ? current : choices?.entries.find(item => 'existing:' + item.path === selected);
+  $('checkoutSummary').textContent = displayPath(selected === 'new' ? choices?.nextPath ? choices.nextPath : 'New worktree creation is unavailable. Refresh or choose another checkout.' : entry ? entry.path + (entry.dirty ? ' (modified)' : '') : selected !== 'current' ? 'This checkout is no longer available. Choose another checkout.' : choices?.error || '');
+  $('checkoutWarning').hidden = $('destination').value !== 'current' || selected === 'current';
+  $('branchError').textContent = displayPath(branchError);
+  $('branchError').hidden = !branchError;
+  $('branch').setAttribute('aria-invalid', String(!!branchError));
+  return selected === 'current' || selected === 'new' && !!choices?.nextPath && !branchPending && !branchError && validatedBranch === $('branch').value.trim() || !!entry && entry.available && !entry.reserved;
+}
+function checkoutRequest() {
+  if (checkoutValue === 'new') return {kind:'new', branch:$('branch').value};
+  return checkoutValue === 'current' ? {kind:'current'} : {kind:'existing', path:checkoutValue.slice('existing:'.length)};
+}
+$('checkout').onchange = () => { checkoutValue = $('checkout').value; render(); };
+$('destination').onchange = () => renderCheckout();
+$('branch').oninput = () => {
+  const branch = $('branch').value.trim();
+  branchError = ''; validatedBranch = ''; branchPending = !!branch;
+  const requestId = ++branchRequestId;
+  if (branch) send({type:'validateBranch', branch, requestId});
+  render();
+};
 const providerName = id => id === '' ? 'Empty terminal' : state.providers.find(provider => provider.id === id)?.displayName || id;
 const assignedProviders = pane => pane.providers.length ? pane.providers : [''];
 function option(value, label) { const item = document.createElement('option'); item.value = value; item.textContent = label; return item; }
-function error(message) { $('error').textContent = message; $('error').hidden = !message; }
+function error(message) { $('error').textContent = displayPath(message); $('error').hidden = !message; }
 function presetMenu(open) {
   menuOpen = open;
   $('presetOptions').hidden = !open;
@@ -98,8 +166,8 @@ function presetMenu(open) {
   }));
 }
 function resetDraft(preset) {
-  draft = clone(preset); selectedPane = 0; dirty = false; pendingGrid = undefined;
-  $('shrink').hidden = true; $('shrinkActions').hidden = true; error(''); presetMenu(false); render();
+  draft = clone(preset); selectedPane = 0; dirty = false;
+  error(''); presetMenu(false); render();
 }
 function render() {
   if (!state || !draft) return;
@@ -121,25 +189,20 @@ function render() {
     return row;
   }));
   document.querySelectorAll('button,input,select').forEach(element => element.disabled = busy);
-  $('launch').disabled = busy || count === 0 || !!pendingGrid;
-  $('save').disabled = busy || !!pendingGrid;
-  $('saveAs').disabled = busy || !!pendingGrid || !canSaveAs();
+  const checkoutValid = renderCheckout();
+  $('launch').disabled = !checkoutValid || busy || count === 0 || (checkoutValue === 'new' && !$('branch').value.trim());
+  $('save').disabled = busy;
+  $('saveAs').disabled = busy || !canSaveAs();
   $('progress').hidden = !busy;
 }
 function setGrid(columns, rows) {
   if (!Number.isInteger(columns) || !Number.isInteger(rows) || columns < 1 || rows < 1 || columns * rows > 9) { error('Choose positive Columns and Rows containing at most nine panes.'); render(); return; }
   dirty = true;
-  const overflow = draft.panes.slice(columns * rows);
-  if (overflow.some(pane => assignedProviders(pane).length)) {
-    pendingGrid = {columns, rows};
-    $('shrink').textContent = 'Resolve assignments removed by this grid: ' + overflow.flatMap((pane, index) => assignedProviders(pane).map(provider => 'pane ' + (columns * rows + index + 1) + ': ' + providerName(provider))).join(', ');
-    $('shrink').hidden = false; $('shrinkActions').hidden = false; render(); return;
-  }
-  draft.panes = Array.from({length: columns * rows}, (_, index) => draft.panes[index] || {providers: []}); draft.columns = columns; draft.rows = rows; selectedPane = Math.min(selectedPane, draft.panes.length - 1); pendingGrid = undefined; $('shrink').hidden = true; $('shrinkActions').hidden = true; error(''); render();
+  draft.panes = Array.from({length: columns * rows}, (_, index) => draft.panes[index] || {providers: []}); draft.columns = columns; draft.rows = rows; selectedPane = Math.min(selectedPane, draft.panes.length - 1); error(''); render();
 }
 const canSaveAs = () => !!draft.name.trim() && draft.name.trim() !== state.presets.find(preset => preset.id === draft.id)?.name;
-function submit(type, extra = {}) { if (busy || pendingGrid) return; error(''); busy = true; const preset = clone(draft); preset.panes.forEach(pane => { pane.providers = assignedProviders(pane); }); send({type, preset, ...extra}); render(); }
-$('preset').oninput = () => { draft.name = $('preset').value; dirty = true; presetMenu(false); $('saveAs').disabled = busy || !!pendingGrid || !canSaveAs(); };
+function submit(type, extra = {}) { if (busy) return; error(''); busy = true; const preset = clone(draft); preset.panes.forEach(pane => { pane.providers = assignedProviders(pane); }); send({type, preset, ...extra}); render(); }
+$('preset').oninput = () => { draft.name = $('preset').value; dirty = true; presetMenu(false); $('saveAs').disabled = busy || !canSaveAs(); };
 $('presetToggle').onmousedown = event => event.preventDefault();
 $('presetToggle').onclick = () => { activeOption = Math.max(0, state.presets.findIndex(preset => preset.id === draft.id)); presetMenu(!menuOpen); $('preset').focus(); };
 $('preset').onkeydown = event => {
@@ -156,15 +219,12 @@ document.addEventListener('click', event => { if (menuOpen && !$('presetCombo').
 $('columns').onchange = () => setGrid(Number($('columns').value), draft.rows);
 $('rows').onchange = () => setGrid(draft.columns, Number($('rows').value));
 $('add').onclick = () => { const pane = draft.panes[selectedPane]; const provider = pane.providers.at(-1) || state.providers[0]?.id; if (provider) { if (!pane.providers.length) pane.providers.push(''); pane.providers.push(provider); dirty = true; } render(); };
-$('moveOverflow').onclick = () => { const {columns,rows} = pendingGrid; const removed = draft.panes.splice(columns * rows); draft.panes[0].providers = [...assignedProviders(draft.panes[0]), ...removed.flatMap(assignedProviders)]; setGrid(columns,rows); };
-$('removeOverflow').onclick = () => { const {columns,rows} = pendingGrid; draft.panes.splice(columns * rows); setGrid(columns,rows); };
-$('cancelShrink').onclick = () => { pendingGrid = undefined; $('shrink').hidden = true; $('shrinkActions').hidden = true; render(); };
 $('save').onclick = () => submit('save');
 $('saveAs').onclick = () => { if (canSaveAs()) submit('saveAs'); };
 $('delete').onclick = () => submit('delete',{id:draft.id});
 $('reset').onclick = () => resetDraft(state.presets.find(preset => preset.id === draft.id) || state.preferredPreset);
 $('run').onclick = () => { if (busy) return; error(''); busy = true; send({type:'run'}); render(); };
-$('launch').onclick = () => submit('launch',{destination:$('destination').value});
+$('launch').onclick = () => submit('launch',{destination:$('destination').value,checkout:checkoutRequest()});
 window.addEventListener('message', event => {
   const message = event.data;
   if (message.type === 'state') {
@@ -172,6 +232,9 @@ window.addEventListener('message', event => {
     if (!draft || (previous && previous.preferredPreset.id !== state.preferredPreset.id)) resetDraft(state.preferredPreset);
     else if (!dirty) { draft = clone(state.presets.find(preset => preset.id === draft.id) || state.preferredPreset); render(); }
     else render();
+  } else if (message.type === 'branchValidation') {
+    if (message.branch !== $('branch').value.trim() || (message.requestId !== undefined && message.requestId !== branchRequestId)) return;
+    validatedBranch = message.branch; branchError = message.error || ''; branchPending = false; render();
   } else if (message.type === 'saved') {
     resetDraft(message.preset);
   } else if (message.type === 'busy') { busy = message.busy; presetMenu(false); render(); }

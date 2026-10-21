@@ -43,6 +43,8 @@ export interface SubagentsJourneyResult {
   readonly requestFilesRemaining: number;
   readonly unexpectedRequests: number;
   readonly recoveredSessions: number;
+  readonly inferenceRequests?: number;
+  readonly shutdownsBeforeResult?: number;
 }
 
 export async function runSubagentsRecoveryJourney(platform: Platform): Promise<SubagentsJourneyResult> {
@@ -53,7 +55,8 @@ export async function runSubagentsRootJourney(platform: Platform): Promise<Subag
   return runSubagentsJourney(platform, "auto", false, true);
 }
 
-export async function runSubagentsJourney(platform: Platform, mode: "interactive" | "auto" = "interactive", recovery = false, alternateRoot = false): Promise<SubagentsJourneyResult> {
+export async function runSubagentsJourney(platform: Platform, mode: "interactive" | "auto" = "interactive", recovery = false, alternateRoot = false, options: { shutdownBeforeResult?: boolean; stopFallback?: boolean; failedWrite?: boolean } = {}): Promise<SubagentsJourneyResult> {
+  const shutdownBeforeResult = options.shutdownBeforeResult ?? false;
   if (platform === "claude") await validateClaudeCli(); else await validateCodexCli();
   const root = await canonicalMkdtemp(join(tmpdir(), `harness-subagents-${platform}-e2e-`));
   const projectRoot = join(root, "project");
@@ -76,6 +79,25 @@ export async function runSubagentsJourney(platform: Platform, mode: "interactive
     const python = await pythonCommand(runtimeSource);
     const binRoot = await createRuntimeShim(root, python);
     await stagePayload(platform, packageRoot, projectRoot, python);
+    if (options.stopFallback) {
+      const path = join(projectRoot, platform === "claude" ? ".claude/settings.json" : ".codex/hooks.json");
+      const settings = JSON.parse(await readFile(path, "utf8")) as HookSettings;
+      delete settings.hooks.PostToolUse;
+      delete settings.hooks.PostToolUseFailure;
+      await writeFile(path, JSON.stringify(settings));
+    }
+    if (shutdownBeforeResult) {
+      if (platform !== "chatgpt" || mode !== "auto" || recovery || alternateRoot) throw new Error("Shutdown regression requires automatic Codex delegation");
+      const hooksPath = join(projectRoot, ".codex", "hooks.json");
+      const settings = JSON.parse(await readFile(hooksPath, "utf8")) as HookSettings;
+      const hook = join(harnessRoot, "tests", "e2e", "tools", "subagents", "shutdown-hook.py");
+      for (const groups of Object.values(settings.hooks)) {
+        for (const group of groups) {
+          for (const entry of group.hooks) entry.command = `${python} ${hook}`;
+        }
+      }
+      await writeFile(hooksPath, JSON.stringify(settings));
+    }
     await initializeRepository(projectRoot);
     if (alternateRoot) {
       await execFileAsync("git", ["-c", "user.name=Harness E2E", "-c", "user.email=harness-e2e@example.invalid", "commit", "--quiet", "--allow-empty", "-m", "fixture"], { cwd: projectRoot, windowsHide: true });
@@ -115,6 +137,7 @@ export async function runSubagentsJourney(platform: Platform, mode: "interactive
       HARNESS_E2E_CLI_DIR: cliStatusRoot,
       HARNESS_E2E_CHILD_COMPLETE: CHILD_REPLY.split(":", 1)[0]!,
       HARNESS_E2E_PARENT_COMPLETE: PARENT_REPLY.split(":", 1)[0]!,
+      HARNESS_E2E_FAIL_REQUEST: options.failedWrite ? "1" : "0",
       NO_PROXY: "127.0.0.1,localhost",
     };
 
@@ -134,7 +157,7 @@ export async function runSubagentsJourney(platform: Platform, mode: "interactive
         scenarioCatalogHash,
         parseRequest: parseAnthropicMessagesRequest,
         transition: async (request,repoRoot) => {
-          const response = claudeTransition(request,repoRoot,mode,recovery,alternateRoot);
+          const response = claudeTransition(request,repoRoot,mode,recovery,alternateRoot,options.stopFallback);
           if (response.checkpoint === "child-interruption-ready") {
             interruptionReady = true;
             await interruption;
@@ -162,7 +185,7 @@ export async function runSubagentsJourney(platform: Platform, mode: "interactive
         diagnosticsPath,
         scenarioCatalogHash,
         transition: async (request) => {
-          const response = codexTransition(request,projectRoot,mode,recovery,alternateRoot);
+          const response = codexTransition(request,projectRoot,mode,recovery,alternateRoot,options.stopFallback);
           if (response.checkpoint === "child-interruption-ready") {
             interruptionReady = true;
             await interruption;
@@ -243,6 +266,12 @@ export async function runSubagentsJourney(platform: Platform, mode: "interactive
       return { checkpoints, completedClis: statuses.map((item) => item.role), requestFilesRemaining, unexpectedRequests: assertions.unexpectedRequests, recoveredSessions: 2 };
     }
 
+    if (shutdownBeforeResult) {
+      await waitForCheckpoint(async () => (await readdir(cliStatusRoot).catch(() => [])).some((name) => name.startsWith("shutdown-")));
+      const receipt = (await readdir(cliStatusRoot)).find((name) => name.startsWith("shutdown-"))!;
+      const shutdown = JSON.parse(await readFile(join(cliStatusRoot, receipt), "utf8"));
+      if (shutdown.state !== "pending" || shutdown.hasReply) throw new Error(`SessionEnd preempted the supervisor result: ${JSON.stringify(shutdown)}`);
+    }
     let statuses: readonly [CliStatus, CliStatus];
     try {
       statuses = await waitForStatuses(cliStatusRoot);
@@ -273,7 +302,28 @@ export async function runSubagentsJourney(platform: Platform, mode: "interactive
     if (checkpoints.some((item) => !expectedCheckpoints.includes(item)) || required.some((item) => !checkpoints.includes(item)) || checkpoints[0] !== "parent-request-write" || checkpoints.at(-1) !== "child-resume-complete") {
       throw new Error(`subagents checkpoint contract changed: ${checkpoints.join(", ")}`);
     }
+    let shutdownsBeforeResult: number | undefined;
+    if (shutdownBeforeResult) {
+      const receipts = (await readdir(cliStatusRoot)).filter((name) => name.startsWith("shutdown-"));
+      for (const name of receipts) {
+        const receipt = JSON.parse(await readFile(join(cliStatusRoot, name), "utf8"));
+        if (receipt.state !== "pending" || receipt.hasReply) throw new Error("Resumed child shutdown preempted the supervisor result");
+      }
+      shutdownsBeforeResult = receipts.length;
+      const result = await execFileAsync(python, ["-c", [
+        "import json",
+        "from subagents_runtime.storage import connect",
+        "with connect() as db:",
+        " rows=db.execute('SELECT state,reply,acknowledged_at IS NOT NULL FROM requests ORDER BY created_at,rowid').fetchall()",
+        "print(json.dumps([list(row) for row in rows]))",
+      ].join("\n")], { cwd: projectRoot, env: environment, encoding: "utf8", windowsHide: true, timeout: 10_000 });
+      const rows = JSON.parse(result.stdout) as [string, string, number][];
+      if (rows.length !== 2 || rows[0]?.[0] !== "succeeded" || rows[0][1] !== CHILD_REPLY || rows[0][2] !== 1 || rows[1]?.[0] !== "succeeded" || rows[1][1] !== NEXT_REPLY) {
+        throw new Error("Automatic shutdown regression did not persist and acknowledge the successful replies");
+      }
+    }
     return {
+      ...(shutdownsBeforeResult === undefined ? {} : { shutdownsBeforeResult, inferenceRequests: assertions.observations.length }),
       checkpoints,
       completedClis: [childStatus.role, parentStatus.role],
       requestFilesRemaining: await countRequestFiles(join(stateRoot, "inboxes")),
@@ -282,9 +332,11 @@ export async function runSubagentsJourney(platform: Platform, mode: "interactive
     };
   } finally {
     releaseInterruption?.();
-    await cleanupExecutions?.();
-    await server?.close();
-    await rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
+    try { await cleanupExecutions?.(); }
+    finally {
+      try { await server?.close(); }
+      finally { await rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 }); }
+    }
   }
 }
 
@@ -313,11 +365,16 @@ async function executionSnapshot(python: string, cwd: string, env: NodeJS.Proces
   return JSON.parse(result.stdout) as ExecutionSnapshot[];
 }
 
-async function killProcessTree(pid: number, allowExited = false): Promise<void> {
+export async function killProcessTree(pid: number, allowExited = false): Promise<void> {
   if (process.platform === "win32") {
     try { await execFileAsync("taskkill",["/PID",String(pid),"/T","/F"],{windowsHide:true,timeout:10_000}); }
-    catch (error) {
-      if (!allowExited || (error as { code?: number }).code !== 128) throw new Error("Could not terminate an owned real CLI process tree");
+    catch {
+      // A supervisor can exit (or reap its child) between the snapshot and taskkill.
+      // Accept only observed absence, not a locale/version-dependent taskkill exit code.
+      let exited = false;
+      try { process.kill(pid, 0); }
+      catch (error) { exited = (error as NodeJS.ErrnoException).code === "ESRCH"; }
+      if (!allowExited || !exited) throw new Error("Could not terminate an owned real CLI process tree");
     }
     return;
   }
@@ -397,23 +454,22 @@ async function createRuntimeShim(root: string, python: string): Promise<string> 
   await mkdir(bin, { recursive: true });
   const helper = join(bin, "request.cjs");
   await writeFile(helper, [
-    'const { spawnSync } = require("node:child_process");',
     'const { writeFileSync } = require("node:fs");',
     'const request = Buffer.from(process.argv[2], "base64").toString();',
     'const content = Buffer.from(process.argv[3], "base64");',
-    'writeFileSync(request, content);',
-    `const result = spawnSync(${JSON.stringify(python)}, ["-c", "from subagents_runtime.cli import main; raise SystemExit(main())", "ask", process.env.HARNESS_SESSION_ID], { cwd: process.cwd(), env: process.env, stdio: "inherit", windowsHide: true });`,
-    'process.exit(result.status ?? 1);',
+    // Match Windows PowerShell's UTF-8 BOM; hooks alone must discover the request.
+    'writeFileSync(request, Buffer.concat([Buffer.from([0xef, 0xbb, 0xbf]), content]));',
+    'process.exitCode = process.env.HARNESS_E2E_FAIL_REQUEST === "1" ? 7 : 0;',
     '',
   ].join("\n"), "utf8");
   await writeFile(join(bin, "harness"), `#!/bin/sh\nexec ${shellQuote(python)} -c 'from subagents_runtime.cli import main; raise SystemExit(main())' "$@"\n`, { encoding: "utf8", mode: 0o755 });
+  await writeFile(join(bin, "harness-e2e-request"), `#!/bin/sh\nexec ${shellQuote(process.execPath)} ${shellQuote(helper)} "$@"\n`, { encoding: "utf8", mode: 0o755 });
   if (process.platform === "win32") {
     await writeFile(join(bin, "harness-subagents-hook.cmd"), `@echo off\r\n"${python}" -m subagents_runtime.hooks %*\r\n`, "utf8");
     await writeFile(join(bin, "harness.cmd"), `@echo off\r\n"${python}" -c "from subagents_runtime.cli import main; raise SystemExit(main())" %*\r\n`, "utf8");
     await writeFile(join(bin, "harness-e2e-request.cmd"), `@echo off\r\n"${process.execPath}" "${helper}" %*\r\n`, "utf8");
   } else {
     await writeFile(join(bin, "harness-subagents-hook"), `#!/bin/sh\nexec ${shellQuote(python)} -m subagents_runtime.hooks "$@"\n`, { encoding: "utf8", mode: 0o755 });
-    await writeFile(join(bin, "harness-e2e-request"), `#!/bin/sh\nexec ${shellQuote(process.execPath)} ${shellQuote(helper)} "$@"\n`, { encoding: "utf8", mode: 0o755 });
   }
   return bin;
 }

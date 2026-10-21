@@ -1,5 +1,5 @@
 name = "auto"
-version = "1.3.1"
+version = "1.3.3"
 description = "Routes /auto and /auto --dry to an active Aboard session"
 selectable = false
 
@@ -16,7 +16,7 @@ status = "supported"
 
 [[files]]
 src = "pi/extension.ts"
-dest = "harness-auto.ts"
+dest = ".harness-auto.ts"
 root = "extensions"
 platforms = ["pi"]
 

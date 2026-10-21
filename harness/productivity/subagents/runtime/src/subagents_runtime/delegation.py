@@ -9,6 +9,7 @@ import re
 import time
 import uuid
 from collections.abc import Callable
+from contextlib import contextmanager
 from dataclasses import dataclass, replace
 from pathlib import Path
 
@@ -129,7 +130,7 @@ def parse_request_file(
     ):
         raise RequestFileError("request file must be Markdown (*.md)")
     try:
-        raw = canonical_path.read_text(encoding="utf-8")
+        raw = canonical_path.read_text(encoding="utf-8-sig")
     except (OSError, UnicodeError) as exc:
         raise RequestFileError(f"request file cannot be read as UTF-8: {exc}") from exc
     lines = raw.splitlines()
@@ -547,9 +548,67 @@ def reconcile_inbox(session_id: str, *, launch: Callable | None = None) -> list[
     return results
 
 
+@contextmanager
+def _inbox_lock(session_id: str):
+    """Serialize scans across hook processes, including validation and recovery."""
+    root = state_dir() / "runtime" / "inbox-locks"
+    root.mkdir(parents=True, exist_ok=True)
+    path = root / (hashlib.sha256(session_id.encode()).hexdigest() + ".lock")
+    with path.open("a+b") as lock:
+        if os.name == "nt":
+            import errno
+            import msvcrt
+
+            deadline = time.monotonic() + 120
+            while True:
+                lock.seek(0)
+                try:
+                    msvcrt.locking(lock.fileno(), msvcrt.LK_NBLCK, 1)
+                    break
+                except OSError as exc:
+                    if exc.errno not in {errno.EACCES, errno.EDEADLK} or time.monotonic() >= deadline:
+                        raise
+                    time.sleep(0.05)
+            try:
+                yield
+            finally:
+                lock.seek(0)
+                msvcrt.locking(lock.fileno(), msvcrt.LK_UNLCK, 1)
+        else:
+            import fcntl
+
+            fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
+            try:
+                yield
+            finally:
+                fcntl.flock(lock.fileno(), fcntl.LOCK_UN)
+
+
+def scan_inbox(session_id: str) -> list[ProcessResult]:
+    """Process published requests in this conversation's assigned inbox, if any."""
+    with _sessions_module()._connect() as connection:
+        enabled = connection.execute(
+            "SELECT 1 FROM session_delegation WHERE parent_session_id=?", (session_id,)
+        ).fetchone()
+    if not enabled:
+        return []
+    return process_inbox(session_id, launch=_sessions_module().launch_delegated)
+
+
 def process_inbox(
     session_id: str, *, launch: Callable, request_paths: set[Path] | None = None,
     allow_loop_resume: bool = False,
+) -> list[ProcessResult]:
+    with _inbox_lock(session_id):
+        return _process_inbox(
+            session_id, launch=launch, request_paths=request_paths,
+            allow_loop_resume=allow_loop_resume,
+        )
+
+
+def _process_inbox(
+    session_id: str, *, launch: Callable, request_paths: set[Path] | None,
+    allow_loop_resume: bool,
 ) -> list[ProcessResult]:
     """Claim, reserve, and start requests in a persistent conversation inbox."""
     from dataclasses import replace
@@ -571,7 +630,7 @@ def process_inbox(
         None if request_paths is None else {p.absolute() for p in request_paths}
     )
     for path in sorted(delegation.inbox.iterdir()):
-        if path.name.endswith(".running") or (path.is_dir() and not path.is_symlink()):
+        if path.suffix.lower() != ".md" or (path.is_dir() and not path.is_symlink()):
             continue
         if candidates is not None and path.absolute() not in candidates:
             continue
@@ -818,6 +877,26 @@ def send_previous_reply(
     signal_parent(parent)
 
 
+def report_child_session_end(
+    child_session_id: str, *, reason: str, execution_id: str | None = None,
+) -> bool:
+    """Leave supervised automatic results to the process owner, not shutdown hooks."""
+    with _sessions_module()._connect() as connection:
+        row = _active_request(connection, child_session_id, execution_id)
+        if row is not None and row[1] == "auto" and execution_id is not None:
+            supervised = connection.execute(
+                "SELECT 1 FROM executions WHERE session_id=? AND request_id=? "
+                "AND (id=? OR input_execution_id=?)",
+                (child_session_id, row[0], execution_id, execution_id),
+            ).fetchone()
+            if supervised is not None:
+                return False
+    return report_child_stop(
+        child_session_id, "", success=False, reason=reason, cancelled=True,
+        execution_id=execution_id,
+    )
+
+
 def report_child_stop(
     child_session_id: str,
     message: str,
@@ -963,11 +1042,11 @@ def delegation_instructions(inbox: str | Path, cwd: Path, provider: str) -> str:
     from subagents_runtime.roles import custom_registry_paths
 
     personal_registry, project_registry = custom_registry_paths(cwd)
-    tools = "the write tool" if provider == "pi" else "a structured file-writing tool such as Write or apply_patch"
     return (
         f"Conversation inbox: {inbox}\n"
-        f"Write inbox requests with {tools}; "
-        "the write event launches the request automatically.\n"
+        "Publish each complete request as a .md file in this inbox using any file-writing tool. "
+        "For multi-step writes, write a temporary file and rename it to .md when complete. "
+        "The runtime scans after tools and before stopping; confirm its launch acknowledgement before reporting a child as started.\n"
         f"Custom task registries: project {project_registry}; personal {personal_registry}. "
         "Project entries replace personal definitions by task name. "
         "Missing files mean no custom tasks; report malformed registries instead of falling back.\n"
@@ -1183,7 +1262,8 @@ def wait_parent_delivery(
         if delivery is not None:
             return delivery
         if not has_pending_children(parent_session_id):
-            return None
+            # The last child can settle between the claim and pending-state reads.
+            return claim_parent_delivery(parent_session_id, "Stop")
         if time.monotonic() >= deadline:
             from subagents_runtime.loop import expire_parent_wait
             expire_parent_wait(parent_session_id)

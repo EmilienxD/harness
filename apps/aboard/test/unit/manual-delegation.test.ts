@@ -80,7 +80,7 @@ test("loop delegation retains runtime ownership and difficulty without a worker 
   assert.equal(received.skill, undefined);
 });
 
-test("loop scoped credentials admit a registered sibling worktree and refuse unrelated directories", async () => {
+test("scoped delegations admit registered sibling checkouts and their subdirectories in every supported mode",  async () => {
   const { execFile } = await import("node:child_process");
   const { promisify } = await import("node:util");
   const { mkdtemp, mkdir, rm } = await import("node:fs/promises");
@@ -94,18 +94,31 @@ test("loop scoped credentials admit a registered sibling worktree and refuse unr
     await git("git", ["init", project]);
     await git("git", ["-C", project, "-c", "user.name=Test", "-c", "user.email=test@example.invalid", "commit", "--allow-empty", "-m", "initial"]);
     await git("git", ["-C", project, "worktree", "add", "-b", "feature", worktree]);
+    const subdirectory = join(worktree, "src");
+    await mkdir(subdirectory);
     const launched: string[] = [];
     const handler = createDelegationRoutes({ launch: async (request) => {
       launched.push(request.cwd); return { agentId: "implementer", sessionId: "child", terminalId: "visible" };
     } }, { workspaceRoot: project });
-    for (const [cwd, mode, status] of [[worktree, "loop", 201], [other, "loop", 403], [worktree, "interactive", 403]] as const) {
+    for (const [cwd, mode, status] of [[worktree, "loop", 201], [other, "loop", 403], [worktree, "interactive", 201], [subdirectory, "interactive", 201], [worktree, "auto", 201], [other, "interactive", 403], [other, "auto", 403]] as const) {
       const response = await handler({ method: "POST", url: new URL("http://localhost/delegations"), headers: {}, authorizationScope: "delegation",
         signal: new AbortController().signal,
         body: { requestId: `${cwd}-${mode}`, task: mode === "loop" ? "loop" : "general", provider: "claude", mode, prompt: "Read the task file.", cwd },
       });
       assert.equal(response.status, status);
     }
-    assert.deepEqual(launched, [worktree]);
+    assert.deepEqual(launched, [worktree, worktree, subdirectory, worktree]);
+    // A stale worktree registration does not authorize a replacement repository.
+    await rm(join(worktree, ".git"));
+    await git("git", ["init", worktree]);
+    for (const mode of ["interactive", "auto", "loop"] as const) {
+      const response = await handler({ method: "POST", url: new URL("http://localhost/delegations"), headers: {}, authorizationScope: "delegation",
+        signal: new AbortController().signal,
+        body: { requestId: `replacement-${mode}`, task: mode === "loop" ? "loop" : "general", provider: "claude", mode, prompt: "Inspect files.", cwd: subdirectory },
+      });
+      assert.equal(response.status, 403);
+    }
+    assert.equal(launched.length, 4);
   } finally {
     await rm(root, { recursive: true, force: true });
   }

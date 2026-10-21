@@ -15,6 +15,7 @@ function color(code: number, text: string): string {
 
 function formatTokens(value: number | null | undefined): string {
   if (typeof value !== "number" || !Number.isFinite(value) || value < 0) return "?";
+  if (value >= 1_000_000) return `${Number((value / 1_000_000).toFixed(2))}M`;
   return value >= 1000 ? `${Math.round(value / 1000)}k` : Math.round(value).toString();
 }
 

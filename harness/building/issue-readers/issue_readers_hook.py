@@ -15,9 +15,9 @@ Aboard may explicitly supply a dirty HITL review range. When its whole argument
 is a strict list of issue numbers it also preloads those issues, which state the
 requirements the pinned diff must satisfy; the diff scope stays the local one.
 
-Both products submit the same payload for this event, so `--claude` and
-`--chatgpt` select nothing here; the flag is accepted so every hook in the
-catalogue is wired the same way.
+Both products submit the same payload for this event. `--chatgpt` selects
+JSON blocking output so Windows shell exit-code translation cannot turn a
+rejected prompt into a non-blocking hook failure.
 """
 
 from __future__ import annotations
@@ -543,16 +543,27 @@ def build_review_context(argument: str, cwd: Path) -> str:
 
 def main() -> None:
     try:
-        payload = json.load(sys.stdin)
-    except (ValueError, OSError):
-        return
+        handle_prompt()
+    except Exception as error:
+        message = str(error) if isinstance(error, Blocked) else (
+            f"Issue context preparation failed ({type(error).__name__}): {error}"
+        )
+        if "--chatgpt" in sys.argv[1:]:
+            json.dump({"decision": "block", "reason": message}, sys.stdout)
+            return
+        print(message, file=sys.stderr)
+        raise SystemExit(2) from error
+
+
+def handle_prompt() -> None:
+    payload = json.load(sys.stdin)
     if not isinstance(payload, dict):
-        return
+        raise ValueError("hook input must be a JSON object")
     if payload.get("hook_event_name", "UserPromptSubmit") != "UserPromptSubmit":
         return
     prompt = payload.get("prompt")
     if not isinstance(prompt, str):
-        return
+        raise ValueError("UserPromptSubmit input must contain a string prompt")
 
     cwd = Path(str(payload.get("cwd") or "."))
     review = parse_invocation(prompt, REVIEW_INVOCATION)
@@ -569,12 +580,8 @@ def main() -> None:
             build_review_context(review, cwd) if review is not None
             else build_address_context(address, cwd)
         )
-    except Blocked as error:
-        print(str(error), file=sys.stderr)
-        raise SystemExit(2)
-    except subprocess.TimeoutExpired:
-        print(timeout_message, file=sys.stderr)
-        raise SystemExit(2)
+    except subprocess.TimeoutExpired as error:
+        raise Blocked(timeout_message) from error
     json.dump(
         {"hookSpecificOutput": {
             "hookEventName": "UserPromptSubmit", "additionalContext": context,
@@ -584,4 +591,6 @@ def main() -> None:
 
 
 if __name__ == "__main__":
+    for stream in (sys.stdin, sys.stdout, sys.stderr):
+        stream.reconfigure(encoding="utf-8")
     main()

@@ -22,8 +22,8 @@ from subagents_runtime.delegation import (
     ensure_inbox,
     lead_instructions,
     observe_parent_event,
-    process_inbox,
-    reconcile_inbox,
+    scan_inbox,
+    report_child_session_end,
     report_child_stop,
     send_previous_reply,
     wait_parent_delivery,
@@ -37,7 +37,6 @@ INVOCATIONS = {
     "chatgpt": re.compile(rf"(?<!\S)\${SKILL_NAME}(?=\s|$)"),
 }
 LINKED_INVOCATION = re.compile(rf"\[\${SKILL_NAME}\]\([^\r\n]+?\)")
-STRUCTURED_WRITE_TOOLS = {"Write", "Edit", "MultiEdit", "apply_patch", "ApplyPatch"}
 
 
 def provider_from_argv(argv: list[str]) -> str | None:
@@ -84,52 +83,6 @@ def _invoked_skill(prompt: str, cwd: Path, provider: str) -> str | None:
             if _registered_skill(match.group(1), cwd, provider):
                 return match.group(1)
     return "ship" if SHIP_INVOCATION.search(prompt) else None
-
-
-def _strings(value: Any):
-    if isinstance(value, str):
-        yield value
-    elif isinstance(value, dict):
-        for child in value.values():
-            yield from _strings(child)
-    elif isinstance(value, list):
-        for child in value:
-            yield from _strings(child)
-
-
-def _written_paths(payload: dict[str, Any]) -> list[Path]:
-    tool = payload.get("tool_name") or payload.get("tool")
-    if tool not in STRUCTURED_WRITE_TOOLS:
-        return []
-    tool_input = payload.get("tool_input", {})
-    paths: set[Path] = set()
-    if isinstance(tool_input, dict):
-        for key in ("file_path", "path"):
-            value = tool_input.get(key)
-            if isinstance(value, str):
-                paths.add(Path(value).absolute())
-    if tool in {"apply_patch", "ApplyPatch"}:
-        for text in _strings(tool_input):
-            for match in re.finditer(
-                r"^\*\*\* (?:Add|Update) File: (.+)$", text, re.MULTILINE
-            ):
-                paths.add(Path(match.group(1).strip()).absolute())
-    return sorted(paths)
-
-
-def _inbox_for_path(session_id: str, path: Path) -> str | None:
-    with sessions._connect() as connection:
-        rows = connection.execute(
-            "SELECT parent_session_id, inbox FROM session_delegation WHERE parent_session_id = ?",
-            (session_id,),
-        ).fetchall()
-    for inbox_session_id, inbox in rows:
-        try:
-            if path.parent == Path(inbox).resolve():
-                return str(inbox_session_id)
-        except OSError:
-            continue
-    return None
 
 
 def _forked_child(execution_id: str | None, conversation: str) -> str | None:
@@ -269,7 +222,7 @@ def handle(
                 (session_id,),
             ).fetchone()
         if enabled:
-            recovered = reconcile_inbox(session_id, launch=sessions.launch_delegated)
+            recovered = scan_inbox(session_id)
             from subagents_runtime.processes import live_executions
 
             with sessions._connect() as connection:
@@ -345,16 +298,16 @@ def handle(
         clear_reply_authorization(session_id)
         return None
 
-    if event == "PostToolUse":
+    if event in {"PostToolUse", "PostToolUseFailure"}:
         response = payload.get("tool_response")
-        if isinstance(response, dict) and (
+        failed = event == "PostToolUseFailure" or isinstance(response, dict) and (
             response.get("isError") or response.get("error")
-        ):
-            return None
+        )
+        processed = scan_inbox(session_id)
         tool_input = payload.get("tool_input")
         skill = tool_input.get("skill") if isinstance(tool_input, dict) else None
         if (
-            payload.get("tool_name") == "Skill"
+            not failed and payload.get("tool_name") == "Skill"
             and isinstance(skill, str)
             and re.fullmatch(SKILL_NAME, skill)
             and _registered_skill(skill, _role_directory(session_id), selected_provider)
@@ -366,26 +319,23 @@ def handle(
             else:
                 instructions = _skill_instructions(session_id, skill)
                 if instructions:
-                    return _context(event, instructions)
-        processed = []
-        for path in _written_paths(payload):
-            inbox_session_id = _inbox_for_path(session_id, path)
-            if inbox_session_id is not None:
-                processed.extend(
-                    process_inbox(
-                        inbox_session_id,
-                        launch=sessions.launch_delegated,
-                        request_paths={path},
-                    )
-                )
+                    text = instructions
+                    if processed:
+                        text += "\n\n" + _processing_context(processed)
+                    return _context(event, text)
         delivery = claim_parent_delivery(session_id, event)
         if delivery is not None:
-            return _context(event, delivery.text)
+            text = delivery.text
+            if processed:
+                text = _processing_context(processed) + "\n\n" + text
+            return _context(event, text)
         if processed:
             return _context(event, _processing_context(processed))
         return None
 
     if event in {"Stop", "StopFailure", "SessionEnd"}:
+        if event == "Stop":
+            scan_inbox(session_id)
         message = payload.get("last_assistant_message")
         if not isinstance(message, str):
             message = ""
@@ -401,14 +351,17 @@ def handle(
                 return None
             return (_context(event, feedback) if selected_provider == "claude"
                     else {"decision": "block", "reason": feedback})
-        reported = report_child_stop(
-            session_id,
-            message,
-            success=success,
-            reason=None if success else str(payload.get("reason") or event),
-            cancelled=event == "SessionEnd",
-            execution_id=execution_id,
-        )
+        if event == "SessionEnd":
+            reported = report_child_session_end(
+                session_id, reason=str(payload.get("reason") or event),
+                execution_id=execution_id,
+            )
+        else:
+            reported = report_child_stop(
+                session_id, message, success=success,
+                reason=None if success else str(payload.get("reason") or event),
+                execution_id=execution_id,
+            )
         if event == "SessionEnd":
             from subagents_runtime.inbox_cleanup import cleanup_inboxes
 
@@ -444,19 +397,40 @@ def handle(
     return None
 
 
+def failure_output(event: str, reason: str) -> dict[str, Any]:
+    if event == "PreToolUse":
+        return {"hookSpecificOutput": {
+            "hookEventName": event, "permissionDecision": "deny", "permissionDecisionReason": reason,
+        }}
+    if event == "UserPromptSubmit":
+        return {"decision": "block", "reason": reason}
+    if event in {"SessionStart", "PostToolUse", "PostToolUseFailure", "Stop"}:
+        return {"continue": False, "stopReason": reason, "systemMessage": reason}
+    # Interrupt and SessionEnd cannot reject an already-ended operation.
+    return {"systemMessage": reason}
+
+
 def main() -> int:
     provider = provider_from_argv(sys.argv[1:])
     if provider == "pi":
         from subagents_runtime.pi_bridge import main as pi_main
 
         return pi_main()
+    payload = {}
     try:
         payload = json.load(sys.stdin)
-        output = handle(payload, provider) if isinstance(payload, dict) else None
+        if not isinstance(payload, dict):
+            raise ValueError("hook input must be a JSON object")
+        output = handle(payload, provider)
         if output is not None:
             print(json.dumps(output))
-    except Exception as exc:  # noqa: BLE001 - Provider entrypoint reports hook failures without a traceback.
-        print(str(exc), file=sys.stderr)
+    except Exception as exc:  # noqa: BLE001 - Provider entrypoint converts failures to event-specific decisions.
+        reason = f"Subagents hook failed ({type(exc).__name__}): {exc}"
+        if provider == "chatgpt":
+            event = str(payload.get("hook_event_name") or "UserPromptSubmit") if isinstance(payload, dict) else "UserPromptSubmit"
+            print(json.dumps(failure_output(event, reason)))
+            return 0
+        print(reason, file=sys.stderr)
         return 2
     return 0
 

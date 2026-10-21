@@ -22,12 +22,12 @@ def test_statusline_install_and_remove(tmp_path, monkeypatch, scope):
     neighbour.write_text("export default function () {}", encoding="utf-8")
     installer = CatalogueInstaller(discover(), target, ReceiptStore.load(tmp_path / "receipts.json"))
     installer.reconcile({"statusline"})
-    extension = target.destination_path("extensions", "harness-statusline/index.ts")
+    extension = target.install_root / "npm/node_modules/harness-pi-statusline/extensions/.harness-statusline/index.ts"
     assert extension.is_file()
     installer.reconcile(set())
     assert not extension.exists()
     assert neighbour.is_file()
-    assert target.settings_path.read_text(encoding="utf-8") == settings
+    assert target.read_settings() == json.loads(settings)
 
 
 def test_statusline_is_pi_only():

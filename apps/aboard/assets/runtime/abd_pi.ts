@@ -44,7 +44,9 @@ export default function aboard(pi: ExtensionAPI): void {
     latestSession = ctx.sessionManager.getSessionId();
     try {
       const rules = await guard();
-      if (latestSession !== process.env.ABOARD_SESSION_ID) {
+      const assignsIdentity = process.env.ABOARD_PI_ASSIGN_SESSION === "1";
+      delete process.env.ABOARD_PI_ASSIGN_SESSION;
+      if (!assignsIdentity && latestSession !== process.env.ABOARD_SESSION_ID) {
         if (rules) throw new Error("Aboard restricted Pi identity changed");
         managed = false; ready = true; return;
       }
@@ -57,6 +59,7 @@ export default function aboard(pi: ExtensionAPI): void {
       if (process.env.HARNESS_EXECUTION_ID) await python(join(dirname(process.env.ABOARD_PI_EXTENSION!), "scripts", "abd_hook.py"), { operation: "start", sessionId: latestSession, cwd: ctx.cwd, pid: process.pid }, "pi-runtime");
       const result = await post("/hooks/session-start", ctx);
       if (result.accepted !== true) throw new Error("Aboard rejected Pi startup");
+      process.env.ABOARD_SESSION_ID = latestSession;
     } catch { ready = false; process.exitCode = 1; process.exit(1); }
   });
   pi.on("session_before_switch", async () => process.env.ABOARD_GUARD_PATH ? { cancel: true } : undefined);

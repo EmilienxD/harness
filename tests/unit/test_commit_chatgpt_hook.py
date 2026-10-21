@@ -99,8 +99,12 @@ def test_event_snapshots_commit_only_chatgpt_changes(repo, capsys):
             core.Flags(False, False),
             "agent change",
         )
-    assert stopped.value.code == 2
-    assert "Committed" in capsys.readouterr().err
+    assert stopped.value.code == 0
+    captured = capsys.readouterr()
+    assert not captured.err
+    output = json.loads(captured.out)
+    assert output["decision"] == "block"
+    assert "Committed" in output["reason"]
     assert _git(repo, "show", "--pretty=", "--name-only", "HEAD").strip() == "agent.md"
     assert _git(repo, "log", "-1", "--pretty=%B").rstrip().endswith(
         "ChatGPT-session: thr-selective"
@@ -128,7 +132,7 @@ def test_missing_pre_snapshot_forces_visible_whole_tree_fallback(repo):
     assert core.changed_paths(scan) is None
 
 
-def test_chatgpt_unhandled_hook_exception_blocks_with_exit_2(monkeypatch, capsys):
+def test_chatgpt_unhandled_hook_exception_blocks_with_json(monkeypatch, capsys):
     monkeypatch.setattr(
         adapter,
         "main",
@@ -138,10 +142,12 @@ def test_chatgpt_unhandled_hook_exception_blocks_with_exit_2(monkeypatch, capsys
     with pytest.raises(SystemExit) as stopped:
         adapter.entrypoint(["--chatgpt"])
 
-    assert stopped.value.code == 2
-    stderr = capsys.readouterr().err
-    assert "harness commit hook failed in ChatGPT" in stderr
-    assert "RuntimeError: adapter failure" in stderr
+    assert stopped.value.code == 0
+    captured = capsys.readouterr()
+    assert not captured.err
+    output = json.loads(captured.out)
+    assert output["decision"] == "block"
+    assert "RuntimeError: adapter failure" in output["reason"]
 
 
 def test_chatgpt_ai_key_uses_harness_local_config(repo, monkeypatch):

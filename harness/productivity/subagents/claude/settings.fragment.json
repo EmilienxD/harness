@@ -5,6 +5,7 @@
     "UserPromptExpansion": [{"matcher": "reply-to-agent-with-previous-message", "hooks": [{"type": "command", "command": "harness-subagents-hook", "args": ["--claude"]}]}],
     "PreToolUse": [{"hooks": [{"type": "command", "command": "harness-subagents-hook", "args": ["--claude"]}]}],
     "PostToolUse": [{"hooks": [{"type": "command", "command": "harness-subagents-hook", "args": ["--claude"]}]}],
+    "PostToolUseFailure": [{"hooks": [{"type": "command", "command": "harness-subagents-hook", "args": ["--claude"]}]}],
     "Stop": [{"hooks": [{"type": "command", "command": "harness-subagents-hook", "args": ["--claude"], "timeout": 86430}]}],
     "StopFailure": [{"hooks": [{"type": "command", "command": "harness-subagents-hook", "args": ["--claude"]}]}],
     "SessionEnd": [{"hooks": [{"type": "command", "command": "harness-subagents-hook", "args": ["--claude"]}]}]

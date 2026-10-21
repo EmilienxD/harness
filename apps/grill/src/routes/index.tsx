@@ -1486,7 +1486,7 @@ function QuestionCard({
           <span className="round-label">Round {round.number}</span>
         </div>
         <h2>{question.question}</h2>
-        <Explanation question={question} />
+        <Explanation question={question} hidden={hidden} />
         <div className="answer-form">
           <div ref={options} className="options">
             {question.options.map((option) => (
@@ -1632,7 +1632,7 @@ function wrapTables(root: HTMLElement) {
   }
 }
 
-function Explanation({ question }: { question: GrillQuestion }) {
+function Explanation({ question, hidden }: { question: GrillQuestion; hidden: boolean }) {
   const root = useRef<HTMLDivElement>(null);
   const [failed, setFailed] = useState(false);
   // React 19 rewrites innerHTML whenever this object's identity changes, which would reset open
@@ -1642,8 +1642,48 @@ function Explanation({ question }: { question: GrillQuestion }) {
     const element = root.current;
     if (!element) return;
     let live = true;
+    const videos = new Map<HTMLVideoElement, () => void>();
     const refresh = () => {
       wrapTables(element);
+      for (const [video, cleanup] of videos) {
+        if (element.contains(video)) continue;
+        cleanup();
+        videos.delete(video);
+      }
+      for (const video of element.querySelectorAll("video")) {
+        if (videos.has(video)) continue;
+        video.controls = true;
+        video.playsInline = true;
+        video.preload = "none";
+        video.autoplay = false;
+        let lastRetry = 0;
+        let restore: (() => void) | undefined;
+        const retry = () => {
+          const sources = [
+            video.getAttribute("src"),
+            ...Array.from(video.querySelectorAll("source"), (source) => source.getAttribute("src")),
+          ];
+          if (!sources.some((source) => source?.startsWith("/api/v1/assets/")) || Date.now() - lastRetry < 30_000)
+            return;
+          // An old tab may hold an expired Storage redirect. Reload the stable authenticated asset URL.
+          lastRetry = Date.now();
+          const position = video.currentTime;
+          const resume = !video.paused;
+          if (restore) video.removeEventListener("loadedmetadata", restore);
+          restore = () => {
+            if (Number.isFinite(position)) video.currentTime = position;
+          };
+          video.addEventListener("loadedmetadata", restore, { once: true });
+          video.load();
+          if (resume && !element.closest("[hidden]")) void video.play().catch(() => {});
+        };
+        video.addEventListener("error", retry, true);
+        videos.set(video, () => {
+          video.pause();
+          video.removeEventListener("error", retry, true);
+          if (restore) video.removeEventListener("loadedmetadata", restore);
+        });
+      }
       if (element.querySelector("pre > code"))
         void loadHighlighter().then((hljs) => live && highlightCode(hljs, element));
     };
@@ -1654,8 +1694,12 @@ function Explanation({ question }: { question: GrillQuestion }) {
     return () => {
       live = false;
       observer.disconnect();
+      for (const cleanup of videos.values()) cleanup();
     };
   }, []);
+  useEffect(() => {
+    if (hidden) for (const video of root.current?.querySelectorAll("video") ?? []) video.pause();
+  }, [hidden]);
   useEffect(() => {
     setFailed(false);
     if (!question.init_js || !root.current) return;

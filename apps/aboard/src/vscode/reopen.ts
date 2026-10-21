@@ -1,6 +1,8 @@
 import type { Disposable } from "vscode";
 
-import { agentLabel } from "../domain/contracts.js";
+import { agentPlatformName } from "../domain/contracts.js";
+import { sessionTitleLabel } from "../domain/session-title.js";
+import { basename } from "node:path";
 import { describeReopenOutcome, type ReopenCoordinator, type ReopenOption } from "../platform/reopen.js";
 import { describeIssueNumbers } from "../shared/issues.js";
 
@@ -26,13 +28,12 @@ export function renderReopenItems(
 ): readonly ReopenQuickPickItem[] {
   return options.map((option) => {
     const { candidate } = option;
-    const label = candidate.title ?? agentLabel(candidate);
+    const label = sessionTitleLabel(candidate.title);
     const described = candidate.issueNumbers === undefined ? "" : describeIssueNumbers(candidate.issueNumbers);
     return {
       label,
-      // Terminals are usually named after the agent; repeat only a description that adds something.
-      description: [candidate.title === undefined ? "" : agentLabel(candidate), candidate.description === label || candidate.title !== undefined ? "" : candidate.description, described].filter(Boolean).join(" · "),
-      detail: detailFor(option, now),
+      description: [agentPlatformName(candidate.platform), candidate.cwd === undefined ? "" : basename(candidate.cwd.replaceAll("\\", "/")), described].filter(Boolean).join(" · "),
+      detail: [detailFor(option, now), candidate.title !== undefined && candidate.title !== label ? candidate.title : ""].filter(Boolean).join(" · "),
       option,
     };
   });
