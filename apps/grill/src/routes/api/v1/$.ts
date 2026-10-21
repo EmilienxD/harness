@@ -23,7 +23,7 @@ import {
   validatePublication,
 } from "@/lib/grill-api.server";
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
-import { PROVIDERS } from "@/lib/grill-contract";
+import { NOTES_ID, PROVIDERS } from "@/lib/grill-contract";
 import { assetResponse, mediaMatches } from "@/lib/grill-assets.server";
 
 export const Route = createFileRoute("/api/v1/$")({
@@ -122,7 +122,7 @@ async function handle(request: Request, path: string, method: string): Promise<R
   if (publicationMatch && method === "POST" && publicationMatch[2] === "commit")
     return commitPublication(request, publicationMatch[1] ?? "");
 
-  const answerMatch = /^rounds\/([0-9a-f-]+)\/answers\/(Q[1-9][0-9]*)$/u.exec(path);
+  const answerMatch = /^rounds\/([0-9a-f-]+)\/answers\/(Q[1-9][0-9]*|Notes)$/u.exec(path);
   if (answerMatch && method === "PUT") return saveAnswer(request, answerMatch[1] ?? "", answerMatch[2] ?? "");
 
   const promptMatch = /^rounds\/([0-9a-f-]+)\/(prompt-preview|prompt-snapshots)$/u.exec(path);
@@ -142,7 +142,7 @@ async function listSessions(): Promise<Response> {
   const { data, error } = await supabaseAdmin
     .from("grill_sessions")
     .select(
-      "id,provider,provider_session_id,display_title,project_name,project_path,last_activity_at,finished_at,expires_at,grill_rounds(id,number,status,payload,grill_answer_drafts(state))",
+      "id,provider,provider_session_id,display_title,project_name,project_path,last_activity_at,finished_at,expires_at,grill_rounds(id,number,status,payload,grill_answer_drafts(question_id,state))",
     )
     .eq("grill_rounds.status", "active")
     .order("last_activity_at", { ascending: false });
@@ -158,8 +158,8 @@ async function listSessions(): Promise<Response> {
       id: string;
       number: number;
       status: string;
-      payload: { questions?: unknown[] };
-      grill_answer_drafts: Array<{ state: string }>;
+      payload: { questions?: Array<{ id: string }> };
+      grill_answer_drafts: Array<{ question_id: string; state: string }>;
     }>;
     const active = rounds.find((round) => round.status === "active");
     return {
@@ -174,7 +174,12 @@ async function listSessions(): Promise<Response> {
       expires_at: session.expires_at,
       active_round_id: active?.id ?? null,
       active_round_number: active?.number ?? null,
-      answered_count: active?.grill_answer_drafts.filter((answer) => answer.state === "queued").length ?? 0,
+      answered_count:
+        active?.grill_answer_drafts.filter(
+          (answer) =>
+            answer.state === "queued" &&
+            active.payload.questions?.some((question) => question.id === answer.question_id),
+        ).length ?? 0,
       question_count: active?.payload.questions?.length ?? 0,
       aboard: presenceMap.get(`${session.provider}:${session.provider_session_id}`) ?? null,
     };
@@ -509,8 +514,10 @@ async function saveAnswer(request: Request, roundId: string, questionId: string)
   const question = (
     round.payload as { questions: Array<{ id: string; options: Array<{ letter: string }> }> }
   ).questions.find((item) => item.id === questionId);
-  if (!question) return problem(404, "question_not_found", "Question not found.");
-  if (parsed.data.selected_option && !question.options.some((option) => option.letter === parsed.data.selected_option))
+  if (questionId !== NOTES_ID && !question) return problem(404, "question_not_found", "Question not found.");
+  if (questionId === NOTES_ID && parsed.data.selected_option !== null)
+    return problem(422, "invalid_answer", "Round notes cannot select an option.");
+  if (parsed.data.selected_option && !question?.options.some((option) => option.letter === parsed.data.selected_option))
     return problem(422, "invalid_answer", "The selected option is unavailable.");
   const empty = !parsed.data.selected_option && !parsed.data.note?.trim();
   let answer = null;
@@ -549,7 +556,7 @@ async function promptOperation(request: Request, roundId: string, operation: str
     .object({ reason: z.enum(["copy", "aboard"]), expected_prompt: z.string().max(100_000) })
     .safeParse(await readJson(request));
   if (!parsed.success) return problem(422, "invalid_snapshot_reason", "Snapshot reason must be copy or aboard.");
-  if (!result.prompt) return problem(422, "empty_prompt", "Answer a question first.");
+  if (!result.prompt) return problem(422, "empty_prompt", "Answer a question or add notes first.");
   if (parsed.data.expected_prompt !== result.prompt)
     return problem(409, "stale_prompt", "The answers changed. Review the regenerated prompt before continuing.");
   const { data, error } = await supabaseAdmin

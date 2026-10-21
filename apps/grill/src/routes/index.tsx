@@ -16,7 +16,7 @@ import {
   X,
 } from "lucide-react";
 import type { HLJSApi } from "highlight.js";
-import type { AnswerDraft, GrillQuestion } from "@/lib/grill-contract";
+import { NOTES_ID, type AnswerDraft, type GrillQuestion } from "@/lib/grill-contract";
 import {
   ignoresShortcuts,
   leaveTextEntry,
@@ -1154,7 +1154,14 @@ function Questionnaire({
   const deck = useRef<HTMLDivElement>(null);
   const [reviewing, setReviewing] = useState(false);
   const flushers = useRef(new Map<string, () => Promise<boolean>>());
-  const questions = round.payload.questions;
+  // Notes shares the same draft lifecycle, but stays outside the published questions.
+  const questions = useMemo(
+    () => [
+      ...round.payload.questions,
+      { id: NOTES_ID, question: "Notes", explanation_html: "", recommendation: "", options: [] },
+    ],
+    [round.payload.questions],
+  );
 
   useEffect(() => {
     setActive(0);
@@ -1262,6 +1269,7 @@ function Questionnaire({
             onSaveState={onSaveState}
             registerFlush={registerFlush}
             onNext={index < questions.length - 1 ? () => showQuestion(index + 1) : undefined}
+            nextLabel={index === questions.length - 2 ? "Add Additional Notes" : "Next question"}
             onReview={reviewPrompt}
           />
         ))}
@@ -1284,6 +1292,7 @@ function QuestionCard({
   onSaveState,
   registerFlush,
   onNext,
+  nextLabel,
   onReview,
 }: {
   round: Round;
@@ -1299,8 +1308,10 @@ function QuestionCard({
   onSaveState: ReportSave;
   registerFlush: (id: string, flush: () => Promise<boolean>) => () => void;
   onNext: (() => void) | undefined;
+  nextLabel: string;
   onReview: () => Promise<void>;
 }) {
+  const isNotes = question.id === NOTES_ID;
   // "None of these" takes the letter after the last option; it is stored as no selected option.
   const noneLetter = String.fromCharCode(
     Math.max(64, ...question.options.map((option) => option.letter.toUpperCase().charCodeAt(0))) + 1,
@@ -1458,7 +1469,7 @@ function QuestionCard({
         noteField.current?.focus();
         return;
       }
-      if (!matchesShortcut(event, "selectOption")) return;
+      if (isNotes || !matchesShortcut(event, "selectOption")) return;
       const letter = shortcutLetter(event);
       const reveal = (target: string) =>
         options.current?.querySelector(`[data-option="${target}"]`)?.scrollIntoView({ block: "nearest" });
@@ -1476,7 +1487,7 @@ function QuestionCard({
     };
     window.addEventListener("keydown", handleShortcut, true);
     return () => window.removeEventListener("keydown", handleShortcut, true);
-  }, [chooseNone, edit, noneLetter, note, question.options, readOnly, shortcutsEnabled]);
+  }, [chooseNone, edit, isNotes, noneLetter, note, question.options, readOnly, shortcutsEnabled]);
 
   return (
     <article className="question" hidden={hidden} inert={hidden}>
@@ -1486,57 +1497,61 @@ function QuestionCard({
           <span className="round-label">Round {round.number}</span>
         </div>
         <h2>{question.question}</h2>
-        <Explanation question={question} hidden={hidden} />
+        {!isNotes && <Explanation question={question} hidden={hidden} />}
         <div className="answer-form">
-          <div ref={options} className="options">
-            {question.options.map((option) => (
-              <label key={option.letter} className="option" data-option={option.letter}>
+          {!isNotes && (
+            <div ref={options} className="options">
+              {question.options.map((option) => (
+                <label key={option.letter} className="option" data-option={option.letter}>
+                  <input
+                    type="radio"
+                    name={`${round.id}-${question.id}`}
+                    checked={shownSelection === option.letter}
+                    disabled={readOnly}
+                    aria-keyshortcuts={shortcuts.aria("selectOption", option.letter)}
+                    onChange={() => edit({ selection: option.letter, note }, 0)}
+                  />
+                  <span className="option__copy">
+                    <span className="option__label">
+                      {option.letter}. {option.label}
+                    </span>
+                    <span className="option__detail">{option.detail}</span>
+                  </span>
+                  <span className="option__badges">
+                    {option.letter === question.recommendation && <span className="rec-badge">Recommended</span>}
+                  </span>
+                </label>
+              ))}
+              <label className="option" data-option={noneLetter}>
                 <input
                   type="radio"
                   name={`${round.id}-${question.id}`}
-                  checked={shownSelection === option.letter}
+                  checked={shownSelection === noneLetter}
                   disabled={readOnly}
-                  aria-keyshortcuts={shortcuts.aria("selectOption", option.letter)}
-                  onChange={() => edit({ selection: option.letter, note }, 0)}
+                  aria-keyshortcuts={shortcuts.aria("selectOption", noneLetter)}
+                  onChange={chooseNone}
                 />
                 <span className="option__copy">
-                  <span className="option__label">
-                    {option.letter}. {option.label}
-                  </span>
-                  <span className="option__detail">{option.detail}</span>
-                </span>
-                <span className="option__badges">
-                  {option.letter === question.recommendation && <span className="rec-badge">Recommended</span>}
+                  <span className="option__label">{noneLetter}. None of these</span>
+                  <span className="option__detail">Write your own answer below.</span>
                 </span>
               </label>
-            ))}
-            <label className="option" data-option={noneLetter}>
-              <input
-                type="radio"
-                name={`${round.id}-${question.id}`}
-                checked={shownSelection === noneLetter}
-                disabled={readOnly}
-                aria-keyshortcuts={shortcuts.aria("selectOption", noneLetter)}
-                onChange={chooseNone}
-              />
-              <span className="option__copy">
-                <span className="option__label">{noneLetter}. None of these</span>
-                <span className="option__detail">Write your own answer below.</span>
-              </span>
-            </label>
-          </div>
-          <div className="freeform">
+            </div>
+          )}
+          <div className={isNotes ? "freeform freeform--notes" : "freeform"}>
             <textarea
               ref={noteField}
               disabled={readOnly}
-              maxLength={2000}
+              maxLength={isNotes ? 10_000 : 2000}
               value={note}
-              aria-label="Add context or write your own answer"
+              aria-label={isNotes ? "Additional notes" : "Add context or write your own answer"}
               aria-keyshortcuts={shortcuts.aria("focusNote")}
               title={shortcuts.title("Additional context", "focusNote")}
               onChange={(event) => edit({ selection, note: event.target.value }, NOTE_SAVE_DELAY)}
               onBlur={() => void flush()}
-              placeholder="Add context or write your own answer..."
+              placeholder={
+                isNotes ? "Add any additional information for this round..." : "Add context or write your own answer..."
+              }
             />
           </div>
           <div className="question__foot">
@@ -1564,10 +1579,10 @@ function QuestionCard({
                 type="button"
                 className="submit is-ghost"
                 aria-keyshortcuts={shortcuts.aria("nextQuestion")}
-                title={shortcuts.title("Next question", "nextQuestion")}
+                title={shortcuts.title(nextLabel, "nextQuestion")}
                 onClick={onNext}
               >
-                Next question <ChevronRight size={16} aria-hidden="true" />
+                {nextLabel} <ChevronRight size={16} aria-hidden="true" />
               </button>
             ) : null}
           </div>

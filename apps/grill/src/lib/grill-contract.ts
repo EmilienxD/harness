@@ -1,6 +1,8 @@
 import { z } from "zod";
 
 export const SCHEMA_VERSION = 1 as const;
+// Reserved draft identity for round-wide notes; generated question IDs are always Q<number>.
+export const NOTES_ID = "Notes";
 export const PROVIDERS = ["claude", "chatgpt", "pi"] as const;
 export const MEDIA_TYPES = [
   "image/png",
@@ -109,5 +111,7 @@ export function compilePrompt(payload: RoundPayload, answers: readonly AnswerDra
     const choice = answer.selected_option ?? "None of these";
     bullets.push(`- ${question.id}: ${choice}.${note ? ` ${note}` : ""}`);
   }
+  const notes = queued.get(NOTES_ID)?.note?.trim();
+  if (notes) bullets.push(`- Additional Notes:\n${notes}`);
   return bullets.join("\n");
 }
