@@ -7,7 +7,7 @@
 // tool names, sources, definitions, or custom renderers. Execution and stored
 // results remain owned by Pi; image components remain visible.
 import { ToolExecutionComponent } from "@earendil-works/pi-coding-agent";
-import { truncateToWidth, wrapTextWithAnsi, type Component } from "@earendil-works/pi-tui";
+import { truncateToWidth, visibleWidth, wrapTextWithAnsi, type Component } from "@earendil-works/pi-tui";
 import { calmHidesTranscriptChrome, getCalmToolCalls, getCalmToolSpinner, type CalmToolCall } from "./visibility.ts";
 
 type ToolRowPresentationState = {
@@ -69,18 +69,22 @@ export function installCalmBuiltInToolShellLayout(): () => void {
     const lines: string[] = [];
     for (const call of patch.calls()) {
       if (call.rowId !== state.toolCallId || width <= 0) continue;
-      if (width < 7) {
+      if (width < 12) {
         lines.push(...wrapTextWithAnsi(call.summary, width).map((line) => truncateToWidth(line, width)));
       }
       else {
         const edge = "─".repeat(width - 2);
-        lines.push("", `╭${edge}╮`);
-        const body = wrapTextWithAnsi(call.summary, width - 6);
-        for (const [index, line] of body.entries()) {
-          const marker = call.status === "running" ? patch.spinnerFrame()
-            : `\u001b[${call.status === "success" ? 32 : 31}m•\u001b[39m`;
-          const spinner = index === 0 ? marker : " ";
-          lines.push(`│ ${spinner} ${truncateToWidth(line, width - 6, "", true)} │`);
+        // Summaries contain the tool identifier followed by its routing arguments.
+        const separator = call.summary.indexOf(" ");
+        const name = separator < 0 ? call.summary : call.summary.slice(0, separator);
+        const detail = separator < 0 ? "" : call.summary.slice(separator + 1);
+        const marker = call.status === "running" ? patch.spinnerFrame()
+          : `\u001b[${call.status === "success" ? 32 : 31}m•\u001b[39m`;
+        const title = truncateToWidth(` ${marker} ${name} `, width - 5, "…");
+        lines.push("", `╭──${title}${"─".repeat(width - 4 - visibleWidth(title))}╮`);
+        const body = wrapTextWithAnsi(detail, width - 4);
+        for (const line of body.length ? body : [""]) {
+          lines.push(`│ ${truncateToWidth(line, width - 4, "", true)} │`);
         }
         lines.push(`╰${edge}╯`);
       }
