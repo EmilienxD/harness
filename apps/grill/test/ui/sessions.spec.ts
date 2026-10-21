@@ -1,0 +1,232 @@
+import { expect, test, type Page, type Route } from "@playwright/test";
+
+function session(id: string, finished = false) {
+  return {
+    id,
+    provider: "chatgpt",
+    provider_session_id: id,
+    display_title: `Session ${id}`,
+    project_name: null,
+    project_path: null,
+    last_activity_at: "2026-10-21T12:00:00Z",
+    finished_at: finished ? "2026-10-21T12:00:00Z" : null,
+    expires_at: null,
+    active_round_id: `round-${id}`,
+    active_round_number: 1,
+    answered_count: 0,
+    question_count: 1,
+    aboard: null,
+  };
+}
+
+function round(id: string) {
+  return {
+    id: `round-${id}`,
+    session_id: id,
+    number: 1,
+    status: "active",
+    payload: {
+      questions: [
+        {
+          id: "Q1",
+          question: `Question for ${id}`,
+          explanation_html: "<p>Context</p>",
+          recommendation: "A",
+          options: [{ letter: "A", label: "First option", detail: "Details" }],
+        },
+      ],
+    },
+    answers: [],
+    prompt_snapshots: [],
+  };
+}
+
+function deferred() {
+  let resolve!: () => void;
+  const promise = new Promise<void>((done) => (resolve = done));
+  return { promise, resolve };
+}
+
+function detail(id: string) {
+  return { session: session(id), rounds: [{ id: `round-${id}`, number: 1, status: "active" }], aboard: null };
+}
+
+// Let the browser consume the released response and React commit before checking the DOM.
+async function settle(page: Page) {
+  await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+}
+
+async function board(page: Page, initial = [session("a"), session("b")]) {
+  let sessions = initial;
+  await page.route("**/api/v1/**", async (route) => {
+    const path = new URL(route.request().url()).pathname.replace("/api/v1/", "");
+    if (path === "sessions") return route.fulfill({ json: { sessions } });
+    if (path.startsWith("sessions/chatgpt/")) {
+      const id = path.split("/")[2];
+      const item = sessions.find((item) => item.id === id);
+      if (route.request().method() === "DELETE") {
+        sessions = sessions.filter((item) => item.id !== id);
+        return route.fulfill({ json: { deleted: true } });
+      }
+      if (!item)
+        return route.fulfill({
+          status: 404,
+          json: { error: { code: "session_not_found", message: "Session not found." } },
+        });
+      return route.fulfill({
+        json: { session: item, rounds: [{ id: `round-${id}`, number: 1, status: "active" }], aboard: null },
+      });
+    }
+    if (path.startsWith("rounds/round-")) {
+      return route.fulfill({ json: { round: round(path.slice("rounds/round-".length)) } });
+    }
+    throw new Error(`Unexpected API request: ${route.request().method()} ${path}`);
+  });
+  return {
+    setSessions(next: typeof initial) {
+      sessions = next;
+    },
+  };
+}
+
+async function choose(page: Page, id: string) {
+  const show = page.getByRole("button", { name: "Show sessions", exact: true });
+  if (await show.isVisible()) await show.click();
+  await page
+    .getByRole("button", { name: `Session ${id}`, exact: false })
+    .filter({ has: page.locator("b") })
+    .click();
+}
+
+async function remove(page: Page, id: string) {
+  const show = page.getByRole("button", { name: "Show sessions", exact: true });
+  if (await show.isVisible()) await show.click();
+  await page.getByRole("button", { name: `Delete Session ${id}`, exact: true }).click();
+  await page.getByRole("alertdialog").getByRole("button", { name: "Delete session", exact: true }).click();
+  await expect(page.getByRole("alertdialog")).toHaveCount(0);
+}
+
+for (const stage of ["detail", "round"] as const) {
+  test(`switch ignores a late ${stage} response from the previous session`, async ({ page }) => {
+    await board(page);
+    await page.goto("/?session=chatgpt%3Aa");
+    await expect(page.getByRole("heading", { name: "Question for a" })).toBeVisible();
+    const started = deferred();
+    const release = deferred();
+    const completed = deferred();
+    const path = stage === "detail" ? "sessions/chatgpt/a" : "rounds/round-a";
+    await page.route(
+      `**/api/v1/${path}`,
+      async (route) => {
+        started.resolve();
+        await release.promise;
+        await route.fulfill({ json: stage === "detail" ? detail("a") : { round: round("a") } });
+        completed.resolve();
+      },
+      { times: 1 },
+    );
+    await started.promise;
+    await choose(page, "b");
+    await expect(page.getByRole("heading", { name: "Question for b" })).toBeVisible();
+    // Hold B's next poll so it cannot conceal an incorrectly accepted A response.
+    const hold = (route: Route) => route.abort();
+    await page.route("**/api/v1/sessions/chatgpt/b", hold);
+    release.resolve();
+    await completed.promise;
+    await settle(page);
+    await expect(page.getByRole("heading", { name: "Question for b" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Question for a" })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "Copy session ID: b", exact: true })).toBeVisible();
+  });
+}
+
+test("refresh preserves the URL selection even when another session is preferred", async ({ page }) => {
+  await board(page);
+  await page.goto("/?session=chatgpt%3Ab");
+  await expect(page.getByRole("heading", { name: "Question for b" })).toBeVisible();
+  await page.reload();
+  await expect(page.getByRole("heading", { name: "Question for b" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Question for a" })).toHaveCount(0);
+  await expect(page).toHaveURL(/session=chatgpt%3Ab/);
+});
+
+test("the default selection survives refresh after session activity reorders the list", async ({ page }) => {
+  const fixture = await board(page);
+  await page.goto("/");
+  await expect(page.getByRole("heading", { name: "Question for a" })).toBeVisible();
+  await expect(page).toHaveURL(/session=chatgpt%3Aa/);
+  fixture.setSessions([session("b"), session("a")]);
+  await page.reload();
+  await expect(page.getByRole("heading", { name: "Question for a" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Question for b" })).toHaveCount(0);
+});
+
+test("deleting the selection prefers an active session over finished sessions", async ({ page }) => {
+  await board(page, [session("a"), session("archived", true), session("b")]);
+  await page.goto("/?session=chatgpt%3Aa");
+  await expect(page.getByRole("heading", { name: "Question for a" })).toBeVisible();
+  const started = deferred();
+  const release = deferred();
+  const completed = deferred();
+  await page.route("**/api/v1/sessions/chatgpt/a", async (route) => {
+    if (route.request().method() !== "GET") return route.fallback();
+    started.resolve();
+    await release.promise;
+    await route.fulfill({
+      status: 404,
+      json: { error: { code: "session_not_found", message: "Session not found." } },
+    });
+    completed.resolve();
+  });
+  await started.promise;
+  await remove(page, "a");
+  await expect(page.getByRole("heading", { name: "Question for b" })).toBeVisible();
+  release.resolve();
+  await completed.promise;
+  await settle(page);
+  expect(await page.locator(".banner").count()).toBe(0);
+  await expect(page).toHaveURL(/session=chatgpt%3Ab/);
+  await page.reload();
+  await expect(page.getByRole("heading", { name: "Question for b" })).toBeVisible();
+});
+
+test("deleting the last session stays empty when an old list response arrives", async ({ page }) => {
+  await board(page, [session("a")]);
+  await page.goto("/?session=chatgpt%3Aa");
+  await expect(page.getByRole("heading", { name: "Question for a" })).toBeVisible();
+  const started = deferred();
+  const release = deferred();
+  const completed = deferred();
+  await page.route(
+    "**/api/v1/sessions",
+    async (route) => {
+      started.resolve();
+      await release.promise;
+      await route.fulfill({ json: { sessions: [session("a")] } });
+      completed.resolve();
+    },
+    { times: 1 },
+  );
+  await started.promise;
+  await remove(page, "a");
+  await expect(page.getByRole("heading", { name: "No grill session selected" })).toBeVisible();
+  release.resolve();
+  await completed.promise;
+  await settle(page);
+  await expect(page.getByRole("heading", { name: "No grill session selected" })).toBeVisible();
+  await expect(page.locator(".banner")).toHaveCount(0);
+  await expect(page.locator(".session-row")).toHaveCount(0);
+  await expect(page).toHaveURL("/");
+  await page.reload();
+  await expect(page.getByRole("heading", { name: "No grill session selected" })).toBeVisible();
+});
+
+test("deleting another session keeps the current selection", async ({ page }) => {
+  await board(page);
+  await page.goto("/?session=chatgpt%3Ab");
+  await expect(page.getByRole("heading", { name: "Question for b" })).toBeVisible();
+  await remove(page, "a");
+  await expect(page.getByRole("heading", { name: "Question for b" })).toBeVisible();
+  await expect(page).toHaveURL(/session=chatgpt%3Ab/);
+  await expect(page.locator(".banner")).toHaveCount(0);
+});

@@ -315,82 +315,111 @@ function GrillBoard() {
   const scrolledActiveRound = useRef<{ session: string; roundId: string | null } | null>(null);
   // Answer saves bump the generation when they start and finish, so polls can detect answers read before them.
   const writes = useRef({ pending: 0, generation: 0 });
+  // Identity changes immediately on navigation, before an old request can publish its result.
+  const selection = useRef({ key: selected });
+  const loadingSelection = useRef<typeof selection.current | null>(null);
+  const sessionListRequest = useRef(0);
+  const sessionList = useRef(sessions);
+  const deleting = useRef(new Set<string>());
 
   useEffect(() => {
     setRailOpen(window.matchMedia("(min-width: 901px)").matches);
   }, []);
 
+  const selectSession = useCallback((key: string | null) => {
+    if (selection.current.key === key) return;
+    selection.current = { key };
+    setSelected(key);
+    setDetail(null);
+    setRounds([]);
+    setDisplayedRoundId(null);
+    setReview(null);
+    setError("");
+    setSwitching(Boolean(key));
+    window.history.replaceState(null, "", key ? `/?session=${encodeURIComponent(key)}` : "/");
+  }, []);
+
   const loadSessions = useCallback(async () => {
+    const request = ++sessionListRequest.current;
     try {
       const result = await api<{ sessions: SessionSummary[] }>("sessions");
+      if (request !== sessionListRequest.current) return;
       setAuthorized(true);
+      sessionList.current = result.sessions;
       setSessions(result.sessions);
       setError("");
       const first = preferredSession(result.sessions);
-      setSelected((current) => current ?? (first ? `${first.provider}:${first.provider_session_id}` : null));
+      if (!selection.current.key && first) selectSession(`${first.provider}:${first.provider_session_id}`);
     } catch (cause) {
+      if (request !== sessionListRequest.current) return;
       if ((cause as ApiError).code === "unauthorized") setAuthorized(false);
       else setError((cause as Error).message);
     }
-  }, []);
-
-  /** Superseded rounds are frozen, so polling only refetches the round that can still change. */
-  const loadRounds = useCallback(async (summaries: RoundSummary[]) => {
-    const generation = writes.current.generation;
-    const loaded: Round[] = [];
-    for (const summary of summaries) {
-      const cached = cache.current.get(summary.id);
-      if (cached && summary.status === "superseded" && cached.status === "superseded") {
-        loaded.push(cached);
-        continue;
-      }
-      const result = await api<{ round: Round }>(`rounds/${summary.id}`);
-      cache.current.set(summary.id, result.round);
-      loaded.push(result.round);
-    }
-    // A save that overlapped this poll makes its answers older than the board's; the next poll catches up.
-    const overlapped = writes.current.pending > 0 || writes.current.generation !== generation;
-    setRounds((current) =>
-      overlapped ? loaded.map((round) => current.find((item) => item.id === round.id) ?? round) : loaded,
-    );
-  }, []);
+  }, [selectSession]);
 
   const loadSelected = useCallback(async () => {
-    if (!selected) {
-      setDetail(null);
-      setRounds([]);
-      return;
-    }
-    const separator = selected.indexOf(":");
+    const current = selection.current;
+    const key = current.key;
+    if (!key || deleting.current.has(key) || loadingSelection.current === current) return;
+    loadingSelection.current = current;
+    const isCurrent = () => selection.current === current && !deleting.current.has(key);
+    const separator = key.indexOf(":");
     try {
       if (separator < 1) return;
       const next = await api<SessionDetail>(
-        `sessions/${encodeURIComponent(selected.slice(0, separator))}/${encodeURIComponent(selected.slice(separator + 1))}`,
+        `sessions/${encodeURIComponent(key.slice(0, separator))}/${encodeURIComponent(key.slice(separator + 1))}`,
       );
+      if (!isCurrent()) return;
+      const generation = writes.current.generation;
+      const loaded: Round[] = [];
+      // Superseded rounds are frozen, so only refetch the round that can still change.
+      for (const summary of next.rounds) {
+        const cached = cache.current.get(summary.id);
+        if (cached && summary.status === "superseded" && cached.status === "superseded") {
+          loaded.push(cached);
+          continue;
+        }
+        const { round } = await api<{ round: Round }>(`rounds/${summary.id}`);
+        if (!isCurrent()) return;
+        cache.current.set(summary.id, round);
+        loaded.push(round);
+      }
+      if (!isCurrent()) return;
+      // Publish the detail and its questions together, only for the current selection.
       setDetail(next);
-      await loadRounds(next.rounds);
+      const overlapped = writes.current.pending > 0 || writes.current.generation !== generation;
+      setRounds((rounds) =>
+        overlapped ? loaded.map((round) => rounds.find((item) => item.id === round.id) ?? round) : loaded,
+      );
     } catch (cause) {
-      setError((cause as Error).message);
+      if (isCurrent()) setError((cause as Error).message);
     } finally {
-      setSwitching(false);
+      if (loadingSelection.current === current) loadingSelection.current = null;
+      if (isCurrent()) setSwitching(false);
     }
-  }, [loadRounds, selected]);
+  }, []);
 
   useEffect(() => {
     void loadSessions();
   }, [loadSessions]);
   useEffect(() => {
     if (authorized) void loadSelected();
-  }, [authorized, loadSelected]);
+  }, [authorized, loadSelected, selected]);
   useEffect(() => {
     if (!authorized) return;
-    const timer = window.setInterval(() => {
-      void (async () => {
-        await loadSessions();
-        await loadSelected();
-      })();
-    }, 1_000);
-    return () => window.clearInterval(timer);
+    let live = true;
+    let timer: number;
+    const poll = async () => {
+      await loadSessions();
+      if (!live) return;
+      await loadSelected();
+      if (live) timer = window.setTimeout(() => void poll(), 1_000);
+    };
+    timer = window.setTimeout(() => void poll(), 1_000);
+    return () => {
+      live = false;
+      window.clearTimeout(timer);
+    };
   }, [authorized, loadSessions, loadSelected]);
 
   useLayoutEffect(() => {
@@ -450,16 +479,9 @@ function GrillBoard() {
     (session: SessionSummary) => {
       const key = `${session.provider}:${session.provider_session_id}`;
       if (!window.matchMedia("(min-width: 901px)").matches) setRailOpen(false);
-      // Re-selecting the current session would leave the spinner waiting on a load that never reruns.
-      if (key === selected) return;
-      setSelected(key);
-      setRounds([]);
-      setDisplayedRoundId(null);
-      setReview(null);
-      setSwitching(true);
-      window.history.replaceState(null, "", `/?session=${encodeURIComponent(key)}`);
+      selectSession(key);
     },
-    [selected],
+    [selectSession],
   );
 
   useEffect(() => {
@@ -543,24 +565,30 @@ function GrillBoard() {
   const deleteSession = useCallback(
     async (session: SessionSummary) => {
       const key = `${session.provider}:${session.provider_session_id}`;
-      await api(`sessions/${encodeURIComponent(session.provider)}/${encodeURIComponent(session.provider_session_id)}`, {
-        method: "DELETE",
-      });
-      const remaining = sessions.filter((item) => item.id !== session.id);
-      setSessions(remaining);
-      cache.current.clear();
-      if (selected === key) {
-        const next = preferredSession(remaining);
-        const nextKey = next ? `${next.provider}:${next.provider_session_id}` : null;
-        setSelected(nextKey);
-        setDetail(null);
-        setRounds([]);
-        setReview(null);
-        setSwitching(Boolean(nextKey));
-        window.history.replaceState(null, "", nextKey ? `/?session=${encodeURIComponent(nextKey)}` : "/");
+      deleting.current.add(key);
+      try {
+        await api(
+          `sessions/${encodeURIComponent(session.provider)}/${encodeURIComponent(session.provider_session_id)}`,
+          {
+            method: "DELETE",
+          },
+        );
+        // A list fetched before the delete must not restore the deleted session afterward.
+        sessionListRequest.current += 1;
+        const remaining = sessionList.current.filter((item) => item.id !== session.id);
+        sessionList.current = remaining;
+        setSessions(remaining);
+        cache.current.clear();
+        setError("");
+        if (selection.current.key === key) {
+          const next = preferredSession(remaining);
+          selectSession(next ? `${next.provider}:${next.provider_session_id}` : null);
+        }
+      } finally {
+        deleting.current.delete(key);
       }
     },
-    [selected, sessions],
+    [selectSession],
   );
 
   const reloadRound = useCallback(async (id: string) => {
