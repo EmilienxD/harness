@@ -1116,6 +1116,12 @@ kbd {
   font-size: 13px;
   line-height: 1.45;
 }
+.freeform--notes {
+  margin-top: 18px;
+}
+.freeform--notes textarea {
+  min-height: 320px;
+}
 .freeform textarea:focus {
   outline: none;
   border-color: var(--accent);

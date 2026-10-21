@@ -2,3 +2,5 @@
 .env*
 !.env.example
 supabase/.branches/
+test-results/
+playwright-report/

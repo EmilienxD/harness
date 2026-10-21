@@ -10,6 +10,7 @@ The board is designed for one person. It uses a shared four-digit access code in
 - Preserves earlier rounds as read-only history.
 - Shows one question at a time, including the agent's explanation, recommendation, and optional interactive content.
 - Accepts an option, a note, or a custom answer. Every edit saves automatically and is included in the prompt.
+- Offers **Add Additional Notes** after the final question in every round. The last **Notes** card autosaves round-wide context and includes it after question answers in the reviewed prompt.
 - Produces a read-only prompt that can be copied, sent through Aboard, or sent to Pi when its session relay is connected. Pi claims answers only while idle and confirms receipt from its saved session.
 - Keeps unfinished sessions indefinitely. Finishing a session moves it to the archive and starts a 30-day period before the daily cleanup removes its data and stored media. Finished sessions can be restored during that period, and a newly published round restores its session automatically.
 
@@ -115,6 +116,19 @@ npm test
 npm run build
 npm run lint
 ```
+
+Browser acceptance tests use the running local Supabase stack and an isolated development server:
+
+```sh
+npx supabase start
+npx playwright install chromium
+npm run test:e2e
+```
+
+These tests publish and remove their own sessions, covering desktop and mobile Notes navigation,
+autosave, refresh persistence, save retries, review, and frozen history. They always use local
+Supabase credentials from `supabase status`; deployment environment files cannot select the database.
+Round notes use the existing answer-draft table, so this feature needs no database migration.
 
 The production access cookie is secure over HTTPS; local HTTP development works without an override.
 
