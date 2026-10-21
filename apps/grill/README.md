@@ -148,3 +148,10 @@ Published explanation HTML and JavaScript are intentionally trusted. Only connec
 
 For the visual and interaction conventions, see [docs/design.md](docs/design.md).
 
+## Editable Mermaid diagrams
+
+Diagrams autosave separately from the authored questions and restore after navigation, refresh, and in round history. Generated diagram feedback appears beside your written notes. It compares the final drawing with its original baseline; panning, zooming, and selecting objects do not count as changes. Undoing back to the baseline reports "No changes were made to the diagram."
+
+Review waits for drawings and changed-diagram PNGs to save. Save or export failures keep the draft and offer a retry. Drawings have a 4 MB request limit and PNG exports a 2.9 MB limit; simplify an oversized drawing before retrying. Reviewed snapshots retain immutable image IDs, checksums, question/diagram identities, and scene revisions. Image and snapshot metadata endpoints require the existing browser cookie or machine bearer authentication. Session deletion and retention also remove these drawings and images.
+
+For existing deployments, apply `20261021130000_editable_diagram_scenes.sql` with `supabase db push` before deploying the app. It adds the separate scene table, immutable baselines, snapshot revision binding, and private image metadata. Authenticated `GET /api/v1/prompt-snapshots/<id>` returns snapshot images for delivery clients; relay responses include the same immutable metadata. Local image downloads and helper invocation belong to the following delivery implementation step.

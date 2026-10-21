@@ -1,6 +1,12 @@
 // Label repair and two-pass font materialization adapted from Lavish (MIT),
 // Copyright (c) 2026 Kun Chen. See THIRD-PARTY-NOTICES.md.
-import { convertToExcalidrawElements, exportToCanvas, exportToBlob, FONT_FAMILY } from "@excalidraw/excalidraw";
+import {
+  convertToExcalidrawElements,
+  exportToCanvas,
+  exportToBlob,
+  restoreElements,
+  FONT_FAMILY,
+} from "@excalidraw/excalidraw";
 import { parseMermaidToExcalidraw } from "@excalidraw/mermaid-to-excalidraw";
 type ExcalidrawElementSkeleton = NonNullable<Parameters<typeof convertToExcalidrawElements>[0]>[number];
 import type { ExcalidrawElement } from "@excalidraw/excalidraw/element/types";
@@ -86,7 +92,10 @@ export function convertDiagram(source: string): Promise<DiagramRecord> {
       maxWidthOrHeight: 1,
     });
     await document.fonts.ready;
-    const elements = fitLabels(materialize());
+    const elements = restoreElements(fitLabels(materialize()), null, {
+      refreshDimensions: false,
+      repairBindings: true,
+    });
     if (!elements.length) throw new Error("The diagram contains no visible elements.");
     const scene: DiagramScene = { elements, files, appState: { viewBackgroundColor: "#ffffff" } };
     return {
@@ -107,7 +116,7 @@ export function convertDiagram(source: string): Promise<DiagramRecord> {
 export function exportDiagramPng(scene: DiagramScene): Promise<Blob> {
   return exportToBlob({
     elements: scene.elements,
-    appState: scene.appState,
+    appState: { ...scene.appState, exportBackground: true, exportWithDarkMode: false, exportScale: 1 },
     files: scene.files,
     mimeType: "image/png",
   });

@@ -103,7 +103,11 @@ export type AnswerDraft = {
   state: "draft" | "queued";
 };
 
-export function compilePrompt(payload: RoundPayload, answers: readonly AnswerDraft[]): string {
+export function compilePrompt(
+  payload: RoundPayload,
+  answers: readonly AnswerDraft[],
+  diagramFeedback: Record<string, string[]> = {},
+): string {
   const queued = new Map(
     answers.filter((answer) => answer.state === "queued").map((answer) => [answer.question_id, answer]),
   );
@@ -111,11 +115,14 @@ export function compilePrompt(payload: RoundPayload, answers: readonly AnswerDra
   const bullets: string[] = [];
   for (const question of payload.questions) {
     const answer = queued.get(question.id);
-    if (!answer) continue;
-    const note = answer.note?.trim() ?? "";
-    if (!answer.selected_option && !note) continue;
-    const choice = answer.selected_option ?? "None of these";
-    bullets.push(`- ${question.id}: ${choice}.${note ? ` ${note}` : ""}`);
+    const feedback = diagramFeedback[question.id] ?? [];
+    if (!answer && !feedback.length) continue;
+    const note = answer?.note?.trim() ?? "";
+    if (!answer?.selected_option && !note && !feedback.length) continue;
+    const choice = answer ? (answer.selected_option ?? "None of these") : "Diagram feedback";
+    bullets.push(
+      `- ${question.id}: ${choice}.${note ? ` ${note}` : ""}${feedback.length ? `\n${feedback.map((line) => `  ${line}`).join("\n")}` : ""}`,
+    );
   }
   const notes = queued.get(NOTES_ID)?.note?.trim();
   if (notes) bullets.push(`- Additional Notes:\n${notes}`);

@@ -55,6 +55,9 @@ test("conversion failure retries locally while other diagrams and authored contr
         json: { session, rounds: [{ id: round.id, number: 1, status: "active" }], aboard: null },
       });
     if (path === "/api/v1/rounds/failure-round") return route.fulfill({ json: { round } });
+    if (path === "/api/v1/rounds/failure-round/scenes") return route.fulfill({ json: { scenes: [] } });
+    if (path.includes("/scenes/") && route.request().method() === "PUT")
+      return route.fulfill({ json: { revision: "a".repeat(64), baseline: route.request().postDataJSON().baseline } });
     throw new Error(`Unexpected API request ${path}`);
   });
   // A transient font-loading failure exercises the actual conversion error path without replacing the converter.
@@ -74,12 +77,12 @@ test("conversion failure retries locally while other diagrams and authored contr
   await page.evaluate(() => {
     Reflect.deleteProperty(document.fonts, "ready");
   });
-  await expect(invalid.getByRole("alert")).toContainText("could not be converted");
+  await expect(invalid.getByRole("alert")).toContainText("could not be loaded or prepared");
   await retry.getByRole("button", { name: "Retry diagram", exact: true }).click();
   await expect(retry.locator("canvas").first()).toBeVisible();
   await expect(retry.getByRole("alert")).toHaveCount(0);
   await invalid.getByRole("button", { name: "Retry diagram", exact: true }).click();
-  await expect(invalid.getByRole("alert")).toContainText("could not be converted");
+  await expect(invalid.getByRole("alert")).toContainText("could not be loaded or prepared");
   if (await valid.getByRole("button", { name: "Retry diagram", exact: true }).isVisible())
     await valid.getByRole("button", { name: "Retry diagram", exact: true }).click();
   await expect(valid.locator("canvas").first()).toBeVisible();

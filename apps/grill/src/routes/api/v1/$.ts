@@ -24,6 +24,7 @@ import {
 } from "@/lib/grill-api.server";
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import { NOTES_ID, PROVIDERS } from "@/lib/grill-contract";
+import { diagramOperation } from "@/lib/diagram-api.server";
 import { assetResponse, mediaMatches } from "@/lib/grill-assets.server";
 
 export const Route = createFileRoute("/api/v1/$")({
@@ -111,6 +112,25 @@ async function handle(request: Request, path: string, method: string): Promise<R
   if (roundMatch && method === "GET") {
     const round = await getRound(roundMatch[1] ?? "");
     return round ? json({ round }) : problem(404, "round_not_found", "Round not found.");
+  }
+
+  const sceneMatch =
+    /^rounds\/([0-9a-f-]+)\/scenes(?:\/(Q[1-9][0-9]*)\/([A-Za-z][A-Za-z0-9_-]{0,63})(\/image)?)?$/u.exec(path);
+  if (
+    sceneMatch &&
+    ((method === "GET" && !sceneMatch[2]) ||
+      (method === "PUT" && !!sceneMatch[2] && !sceneMatch[4]) ||
+      (method === "POST" && !!sceneMatch[4]))
+  )
+    return diagramOperation(request, sceneMatch[1]!, sceneMatch[2], sceneMatch[3], !!sceneMatch[4]);
+  const snapshotMatch = /^prompt-snapshots\/([0-9a-f-]+)$/u.exec(path);
+  if (snapshotMatch && method === "GET") {
+    const { data, error } = await supabaseAdmin
+      .from("grill_prompt_snapshots")
+      .select("id,round_id,prompt,reason,created_at,images,diagram_revisions")
+      .eq("id", snapshotMatch[1]!)
+      .maybeSingle();
+    return !error && data ? json({ snapshot: data }) : problem(404, "snapshot_not_found", "Prompt snapshot not found.");
   }
 
   const assetMatch = /^assets\/([0-9a-f-]+)$/u.exec(path);
@@ -550,23 +570,43 @@ async function saveAnswer(request: Request, roundId: string, questionId: string)
 async function promptOperation(request: Request, roundId: string, operation: string): Promise<Response> {
   const result = await promptForRound(roundId);
   if (!result) return problem(404, "round_not_found", "Round not found.");
-  if (operation === "prompt-preview") return json({ prompt: result.prompt });
+  if (result.missingImages)
+    return problem(409, "diagram_export_required", "A changed diagram needs its saved image. Retry review.");
+  if (operation === "prompt-preview")
+    return json({ prompt: result.prompt, diagram_revisions: result.diagramRevisions });
   if (result.round.status !== "active") return problem(409, "stale_round", "Historical rounds are read-only.");
   const parsed = z
-    .object({ reason: z.enum(["copy", "aboard"]), expected_prompt: z.string().max(100_000) })
+    .object({
+      reason: z.enum(["copy", "aboard"]),
+      expected_prompt: z.string().max(100_000),
+      expected_diagram_revisions: z.record(z.string()).optional(),
+    })
     .safeParse(await readJson(request));
   if (!parsed.success) return problem(422, "invalid_snapshot_reason", "Snapshot reason must be copy or aboard.");
   if (!result.prompt) return problem(422, "empty_prompt", "Answer a question or add notes first.");
   if (parsed.data.expected_prompt !== result.prompt)
     return problem(409, "stale_prompt", "The answers changed. Review the regenerated prompt before continuing.");
-  const { data, error } = await supabaseAdmin
-    .from("grill_prompt_snapshots")
-    .insert({ round_id: roundId, prompt: result.prompt, reason: parsed.data.reason })
-    .select("id,prompt,reason,created_at")
-    .single();
-  if (error) return problem(500, "snapshot_failed", "The prompt snapshot could not be created.");
+  if (
+    Object.keys(result.diagramRevisions).length &&
+    fingerprint(Object.entries(parsed.data.expected_diagram_revisions ?? {}).sort()) !==
+      fingerprint(Object.entries(result.diagramRevisions).sort())
+  )
+    return problem(409, "stale_diagrams", "The drawings changed. Review them again before continuing.");
+  const { data, error } = await supabaseAdmin.rpc("grill_snapshot_diagrams", {
+    target_round: roundId,
+    target_prompt: result.prompt,
+    target_reason: parsed.data.reason,
+    expected_revisions: result.diagramRevisions,
+    target_images: result.images,
+  });
+  if (error || !data?.[0])
+    return problem(
+      409,
+      "snapshot_failed",
+      "The diagram changed or the prompt snapshot could not be created. Review again and retry.",
+    );
   await touchSession(result.round.session_id as string);
-  return json({ snapshot: data });
+  return json({ snapshot: data[0] });
 }
 
 async function createDelivery(snapshotId: string): Promise<Response> {
@@ -714,9 +754,25 @@ async function syncAboard(request: Request, piRelay = false): Promise<Response> 
     target_sessions: input.sessions,
   });
   if (error) return problem(500, "delivery_claim_failed", "Pending deliveries could not be claimed.");
-  return json({
-    deliveries: (data ?? []).map(
-      (delivery: { delivery_id: string; provider: string; session_id: string; prompt: string }) => delivery,
+  const deliveries = await Promise.all(
+    (data ?? []).map(
+      async (delivery: { delivery_id: string; provider: string; session_id: string; prompt: string }) => {
+        const { data: row } = await supabaseAdmin
+          .from("grill_deliveries")
+          .select("prompt_snapshot_id,grill_prompt_snapshots(images,diagram_revisions)")
+          .eq("id", delivery.delivery_id)
+          .single();
+        const snapshot = row?.grill_prompt_snapshots as unknown as
+          | { images: unknown[]; diagram_revisions: unknown }
+          | undefined;
+        return {
+          ...delivery,
+          snapshot_id: row?.prompt_snapshot_id,
+          images: snapshot?.images ?? [],
+          diagram_revisions: snapshot?.diagram_revisions ?? {},
+        };
+      },
     ),
-  });
+  );
+  return json({ deliveries });
 }

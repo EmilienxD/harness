@@ -18,6 +18,8 @@ import {
 import type { HLJSApi } from "highlight.js";
 import { AuthoredDiagrams } from "@/components/authored-diagrams";
 import { discoverDiagrams, type DiagramTarget } from "@/lib/diagram-discovery";
+import { extractAuthoredDiagrams } from "@/lib/grill-diagrams";
+import { summarizeDiagram } from "@/lib/diagram-feedback";
 import { DiagramSceneStore } from "@/lib/diagram-scene";
 import { NOTES_ID, type AnswerDraft, type GrillQuestion } from "@/lib/grill-contract";
 import {
@@ -300,7 +302,11 @@ function GrillBoard() {
   const [selected, setSelected] = useState<string | null>(requestedSession);
   const [detail, setDetail] = useState<SessionDetail | null>(null);
   const [rounds, setRounds] = useState<Round[]>([]);
-  const [review, setReview] = useState<{ roundId: string; prompt: string } | null>(null);
+  const [review, setReview] = useState<{
+    roundId: string;
+    prompt: string;
+    diagramRevisions: Record<string, string>;
+  } | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<SessionSummary | null>(null);
   const [finishTarget, setFinishTarget] = useState<SessionSummary | null>(null);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
@@ -817,11 +823,18 @@ function GrillBoard() {
                             onSaveState={reportSave}
                             onRevealRound={() => scrollToRound(item.id)}
                             onReview={async () => {
-                              const result = await api<{ prompt: string }>(`rounds/${item.id}/prompt-preview`, {
-                                method: "POST",
-                                body: "{}",
+                              const result = await api<{ prompt: string; diagram_revisions: Record<string, string> }>(
+                                `rounds/${item.id}/prompt-preview`,
+                                {
+                                  method: "POST",
+                                  body: "{}",
+                                },
+                              );
+                              setReview({
+                                roundId: item.id,
+                                prompt: result.prompt,
+                                diagramRevisions: result.diagram_revisions ?? {},
                               });
-                              setReview({ roundId: item.id, prompt: result.prompt });
                             }}
                           />
                         </div>
@@ -833,6 +846,7 @@ function GrillBoard() {
                       round={reviewed}
                       session={detail.session}
                       prompt={review.prompt}
+                      diagramRevisions={review.diagramRevisions}
                       aboardReady={online}
                       onClose={closeReview}
                       onReload={() => reloadRound(reviewed.id)}
@@ -1184,8 +1198,9 @@ function Questionnaire({
   const [active, setActive] = useState(0);
   const deck = useRef<HTMLDivElement>(null);
   const [reviewing, setReviewing] = useState(false);
+  const [diagramFailure, setDiagramFailure] = useState("");
   const flushers = useRef(new Map<string, () => Promise<boolean>>());
-  const diagramStore = useMemo(() => new DiagramSceneStore(round.id), [round.id]);
+  const diagramStore = useMemo(() => new DiagramSceneStore(round.id, api), [round.id]);
   // Notes shares the same draft lifecycle, but stays outside the published questions.
   const questions = useMemo(
     () => [
@@ -1221,11 +1236,28 @@ function Questionnaire({
         setActive(failed);
         return;
       }
+      if (!readOnly) {
+        for (const question of round.payload.questions) {
+          for (const diagram of extractAuthoredDiagrams(question.explanation_html)) {
+            try {
+              await diagramStore.prepare(question.id, diagram.id, diagram.source);
+            } catch (cause) {
+              throw new Error(
+                `Diagram ${question.id}/${diagram.id} could not be prepared. ${(cause as Error).message}`,
+              );
+            }
+          }
+        }
+        await diagramStore.flush(true);
+      }
+      setDiagramFailure("");
       await onReview();
+    } catch (cause) {
+      setDiagramFailure((cause as Error).message);
     } finally {
       setReviewing(false);
     }
-  }, [onReview, questions]);
+  }, [onReview, questions, diagramStore, readOnly, round.payload.questions]);
 
   // A new question starts reading from the top of the round, as on page load.
   const showQuestion = useCallback(
@@ -1268,6 +1300,14 @@ function Questionnaire({
 
   return (
     <div className="deck-wrap">
+      {diagramFailure && (
+        <div role="alert">
+          Diagram changes are still in your draft. {diagramFailure}{" "}
+          <button type="button" onClick={() => void reviewPrompt()}>
+            Retry review
+          </button>
+        </div>
+      )}
       <div
         ref={deck}
         className={`deck ${active === questions.length - 2 ? "is-penult" : ""} ${active === questions.length - 1 ? "is-last" : ""}`}
@@ -1308,6 +1348,29 @@ function Questionnaire({
         ))}
       </div>
     </div>
+  );
+}
+
+function QuestionDiagramFeedback({ question, store }: { question: GrillQuestion; store: DiagramSceneStore }) {
+  const [, refresh] = useState(0);
+  useEffect(() => store.subscribe(() => refresh((value) => value + 1)), [store]);
+  const diagrams = useMemo(() => extractAuthoredDiagrams(question.explanation_html), [question.explanation_html]);
+  if (!diagrams.length) return null;
+  return (
+    <section className="question-diagram-feedback" aria-label="Generated diagram feedback">
+      <h3>Diagram feedback</h3>
+      {diagrams.map((diagram) => {
+        const record = store.get(question.id, diagram.id);
+        return (
+          <div key={diagram.id} data-diagram-feedback={diagram.id}>
+            <strong>{diagram.id}</strong>
+            <p style={{ whiteSpace: "pre-line" }}>
+              {record ? summarizeDiagram(record.baseline, record.scene) : "No changes were made to the diagram."}
+            </p>
+          </div>
+        );
+      })}
+    </section>
   );
 }
 
@@ -1591,6 +1654,7 @@ function QuestionCard({
               }
             />
           </div>
+          {!isNotes && <QuestionDiagramFeedback question={question} store={diagramStore} />}
           <div className="question__foot">
             {/* Progress shows in the page's save badge; only a failure, which needs this card's Retry, stays here. */}
             {!readOnly && failure ? (
@@ -1790,6 +1854,7 @@ function Explanation({
 }
 
 function PromptModal({
+  diagramRevisions,
   round,
   session,
   prompt,
@@ -1797,6 +1862,7 @@ function PromptModal({
   onClose,
   onReload,
 }: {
+  diagramRevisions: Record<string, string>;
   round: Round;
   session: SessionSummary;
   prompt: string;
@@ -1824,25 +1890,17 @@ function PromptModal({
       const record = () =>
         api<{ snapshot: { id: string; prompt: string } }>(`rounds/${round.id}/prompt-snapshots`, {
           method: "POST",
-          body: JSON.stringify({ reason, expected_prompt: prompt }),
+          body: JSON.stringify({ reason, expected_prompt: prompt, expected_diagram_revisions: diagramRevisions }),
         }).then((result) => result.snapshot);
       if (reason === "copy") {
         try {
-          await copyText(prompt);
+          const recorded = readOnly ? { prompt } : await record();
+          await copyText(recorded.prompt);
           confirmCopy();
         } catch (cause) {
           setMessage((cause as Error).message);
-          return;
         } finally {
           setBusy("");
-        }
-        if (readOnly) return;
-        // Recording is useful history, but the visible prompt is ready to copy without a round trip.
-        try {
-          await record();
-          // The regular poll refreshes snapshot history without delaying the copy confirmation.
-        } catch (cause) {
-          setMessage(`Prompt copied, but the copy was not recorded. ${(cause as Error).message}`);
         }
         return;
       }
@@ -1861,7 +1919,7 @@ function PromptModal({
         setBusy("");
       }
     },
-    [confirmCopy, confirmSend, onReload, prompt, readOnly, round.id],
+    [confirmCopy, confirmSend, onReload, prompt, readOnly, round.id, diagramRevisions],
   );
 
   useEffect(() => {

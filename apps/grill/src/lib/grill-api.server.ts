@@ -2,6 +2,10 @@ import { createHash } from "node:crypto";
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import { compilePrompt, publicationSchema, type AnswerDraft, type RoundPayload } from "@/lib/grill-contract";
 
+import { extractAuthoredDiagrams } from "./grill-diagrams";
+import { diagramChanged, summarizeDiagram } from "./diagram-feedback";
+import type { DiagramScene } from "./diagram-scene";
+
 export const DEFAULT_GRILL_URL = "https://grill-me-in-cloud.vercel.app";
 export const BUCKET = "grill-assets";
 export const json = (body: unknown, status = 200, headers?: HeadersInit) => {
@@ -61,15 +65,85 @@ export async function getRound(roundId: string) {
 export async function promptForRound(roundId: string) {
   // Preview and snapshot validation only need the payload and answers. The full round also
   // fetches assets and every historical snapshot, which grows with each copy.
-  const [{ data: round, error }, { data: answers }] = await Promise.all([
+  const [
+    { data: round, error },
+    { data: answers },
+    { data: scenes, error: sceneError },
+    { data: images, error: imageError },
+  ] = await Promise.all([
     supabaseAdmin.from("grill_rounds").select("id,session_id,status,payload").eq("id", roundId).maybeSingle(),
+    supabaseAdmin.from("grill_answer_drafts").select("question_id,selected_option,note,state").eq("round_id", roundId),
     supabaseAdmin
-      .from("grill_answer_drafts")
-      .select("question_id,selected_option,note,state")
+      .from("grill_diagram_scenes")
+      .select("question_id,diagram_id,scene,baseline,revision")
       .eq("round_id", roundId),
+    supabaseAdmin
+      .from("grill_round_assets")
+      .select("id,question_id,diagram_id,scene_revision,sha256,byte_size,media_type")
+      .eq("round_id", roundId)
+      .not("scene_revision", "is", null),
   ]);
   if (error || !round) return null;
-  return { round, prompt: compilePrompt(round.payload as RoundPayload, (answers ?? []) as AnswerDraft[]) };
+  if (sceneError || imageError) throw new Error("Saved diagram feedback could not be loaded. Retry review.");
+  const payload = round.payload as RoundPayload;
+  const feedback: Record<string, string[]> = {};
+  const diagramRevisions: Record<string, string> = {};
+  const snapshotImages: Array<{
+    asset_id: string;
+    question_id: string;
+    diagram_id: string;
+    scene_revision: string;
+    sha256: string;
+    byte_size: number;
+    media_type: string;
+    reference: string;
+  }> = [];
+  let missingImages = false;
+  for (const row of scenes ?? []) diagramRevisions[`${row.question_id}/${row.diagram_id}`] = row.revision;
+  for (const question of payload.questions) {
+    const diagrams = extractAuthoredDiagrams(question.explanation_html);
+    const changed = (scenes ?? []).some(
+      (row) =>
+        row.question_id === question.id && diagramChanged(row.baseline as DiagramScene, row.scene as DiagramScene),
+    );
+    if (!changed && !(answers ?? []).some((answer) => answer.question_id === question.id && answer.state === "queued"))
+      continue;
+    feedback[question.id] = diagrams.map((diagram) => {
+      const row = (scenes ?? []).find((scene) => scene.question_id === question.id && scene.diagram_id === diagram.id);
+      const summary = row
+        ? summarizeDiagram(row.baseline as DiagramScene, row.scene as DiagramScene)
+        : "No changes were made to the diagram.";
+      if (!row || !diagramChanged(row.baseline as DiagramScene, row.scene as DiagramScene))
+        return `Diagram ${diagram.id}: ${summary}`;
+      const asset = (images ?? []).find(
+        (item) =>
+          item.question_id === question.id && item.diagram_id === diagram.id && item.scene_revision === row.revision,
+      );
+      if (!asset) {
+        missingImages = true;
+        return `Diagram ${diagram.id}: ${summary}`;
+      }
+      const reference = `[grill-image:${asset.id}]`;
+      snapshotImages.push({
+        asset_id: asset.id,
+        question_id: question.id,
+        diagram_id: diagram.id,
+        scene_revision: row.revision,
+        sha256: asset.sha256,
+        byte_size: asset.byte_size,
+        media_type: asset.media_type,
+        reference,
+      });
+      return `Diagram ${diagram.id}: ${summary}\n  Image: ${reference}`;
+    });
+  }
+  return {
+    round,
+    prompt: compilePrompt(payload, (answers ?? []) as AnswerDraft[], feedback),
+    diagramRevisions,
+    images: snapshotImages,
+    missingImages,
+  };
 }
 
 export async function touchSession(sessionId: string): Promise<void> {
