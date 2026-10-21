@@ -16,6 +16,9 @@ import {
   X,
 } from "lucide-react";
 import type { HLJSApi } from "highlight.js";
+import { AuthoredDiagrams } from "@/components/authored-diagrams";
+import { discoverDiagrams, type DiagramTarget } from "@/lib/diagram-discovery";
+import { DiagramSceneStore } from "@/lib/diagram-scene";
 import { NOTES_ID, type AnswerDraft, type GrillQuestion } from "@/lib/grill-contract";
 import {
   ignoresShortcuts,
@@ -1182,6 +1185,7 @@ function Questionnaire({
   const deck = useRef<HTMLDivElement>(null);
   const [reviewing, setReviewing] = useState(false);
   const flushers = useRef(new Map<string, () => Promise<boolean>>());
+  const diagramStore = useMemo(() => new DiagramSceneStore(round.id), [round.id]);
   // Notes shares the same draft lifecycle, but stays outside the published questions.
   const questions = useMemo(
     () => [
@@ -1272,6 +1276,7 @@ function Questionnaire({
           <QuestionCard
             key={question.id}
             round={round}
+            diagramStore={diagramStore}
             question={question}
             answer={answerFor(question.id)}
             readOnly={readOnly}
@@ -1308,6 +1313,7 @@ function Questionnaire({
 
 function QuestionCard({
   round,
+  diagramStore,
   question,
   answer,
   readOnly,
@@ -1324,6 +1330,7 @@ function QuestionCard({
   onReview,
 }: {
   round: Round;
+  diagramStore: DiagramSceneStore;
   question: GrillQuestion;
   answer: Answer | undefined;
   readOnly: boolean;
@@ -1525,7 +1532,9 @@ function QuestionCard({
           <span className="round-label">Round {round.number}</span>
         </div>
         <h2>{question.question}</h2>
-        {!isNotes && <Explanation question={question} hidden={hidden} />}
+        {!isNotes && (
+          <Explanation key={round.id} question={question} hidden={hidden} readOnly={readOnly} store={diagramStore} />
+        )}
         <div className="answer-form">
           {!isNotes && (
             <div ref={options} className="options">
@@ -1675,7 +1684,18 @@ function wrapTables(root: HTMLElement) {
   }
 }
 
-function Explanation({ question, hidden }: { question: GrillQuestion; hidden: boolean }) {
+function Explanation({
+  question,
+  hidden,
+  readOnly,
+  store,
+}: {
+  question: GrillQuestion;
+  hidden: boolean;
+  readOnly: boolean;
+  store: DiagramSceneStore;
+}) {
+  const [targets, setTargets] = useState<DiagramTarget[]>([]);
   const root = useRef<HTMLDivElement>(null);
   const [failed, setFailed] = useState(false);
   // React 19 rewrites innerHTML whenever this object's identity changes, which would reset open
@@ -1752,8 +1772,17 @@ function Explanation({ question, hidden }: { question: GrillQuestion; hidden: bo
       setFailed(true);
     }
   }, [question.id, question.init_js, question.explanation_html]);
+  useLayoutEffect(() => {
+    if (!root.current) return;
+    const found = discoverDiagrams(root.current);
+    setTargets(found);
+    return () => {
+      for (const target of found) target.host.remove();
+    };
+  }, [question.id, question.explanation_html]);
   return (
     <>
+      <AuthoredDiagrams targets={targets} questionId={question.id} store={store} hidden={hidden} readOnly={readOnly} />
       <div ref={root} id={`explanation-${question.id}`} className="explanation" dangerouslySetInnerHTML={html} />
       {failed && <div className="explanation-error">This question's interactive explanation could not initialize.</div>}
     </>
