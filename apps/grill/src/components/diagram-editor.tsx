@@ -89,6 +89,18 @@ export default function DiagramEditor({
   useEffect(() => {
     if (hidden && !readOnly) void store.flush().catch(() => {});
   }, [hidden, readOnly, store]);
+  useEffect(() => {
+    // Feedback and surrounding cards can move the canvas without resizing it.
+    // Keep native pointer-to-scene coordinates aligned with the current layout.
+    const refresh = () => api.current?.refresh();
+    const observer = new ResizeObserver(refresh);
+    if (shell.current) observer.observe(shell.current);
+    window.addEventListener("scroll", refresh, true);
+    return () => {
+      observer.disconnect();
+      window.removeEventListener("scroll", refresh, true);
+    };
+  }, [fullscreen, hidden]);
   const capture = () => {
     const current = recordRef.current;
     if (!api.current || !current || readOnly) return;

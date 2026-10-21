@@ -23,6 +23,7 @@ test("durable drawings, undo, retry, immutable reviewed images, authenticated me
         title: "Durable diagram acceptance",
         schema_version: 1,
         payload: {
+          image_command: "python fixture-grill-images.py",
           questions: [1, 2].map((index) => ({
             id: `Q${index}`,
             question: `Durable ${index}`,
@@ -55,7 +56,9 @@ test("durable drawings, undo, retry, immutable reviewed images, authenticated me
     await expect(editor.locator("canvas").first()).toBeVisible({ timeout: 30_000 });
     await expect.poll(async () => (await scenes()).length).toBe(2);
     const baselineRows = await scenes();
-    const original = baselineRows.find((row: { diagram_id: string }) => row.diagram_id === "flow");
+    const original = baselineRows.find(
+      (row: { question_id: string; diagram_id: string }) => row.question_id === "Q1" && row.diagram_id === "flow",
+    );
     const initialRevision = original.revision;
     const viewportOnly = structuredClone(original);
     Object.assign(viewportOnly.scene.appState, {
@@ -83,7 +86,12 @@ test("durable drawings, undo, retry, immutable reviewed images, authenticated me
     await page.keyboard.press("Escape");
     await expect(editor.getByLabel("Diagram feedback")).toContainText("Added");
     await expect
-      .poll(async () => (await scenes()).find((row: { diagram_id: string }) => row.diagram_id === "flow")?.revision)
+      .poll(
+        async () =>
+          (await scenes()).find(
+            (row: { question_id: string; diagram_id: string }) => row.question_id === "Q1" && row.diagram_id === "flow",
+          )?.revision,
+      )
       .not.toBe(initialRevision);
     await page.keyboard.press("ControlOrMeta+z");
     await expect(editor.getByLabel("Diagram feedback")).toContainText("No changes were made to the diagram.");
@@ -102,9 +110,16 @@ test("durable drawings, undo, retry, immutable reviewed images, authenticated me
     await page.unroute(`**/rounds/${roundId}/scenes/Q1/flow`);
     await editor.getByRole("button", { name: "Retry diagram save" }).click();
     await expect
-      .poll(async () => (await scenes()).find((row: { diagram_id: string }) => row.diagram_id === "flow")?.revision)
+      .poll(
+        async () =>
+          (await scenes()).find(
+            (row: { question_id: string; diagram_id: string }) => row.question_id === "Q1" && row.diagram_id === "flow",
+          )?.revision,
+      )
       .not.toBe(initialRevision);
-    const moved = (await scenes()).find((row: { diagram_id: string }) => row.diagram_id === "flow");
+    const moved = (await scenes()).find(
+      (row: { question_id: string; diagram_id: string }) => row.question_id === "Q1" && row.diagram_id === "flow",
+    );
     expect(moved.baseline).toEqual(original.baseline);
     // Navigation, independent diagrams, and refresh use persisted identities.
     await card.getByRole("button", { name: "Q2", exact: true }).click();
@@ -120,13 +135,19 @@ test("durable drawings, undo, retry, immutable reviewed images, authenticated me
     const note = card.getByRole("textbox").first();
     await note.fill("My written notes stay separate.");
     // Invalidate the prior export with an appearance edit, then fail its upload during review.
-    const current = (await scenes()).find((row: { diagram_id: string }) => row.diagram_id === "flow");
-    current.scene.elements[0].strokeColor = "#ff0000";
-    const changed = await request.put(`${scenePath}/Q1/flow`, {
-      headers,
-      data: { ...current, expected_revision: current.revision },
-    });
-    expect(changed.ok(), await changed.text()).toBeTruthy();
+    await expect
+      .poll(async () => {
+        const current = (await scenes()).find(
+          (row: { question_id: string; diagram_id: string }) => row.question_id === "Q1" && row.diagram_id === "flow",
+        );
+        current.scene.elements[0].strokeColor = "#ff0000";
+        const changed = await request.put(`${scenePath}/Q1/flow`, {
+          headers,
+          data: { ...current, expected_revision: current.revision },
+        });
+        return changed.status();
+      })
+      .toBe(200);
     await page.reload();
     await expect(editor.locator("canvas").first()).toBeVisible();
     await page.route(`**/rounds/${roundId}/scenes/Q1/flow/image`, (route) =>
@@ -145,7 +166,8 @@ test("durable drawings, undo, retry, immutable reviewed images, authenticated me
     const firstSnapshotResponse = await request.post(`/api/v1/rounds/${roundId}/prompt-snapshots`, {
       headers,
       data: {
-        reason: "aboard",
+        reason: "copy",
+        snapshot_id: (await preview.json()).snapshot_id,
         expected_prompt: (await preview.json()).prompt,
         expected_diagram_revisions: (await preview.json()).diagram_revisions,
       },
@@ -154,7 +176,12 @@ test("durable drawings, undo, retry, immutable reviewed images, authenticated me
     const first = (await firstSnapshotResponse.json()).snapshot;
     const staleReview = await request.post(`/api/v1/rounds/${roundId}/prompt-snapshots`, {
       headers,
-      data: { reason: "copy", expected_prompt: (await preview.json()).prompt, expected_diagram_revisions: {} },
+      data: {
+        reason: "copy",
+        snapshot_id: (await preview.json()).snapshot_id,
+        expected_prompt: (await preview.json()).prompt,
+        expected_diagram_revisions: {},
+      },
     });
     expect(staleReview.status()).toBe(409);
 
@@ -162,7 +189,8 @@ test("durable drawings, undo, retry, immutable reviewed images, authenticated me
     const image = first.images[0];
     expect(image).toMatchObject({ question_id: "Q1", diagram_id: "flow", media_type: "image/png" });
     expect(image.scene_revision).toBe(first.diagram_revisions["Q1/flow"]);
-    expect(image.reference).toBe(`[grill-image:${image.asset_id}]`);
+    expect(image.reference).toBe(`http://localhost:8087/api/v1/assets/${image.asset_id} (authenticated Grill image)`);
+    expect(first.prompt.slice(image.reference_start, image.reference_end)).toBe(image.reference);
     const png = await request.get(`/api/v1/assets/${image.asset_id}`, { headers });
     expect(png.status()).toBe(200);
     expect(png.headers()["content-type"]).toBe("image/png");
@@ -174,7 +202,9 @@ test("durable drawings, undo, retry, immutable reviewed images, authenticated me
     const cookieImage = await page.request.get(`/api/v1/assets/${image.asset_id}`);
     expect(cookieImage.status()).toBe(200);
     // A later revision cannot mutate the original baseline or a reviewed PNG.
-    const latest = (await scenes()).find((row: { diagram_id: string }) => row.diagram_id === "flow");
+    const latest = (await scenes()).find(
+      (row: { question_id: string; diagram_id: string }) => row.question_id === "Q1" && row.diagram_id === "flow",
+    );
     const alteredBaseline = structuredClone(latest.baseline);
     alteredBaseline.elements[0].x += 999;
     latest.scene.appState.viewBackgroundColor = "#ffffcc";
@@ -212,6 +242,28 @@ test("durable drawings, undo, retry, immutable reviewed images, authenticated me
     expect(deliveries).toHaveLength(1);
     expect(deliveries[0].snapshot_id).toBe(first.id);
     expect(deliveries[0].images).toEqual(first.images);
+    const originalDelivery = (await delivery.json()).delivery;
+    await request.post("/api/v1/aboard/sync", {
+      headers,
+      data: {
+        ...sync,
+        acknowledgements: [
+          { delivery_id: originalDelivery.id, status: "failed", failure_message: "Fixture preparation failed" },
+        ],
+      },
+    });
+    const retryId = randomUUID();
+    const retryRequest = { headers, data: { delivery_id: retryId } };
+    const retried = await request.post(`/api/v1/prompt-snapshots/${first.id}/deliveries`, retryRequest);
+    expect(retried.ok()).toBeTruthy();
+    expect((await retried.json()).delivery.id).toBe(retryId);
+    expect(retryId).not.toBe(originalDelivery.id);
+    const repeated = await request.post(`/api/v1/prompt-snapshots/${first.id}/deliveries`, retryRequest);
+    expect((await repeated.json()).delivery.id).toBe(retryId);
+    expect(
+      (await (await request.get(`/api/v1/prompt-snapshots/${first.id}`, { headers })).json()).snapshot.images,
+    ).toEqual(first.images);
+
     await publish();
     await page.reload();
     const historical = page.locator(".round-card").first();

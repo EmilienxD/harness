@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { mkdirSync, mkdtempSync, rmSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, sep } from "node:path";
 import test from "node:test";
@@ -135,7 +136,7 @@ function liveSession(agentId: string, platform: AgentPlatformId, sessionId: stri
 
 /** Drives a relay against a scripted board so a delivery's acknowledgement can be observed. */
 function harness(t: { after(fn: () => void): void }, confirmationTimeoutMs: number, target: AgentPlatformId = "claude",
-  options: { readonly bindingChanges?: boolean; readonly sendFails?: boolean } = {}) {
+  options: { readonly bindingChanges?: boolean; readonly sendFails?: boolean; readonly imagePreparation?: "fail" | "rebind" | "success"; readonly expiryOffsetMs?: number; readonly imageDelayMs?: number } = {}) {
   const claude = "5f0c2d1e-9a8b-4c7d-8e6f-1a2b3c4d5e6f";
   const chatgpt = "codex-thread";
   const pi = "pi-session";
@@ -144,10 +145,11 @@ function harness(t: { after(fn: () => void): void }, confirmationTimeoutMs: numb
     fleet.register(session, at);
     fleet.transition(session.identity.agentId, { status: "running", startedAt: at }, at);
   }
+  let rebound = false;
   const typed: string[] = [];
   const fakeTerminals = {
     liveTerminalForAgent: (agentId: string) => `terminal-${agentId}`,
-    get: (terminalId: string) => ({ backend: "terminal", sessionId: options.bindingChanges
+    get: (terminalId: string) => ({ backend: "terminal", sessionId: options.bindingChanges || rebound
       ? "changed-session" : terminalId === "terminal-1" ? claude : terminalId === "terminal-2" ? chatgpt : pi }),
     sendResumeMessage: async (_terminalId: string, message: string) => {
       if (options.sendFails) throw new Error("Terminal closed");
@@ -157,9 +159,27 @@ function harness(t: { after(fn: () => void): void }, confirmationTimeoutMs: numb
   const syncs: Sync[] = [];
   const targetSession = target === "claude" ? claude : target === "chatgpt" ? chatgpt : pi;
   const payload = "Answers for round 2\n\n- First answer\n- Second answer: é 😀\n";
-  let pending = [{ delivery_id: "d-1", provider: target, session_id: targetSession, prompt: payload }];
+  const bytes = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGP4z8DwHwAFAAH/iZk9HQAAAABJRU5ErkJggg==", "base64");
+  const cache = mkdtempSync(join(tmpdir(), "aboard image relay "));
+  t.after(() => rmSync(cache, { recursive: true, force: true }));
+  const image = { asset_id: "22222222-2222-4222-8222-222222222222", question_id: "Q1", diagram_id: "flow", sha256: createHash("sha256").update(bytes).digest("hex"), byte_size: bytes.length, media_type: "image/png", reference: "https://grill.example.test/api/v1/assets/22222222-2222-4222-8222-222222222222 (authenticated Grill image)", reference_start: payload.length, reference_end: 0 };
+  image.reference_end = image.reference_start + image.reference.length;
+  const reviewed = options.imagePreparation === "success" ? payload + image.reference : payload;
+  const path = join(cache, `${image.sha256}.png`);
+  let pending = [{ delivery_id: "d-1", provider: target, session_id: targetSession, prompt: reviewed, expires_at: new Date(Date.now() + (options.expiryOffsetMs ?? 30_000)).toISOString(), ...(options.imagePreparation ? { snapshot_id: "11111111-1111-4111-8111-111111111111", images: [{}] } : {}) }];
   const realFetch = globalThis.fetch;
-  globalThis.fetch = (async (_url: unknown, init?: { body?: string }) => {
+  globalThis.fetch = (async (_url: unknown, init?: { body?: string; headers?: { Authorization?: string }; redirect?: string }) => {
+    if (String(_url).includes("/assets/")) {
+      assert.equal(init?.headers?.Authorization, "Bearer 1234");
+      assert.equal(init?.redirect, "error");
+      return new Response(bytes);
+    }
+    if (String(_url).includes("/prompt-snapshots/")) {
+      if (options.imageDelayMs) await new Promise((resolve) => setTimeout(resolve, options.imageDelayMs));
+      await Promise.resolve();
+      rebound = options.imagePreparation === "rebind";
+      return new Response(JSON.stringify({ snapshot: { id: "11111111-1111-4111-8111-111111111111", prompt: reviewed, images: options.imagePreparation === "success" ? [image] : [] } }), { status: options.imagePreparation === "fail" ? 401 : 200 });
+    }
     syncs.push(JSON.parse(init?.body ?? "{}") as Sync);
     const deliveries = pending;
     pending = [];
@@ -168,13 +188,13 @@ function harness(t: { after(fn: () => void): void }, confirmationTimeoutMs: numb
   const prompts = new PromptSubmissions();
   const relay = createGrillCloudRelay({
     fleet, terminals: fakeTerminals, prompts, workspaceRoot: "C:/work/unloopedit", home: "C:/nonexistent-home", log: () => undefined,
-    environment, activeIntervalMs: 10, idleIntervalMs: 10, confirmationTimeoutMs,
+    environment, imageCacheDirectory: cache, activeIntervalMs: 10, idleIntervalMs: 10, confirmationTimeoutMs,
   });
   assert.ok(relay);
   t.after(() => { relay.dispose(); prompts.submitted(targetSession as SessionId); globalThis.fetch = realFetch; });
   relay.start();
   const acknowledged = () => syncs.flatMap((sync) => sync.acknowledgements);
-  return { claude: claude as SessionId, target: targetSession as SessionId, prompts, typed, syncs, acknowledged, payload, relay };
+  return { claude: claude as SessionId, target: targetSession as SessionId, prompts, typed, syncs, acknowledged, payload, relay, path, bytes };
 }
 
 async function until(condition: () => boolean): Promise<void> {
@@ -220,6 +240,30 @@ test("a typed prompt Claude never confirms is reported as failed", async (t) => 
   assert.match(board.acknowledged()[0]?.failure_message ?? "", /did not confirm/u);
 });
 
+test("an already expired server delivery is rejected before typing", async (t) => {
+  const board = harness(t, 60_000, "pi", { expiryOffsetMs: -1 });
+  await until(() => board.acknowledged().length === 1);
+  assert.equal(board.typed.length, 0);
+  assert.equal(board.prompts.submitted(board.target), false);
+  assert.match(board.acknowledged()[0]?.failure_message ?? "", /expired before preparation/u);
+});
+
+test("image preparation that outlives server expiry cannot type a fallback prompt", async (t) => {
+  const board = harness(t, 60_000, "pi", { imagePreparation: "fail", expiryOffsetMs: 50, imageDelayMs: 100 });
+  await until(() => board.acknowledged().length === 1);
+  assert.equal(board.typed.length, 0);
+  assert.equal(board.prompts.submitted(board.target), false);
+  assert.match(board.acknowledged()[0]?.failure_message ?? "", /expired during preparation/u);
+});
+
+test("confirmation timeout is bounded by the server delivery expiry", async (t) => {
+  const board = harness(t, 60_000, "pi", { expiryOffsetMs: 100 });
+  await until(() => board.typed.length === 1);
+  await until(() => board.acknowledged().length === 1);
+  assert.equal(board.acknowledged()[0]?.status, "failed");
+  assert.equal(board.prompts.submitted(board.target), false);
+});
+
 for (const provider of ["claude", "chatgpt", "pi"] as const) {
   test(`${provider} receives the reviewed payload verbatim`, async (t) => {
     const board = harness(t, 60_000, provider);
@@ -239,5 +283,37 @@ for (const failure of ["bindingChanges", "sendFails"] as const) {
     assert.equal(board.acknowledged()[0]?.status, "failed");
     assert.equal(board.typed.length, 0);
     assert.equal(board.prompts.submitted(board.target), false);
+  });
+}
+
+for (const provider of ["claude", "chatgpt", "pi"] as const) {
+  test(`${provider} keeps reviewed data on image failure and requires its own confirmation`, async (t) => {
+    const board = harness(t, 60_000, provider, { imagePreparation: "fail" });
+    await until(() => board.typed.length === 1);
+    assert.equal(board.typed[0]!.slice(0, board.payload.length), board.payload);
+    assert.deepEqual(board.acknowledged(), []);
+    board.prompts.submitted(board.target);
+    await until(() => board.acknowledged().length === 1);
+    assert.equal(board.acknowledged()[0]!.status, "submitted-to-terminal");
+  });
+  test(`${provider} refuses a terminal rebound during asynchronous image preparation`, async (t) => {
+    const board = harness(t, 100, provider, { imagePreparation: "rebind" });
+    await until(() => board.acknowledged().length === 1);
+    assert.equal(board.typed.length, 0);
+    assert.equal(board.acknowledged()[0]!.status, "failed");
+  });
+}
+
+for (const provider of ["claude", "chatgpt", "pi"] as const) {
+  test(`${provider} downloads authenticated images before typing and exact-session confirmation`, async (t) => {
+    const board = harness(t, 60_000, provider, { imagePreparation: "success" });
+    await until(() => board.typed.length === 1);
+    assert.deepEqual(readFileSync(board.path), board.bytes);
+    assert.equal(board.typed[0], board.payload + JSON.stringify(board.path));
+    assert.deepEqual(board.acknowledged(), []);
+    assert.equal(board.prompts.submitted("unrelated-session" as SessionId), false);
+    assert.equal(board.prompts.submitted(board.target), true);
+    await until(() => board.acknowledged().length === 1);
+    assert.equal(board.acknowledged()[0]!.status, "submitted-to-terminal");
   });
 }

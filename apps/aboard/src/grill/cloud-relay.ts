@@ -1,3 +1,4 @@
+import { imageCache, prepareImages } from "./images.js";
 import { createHash, randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
@@ -8,7 +9,7 @@ import type { PromptSubmissions } from "../platform/prompt-submissions.js";
 import { validateResumeMessage, type TerminalController } from "../platform/terminals.js";
 
 type Presence = { readonly provider: AgentPlatformId; readonly session_id: string };
-type Delivery = { readonly delivery_id: string; readonly provider: AgentPlatformId; readonly session_id: string; readonly prompt: string };
+type Delivery = { readonly delivery_id: string; readonly provider: AgentPlatformId; readonly session_id: string; readonly prompt: string; readonly expires_at: string; readonly snapshot_id?: string; readonly images?: unknown[] };
 type Acknowledgement = { readonly delivery_id: string; readonly status: "submitted-to-terminal" | "failed"; readonly failure_message?: string };
 type Workspace = { readonly name: string; readonly path: string };
 
@@ -21,6 +22,7 @@ export interface GrillCloudRelayOptions {
   readonly code: string;
   readonly log: (message: string) => void;
   readonly home?: string;
+  readonly imageCacheDirectory?: string;
   readonly activeIntervalMs?: number;
   readonly idleIntervalMs?: number;
   /** Must stay inside the board's 30-second delivery expiry, including claim latency. */
@@ -82,6 +84,7 @@ export class GrillCloudRelay {
     if (this.#stopped || this.#running) return;
     this.#running = true;
     const sessions = this.#presence();
+    const deliveryDeadline = Date.now() + 28_000;
     try {
       const sent = [...this.#acknowledgements];
       const response = await fetch(`${this.options.origin}/api/v1/aboard/sync`, {
@@ -89,13 +92,14 @@ export class GrillCloudRelay {
         headers: { Authorization: `Bearer ${this.options.code}`, "Content-Type": "application/json" },
         body: JSON.stringify({ instance_id: this.#instanceId, workspace: this.#workspace, sessions, acknowledgements: sent }),
         signal: AbortSignal.timeout(10_000),
+        redirect: "error",
       });
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
       const body = await response.json() as { deliveries?: Delivery[] };
       this.#acknowledgements.splice(0, sent.length);
       // Confirmation can take seconds; awaiting it here would stall the heartbeat
       // and let this project's presence expire mid-delivery.
-      for (const delivery of body.deliveries ?? []) void this.#deliver(delivery);
+      for (const delivery of body.deliveries ?? []) void this.#deliver(delivery, deliveryDeadline);
     } catch (error) {
       this.options.log(`Grill relay sync failed: ${error instanceof Error ? error.message : "unknown error"}`);
     } finally {
@@ -129,30 +133,51 @@ export class GrillCloudRelay {
     return presence;
   }
 
-  async #deliver(delivery: Delivery): Promise<void> {
-    this.#acknowledgements.push(await this.#submit(delivery));
+  async #deliver(delivery: Delivery, deadline: number): Promise<void> {
+    this.#acknowledgements.push(await this.#submit(delivery, deadline));
     this.#wake();
   }
 
-  async #submit(delivery: Delivery): Promise<Acknowledgement> {
+  async #submit(delivery: Delivery, deadline: number): Promise<Acknowledgement> {
     try {
+      const expiresAt = Date.parse(delivery.expires_at);
+      if (!Number.isFinite(expiresAt)) throw new Error("Grill delivery expiry is missing or invalid");
+      deadline = Math.min(deadline, expiresAt);
+      if (deadline <= Date.now()) throw new Error("Grill delivery expired before preparation");
       const session = this.options.fleet.getBySession(delivery.session_id as SessionId);
       if (session === undefined || session.platform !== delivery.provider || session.sessionBinding !== "bound") throw new Error("Exact provider session is not registered");
       const terminalId = this.options.terminals.liveTerminalForAgent(session.identity.agentId);
       if (terminalId === undefined) throw new Error("Provider terminal is no longer open");
       const terminal = this.options.terminals.get(terminalId);
       if (terminal.backend !== "terminal" || terminal.sessionId !== delivery.session_id) throw new Error("Terminal binding changed before submission");
-      validateResumeMessage(delivery.prompt);
+      let prompt = delivery.prompt;
+      if (delivery.snapshot_id || delivery.images?.length) {
+        try {
+          if (!delivery.snapshot_id) throw new Error("Missing snapshot identity");
+          prompt = await prepareImages(prompt, delivery.snapshot_id, this.options.origin, this.options.code, AbortSignal.timeout(Math.max(1, Math.min(8_000, deadline - Date.now() - 5_000))), this.options.imageCacheDirectory ?? imageCache(process.env, this.options.workspaceRoot));
+        } catch {
+          // Keep the reviewed references and helper invocation intact on failure.
+          prompt += "\n\nAboard could not download the diagram images. Use the authenticated snapshot download command above and retry if needed.";
+          this.options.log("Grill image download failed; the authenticated references and fallback command were retained.");
+        }
+      }
+      const current = this.options.fleet.getBySession(delivery.session_id as SessionId);
+      if (current === undefined || current.identity.agentId !== session.identity.agentId || current.platform !== delivery.provider || current.sessionBinding !== "bound" || !["running", "awaiting-user"].includes(current.lifecycle.status) || this.options.terminals.liveTerminalForAgent(session.identity.agentId) !== terminalId) throw new Error("Session binding changed during image preparation");
+      const rebound = this.options.terminals.get(terminalId);
+      if (rebound.backend !== "terminal" || rebound.sessionId !== delivery.session_id) throw new Error("Terminal binding changed during image preparation");
+      validateResumeMessage(prompt);
       if (this.#stopped) throw new Error("Grill relay stopped before submission");
-      const expectation = this.options.prompts.expect(session.sessionId, this.#confirmationTimeoutMs);
+      const timeout = Math.min(this.#confirmationTimeoutMs, deadline - Date.now());
+      if (timeout <= 0) throw new Error("Grill delivery expired during preparation");
+      const expectation = this.options.prompts.expect(session.sessionId, timeout);
       try {
-        await this.options.terminals.sendResumeMessage(terminalId, delivery.prompt, { normalizeFileReferences: false });
+        await this.options.terminals.sendResumeMessage(terminalId, prompt, { normalizeFileReferences: false });
       } catch (error) {
         expectation.cancel();
         throw error;
       }
       if (!await expectation.confirmed) {
-        throw new Error(`The provider did not confirm the prompt within ${Math.round(this.#confirmationTimeoutMs / 1000)} seconds`);
+        throw new Error(`The provider did not confirm the prompt within ${Math.round(timeout / 1000)} seconds`);
       }
       this.options.log(`Grill delivery ${delivery.delivery_id} confirmed by ${delivery.provider} session ${delivery.session_id}.`);
       return { delivery_id: delivery.delivery_id, status: "submitted-to-terminal" };
@@ -225,5 +250,5 @@ export function createGrillCloudRelay(options: Omit<GrillCloudRelayOptions, "ori
     options.log("Grill relay disabled: the grill URL must be an HTTP(S) origin without a trailing slash.");
     return undefined;
   }
-  return new GrillCloudRelay({ ...options, origin, code });
+  return new GrillCloudRelay({ ...options, origin, code, imageCacheDirectory: options.imageCacheDirectory ?? imageCache(options.environment ?? process.env, options.workspaceRoot) });
 }

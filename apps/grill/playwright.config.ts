@@ -23,6 +23,7 @@ export default defineConfig({
       SUPABASE_URL: local.API_URL,
       SUPABASE_SECRET_KEY: local.SERVICE_ROLE_KEY,
       HARNESS_GRILL_CODE: "1234",
+      HARNESS_GRILL_URL: "http://localhost:8087",
       HARNESS_GRILL_SESSION_SECRET: "local-notes-acceptance-secret-only",
     },
   },

@@ -37,6 +37,10 @@ export class DiagramSceneStore {
   private preparations = new Map<string, Promise<DiagramRecord>>();
   private observed = new Map<string, string>();
   private listeners = new Set<() => void>();
+  private preparationErrors = new Map<string, string>();
+  preparationError(questionId: string, diagramId: string) {
+    return this.preparationErrors.get(this.key(questionId, diagramId));
+  }
   error = "";
   subscribe = (listener: () => void) => {
     this.listeners.add(listener);
@@ -135,7 +139,14 @@ export class DiagramSceneStore {
     })();
     this.preparations.set(key, work);
     try {
-      return await work;
+      const record = await work;
+      this.preparationErrors.delete(key);
+      this.emit();
+      return record;
+    } catch (cause) {
+      this.preparationErrors.set(key, cause instanceof Error ? cause.message : "Diagram preparation failed.");
+      this.emit();
+      throw cause;
     } finally {
       this.preparations.delete(key);
     }

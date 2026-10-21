@@ -97,6 +97,7 @@ test("published diagrams share inline/fullscreen edits, isolate navigation, scro
         title: "Diagram editor acceptance",
         schema_version: 1,
         payload: {
+          image_command: "python fixture-grill-images.py",
           questions: [1, 2].map((index) => ({
             id: `Q${index}`,
             question: `Diagram question ${index}`,
@@ -159,30 +160,21 @@ test("published diagrams share inline/fullscreen edits, isolate navigation, scro
     await expect(card.getByRole("heading", { name: "Diagram question 1" })).toBeVisible();
     await page.keyboard.press("Escape");
     await editor.screenshot({ path: info.outputPath("before-rename.png") });
-    // Add a label annotation through Excalidraw's normal native clipboard import.
-    const label = original.elements.find((element) => element.text === "Start")!;
-    await page.evaluate(
-      async (element) =>
-        navigator.clipboard.writeText(
-          JSON.stringify({
-            type: "excalidraw/clipboard",
-            elements: [
-              {
-                ...element,
-                id: "renamed-label",
-                text: "Revised start",
-                originalText: "Revised start",
-                containerId: null,
-              },
-            ],
-            files: {},
-          }),
-        ),
-      label,
-    );
-    await page.keyboard.press("ControlOrMeta+v");
+    // Double-click the converted node's existing label in the native canvas.
+    const nativeCanvas = editor.locator("canvas").last();
+    const nativeBounds = await nativeCanvas.boundingBox();
+    await nativeCanvas.dblclick({ position: { x: nativeBounds!.width / 2 - 75, y: nativeBounds!.height / 2 } });
+    const labelEditor = page.locator("textarea.excalidraw-wysiwyg");
+    await expect(labelEditor).toBeVisible();
+    await expect(labelEditor).toHaveValue("Start");
+    await labelEditor.fill("Revised start");
+    await page.keyboard.press("Escape");
     const renamed = await clipboardScene(page, editor);
-    expect(renamed.elements.some((element) => element.text === "Revised start")).toBe(true);
+    const originalLabel = original.elements.find((element) => element.text === "Start")!;
+    expect(renamed.elements.find((element) => element.id === originalLabel.id)?.text?.replace(/\s+/gu, " ")).toBe(
+      "Revised start",
+    );
+    await expect(editor.getByLabel("Diagram feedback")).toContainText(/Revised\s+start/u);
     await page.keyboard.press("Escape");
     // Add a native arrow using the editor tool and drag gesture.
     await page.keyboard.press("a");

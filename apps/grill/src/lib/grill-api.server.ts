@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import { compilePrompt, publicationSchema, type AnswerDraft, type RoundPayload } from "@/lib/grill-contract";
 
@@ -62,7 +62,7 @@ export async function getRound(roundId: string) {
   return { ...round, answers: answers ?? [], assets: assets ?? [], prompt_snapshots: snapshots ?? [] };
 }
 
-export async function promptForRound(roundId: string) {
+export async function promptForRound(roundId: string, snapshotId?: string, origin = DEFAULT_GRILL_URL) {
   // Preview and snapshot validation only need the payload and answers. The full round also
   // fetches assets and every historical snapshot, which grows with each copy.
   const [
@@ -97,7 +97,10 @@ export async function promptForRound(roundId: string) {
     byte_size: number;
     media_type: string;
     reference: string;
+    reference_start?: number;
+    reference_end?: number;
   }> = [];
+  const markerPrefix = randomUUID();
   let missingImages = false;
   for (const row of scenes ?? []) diagramRevisions[`${row.question_id}/${row.diagram_id}`] = row.revision;
   for (const question of payload.questions) {
@@ -123,7 +126,7 @@ export async function promptForRound(roundId: string) {
         missingImages = true;
         return `Diagram ${diagram.id}: ${summary}`;
       }
-      const reference = `[grill-image:${asset.id}]`;
+      const reference = `${origin}/api/v1/assets/${asset.id} (authenticated Grill image)`;
       snapshotImages.push({
         asset_id: asset.id,
         question_id: question.id,
@@ -134,12 +137,30 @@ export async function promptForRound(roundId: string) {
         media_type: asset.media_type,
         reference,
       });
-      return `Diagram ${diagram.id}: ${summary}\n  Image: ${reference}`;
+      return `Diagram ${diagram.id}: ${summary}\n  Image: ${markerPrefix}:${snapshotImages.length - 1}:${markerPrefix}`;
     });
+  }
+  if (snapshotImages.length > 20 || snapshotImages.reduce((sum, image) => sum + image.byte_size, 0) > 50 * 1024 * 1024)
+    throw new Error(
+      "Review supports at most 20 edited diagrams and 50 MiB of images per round. Split this round before continuing.",
+    );
+  let prompt = compilePrompt(payload, (answers ?? []) as AnswerDraft[], feedback);
+  for (const [index, image] of snapshotImages.entries()) {
+    const marker = `${markerPrefix}:${index}:${markerPrefix}`;
+    const start = prompt.indexOf(marker);
+    if (start < 0) throw new Error("Image reference could not be prepared.");
+    prompt = prompt.slice(0, start) + image.reference + prompt.slice(start + marker.length);
+    image.reference_start = start;
+    image.reference_end = start + image.reference.length;
+  }
+  if (snapshotImages.length) {
+    if (!payload.image_command || !snapshotId)
+      throw new Error("Republish this round with the latest Grill skill to retrieve its images.");
+    prompt += `\n\nGrill snapshot: ${snapshotId}\nDownload all diagram images (run in the project directory using ${payload.image_shell ?? "the configured shell"}):\n${payload.image_command} ${snapshotId}`;
   }
   return {
     round,
-    prompt: compilePrompt(payload, (answers ?? []) as AnswerDraft[], feedback),
+    prompt,
     diagramRevisions,
     images: snapshotImages,
     missingImages,

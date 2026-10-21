@@ -100,7 +100,7 @@ def test_diagrams_publish_without_assets_or_initialization_javascript(tmp_path, 
     interview.source.write_text(json.dumps(payload), encoding="utf-8")
     runtime.publish(provider, "session")
     prepared = next(body for method, path, body in client.requests if method == "POST" and path.endswith("/prepare"))
-    assert prepared["payload"] == payload
+    assert prepared["payload"]["questions"] == payload["questions"]
     assert prepared["assets"] == []
     assert client.uploads == []
 

@@ -47,7 +47,11 @@ export const questionSchema = z
   });
 
 export const roundPayloadSchema = z
-  .object({ questions: z.array(questionSchema).min(1) })
+  .object({
+    questions: z.array(questionSchema).min(1),
+    image_command: z.string().min(1).max(8000).optional(),
+    image_shell: z.enum(["powershell", "sh"]).optional(),
+  })
   .superRefine((payload, context) => {
     const ids = payload.questions.map((question) => question.id);
     if (new Set(ids).size !== ids.length) context.addIssue({ code: "custom", message: "Question IDs must be unique" });

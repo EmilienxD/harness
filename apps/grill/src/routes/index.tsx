@@ -304,6 +304,7 @@ function GrillBoard() {
   const [rounds, setRounds] = useState<Round[]>([]);
   const [review, setReview] = useState<{
     roundId: string;
+    snapshotId: string;
     prompt: string;
     diagramRevisions: Record<string, string>;
   } | null>(null);
@@ -823,15 +824,17 @@ function GrillBoard() {
                             onSaveState={reportSave}
                             onRevealRound={() => scrollToRound(item.id)}
                             onReview={async () => {
-                              const result = await api<{ prompt: string; diagram_revisions: Record<string, string> }>(
-                                `rounds/${item.id}/prompt-preview`,
-                                {
-                                  method: "POST",
-                                  body: "{}",
-                                },
-                              );
+                              const result = await api<{
+                                snapshot_id: string;
+                                prompt: string;
+                                diagram_revisions: Record<string, string>;
+                              }>(`rounds/${item.id}/prompt-preview`, {
+                                method: "POST",
+                                body: "{}",
+                              });
                               setReview({
                                 roundId: item.id,
+                                snapshotId: result.snapshot_id,
                                 prompt: result.prompt,
                                 diagramRevisions: result.diagram_revisions ?? {},
                               });
@@ -846,6 +849,7 @@ function GrillBoard() {
                       round={reviewed}
                       session={detail.session}
                       prompt={review.prompt}
+                      snapshotId={review.snapshotId}
                       diagramRevisions={review.diagramRevisions}
                       aboardReady={online}
                       onClose={closeReview}
@@ -1365,7 +1369,11 @@ function QuestionDiagramFeedback({ question, store }: { question: GrillQuestion;
           <div key={diagram.id} data-diagram-feedback={diagram.id}>
             <strong>{diagram.id}</strong>
             <p style={{ whiteSpace: "pre-line" }}>
-              {record ? summarizeDiagram(record.baseline, record.scene) : "No changes were made to the diagram."}
+              {store.preparationError(question.id, diagram.id) || store.error
+                ? `Diagram feedback unavailable. ${store.preparationError(question.id, diagram.id) || store.error}`
+                : record
+                  ? summarizeDiagram(record.baseline, record.scene)
+                  : "Diagram feedback is being prepared."}
             </p>
           </div>
         );
@@ -1854,6 +1862,7 @@ function Explanation({
 }
 
 function PromptModal({
+  snapshotId,
   diagramRevisions,
   round,
   session,
@@ -1862,6 +1871,7 @@ function PromptModal({
   onClose,
   onReload,
 }: {
+  snapshotId: string;
   diagramRevisions: Record<string, string>;
   round: Round;
   session: SessionSummary;
@@ -1878,9 +1888,8 @@ function PromptModal({
   const shortcuts = useShortcuts();
   const readOnly = round.status !== "active";
   // Only a confirmed delivery counts: retrying after a failed send needs no warning.
-  const alreadySent = round.prompt_snapshots.some(
-    (item) =>
-      item.reason === "aboard" && item.grill_deliveries.some((delivery) => delivery.status === "submitted-to-terminal"),
+  const alreadySent = round.prompt_snapshots.some((item) =>
+    item.grill_deliveries.some((delivery) => delivery.status === "submitted-to-terminal"),
   );
 
   const snapshot = useCallback(
@@ -1890,12 +1899,27 @@ function PromptModal({
       const record = () =>
         api<{ snapshot: { id: string; prompt: string } }>(`rounds/${round.id}/prompt-snapshots`, {
           method: "POST",
-          body: JSON.stringify({ reason, expected_prompt: prompt, expected_diagram_revisions: diagramRevisions }),
+          body: JSON.stringify({
+            reason,
+            snapshot_id: snapshotId,
+            expected_prompt: prompt,
+            expected_diagram_revisions: diagramRevisions,
+          }),
         }).then((result) => result.snapshot);
       if (reason === "copy") {
         try {
-          const recorded = readOnly ? { prompt } : await record();
-          await copyText(recorded.prompt);
+          const recorded = readOnly ? Promise.resolve({ prompt }) : record();
+          // Start clipboard permission within the gesture; Safari awaits the snapshot Blob.
+          if (typeof ClipboardItem !== "undefined" && navigator.clipboard.write) {
+            await navigator.clipboard.write([
+              new ClipboardItem({
+                "text/plain": recorded.then((value) => new Blob([value.prompt], { type: "text/plain" })),
+              }),
+            ]);
+          } else {
+            await recorded;
+            await copyText(prompt);
+          }
           confirmCopy();
         } catch (cause) {
           setMessage((cause as Error).message);
@@ -1908,7 +1932,7 @@ function PromptModal({
         const recorded = await record();
         const { delivery } = await api<{ delivery: { id: string } }>(`prompt-snapshots/${recorded.id}/deliveries`, {
           method: "POST",
-          body: "{}",
+          body: JSON.stringify({ delivery_id: crypto.randomUUID() }),
         });
         await awaitDelivery(delivery.id);
         confirmSend();
@@ -1919,7 +1943,7 @@ function PromptModal({
         setBusy("");
       }
     },
-    [confirmCopy, confirmSend, onReload, prompt, readOnly, round.id, diagramRevisions],
+    [confirmCopy, confirmSend, onReload, prompt, readOnly, round.id, diagramRevisions, snapshotId],
   );
 
   useEffect(() => {

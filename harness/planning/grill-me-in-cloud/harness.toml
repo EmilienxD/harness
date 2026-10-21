@@ -1,5 +1,5 @@
 name = "grill-me-in-cloud"
-version = "2.4.0"
+version = "2.5.0"
 description = "Publishes visual design interviews to a persistent hosted board"
 docs = "https://github.com/EmilienxD/harness/blob/main/README.md#user-invoked-skills"
 requires = []
@@ -57,3 +57,15 @@ src = "chatgpt/openai.yaml"
 dest = "grill-me-in-cloud/agents/openai.yaml"
 root = "skills"
 platforms = ["chatgpt"]
+
+[[files]]
+src = "grill_images.py"
+dest = "grill_images.py"
+root = "hooks"
+platforms = ["claude", "chatgpt"]
+
+[[files]]
+src = "grill_images.py"
+dest = "grill_images.py"
+root = "support"
+platforms = ["pi"]

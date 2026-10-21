@@ -149,7 +149,7 @@ async function handle(request: Request, path: string, method: string): Promise<R
   if (promptMatch && method === "POST") return promptOperation(request, promptMatch[1] ?? "", promptMatch[2] ?? "");
 
   const deliveryMatch = /^prompt-snapshots\/([0-9a-f-]+)\/deliveries$/u.exec(path);
-  if (deliveryMatch && method === "POST") return createDelivery(deliveryMatch[1] ?? "");
+  if (deliveryMatch && method === "POST") return createDelivery(deliveryMatch[1] ?? "", request);
   const deliveryStatusMatch = /^deliveries\/([0-9a-f-]+)$/u.exec(path);
   if (deliveryStatusMatch && method === "GET") return deliveryStatus(deliveryStatusMatch[1] ?? "");
 
@@ -568,12 +568,40 @@ async function saveAnswer(request: Request, roundId: string, questionId: string)
 }
 
 async function promptOperation(request: Request, roundId: string, operation: string): Promise<Response> {
-  const result = await promptForRound(roundId);
+  const input = operation === "prompt-preview" ? {} : await readJson(request);
+  const proposed = (input as { snapshot_id?: unknown } | undefined)?.snapshot_id;
+  if (proposed !== undefined && !z.string().uuid().safeParse(proposed).success)
+    return problem(422, "invalid_snapshot", "Snapshot identity must be a UUID.");
+  const snapshotId = typeof proposed === "string" ? proposed : randomUUID();
+  let result: Awaited<ReturnType<typeof promptForRound>>;
+  try {
+    result = await promptForRound(roundId, snapshotId, process.env["HARNESS_GRILL_URL"] || new URL(request.url).origin);
+  } catch (cause) {
+    return problem(
+      409,
+      "diagram_review_unavailable",
+      cause instanceof Error ? cause.message : "Diagram review is unavailable. Retry review.",
+    );
+  }
   if (!result) return problem(404, "round_not_found", "Round not found.");
   if (result.missingImages)
     return problem(409, "diagram_export_required", "A changed diagram needs its saved image. Retry review.");
-  if (operation === "prompt-preview")
-    return json({ prompt: result.prompt, diagram_revisions: result.diagramRevisions });
+  if (operation === "prompt-preview") {
+    // Reserve the actual immutable identity before displaying its invocation, including history copies.
+    if (result.images.length) {
+      const { data, error } = await supabaseAdmin.rpc("grill_snapshot_diagrams", {
+        target_round: roundId,
+        target_prompt: result.prompt,
+        target_reason: "copy",
+        expected_revisions: result.diagramRevisions,
+        target_images: result.images,
+        target_snapshot: snapshotId,
+      });
+      if (error || !data?.[0])
+        return problem(409, "snapshot_failed", "The diagram changed during review. Retry review.");
+    }
+    return json({ snapshot_id: snapshotId, prompt: result.prompt, diagram_revisions: result.diagramRevisions });
+  }
   if (result.round.status !== "active") return problem(409, "stale_round", "Historical rounds are read-only.");
   const parsed = z
     .object({
@@ -581,7 +609,7 @@ async function promptOperation(request: Request, roundId: string, operation: str
       expected_prompt: z.string().max(100_000),
       expected_diagram_revisions: z.record(z.string()).optional(),
     })
-    .safeParse(await readJson(request));
+    .safeParse(input);
   if (!parsed.success) return problem(422, "invalid_snapshot_reason", "Snapshot reason must be copy or aboard.");
   if (!result.prompt) return problem(422, "empty_prompt", "Answer a question or add notes first.");
   if (parsed.data.expected_prompt !== result.prompt)
@@ -598,6 +626,7 @@ async function promptOperation(request: Request, roundId: string, operation: str
     target_reason: parsed.data.reason,
     expected_revisions: result.diagramRevisions,
     target_images: result.images,
+    target_snapshot: snapshotId,
   });
   if (error || !data?.[0])
     return problem(
@@ -609,7 +638,10 @@ async function promptOperation(request: Request, roundId: string, operation: str
   return json({ snapshot: data[0] });
 }
 
-async function createDelivery(snapshotId: string): Promise<Response> {
+async function createDelivery(snapshotId: string, request: Request): Promise<Response> {
+  const parsed = z.object({ delivery_id: z.string().uuid().optional() }).safeParse(await readJson(request));
+  if (!parsed.success) return problem(422, "invalid_delivery", "Invalid delivery identity.");
+  const deliveryId = parsed.data.delivery_id ?? randomUUID();
   const { data: snapshot } = await supabaseAdmin
     .from("grill_prompt_snapshots")
     .select(
@@ -618,8 +650,6 @@ async function createDelivery(snapshotId: string): Promise<Response> {
     .eq("id", snapshotId)
     .maybeSingle();
   if (!snapshot) return problem(404, "snapshot_not_found", "Prompt snapshot not found.");
-  if (snapshot.reason !== "aboard")
-    return problem(409, "invalid_snapshot_reason", "Only an Aboard snapshot can create a delivery.");
   const round = snapshot.grill_rounds as unknown as {
     session_id: string;
     status: string;
@@ -636,16 +666,18 @@ async function createDelivery(snapshotId: string): Promise<Response> {
     .limit(1)
     .maybeSingle();
   if (!presence) return problem(409, "aboard_unavailable", "The answer relay is not connected to this exact session.");
-  // Network retries of one reviewed snapshot refer to the same delivery.
+  // A gesture owns a delivery identity; retries reuse it, deliberate resends get a new identity.
   const { data: existing } = await supabaseAdmin
     .from("grill_deliveries")
     .select("*")
+    .eq("id", deliveryId)
     .eq("prompt_snapshot_id", snapshotId)
     .maybeSingle();
   if (existing) return json({ delivery: existing });
   const { data, error } = await supabaseAdmin
     .from("grill_deliveries")
     .insert({
+      id: deliveryId,
       prompt_snapshot_id: snapshotId,
       provider: round.grill_sessions.provider,
       provider_session_id: round.grill_sessions.provider_session_id,
@@ -656,9 +688,17 @@ async function createDelivery(snapshotId: string): Promise<Response> {
     const { data: raced } = await supabaseAdmin
       .from("grill_deliveries")
       .select("*")
+      .eq("id", deliveryId)
       .eq("prompt_snapshot_id", snapshotId)
       .maybeSingle();
-    return raced ? json({ delivery: raced }) : problem(500, "delivery_failed", "The delivery could not be created.");
+    if (raced) return json({ delivery: raced });
+    const { data: active } = await supabaseAdmin
+      .from("grill_deliveries")
+      .select("*")
+      .eq("prompt_snapshot_id", snapshotId)
+      .in("status", ["pending", "claimed"])
+      .maybeSingle();
+    return active ? json({ delivery: active }) : problem(500, "delivery_failed", "The delivery could not be created.");
   }
   await touchSession(round.session_id);
   return json({ delivery: data }, 201);
@@ -752,6 +792,7 @@ async function syncAboard(request: Request, piRelay = false): Promise<Response> 
   const { data, error } = await supabaseAdmin.rpc("grill_claim_deliveries", {
     target_instance: input.instance_id,
     target_sessions: input.sessions,
+    target_native_pi: piRelay,
   });
   if (error) return problem(500, "delivery_claim_failed", "Pending deliveries could not be claimed.");
   const deliveries = await Promise.all(
@@ -759,7 +800,7 @@ async function syncAboard(request: Request, piRelay = false): Promise<Response> 
       async (delivery: { delivery_id: string; provider: string; session_id: string; prompt: string }) => {
         const { data: row } = await supabaseAdmin
           .from("grill_deliveries")
-          .select("prompt_snapshot_id,grill_prompt_snapshots(images,diagram_revisions)")
+          .select("prompt_snapshot_id,expires_at,grill_prompt_snapshots(images,diagram_revisions)")
           .eq("id", delivery.delivery_id)
           .single();
         const snapshot = row?.grill_prompt_snapshots as unknown as
@@ -768,6 +809,7 @@ async function syncAboard(request: Request, piRelay = false): Promise<Response> 
         return {
           ...delivery,
           snapshot_id: row?.prompt_snapshot_id,
+          expires_at: row?.expires_at,
           images: snapshot?.images ?? [],
           diagram_revisions: snapshot?.diagram_revisions ?? {},
         };
