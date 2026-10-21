@@ -16,7 +16,7 @@ export type CalmToolCall = {
   status: "running" | "success" | "error";
   completedAt?: number;
 };
-let latestToolCall: CalmToolCall | undefined;
+let toolCalls: readonly CalmToolCall[] = [];
 let toolSpinner = "⠴";
 
 export function getCalmToolSpinner(): string {
@@ -27,12 +27,12 @@ export function setCalmToolSpinner(frame: string): void {
   toolSpinner = frame;
 }
 
-export function getCalmToolCall(): CalmToolCall | undefined {
-  return latestToolCall;
+export function getCalmToolCalls(): readonly CalmToolCall[] {
+  return toolCalls;
 }
 
-export function setCalmToolCall(call: CalmToolCall | undefined): void {
-  latestToolCall = call;
+export function setCalmToolCalls(calls: readonly CalmToolCall[]): void {
+  toolCalls = calls;
 }
 
 /** True while Calm presentation filtering is enabled. */

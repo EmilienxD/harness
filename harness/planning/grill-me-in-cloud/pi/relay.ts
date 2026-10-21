@@ -6,7 +6,7 @@ export const RECEIPT = "harness-grill-cloud-v1";
 const digest = (text: string) => createHash("sha256").update(text).digest("hex");
 const text = (content: any): string => typeof content === "string" ? content : (content ?? []).filter((block: any) => block.type === "text").map((block: any) => block.text).join("\n");
 type Delivery = { delivery_id: string; provider: string; session_id: string; prompt: string; round_id: string };
-type Intent = { id: string; hash: string; round: string; attemptedBy?: string };
+type Intent = { id: string; hash: string; round: string; after?: string; attemptedBy?: string };
 type Journal = { instance: string; file: string; intents: Intent[] };
 type Config = { origin: string; code: string; directory: string; workspace: { name: string; path: string } };
 
@@ -85,13 +85,18 @@ export class GrillRelay {
     return entries.filter((entry: any) => entry.type === "custom" && entry.customType === RECEIPT && entry.data?.phase === "round" && entry.data.sessionId === this.session).at(-1)?.data.roundId;
   }
 
+  private matchingEntry(intent: Intent, entries: any[]): any | undefined {
+    const anchor = intent.after === undefined ? -1 : entries.findIndex((entry: any) => entry.id === intent.after);
+    if (intent.after !== undefined && anchor === -1) return;
+    return entries.slice(anchor + 1).find((entry: any) => entry.type === "message" && entry.message?.role === "user" && digest(text(entry.message.content)) === intent.hash);
+  }
+
   private accepted(intent: Intent): any | undefined {
     // message_end extensions run BEFORE appendMessage. Read the exact disk file, not the callback.
     if (!existsSync(this.file)) return;
     const entries = readFileSync(this.file, "utf8").split("\n").filter(Boolean).map((line) => JSON.parse(line));
     if (entries[0]?.type !== "session" || entries[0]?.id !== this.session) throw new Error("Pi persisted session identity mismatch");
-    const marker = `[harness-grill-delivery:${intent.id}]`;
-    return entries.find((entry: any) => entry.type === "message" && entry.message?.role === "user" && text(entry.message.content).startsWith(marker + "\n") && digest(text(entry.message.content)) === intent.hash);
+    return this.matchingEntry(intent, entries);
   }
 
   private async tick() {
@@ -123,13 +128,16 @@ export class GrillRelay {
       for (const delivery of result.deliveries) {
         if (this.stopped || !this.ctx.isIdle()) break;
         if (delivery.provider !== "pi" || delivery.session_id !== this.session || delivery.round_id !== this.activeRound() || !/^[0-9a-f-]{36}$/.test(delivery.delivery_id) || typeof delivery.prompt !== "string" || !delivery.prompt.trim()) throw new Error("Pi relay delivery binding mismatch");
-        const message = `[harness-grill-delivery:${delivery.delivery_id}]\n${delivery.prompt}`;
+        const message = delivery.prompt;
         let intent = this.journal.intents.find((item) => item.id === delivery.delivery_id);
         if (intent && intent.hash !== digest(message)) throw new Error("Pi delivery content changed");
         if (intent && (this.accepted(intent) || intent.attemptedBy === this.owner)) continue;
-        // An in-memory user message awaiting disk persistence is already accepted; never queue it twice.
-        if (this.ctx.sessionManager.getEntries().some((entry: any) => entry.type === "message" && entry.message?.role === "user" && digest(text(entry.message.content)) === digest(message))) continue;
-        if (!intent) { intent = { id: delivery.delivery_id, hash: digest(message), round: delivery.round_id }; this.journal.intents.push(intent); }
+        if (!intent) {
+          intent = { id: delivery.delivery_id, hash: digest(message), round: delivery.round_id, after: this.ctx.sessionManager.getEntries().at(-1)?.id };
+          this.journal.intents.push(intent);
+        }
+        // Only messages after this delivery's boundary count, including while awaiting disk persistence.
+        if (this.matchingEntry(intent, this.ctx.sessionManager.getEntries())) continue;
         intent.attemptedBy = this.owner;
         this.save();
         this.pi.sendUserMessage(message, { deliverAs: "followUp", expandPromptTemplates: false });

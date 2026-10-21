@@ -1,4 +1,7 @@
 import json
+import hashlib
+import shutil
+import subprocess
 import sys
 from pathlib import Path
 
@@ -67,6 +70,129 @@ def test_assets_are_bounded_to_the_round_and_content_checked(tmp_path):
     assert [(item["media_type"], item["byte_size"]) for item in manifest] == [("image/png", 15)]
     with pytest.raises(RoundError):
         validate_assets(round_data('<img src="assets/round-001/../secret.png">'), assets, "assets/round-001/")
+
+
+def test_video_sources_and_posters_share_image_asset_discovery():
+    payload = round_data('<video src="assets/round-001/a.mp4" poster="assets/round-001/a&amp;b.png">'
+                         '<source src="assets/round-001/b.webm" type="video/webm"></video>'
+                         '<img src="assets/round-001/a&amp;b.png">')
+    assert discover_references(payload) == [
+        "assets/round-001/a.mp4", "assets/round-001/a&b.png", "assets/round-001/b.webm",
+    ]
+
+
+@pytest.mark.parametrize("html", [
+    '<video src="assets/round-001/../outside.mp4"></video>',
+    '<video poster="assets/round-001/../outside.png"></video>',
+    '<video><source src="assets/round-001/../outside.webm"></video>',
+])
+def test_video_assets_cannot_escape_the_round_directory(tmp_path, html):
+    with pytest.raises(RoundError):
+        validate_assets(round_data(html), tmp_path, "assets/round-001/")
+
+
+def test_video_manifest_rejects_mismatched_content_and_oversized_files(tmp_path):
+    clip = tmp_path / "demo.mp4"
+    clip.write_bytes(b"\x89PNG\r\n\x1a\n")
+    payload = round_data('<video src="assets/round-001/demo.mp4"></video>')
+    with pytest.raises(RoundError, match="media type mismatch"):
+        validate_assets(payload, tmp_path, "assets/round-001/")
+    with clip.open("wb") as file:
+        file.write(b"\x00\x00\x00\x20ftypisom\x00\x00\x00\x00")
+        file.truncate(grill_me_in_cloud_hook.MAX_VIDEO_BYTES + 1)
+    with pytest.raises(RoundError, match="20 MiB"):
+        validate_assets(payload, tmp_path, "assets/round-001/")
+
+
+@pytest.fixture(params=["mp4", "webm"])
+def video_clip(request, tmp_path):
+    if not shutil.which("ffmpeg") or not shutil.which("ffprobe"):
+        pytest.skip("Video integration checks require installed ffmpeg and ffprobe")
+    clip = tmp_path / f"recording.{request.param}"
+    codecs = ["-c:v", "libx264", "-c:a", "aac"] if request.param == "mp4" else ["-c:v", "libvpx-vp9", "-c:a", "libopus"]
+    subprocess.run([
+        "ffmpeg", "-hide_banner", "-loglevel", "error", "-nostdin", "-y",
+        "-f", "lavfi", "-i", "color=c=blue:s=160x90:r=5:d=0.4",
+        "-f", "lavfi", "-i", "sine=frequency=440:sample_rate=48000:duration=0.4",
+        *codecs, str(clip),
+    ], check=True, capture_output=True, timeout=15)
+    return clip
+
+
+@pytest.mark.parametrize("provider", ["claude", "chatgpt", "pi"])
+def test_videos_publish_and_retry_like_images_with_real_ffmpeg(tmp_path, video_clip, provider, monkeypatch):
+    project = tmp_path / "project"
+    project.mkdir()
+    client = HostedBoard(fail=True)
+    runtime = InterviewRuntime(tmp_path / "runtime", client)
+    interview = runtime.start(provider, "session", project)
+    original = video_clip.read_bytes()
+    shutil.copyfile(video_clip, interview.assets / video_clip.name)
+    poster = interview.assets / "poster.png"
+    poster.write_bytes(b"\x89PNG\r\n\x1a\n")
+    interview.source.write_text(json.dumps(round_data(
+        f'<video poster="{interview.assets_url}poster.png"><source src="{interview.assets_url}{video_clip.name}" '
+        f'type="video/{video_clip.suffix[1:]}"></video>'
+    )), encoding="utf-8")
+    with pytest.raises(HostedError):
+        runtime.publish(provider, "session")
+    assert (interview.assets / video_clip.name).read_bytes() == original
+    staged_path = next((runtime.root / "outbox").rglob("publication.json"))
+    staged = json.loads(staged_path.read_text(encoding="utf-8"))
+    video_asset = next(asset for asset in staged["assets"] if asset["media_type"].startswith("video/"))
+    prepared = staged_path.parent / video_asset["file"]
+    assert video_asset["byte_size"] == prepared.stat().st_size
+    assert video_asset["sha256"] == hashlib.sha256(prepared.read_bytes()).hexdigest()
+    probe = subprocess.run([
+        "ffprobe", "-v", "error", "-show_entries", "stream=codec_name,pix_fmt", "-of", "json", str(prepared),
+    ], check=True, capture_output=True, timeout=10)
+    streams = json.loads(probe.stdout)["streams"]
+    assert [stream["codec_name"] for stream in streams] == (["h264", "aac"] if video_clip.suffix == ".mp4" else ["vp9", "opus"])
+    assert streams[0]["pix_fmt"] == "yuv420p"
+    if video_clip.suffix == ".mp4":
+        content = prepared.read_bytes()
+        assert content.index(b"moov") < content.index(b"mdat")
+    # Retries upload the immutable prepared bytes without requiring FFmpeg again.
+    monkeypatch.setattr(grill_me_in_cloud_hook.shutil, "which", lambda _: None)
+    client.fail = False
+    assert runtime.retry_pending(provider, "session")[0]["round_number"] == 1
+    assert len(client.uploads) == 2
+    video_upload = next(upload for upload in client.uploads if upload[2].startswith("video/"))
+    assert video_upload[2] == video_asset["media_type"]
+    assert hashlib.sha256(video_upload[1]).hexdigest() == video_asset["sha256"]
+    assert not list((runtime.root / "outbox").rglob("publication.json"))
+
+
+def test_missing_ffmpeg_rejects_only_videos_and_cleans_partial_publication(tmp_path, monkeypatch):
+    project = tmp_path / "project"
+    project.mkdir()
+    runtime = InterviewRuntime(tmp_path / "runtime", HostedBoard())
+    interview = runtime.start("claude", "session", project)
+    (interview.assets / "demo.mp4").write_bytes(b"\x00\x00\x00\x20ftypisom\x00\x00\x00\x00")
+    interview.source.write_text(json.dumps(round_data(f'<video src="{interview.assets_url}demo.mp4"></video>')), encoding="utf-8")
+    monkeypatch.setattr(grill_me_in_cloud_hook.shutil, "which", lambda _: None)
+    with pytest.raises(RoundError, match="ffmpeg on PATH"):
+        runtime.publish("claude", "session")
+    assert list((runtime.root / "outbox" / runtime.key("claude", "session")).iterdir()) == []
+    interview = runtime.current("claude", "session")
+    (interview.assets / "diagram.png").write_bytes(b"\x89PNG\r\n\x1a\n")
+    interview.source.write_text(json.dumps(round_data(f'<img src="{interview.assets_url}diagram.png">')), encoding="utf-8")
+    assert runtime.publish("claude", "session")["round_number"] == 1
+
+
+def test_ffmpeg_rejects_a_corrupt_video_before_it_can_be_queued(tmp_path):
+    if not shutil.which("ffmpeg"):
+        pytest.skip("Requires installed FFmpeg")
+    project = tmp_path / "project"
+    project.mkdir()
+    runtime = InterviewRuntime(tmp_path / "runtime", HostedBoard())
+    interview = runtime.start("claude", "session", project)
+    (interview.assets / "corrupt.mp4").write_bytes(b"\x00\x00\x00\x20ftypisom\x00\x00\x00\x00")
+    interview.source.write_text(json.dumps(round_data(f'<video src="{interview.assets_url}corrupt.mp4"></video>')), encoding="utf-8")
+    with pytest.raises(RoundError, match="FFmpeg could not prepare"):
+        runtime.publish("claude", "session")
+    assert runtime.client.requests == []
+    assert list((runtime.root / "outbox" / runtime.key("claude", "session")).iterdir()) == []
 
 
 def test_publication_returns_immediately_and_reserves_the_next_inbox(tmp_path):
@@ -360,3 +486,23 @@ def test_a_permanently_rejected_queued_round_ends_the_interview_without_a_new_pa
     reply = hook_context(grill_me_in_cloud_hook.handle(hook_event(project, "UserPromptSubmit", prompt="retry"), "claude", runtime))
     assert not queued_publications(tmp_path)
     assert str(runtime.current("claude", "session").directory) not in reply
+
+
+def test_failed_video_preparation_preserves_an_older_queued_round(tmp_path, monkeypatch):
+    project = tmp_path / "project"
+    project.mkdir()
+    runtime = InterviewRuntime(tmp_path / "runtime", HostedBoard(fail=True))
+    interview = runtime.start("claude", "session", project)
+    interview.source.write_text(json.dumps(round_data()), encoding="utf-8")
+    with pytest.raises(HostedError):
+        runtime.publish("claude", "session")
+    older = next((runtime.root / "outbox").rglob("publication.json"))
+    interview = runtime.current("claude", "session")
+    (interview.assets / "demo.mp4").write_bytes(b"\x00\x00\x00\x20ftypisom\x00\x00\x00\x00")
+    interview.source.write_text(json.dumps(round_data(f'<video src="{interview.assets_url}demo.mp4"></video>')), encoding="utf-8")
+    monkeypatch.setattr(grill_me_in_cloud_hook.shutil, "which", lambda _: None)
+    with pytest.raises(RoundError):
+        runtime.publish("claude", "session")
+    assert list((runtime.root / "outbox").rglob("publication.json")) == [older]
+    runtime.client.fail = False
+    assert runtime.retry_pending("claude", "session")[0]["round_number"] == 1

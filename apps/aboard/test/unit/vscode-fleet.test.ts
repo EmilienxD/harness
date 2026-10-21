@@ -5,6 +5,9 @@ import type { AgentId, AgentSession, IsoTimestamp, SessionId, TerminalId } from 
 import { FleetRegistry } from "../../src/domain/fleet.js";
 import { WriteLease } from "../../src/domain/lease.js";
 import { FleetTreeModel } from "../../src/vscode/fleet.js";
+import { reopenCandidates, agentActivity } from "../../src/domain/activity.js";
+import { renderReopenItems } from "../../src/vscode/reopen.js";
+import { parseFleetPersistenceDto } from "../../src/domain/validation.js";
 
 const timestamp = "2026-09-17T10:00:00.000Z" as IsoTimestamp;
 const agent = (value: string) => value as AgentId;
@@ -29,6 +32,28 @@ function liveSession(
     telemetry: { totalTokens: 0, totalDurationMs: 0, totalToolUseCount: 0, compactionCount: 0 },
   };
 }
+
+test("conversation titles remain recognizable across fleet, reopen and restored history", () => {
+  const id = agent("17");
+  const nativeId = session("22222222-2222-4222-8222-222222222222");
+  const fleet = new FleetRegistry();
+  fleet.register({ ...liveSession(id, "pi", "interactive"), sessionId: nativeId }, timestamp);
+  const model = new FleetTreeModel(fleet, new WriteLease(), { refresh() {} });
+  const title = "Repair checkout recovery after switching branches";
+  fleet.setTitle(nativeId, title, timestamp);
+  const row = model.item(model.roots()[0]!);
+  assert.equal(row.label, "Repair checkout recovery after switchin…");
+  assert.ok(row.tooltip.includes(title));
+  const candidates = reopenCandidates(undefined, fleet.list(), () => true);
+  const picker = renderReopenItems(candidates.map((candidate) => ({ candidate, resumable: true })))[0]!;
+  assert.equal(picker.label, row.label);
+  assert.equal(picker.description, "Pi");
+  const restored = parseFleetPersistenceDto(fleet.toPersistenceDto());
+  assert.equal(restored.ok && restored.value.sessions[0]?.title, title);
+  assert.equal(agentActivity(fleet.list()[0]!, "ended", timestamp).title, title);
+  assert.equal(agentActivity(fleet.list()[0]!, "launch-failed", timestamp, { conversationStarted: false }).reopen, undefined);
+  model.dispose();
+});
 
 test("fleet rows distinguish execution mode and provider independently of the write lease", () => {
   const interactiveId = agent("interactive-claude");

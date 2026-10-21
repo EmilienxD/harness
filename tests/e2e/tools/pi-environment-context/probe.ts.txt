@@ -1,0 +1,18 @@
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+
+export default function (pi: ExtensionAPI) {
+  let sections: Record<string, string> = {};
+  pi.on("before_agent_start", (event) => { sections = event.systemPromptOptions.sections; });
+  pi.on("agent_start", (_event, ctx) => {
+    pi.appendEntry("environment-context-probe", {
+      sectionNames: Object.keys(sections),
+      environmentLength: sections.environment?.length ?? 0,
+      gitLength: sections.git_snapshot?.length ?? 0,
+      sessionTimestamp: ctx.sessionManager.getHeader()?.timestamp,
+    });
+  });
+  pi.registerCommand("environment-reload", {
+    description: "Reload fixture resources without inference",
+    handler: async (_args, ctx) => { await ctx.reload(); },
+  });
+}

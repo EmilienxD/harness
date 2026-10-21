@@ -91,8 +91,10 @@ test("the unified workspace launcher is a webview above the fleet and retains di
   for (const [command, label] of [
     ["aboard.runClaudeCode", "Run Claude Code"],
     ["aboard.runCodex", "Run Codex"],
+    ["aboard.runPi", "Run Pi"],
   ] as const) {
     assert.equal(commands.get(command)?.title, label);
+    assert.equal(contributes.menus.commandPalette?.find((entry) => entry.command === command)?.when, "aboard.initialized");
     assert.equal((contributes.menus["view/title"] ?? []).some((entry) => entry.command === command), false, `${label} must not sit in a view title`);
     assert.equal((contributes.menus["view/item/context"] ?? []).some((entry) => entry.command === command), false);
   }

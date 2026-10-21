@@ -29,7 +29,9 @@ from collections.abc import Iterator, Sequence
 from pathlib import Path
 from typing import Any, Callable, NamedTuple
 
-COMMIT_PATTERN = re.compile(r"(?<!\S)/commit(?:\s+(.*))?$", re.DOTALL)
+COMMIT_PATTERN = re.compile(
+    r"(?<!\S)(?:[/$]commit|\[\$commit\]\([^\r\n]+\))(?=$|\s)(?:\s+(.*))?$", re.DOTALL
+)
 
 # Leading flags accepted before the commit message.
 DRY_FLAGS = {"--dry", "-n"}
@@ -539,24 +541,38 @@ def finish(message: str) -> None:
     """
     Reject the prompt either way (success or failure) so it never reaches
     the model. `message` is what the user sees in place of a response.
-    Exit code 2 is what makes Claude Code treat stderr as the rejection
-    reason for a UserPromptSubmit hook.
+    Claude Code uses stderr and exit 2; Codex uses blocking JSON and exit 0
+    so Windows shell exit-code translation cannot lose the decision.
     """
+    if PROVIDER == CHATGPT:
+        print(json.dumps({"decision": "block", "reason": message.strip()}))
+        sys.exit(0)
     sys.stderr.write(f"\n\n{message.strip()}")
     sys.exit(2)
 
 
 def fail_unhandled_exception(host: str, exc: Exception) -> None:
     """
-    Convert unexpected hook crashes into the UserPromptSubmit rejection code.
+    Convert unexpected crashes into provider- and event-specific decisions.
 
-    A plain Python crash exits 1, which some hosts can treat as "hook failed,
-    continue anyway". For /commit that is the expensive failure mode: the
-    fallback skill reaches the model. Exit 2 keeps the prompt blocked and
-    shows a useful error instead.
+    Codex must receive JSON rather than a shell-dependent exit code. Prompt
+    failures reject the command, pre-tool failures deny the action, and
+    post-tool failures replace the original result with explicit error feedback.
     """
     _force_utf8_output()
     details = str(exc).strip() or "(no details)"
+    if PROVIDER == CHATGPT:
+        reason = f"harness commit hook failed in {host}: {exc.__class__.__name__}: {details}"
+        if HOOK_EVENT == "PreToolUse":
+            output = {"hookSpecificOutput": {
+                "hookEventName": "PreToolUse", "permissionDecision": "deny", "permissionDecisionReason": reason,
+            }}
+        elif HOOK_EVENT == "PostToolUse":
+            output = {"continue": False, "stopReason": reason, "systemMessage": reason}
+        else:
+            output = {"decision": "block", "reason": reason}
+        print(json.dumps(output))
+        sys.exit(0)
     try:
         sys.stderr.write(
             "\n\n"
@@ -1771,6 +1787,7 @@ PI = "pi"
 
 # Set by `main` from argv, before anything reads it.
 PROVIDER = CLAUDE
+HOOK_EVENT = "UserPromptSubmit"
 
 PRODUCT = {CLAUDE: "Claude Code", CHATGPT: "ChatGPT", PI: "Pi"}
 # How the commit trailer and the staging report name whoever did the writing.
@@ -2227,7 +2244,11 @@ def main(argv: list[str] | None = None) -> None:
         cli_main(rest)
         return
 
+    global HOOK_EVENT
     payload = json.load(sys.stdin)
+    if not isinstance(payload, dict):
+        raise ValueError("hook input must be a JSON object")
+    HOOK_EVENT = str(payload.get("hook_event_name") or "UserPromptSubmit")
     if provider == CHATGPT:
         chatgpt_main(payload)
     else:
@@ -2237,6 +2258,9 @@ def main(argv: list[str] | None = None) -> None:
 def entrypoint(argv: list[str] | None = None) -> None:
     argv = sys.argv[1:] if argv is None else argv
     provider, _ = provider_from_argv(argv)
+    set_provider(provider)
+    global HOOK_EVENT
+    HOOK_EVENT = "UserPromptSubmit"
     guarded_main(PRODUCT[provider], lambda: main(argv))
 
 

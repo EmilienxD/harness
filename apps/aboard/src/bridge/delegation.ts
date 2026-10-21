@@ -1,6 +1,6 @@
 import type { RequestedEffort } from "../platform/effort.js";
 import type { AgentPlatform, AgentPlatformId, ConfiguredLaunch, EffortLevel, PromptSpillStore, ResolvedPrompt, SessionWrapperLayout, ShellKind, TerminalController } from "../platform/agent-platform.js";
-import { delimiter, dirname } from "node:path";
+import { basename, delimiter, dirname } from "node:path";
 import { existsSync } from "node:fs";
 import type { LaunchRestrictions, WriteCapability } from "../domain/capability.js";
 import {
@@ -98,6 +98,7 @@ export interface AutomatedLaunchOutcome {
 }
 
 export interface ReopenTarget {
+  readonly title?: string;
   readonly harnessPython?: string;
   readonly editorPane?: object;
   readonly model?: string;
@@ -148,6 +149,7 @@ export interface DelegationConfigurationSource {
   get(type: AgentType): Promise<ConfiguredLaunch>;
   /** Resolves one explicit or session-owned provider without consulting the Auto Run default. */
   getFor(platform: AgentPlatformId, type: AgentType): Promise<ConfiguredLaunch>;
+  getForWorktree?(platform: AgentPlatformId, type: AgentType, cwd: string): Promise<ConfiguredLaunch>;
   getDelegationFor?(platform: AgentPlatformId, task: DelegationTask): Promise<ConfiguredLaunch>;
   getDelegationForWorktree?(platform: AgentPlatformId, task: DelegationTask, cwd: string): Promise<ConfiguredLaunch>;
 }
@@ -296,11 +298,14 @@ export class DelegationCoordinator {
     // Where the session ran is where its conversation is: a session that ran in
     // an auto-run's own checkout has no transcript under the workspace at all.
     const cwd = target.cwd ?? this.options.workspaceRoot;
-    const configured = executionMode === "loop" && this.options.configurations.getDelegationForWorktree !== undefined
-      ? await this.options.configurations.getDelegationForWorktree(target.platform, "loop", cwd)
-      : target.delegationTask === undefined || this.options.configurations.getDelegationFor === undefined
-        ? await this.options.configurations.getFor(target.platform, target.type)
-        : await this.options.configurations.getDelegationFor(target.platform, target.delegationTask);
+    const task = executionMode === "loop" ? "loop" : target.delegationTask;
+    const configured = target.autoRunRestricted !== true && task !== undefined && this.options.configurations.getDelegationForWorktree !== undefined
+      ? await this.options.configurations.getDelegationForWorktree(target.platform, task, cwd)
+      : task !== undefined && this.options.configurations.getDelegationFor !== undefined
+        ? await this.options.configurations.getDelegationFor(target.platform, task)
+        : target.autoRunRestricted !== true && this.options.configurations.getForWorktree !== undefined
+          ? await this.options.configurations.getForWorktree(target.platform, target.type, cwd)
+          : await this.options.configurations.getFor(target.platform, target.type);
     const platform = this.#platform(target.platform);
     const attended = executionMode === "interactive";
     const writableRoots = target.autoRunRestricted === true && target.cwd !== undefined
@@ -374,7 +379,7 @@ export class DelegationCoordinator {
         ...(target.completionCommitStartingSha === undefined ? {} : { completionCommitStartingSha: target.completionCommitStartingSha }),
         ...(target.reviewRange === undefined ? {} : { reviewRange: target.reviewRange }),
         ...(target.workerContinuation === true ? { workerContinuation: true as const } : {}),
-        name: agentLabel({ agentId: target.agentId, type: target.type }),
+        name: `${agentLabel({ agentId: target.agentId, type: target.type })}${target.cwd === undefined || target.cwd === this.options.workspaceRoot ? "" : ` · ${basename(target.cwd.replaceAll("\\", "/"))}`}`,
         ...(target.cwd === undefined ? {} : { cwd: target.cwd }),
         initialCommand: plan.commandLine,
         attended,
@@ -424,6 +429,10 @@ export class DelegationCoordinator {
           attended,
           executionMode,
         );
+      }
+      if (target.title !== undefined) {
+        this.options.fleet.setTitle(target.sessionId, target.title, occurredAt);
+        this.options.terminals.setSessionTitle(target.sessionId, target.title);
       }
       if (this.options.startupTimeoutMs !== undefined) {
         const startup = this.options.terminals.waitForStartup(target.agentId);
@@ -594,7 +603,7 @@ export class DelegationCoordinator {
         ...(input.issues === undefined ? {} : { issueNumbers: input.issues }),
         ...(input.completionCommitStartingSha === undefined ? {} : { completionCommitStartingSha: input.completionCommitStartingSha }),
         ...(input.reviewRange === undefined ? {} : { reviewRange: input.reviewRange }),
-        name: agentLabel({ agentId, type: agentType }),
+        name: `${agentLabel({ agentId, type: agentType })}${cwd === undefined || cwd === this.options.workspaceRoot ? "" : ` · ${basename(cwd.replaceAll("\\", "/"))}`}`,
         ...(cwd === undefined ? {} : { cwd }),
         initialCommand: plan.commandLine,
         attended,

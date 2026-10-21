@@ -3,6 +3,8 @@ export interface WorkspaceLaunchPlan {
   readonly preset: { readonly id: string; readonly name: string; readonly columns: number; readonly rows: number; readonly panes: readonly { readonly providers: readonly string[] }[] };
   readonly empty: boolean;
   readonly manual?: boolean;
+  /** Resolved checkout for a current-window batch; never stored in a preset. */
+  readonly checkoutRoot?: string;
 }
 
 export interface WorkspaceBatchResult {
@@ -39,6 +41,7 @@ export function validateWorkspaceLaunchPlan(value: unknown, providers: readonly 
   if (!Array.isArray(preset.panes) || preset.panes.length !== preset.columns * preset.rows) throw new Error("The preset pane count does not match its layout");
   for (const pane of preset.panes) if (!pane || !Array.isArray(pane.providers) || pane.providers.some((provider: string) => (provider !== "" && !providers.includes(provider)))) throw new Error("The preset contains an unavailable provider");
   if (typeof plan.empty !== "boolean" || (plan.manual !== undefined && typeof plan.manual !== "boolean")) throw new Error("Invalid workspace launch options");
+  if (plan.checkoutRoot !== undefined && (typeof plan.checkoutRoot !== "string" || plan.checkoutRoot.length === 0)) throw new Error("Invalid checkout directory");
   return plan;
 }
 
@@ -49,7 +52,7 @@ export class WorkspaceBatchLauncher {
     readonly initialized: () => boolean;
     readonly markInitialized: () => Promise<void>;
     readonly initializeLayout: (columns: number, rows: number) => Promise<readonly object[]>;
-    readonly launch: (provider: string, pane: object | undefined, onCreated: () => void) => Promise<{ terminalId: string }>;
+    readonly launch: (provider: string, pane: object | undefined, onCreated: () => void, checkoutRoot?: string) => Promise<{ terminalId: string }>;
     readonly focus: (terminalId: string) => void;
   }) {}
 
@@ -98,7 +101,7 @@ export class WorkspaceBatchLauncher {
         const created = new Promise<void>((resolve) => { onCreated = resolve; });
         const assignment = pending.length;
         const launch = (async () => {
-          try { started[assignment] = (await this.host.launch(provider, placement, onCreated)).terminalId; }
+          try { started[assignment] = (await this.host.launch(provider, placement, onCreated, plan.checkoutRoot)).terminalId; }
           catch (error) {
             if (error instanceof Error && error.name === "SessionStartCancelledError") cancelled = true;
             else failed.push({ provider, message: error instanceof Error ? error.message : String(error), ...(typeof error === "object" && error !== null && "retrySafe" in error && error.retrySafe === false ? { retrySafe: false } : {}) });

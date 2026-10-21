@@ -23,7 +23,7 @@ uvx --from "git+https://github.com/EmilienxD/harness" harness
 
 The interactive catalogue asks for Claude Code, ChatGPT, and/or Pi, project or user scope, and the packages you want. Rerun it to add, upgrade, or remove selections. Existing selections start checked, dependencies are handled automatically, user-edited starter files are preserved, and the final plan is shown before anything changes. Removing a selection retains reusable dependencies as independent selections; dependencies declared as coupled components are removed when nothing else requires them. When a package would land on a file Harness does not own, the installer lists those files and asks whether to overwrite them or abandon the installation; approved files become Harness-owned and are removed again on uninstall. A machine-level product a package installs — a `uv` tool or a VS Code extension — gets the same treatment: if one is already present and no Harness receipt accounts for it, the installer names it and asks whether to take ownership, which replaces it with the pinned version and removes it again on uninstall.
 
-When selected packages include skills for Claude Code, the catalogue asks whether to copy the skills or install them in `.agents/skills` and symlink each `.claude/skills/<name>` directory to its counterpart. Copy is the default for a new installation; later runs remember the chosen mode. Non-interactive `install` and `upgrade` accept `--skill-mode copy|symlink` to choose or change it. Hooks and other platform-specific files still use their own provider directories.
+When selected packages include skills for Claude Code, the catalogue asks whether to copy the skills or install them in `.agents/skills` and symlink each `.claude/skills/<name>` directory to its counterpart. Copy is the default for a new installation; later runs remember the chosen mode. In a clone or worktree without local receipts, Harness recognizes existing `.claude/skills/<name>` symlinks to the same checkout's `.agents/skills/<name>` and preserves that layout. These pre-existing links remain unowned and survive uninstall; unrelated links and symlinked parent directories are rejected. Differing unowned payload files still require overwrite approval. Non-interactive `install` and `upgrade` accept `--skill-mode copy|symlink` to choose or change it. Hooks and other platform-specific files still use their own provider directories.
 
 In a Git repository, symlink mode depends on Git and the operating system recreating directory symlinks when a clone or worktree is checked out. On Windows, set `git config --global core.symlinks true` and enable symlink creation before creating worktrees. If symlink checkout is disabled, Git writes each link target as a plain text file. Harness warns when project symlink mode is selected in a Git worktree. Use copy mode when the committed project files must work without symlink support.
 
@@ -64,6 +64,13 @@ from this checkout, then invoke `/skill:tdd` or `/skill:audit` in Pi. `todo-hitl
 `/skill:mark-as-todo-hitl` and `/skill:address-todo-hitl`.
 Project skills live in `.pi/skills`; user skills live in `~/.pi/agent/skills`, or the agent
 directory selected by `PI_CODING_AGENT_DIR`. Review project resources before granting Pi trust.
+Pi extensions use native package identities: a trusted project's enabled copy replaces the
+same tool at user scope, while other user extensions remain available. Removing the project
+copy restores the user copy on the next launch or `/reload`. Explicit project package filters
+also take precedence. Harness builds complete local npm packages and calls `pi install` and
+`pi remove`; Pi manages their files and npm metadata. The cached `.tgz` is the installation
+source and contains the extension, skills and required helpers. No registry publication is needed.
+This layout assumes fresh Pi installations.
 Audit runs in the current session; Pi explorer delegation remains pending. UI prototypes
 require available browser tools, Lavish requires `npx` and external browser review, GitHub
 lookup requires authenticated `gh`, and text replacements remain Windows-only.
@@ -87,8 +94,9 @@ uv run harness install on-read-reminder on-edit-reminder on-edit-block --platfor
 
 Run `/reload` in Pi, approve the project resources, and configure the corresponding
 `.harness/guards/*.toml` policies. The empty starters leave the guards inactive until rules
-are added. Extensions live in `.pi/extensions`; Python helpers live in `.pi/harness`.
-User installs use the effective Pi agent directory, with policy starters beside the helpers in `harness/`.
+are added. Extensions and their helpers live inside `.pi/npm/node_modules/harness-pi-<tool>/`.
+User installs use the effective Pi agent directory; editable policy starters stay outside npm
+packages under `<agent-dir>/harness/`.
 Pi guards require uv or Python 3.11+. They cover native reads/edits/writes, including nested
 calls, and recognized shell reads; shell mutations need separate controls.
 
@@ -102,6 +110,8 @@ separate integration. See the [policy and Pi coverage](docs/user/tools/guards/pr
 ## Reference
 
 Claude Code invokes a skill as `/skill-name`; ChatGPT uses `$skill-name`; Pi uses `/skill:skill-name` for its supported skills. Deterministic commands such as `/commit` are consumed by hooks or native Pi commands before a model call.
+
+For Codex, deterministic command failures reject the prompt rather than falling back to a model call. Guard errors deny the proposed action. A post-tool failure is surfaced as tool feedback; it cannot undo an action that has already run. Optional notifications and reminders remain best effort.
 
 **User-invoked** skills run only when you explicitly ask for them. **Model-invoked** skills may also be selected automatically when their description fits the work. Harness strongly favors the first group: you decide when a workflow starts, when a draft is published, and when another agent is launched.
 
@@ -121,7 +131,7 @@ Claude Code invokes a skill as `/skill-name`; ChatGPT uses `$skill-name`; Pi use
 
 - **`breakdown-help-wanted-issue`**: Explores a request against the codebase and helps you agree on what to build, with questions and concrete recommendations. With no argument, it fetches the oldest open `[AI]-help-wanted` GitHub issue.
 
-- **`grill-me-in-cloud`**: Stress-tests a plan through branching rounds on a persistent hosted board. Hooks or Pi's native extension supply fresh round and asset paths outside the project, upload local explanation images, publish without waiting for answers, and return the session URL. Drafts survive refreshes; only queued answers enter the deterministic prompt. Copy the reviewed prompt, send through Aboard for Claude/ChatGPT, or choose **Send to Pi** for Pi's standalone relay. Pi confirms a persisted user message and recovers delivery after reload without resubmission; `/grill-cloud-stop` disconnects the interview. Pi requires the current hosted app and additive provider migration.
+- **`grill-me-in-cloud`**: Stress-tests a plan through branching rounds on a persistent hosted board. Hooks or Pi's native extension supply fresh round and asset paths outside the project, upload local explanation images and video previews, publish without waiting for answers, and return the session URL. Drafts survive refreshes; only queued answers enter the deterministic prompt. Copy the reviewed prompt, send through Aboard for Claude/ChatGPT, or choose **Send to Pi** for Pi's standalone relay. Pi confirms a persisted user message and recovers delivery after reload without resubmission; `/grill-cloud-stop` disconnects the interview. Pi requires the current hosted app and additive provider migration.
 
 - **`prototype`**: Builds a throwaway logic or UI prototype to answer one explicit design question. It follows user or project instructions; otherwise it requires a clean working tree, creates and switches to a new `proto/<prototype-name>` branch. It exercises only the decisive paths and reports what the result supports and where its evidence stops.
 
@@ -167,6 +177,10 @@ harness resume <session-id|agent-i> [next message...]
 harness watch [session-id|agent-i] [--once]
 harness inbox cleanup [--dry-run | --apply] [--grace-hours 168] [--offline]
 ```
+
+Delegation requests can be written with any file-writing tool. The runtime checks the conversation's
+assigned inbox after tool completions, before stopping, and on resume. Publish complete `.md`
+requests; for multi-step writes, write a temporary file and rename it to `.md` when ready.
 
 `run` opens an independent visible terminal. When `subagents-toolkit` is installed for the current provider, the session-start hook assigns one persistent inbox to the saved conversation and supplies its path in context. Natural-language requests such as "run a Claude subagent" can use the toolkit without an explicit launcher skill invocation. Without the toolkit installed, session start adds no inbox instructions. Request files and execution logs live under `~/.harness/runtime/` (`HARNESS_STATE_DIR` overrides `~/.harness`), never in the project. Automatic children run headlessly with native provider permissions; interactive children open visible sessions. `harness watch` follows structured Claude or Codex progress for the one active background session in the current directory; pass a child session ID to select a particular agent from another terminal, or use `agent-i` inside its parent. `--once` prints the progress recorded so far. The `ask` command prints each launched child's watch command. Progress reports observed searches, tool activity, messages, errors, elapsed time, and provider-reported usage; it does not judge research quality. Children receive stable `agent-i` identifiers scoped to the parent. After an Aboard-launched interactive child sends its reply, its hook shows a VS Code link that returns to the exact parent terminal without switching focus automatically. Use `resume-agent` or `harness resume agent-i "next message"` inside the parent to continue a child, preserving its provider, mode, directory, and conversation. A child whose session is still live, such as an idle terminal, normally continues in a fork of its transcript that keeps the same `agent-i` identifier and leaves the original session open. Aboard's `aboard.sessions.interactiveResumeMode` setting can instead use `reuse-terminal` to send the next message into a matching live interactive terminal; the default remains `fork`. Results survive parent shutdown and replay after interrupted delivery. A child that fails to start or exits early reports the provider's last diagnostic line, such as Codex refusing to run outside a Git repository; an unconfirmed interactive start names the provider and directory whose subagents installation or trust prompt to check. Launch and resume skills load the shared `subagents-toolkit` instruction skill when needed. The session-start hook supplies the assigned inbox again on resume and after compaction.
 
@@ -281,6 +295,7 @@ Hooks do not need a skill invocation. Select them in the catalogue and restart t
 | `prefer-edit-tool` | Claude Code | Nudges the agent toward Write/Edit after shell-based file changes. |
 | `prefer-fewer-comments` | Claude Code, ChatGPT, Pi | Flags newly written comments or docstrings that exceed an editable budget. Pi wraps native writes/edits with exact mutation snapshots. |
 | `mid-prompt-skills` | Claude Code, ChatGPT, Pi | Loads skills typed after other prompt text when the provider otherwise leaves them as plain text. |
+| `file-mentions` | Pi | Includes `@file` contents and bounded `@directory` listings directly in the prompt. |
 | `redirect-subagents` | Claude Code | Redirects built-in Agent tool work to configured alternate providers and returns the result to the parent session. |
 | `usage-limit-wait` | Claude Code, ChatGPT | Pauses at an exhausted subscription window and resumes after reset; usage-reader failures always fail open. |
 
@@ -298,6 +313,52 @@ Project policies use `.harness/guards/no-new-documents.toml`; Pi user policies s
 `<PI_CODING_AGENT_DIR>/harness/no-new-documents.toml` (default `~/.pi/agent/harness/`). Home and project
 policies also apply. Command outcomes follow the active session branch; pending drafts follow the
 current filesystem. Quote paths containing spaces.
+
+#### File mentions
+
+`file-mentions` gives Pi Claude-style automatic file context. After installing, restart Pi or run
+`/reload`, then write prompts such as:
+
+```text
+Explain @src/main.ts using @"docs/design notes.md" and show how it fits into @src/components/.
+```
+
+```powershell
+uv run harness install file-mentions --platform pi --scope user
+```
+
+The extension keeps your original text and images, appending an HTML-style `<file-mentions>`
+container with `<file path="…">` and `<directory path="…">` blocks in model context. Absolute paths
+identify each resource; HTML escaping keeps file contents and unusual filenames inside their
+containers. In Pi's interactive transcript, the user message block shows only your original text.
+A separate grey info notification below it lists relative-path statuses such as `src/main.ts loaded.`
+Unavailable references show `path not loaded.` and bounded folder listings identify truncation.
+Content hiding also applies to older snapshots after reload/resume; info notifications are emitted
+only for live messages, not when rendering history. Full contents remain in the stored message and provider
+context (and thus raw JSON/session exports); this is display filtering, not secret redaction.
+Relative paths resolve from Pi's working directory; absolute paths, `~/…`, Windows paths and quoted paths with
+spaces are supported. Repeated references to the same resolved path load once per message;
+later messages read fresh content. Fenced/inline code examples and expanded skill/context blocks
+are ignored, and loaded contents are never recursively scanned for more mentions.
+
+Limits are 20 distinct reference spellings per message, 256 KiB per UTF-8 text file and 1 MiB of
+raw content across files/listings. Oversized, binary, missing, unreadable or non-UTF-8 files produce
+an explicit `<unavailable>` block rather than partial file contents. Other references still load.
+References beyond the count limit are reported in an `<omitted>` block. Images/PDFs are not
+attached through this extension; use Pi's image attachment support or a suitable file tool.
+
+Folders include immediate names only, including dotfiles, with `/` for directories and `@` for
+symlinks. Names are JSON-quoted to keep control characters on one line. Each listing samples at
+most 100 entries, sorts that sample, and caps output at 16 KiB; `truncated="true"` signals omitted
+entries. It neither recurses nor loads file contents from a folder mention.
+
+This mirrors Claude's file/listing convenience, not all of its policies: there is no Claude token
+counter, MCP-resource expansion or automatic ancestor `CLAUDE.md` loading. See
+[Claude's documented behavior](https://code.claude.com/docs/en/common-workflows#reference-files-and-directories).
+Pi's own instruction discovery is unchanged. Reading happens inside the extension, not through
+a model tool call: tool-call guards/reminders do not observe these reads, and mentions do not
+satisfy `on-edit-block`'s read-evidence requirements. Explicit mentions can read outside the project
+and follow symlinks; only reference files you intend to send to the model.
 
 #### Guard configuration
 
@@ -397,6 +458,31 @@ Run the workflow, then `test-workflows confirm tests/workflow/greeting.md` to au
 
 Run `test-workflows status` explicitly when verifying changes, as you would run unit tests, then run the affected checks and confirm passing ones. Loop implementers run and report; only the Lead stamps their results. Pi installs the same CLI and shared skill; invoke `/skill:test-workflows` to load it explicitly. Confirmation records verification performed by the agent; it does not execute the acceptance steps.
 
+## Environment context
+
+`environment-context` is a Pi-only extension that adds runtime metadata to model context:
+
+- `<environment>` contains OS name/version/architecture, the original session-start timestamp,
+  and the local timezone. The timestamp is explicitly labeled as a session-start snapshot,
+  not the current time; resume and reload retain the original timestamp.
+- `<git_snapshot>` refreshes before each agent run. It includes full counts of changed,
+  modified, tracked-added, deleted, renamed, copied, untracked/new, and conflicted files,
+  plus staged/unstaged counts. Categories can overlap; conflicted files are counted separately.
+  Individual untracked files are counted, including inside new directories.
+- The displayed Git file list is limited to 12 files and 1,200 characters, with a truncation
+  marker. Counts still cover the full status. Git inspection has a two-second deadline per
+  command; failures report unavailable status and unknown counts rather than partial totals.
+- Outside a Git working tree it reports “No Git exists in the cwd.” A GitHub remote is not
+  required. Pi's existing cwd section is left unchanged.
+
+```powershell
+uv run harness install environment-context --platform pi --scope user
+```
+
+Restart Pi or run `/reload`. Use `--scope project` for a project-only installation.
+The extension uses local OS/session metadata and read-only Git commands; it makes no model
+requests of its own. Git state is a snapshot and should be rechecked before destructive actions.
+
 ## Statusline
 
 `statusline` replaces Pi's footer with one line when space allows:
@@ -477,9 +563,7 @@ The exclusion list is fixed in the package payload; it does not edit `settings.j
 uv run harness install exclude-unwanted-tools --platform pi --scope user
 ```
 
-Restart Pi or run `/reload` to activate it. This preserves the behavior of the original
-standalone `exclude-unwanted-tools.ts`; if migrating from that file, remove the standalone
-copy after installing the package so there is only one owner of the filter.
+Restart Pi or run `/reload` to activate it.
 
 **Compatibility:** verified against Pi 1.2.0. This adapter patches the private
 `AgentSession._isAllowedTool` method because changing active tools alone does not remove
@@ -503,16 +587,16 @@ Restart Pi or run `/reload`, then use `/clear`.
 
 `calm` is a Pi-only extension that hides every tool's transcript output and file diffs,
 including built-in, extension, SDK, and MCP tools. Web summaries show the search query or fetched URL.
-A compact block
-in the chat shows just the latest tool call, such as `read src/app.ts` or `bash npm test`.
+Each tool call appears independently in a compact chat block, such as `read src/app.ts`
+or `bash npm test`. Parallel and nested calls can display multiple blocks at once.
 Commands preserve line breaks and wrap to fit the terminal. Summaries are capped at 350
 characters, including a trailing `…` when truncated.
 An animated Braille spinner sits to the left while the tool runs. Completion replaces it
-with a green `•` on success or a red `•` on failure. Each displayed call stays visible while
-running and for three seconds after it completes. After that, the block shows the latest call
-or disappears if the next model request or final completion has already arrived. Rapid calls
-are coalesced to the latest one, so the display never replays a backlog. Agent execution keeps
-running at full speed. Reloading, switching sessions, or disabling Calm resets the display immediately.
+with a green `•` on success or a red `•` on failure. Each call stays visible while
+running and disappears independently three seconds after it completes, even if other calls
+are still running or the agent has already finished. No calls are coalesced or queued for display.
+Agent execution keeps running at full speed. Reloading or switching sessions clears the display;
+disabling Calm immediately restores native tool rows.
 Pi's normal running indicator stays in the input bar.
 Install it globally with:
 
@@ -629,33 +713,51 @@ Windows shell resolver, including Windows PowerShell when PowerShell 7 is unavai
 Ask Pi: "Run the test suite in the background, continue the review, and inspect the result
 when it finishes." The shell tool itself exposes the option and its usage guidance.
 Commands start in the foreground unless `run_in_background: true` requests an immediate job
-receipt. If a foreground command exceeds `timeout` (120 seconds by default), the same process
+receipt. If a foreground command runs longer than the foreground limit (120 seconds by default), the same process
 continues in the background without restarting. Its result includes the job ID, temporary log
 path, and recent output. Completion delivers the actual exit status, elapsed time, and recent
-output and wakes an idle agent. Quiet commands keep running.
+output to the agent. Version 3.0.1 uses steering: completion reaches an ongoing task at the next
+agent-loop boundary, or wakes the agent if idle. It does not interrupt an executing foreground
+tool batch. When only background work remains, the agent should end its response and wait for
+notification rather than run foreground sleeps or poll. The TUI shows only
+``Background command `<title or command>` exited with status <status-code>.``, even when expanded;
+command output remains available through `/ps` or `get_background_shell_status` with
+`show_output: true`. If cancellation or a hard deadline prevents an exit code from being reported,
+the status is `unknown`. Quiet commands keep running.
 
-Starting with **2.0.0**, foreground `timeout` is a wait limit, not a termination deadline.
-Use `execution_timeout` for an optional hard deadline in seconds measured from launch; it
-continues counting after automatic backgrounding and terminates the process tree when reached.
-For explicitly backgrounded commands, `timeout` retains its hard-deadline behavior and has no
-default. If both hard deadlines are supplied, the earlier one wins. For example, `timeout: 5,
-execution_timeout: 600` waits up to five seconds in the foreground and permits ten minutes
-of total execution. Cancellation before handoff stops the command; after handoff, use
-`shell_job` to cancel it.
+The agent-visible `timeout` parameter is a hard limit in seconds, measured from launch, that
+terminates the command and its process tree whether it runs in the foreground or background.
+It has no default. The foreground-to-background handoff is a user setting, not an agent
+parameter: set `backgroundShell.foregroundTimeout` (seconds, default 120) in Pi's `settings.json`.
+A command whose `timeout` is at or below that limit is cancelled in the foreground and never
+moves to the background; a longer `timeout` keeps counting after handoff and cancels the job.
+Cancellation before handoff stops the command; after handoff, use `cancel_background_shell` to cancel it.
+Version 2.2.0 removes `execution_timeout`.
 The optional Windows `powershell` tool follows your existing tool selection; installing this
 package does not switch Bash commands to PowerShell syntax.
 
-`shell_job` lists jobs, reads status or recent output, and cancels a job with its process tree.
+Version 3.0.0 replaces `shell_job` with two tools, both requiring the command `id`:
+`get_background_shell_status` always returns status and includes recent output when its optional
+`show_output` boolean is true (default false); `cancel_background_shell` stops the command and
+its process tree and returns the final status. IDs are six hexadecimal characters, checked for
+uniqueness within the live session. After each user message, the agent receives a small reminder
+when background commands are still running, containing only their count; there is no agent listing tool.
 The optional `title` parameter gives commands a short label. In Pi's terminal UI, `/ps` opens
 a command selector beneath a single separator, replacing the input bar until the menu closes.
 Use arrows and Enter to inspect a job, Page Up/Down or the mouse wheel over the shell to scroll,
 and `x` to stop it and return to the selector. Escape returns to the list or closes the menu.
-Cancelled jobs stay visible until the menu closes, then disappear from the next selection.
+Cancelled and completed jobs stay visible until the menu closes, then disappear from the next selection.
 The panel grows to fit its content up to 20 rows or 45% of the terminal height; command text
 wraps across up to three rows. Press `l` to load the retained log or `f` to follow recent output.
 Closing the menu restores the previous input editor and draft. Mouse scrolling requires Pi's
-fullscreen mode. Completion messages show status and recent output; tool calls that already
-return a final status consume pending notifications for that job.
+fullscreen mode. Completion messages show status and recent output. A final status read or
+cancellation suppresses notifications still owned by the extension, but cannot retract a message
+already queued in Pi. `notification_state` distinguishes `not_ready`, `pending`, `submitted`,
+`delivered` (observed through Pi's finalized-message event, not proof the model acted on it),
+and `consumed`. Synchronous
+submission rejections are retried with capped backoff. Pi's fire-and-forget API cannot report
+per-message asynchronous failures: submitted notifications without a session receipt are not
+blindly resent. Status and output remain retrievable by ID.
 
 It retains the last 8 KiB of decoded output and the first 16 MiB in a private temporary log,
 with truncation reported explicitly. At most eight shell commands run concurrently (including

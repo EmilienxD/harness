@@ -46,11 +46,9 @@ export function validateWorkspacePreset(value: unknown, providerIds: readonly st
 
 export function countPresetAgents(preset: WorkspacePreset): number { return preset.panes.reduce((count, pane) => count + pane.providers.filter(Boolean).length, 0); }
 
-/** Shrinking requires the editor to explicitly move or remove affected assignments first. */
+/** Resize the draft grid, dropping removed panes without changing the saved preset. */
 export function resizeWorkspacePreset(preset: WorkspacePreset, columns: number, rows: number): WorkspacePreset {
   if (!Number.isInteger(columns) || !Number.isInteger(rows) || columns < 1 || rows < 1 || columns * rows > 9) throw new Error("Choose positive Columns and Rows containing at most nine panes.");
-  const removed = preset.panes.slice(columns * rows).flatMap((pane, index) => pane.providers.map((provider) => `pane ${columns * rows + index + 1}: ${provider}`));
-  if (removed.length) throw new Error(`Move or remove these assignments before reducing the grid: ${removed.join(", ")}.`);
   return { ...preset, columns, rows, panes: Array.from({ length: columns * rows }, (_, index) => ({ providers: [...(preset.panes[index]?.providers ?? [])] })) };
 }
 

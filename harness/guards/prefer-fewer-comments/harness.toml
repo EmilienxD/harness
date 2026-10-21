@@ -1,5 +1,5 @@
 name = "prefer-fewer-comments"
-version = "2.3.2"
+version = "2.3.4"
 description = "Advisory comment and docstring budgets over newly written commentary, with native Pi mutation snapshots"
 docs = "https://github.com/EmilienxD/harness/blob/main/README.md#hooks"
 
@@ -48,7 +48,7 @@ platforms = ["pi"]
 
 [[files]]
 src = "pi/extension.ts"
-dest = "harness-prefer-fewer-comments/index.ts"
+dest = ".harness-prefer-fewer-comments/index.ts"
 root = "extensions"
 platforms = ["pi"]
 

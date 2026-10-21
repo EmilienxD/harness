@@ -64,29 +64,32 @@ export async function runPiSmoke(): Promise<void> {
     const native = wrapped
       ? spawnableCommand("uv", ["run", "--no-project", "--no-managed-python", resolve("assets/runtime/abd_wrapper.py"), join(plan.runtimeDirectory, "process.lock"), "--", plan.command[0]!, ...args])
       : spawnableCommand(plan.command[0]!, args);
-    return new Promise<{ code: number | null; status: string }>((done, reject) => {
+    return new Promise<{ code: number | null; status: string; createWarning: boolean }>((done, reject) => {
       const child = spawn(native.file, [...native.args], { cwd: fixture.workspace.projectRoot, env: { ...fixture.workspace.env, ...environment, ...plan.providerEnvironment, ABOARD_SESSION_ID: plan.sessionId, ABOARD_AGENT_ID: plan.agentId, ABOARD_AGENT_TYPE: plan.agentType, ABOARD_BRIDGE_PORT: String((bridge.address() as AddressInfo).port), ABOARD_BRIDGE_TOKEN: "fixture-bridge" }, windowsHide: true, stdio: ["ignore", "pipe", "pipe"] });
-      let stdout = ""; let size = 0;
+      let stdout = ""; let stderr = ""; let size = 0;
       const timer = setTimeout(() => { child.kill(); reject(new Error("Aboard Pi journey timed out")); }, 45_000);
       child.stdout.on("data", (data: Buffer) => { size += data.length; if (size > 4 * 1024 * 1024) { child.kill(); reject(new Error("Aboard Pi output bound exceeded")); } else stdout += data.toString(); });
-      child.stderr.resume();
+      child.stderr.on("data", (data: Buffer) => { size += data.length; if (size > 4 * 1024 * 1024) { child.kill(); reject(new Error("Aboard Pi output bound exceeded")); } else stderr += data.toString(); });
       child.once("error", () => { clearTimeout(timer); reject(new Error("Aboard Pi failed to start")); });
-      child.once("close", (code) => { clearTimeout(timer); const events = stdout.split(/\r?\n/u).filter(Boolean).map((line) => JSON.parse(line)); done({ code, status: summarizePiRun(events).status }); });
+      child.once("close", (code) => { clearTimeout(timer); const events = stdout.split(/\r?\n/u).filter(Boolean).map((line) => JSON.parse(line)); done({ code, status: summarizePiRun(events).status, createWarning: stderr.includes("No project session found") }); });
     });
   };
   try {
     const plan = platform.planLaunch({ ...common, agentType: "general", executionMode: "auto", configuration: configurations.delegationConfigurationFor("pi", "general").settings, restrictions: { deniedCommands: ["git checkout *"] }, prompt: "ABOARD_PI_JOURNEY" });
     const result = await execute(plan);
     assert.equal(result.code, 0); assert.equal(result.status, "success");
+    assert.equal(result.createWarning, false);
     assert.equal(await readFile(join(fixture.workspace.projectRoot, "result.txt"), "utf8"), "aboard Pi complete\n");
     assert.equal(observations.filter((e) => e.route === "/hooks/session-start").length, 1);
     assert.equal(observations.filter((e) => e.route === "/hooks/stop").length, 1);
     assert.equal(observations.filter((e) => e.route === "/hooks/stop-failure").length, 0);
     assert.equal(fixture.assertions().inferenceRequests, 3);
-    const resumed = platform.planSessionResume({ ...common, agentType: "general", executionMode: "auto", configuration: configurations.delegationConfigurationFor("pi", "general").settings, restrictions: { deniedCommands: ["git checkout *"] }, prompt: "ABOARD_PI_JOURNEY continue" });
+    const nativeSessionId = observations.find((e) => e.route === "/hooks/session-start")!.body.sessionId as SessionId;
+    assert.notEqual(nativeSessionId, sessionId);
+    const resumed = platform.planSessionResume({ ...common, sessionId: nativeSessionId, agentType: "general", executionMode: "auto", configuration: configurations.delegationConfigurationFor("pi", "general").settings, restrictions: { deniedCommands: ["git checkout *"] }, prompt: "ABOARD_PI_JOURNEY continue" });
     assert.equal((await execute(resumed)).status, "success");
     const forkId = randomUUID() as SessionId;
-    const fork = platform.planLaunch({ ...common, sessionId: forkId, forkSessionId: sessionId, agentType: "general", executionMode: "auto", configuration: configurations.delegationConfigurationFor("pi", "general").settings, prompt: "ABOARD_PI_JOURNEY fork" });
+    const fork = platform.planLaunch({ ...common, sessionId: forkId, forkSessionId: nativeSessionId, agentType: "general", executionMode: "auto", configuration: configurations.delegationConfigurationFor("pi", "general").settings, prompt: "ABOARD_PI_JOURNEY fork" });
     assert.equal((await execute(fork)).status, "success");
     assert.equal(observations.filter((e) => e.route === "/hooks/session-start" && e.body.sessionId === forkId).length, 1);
     const failed = platform.planLaunch({ ...common, agentId: "agent-failed" as AgentId, sessionId: randomUUID() as SessionId, agentType: "general", executionMode: "auto", configuration: configurations.delegationConfigurationFor("pi", "general").settings, prompt: "ABOARD_PI_FAILURE" });
@@ -159,10 +162,11 @@ export async function runPiSmoke(): Promise<void> {
         agentType: "general", executionMode: "auto", configuration: configurations.delegationConfigurationFor("pi", "general").settings,
         restrictions: { deniedCommands: ["git checkout *"] }, prompt: request.prompt } as const;
       const plan = request.resumeSessionId === undefined ? platform.planLaunch(launch) : platform.planSessionResume(launch);
-      launchedPlan = plan;
       launchedEnvironment = { ...environment, HARNESS_SESSION_ID: request.harnessSessionId, HARNESS_EXECUTION_ID: request.executionId, HARNESS_EXECUTION_MODE: request.executionMode };
       assert.equal((await execute(plan, [], launchedEnvironment, true)).status, "success");
-      return { agentId: plan.agentId, sessionId: plan.sessionId, terminalId: "durable-process" };
+      const canonical = observations.filter((event) => event.route === "/hooks/session-start" && event.body.agentId === plan.agentId).at(-1)!.body.sessionId as SessionId;
+      launchedPlan = platform.planSessionResume({ ...launch, sessionId: canonical });
+      return { agentId: plan.agentId, sessionId: canonical, terminalId: "durable-process" };
     };
     delegations = createDelegationRoutes({ launch: launchDelegation, resume: launchDelegation }, { workspaceRoot: fixture.workspace.projectRoot, stateDirectory: join(fixture.root, "bindings") });
     const beforeDelegation = fixture.assertions().inferenceRequests;

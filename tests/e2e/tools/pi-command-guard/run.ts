@@ -45,14 +45,14 @@ export async function runPiCommandGuardJourney(mode: "json" | "rpc", scope: "pro
     const project = fixture.workspace.projectRoot;
     await enableShell(project, shell);
     await runFixtureInstaller(fixture.workspace, "install", ["command-guard"], { scope, dryRun: true });
-    assert.equal(existsSync(join(project, ".pi", "harness", "pi-transport")), false);
+    assert.equal(existsSync(join(project, ".pi", "npm/node_modules/harness-pi-pi-transport", "harness", "pi-transport")), false);
     await runFixtureInstaller(fixture.workspace, "install", ["command-guard"], { scope });
     // Reinstall must preserve the policy below and stay idempotent.
     await runFixtureInstaller(fixture.workspace, "install", ["command-guard"], { scope });
     const platformRoot = scope === "project" ? join(project, ".pi") : fixture.workspace.agentDir;
     assert.equal(existsSync(join(project, ".pi", "hooks")), false);
     assert.equal(existsSync(join(fixture.workspace.agentDir, "hooks")), false);
-    await access(join(platformRoot, "harness", "pi-transport", "transport.ts"));
+    await access(join(platformRoot, "npm/node_modules/harness-pi-pi-transport", "harness", "pi-transport", "transport.ts"));
     assert.equal(await piLegacyDirectoryWarningCount(fixture.workspace), 0);
     const policy = scope === "project"
       ? join(project, ".harness", "guards", "command-guard.toml")
@@ -68,9 +68,9 @@ export async function runPiCommandGuardJourney(mode: "json" | "rpc", scope: "pro
     assert.equal(fixture.assertions().unexpectedRequests, 0);
 
     await runFixtureInstaller(fixture.workspace, "uninstall", ["command-guard"], { scope });
-    await assert.rejects(access(join(platformRoot, "extensions", "harness-command-guard", "index.ts")));
-    await assert.rejects(access(join(platformRoot, "harness", "command_guard_pi.py")));
-    await assert.rejects(access(join(platformRoot, "harness", "pi-transport", "transport.ts")));
+    await assert.rejects(access(join(platformRoot, "npm/node_modules/harness-pi-command-guard", "extensions", ".harness-command-guard", "index.ts")));
+    await assert.rejects(access(join(platformRoot, "npm/node_modules/harness-pi-command-guard", "harness", "command_guard_pi.py")));
+    await assert.rejects(access(join(platformRoot, "npm/node_modules/harness-pi-pi-transport", "harness", "pi-transport", "transport.ts")));
     assert.equal(await readFile(policy, "utf8"), POLICY);
     return { version: fixture.version, mode, scope, status: run.status, inferenceRequests: steps.length + 1 };
   } finally {

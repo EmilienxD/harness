@@ -2,7 +2,7 @@
 
 Grill-Me board is a private, self-hosted review surface for decisions raised during an agent conversation. An agent publishes a round of questions, the board keeps those rounds available across devices, and the user answers them before reviewing one compact prompt to return to the originating conversation.
 
-The board is designed for one person. It uses a shared four-digit access code instead of accounts, stores its data and private images in Supabase, and runs as a Vercel application. Pi's native cloud extension and Aboard can relay a reviewed prompt to the exact provider session; copying the prompt always remains available.
+The board is designed for one person. It uses a shared four-digit access code instead of accounts, stores its data and private images and videos in Supabase, and runs as a Vercel application. Pi's native cloud extension and Aboard can relay a reviewed prompt to the exact provider session; copying the prompt always remains available.
 
 ## What the board does
 
@@ -11,7 +11,7 @@ The board is designed for one person. It uses a shared four-digit access code in
 - Shows one question at a time, including the agent's explanation, recommendation, and optional interactive content.
 - Accepts an option, a note, or a custom answer. Every edit saves automatically and is included in the prompt.
 - Produces a read-only prompt that can be copied, sent through Aboard, or sent to Pi when its session relay is connected. Pi claims answers only while idle and confirms receipt from its saved session.
-- Keeps unfinished sessions indefinitely. Finishing a session moves it to the archive and starts a 30-day period before the daily cleanup removes its data and stored images. Finished sessions can be restored during that period, and a newly published round restores its session automatically.
+- Keeps unfinished sessions indefinitely. Finishing a session moves it to the archive and starts a 30-day period before the daily cleanup removes its data and stored media. Finished sessions can be restored during that period, and a newly published round restores its session automatically.
 
 ## Default hosted board
 
@@ -83,6 +83,16 @@ For Pi, install Harness's `grill-me-in-cloud` package with `--platform pi`, relo
 
 When upgrading an existing board for Pi, apply `20261014120000_add_pi_grill_relay.sql` before deploying the app. It widens provider constraints, adds snapshot idempotency for Pi, and extends the shared claim function with native round binding and recovery of an owner's outstanding claims. `GET /api/v1/capabilities` lets the extension reject older services before inference. Existing Claude/ChatGPT session identities and delivery status values remain compatible.
 
+## Video previews
+
+Videos publish like images: put an MP4 or WebM file in the round's supplied assets directory, reference it in the explanation, then write the round JSON last. The board shows an inline player with native controls, supports optional poster images, and pauses playback when switching questions. Playback remains in place while answers save and the board polls.
+
+The local publisher checks for `ffmpeg` on PATH only when publishing a video. It uses that installed executable to prepare clips up to 720p and 30 fps (H.264/AAC MP4 or VP9/Opus WebM), preserving the original files. FFmpeg is not bundled, downloaded, or run on Vercel. Images work without it. Target clips under one minute; source and prepared videos are limited to 20 MiB each, images to 6 MiB, and a round to 50 MiB / 20 assets.
+
+Uploads go directly to the existing private Supabase bucket. After authenticating the viewer, the app redirects video playback to a signed Storage URL valid for one hour, so seeking and video bytes bypass Vercel functions. Anyone with that temporary URL can use it until expiry. The board renews an expired playback URL when loading fails. Existing session deletion and 30-day finished-session cleanup include videos; unfinished sessions retain their media indefinitely.
+
+For an existing personal deployment, apply `20261021120000_add_video_assets.sql` with `supabase db push`, then deploy the updated app and upgrade the local `grill-me-in-cloud` package. No additional service, account, or environment variable is required.
+
 ## Local development
 
 Copy `.env.example` to `.env`, replace every placeholder, and point it at a development Supabase project. Then run:
@@ -101,6 +111,7 @@ local secret key from `npx supabase status`. Grill reserves ports 55420–55429 
 Useful checks are:
 
 ```sh
+npm test
 npm run build
 npm run lint
 ```

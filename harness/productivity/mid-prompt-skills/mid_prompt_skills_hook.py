@@ -267,8 +267,12 @@ def main() -> int:
         print(json.dumps(handle(json.load(sys.stdin), provider) or {}))
         return 0
     except Exception as error:
-        print(str(error), file=sys.stderr)
-        return 1
+        message = f"Required skill instructions could not be loaded ({type(error).__name__}): {error}"
+        if "--chatgpt" in sys.argv[1:]:
+            print(json.dumps({"decision": "block", "reason": message}))
+            return 0
+        print(message, file=sys.stderr)
+        return 2
 
 
 if __name__ == "__main__":

@@ -1,5 +1,5 @@
 name = "commit"
-version = "1.7.2"
+version = "1.7.4"
 description = "Zero-model-turn /commit with native Pi branch attribution and shared Git/message generation"
 requires = ["git"]
 dependencies = [{ name = "pi-transport", version = ">=1.0.0,<2.0.0", lifecycle = "coupled", platforms = ["pi"] }]
@@ -21,7 +21,7 @@ status = "supported"
 
 [[files]]
 src = "pi/extension.ts"
-dest = "harness-commit/index.ts"
+dest = ".harness-commit/index.ts"
 root = "extensions"
 platforms = ["pi"]
 

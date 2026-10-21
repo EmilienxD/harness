@@ -34,8 +34,9 @@ PROVIDER = CLAUDE
 
 
 def _config_sources(root: Path) -> list[Path]:
+    personal = Path(os.environ.get("HARNESS_PI_SUPPORT_DIR", Path(__file__).parent)) / CONFIG_NAME
     candidates = [
-        Path(__file__).with_name(CONFIG_NAME),
+        personal if personal.is_file() else Path(__file__).with_name(CONFIG_NAME),
         Path.home() / ".harness" / "guards" / CONFIG_NAME,
         root / ".harness" / "guards" / CONFIG_NAME,
     ]
@@ -258,11 +259,15 @@ def draft_guidance(path: str, root: Path, provider: str) -> str:
 
 
 def _deny(path: str, root: Path) -> None:
+    _deny_reason(draft_guidance(path, root, PROVIDER))
+
+
+def _deny_reason(reason: str) -> None:
     print(json.dumps({
         "hookSpecificOutput": {
             "hookEventName": "PreToolUse",
             "permissionDecision": "deny",
-            "permissionDecisionReason": draft_guidance(path, root, PROVIDER),
+            "permissionDecisionReason": reason,
         }
     }))
 
@@ -303,28 +308,30 @@ def new_document(
 def guard_tool(payload: dict[str, Any]) -> int:
     tool_input = payload.get("tool_input")
     if not isinstance(tool_input, dict):
-        return 0
+        raise ValueError("file action must contain tool_input")
     tool_name = payload.get("tool_name")
+    if not isinstance(tool_name, str):
+        raise ValueError("file action must contain a tool name")
     root = _root(payload)
     candidates: list[str] = []
     if tool_name == "Write":
         file_path = tool_input.get("file_path")
-        if isinstance(file_path, str) and file_path:
-            candidates.append(file_path)
+        if not isinstance(file_path, str) or not file_path:
+            raise ValueError("Write input must contain a file path")
+        candidates.append(file_path)
     elif tool_name == "apply_patch":
         command = tool_input.get("command") or tool_input.get("patch")
-        if isinstance(command, str):
-            candidates.extend(match.group(1).strip() for match in ADD_FILE.finditer(command))
+        if not isinstance(command, str):
+            raise ValueError("apply_patch input must contain a patch")
+        candidates.extend(match.group(1).strip() for match in ADD_FILE.finditer(command))
     elif tool_name in {"Bash", "PowerShell"}:
         command = tool_input.get("command")
-        if isinstance(command, str):
-            candidates.extend(_shell_candidates(command, root))
+        if not isinstance(command, str):
+            raise ValueError("shell input must contain a command")
+        candidates.extend(_shell_candidates(command, root))
     if not candidates:
         return 0
-    try:
-        patterns = _configuration(root)
-    except (OSError, UnicodeError, tomllib.TOMLDecodeError, ValueError):
-        return 0
+    patterns = _configuration(root)
     path = new_document(candidates, root, patterns)
     if path is not None:
         _deny(path, root)
@@ -555,15 +562,20 @@ def handle_prompt(payload: dict[str, Any]) -> int:
 def main() -> int:
     global PROVIDER
     PROVIDER = PI if "--pi" in sys.argv[1:] else CHATGPT if "--" + CHATGPT in sys.argv[1:] else CLAUDE
+    payload = {}
     try:
         payload = json.load(sys.stdin)
-    except (json.JSONDecodeError, OSError):
+        if not isinstance(payload, dict):
+            raise ValueError("hook input must be a JSON object")
+        if payload.get("hook_event_name") == "UserPromptSubmit":
+            return handle_prompt(payload)
+        return guard_tool(payload)
+    except Exception as error:
+        reason = f"Document guard could not check this action ({type(error).__name__}): {error}"
+        if isinstance(payload, dict) and payload.get("hook_event_name") == "UserPromptSubmit":
+            return _block_prompt(reason)
+        _deny_reason(reason)
         return 0
-    if not isinstance(payload, dict):
-        return 0
-    if payload.get("hook_event_name") == "UserPromptSubmit":
-        return handle_prompt(payload)
-    return guard_tool(payload)
 
 
 if __name__ == "__main__":

@@ -1,0 +1,21 @@
+name = "environment-context"
+version = "1.0.0"
+description = "Add OS, fixed session-start time, and compact Git status with full file counts to Pi context"
+docs = "https://github.com/EmilienxD/harness/blob/main/README.md#environment-context"
+
+[platforms.claude]
+status = "unsupported"
+reason = "Adds structured context through Pi's native extension API only."
+
+[platforms.chatgpt]
+status = "unsupported"
+reason = "Adds structured context through Pi's native extension API only."
+
+[platforms.pi]
+status = "supported"
+
+[[files]]
+src = "pi/extension.ts"
+dest = ".harness-environment-context/index.ts"
+root = "extensions"
+platforms = ["pi"]

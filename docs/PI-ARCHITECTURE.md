@@ -15,6 +15,43 @@ This is a design baseline, not runtime certification. Before implementation, ver
 Pi exports and CLI against that baseline and record the version used for acceptance checks.
 Rolling reference refreshes do not widen the supported runtime range automatically.
 
+Harness extension and helper packages use one native npm identity per catalogue tool.
+Harness builds a complete npm archive containing the extension, skills and required helper
+code, then runs `pi install npm:harness-pi-<tool>@file:<absolute archive>` (`--local --approve`
+for projects). Pi installs the package under `<platform>/npm/node_modules/harness-pi-<tool>/`
+and manages its npm metadata. Removal runs `pi remove` for the receipt-owned source.
+The archive is an installation source in the immutable, content-addressed `pi-packages/`
+cache beside the receipt store. Retain it after uninstall because copied worktrees can still
+reference it. There is no second archive under the Pi configuration directory.
+
+Manifest resource paths stay inside the package and remain relative. Required helper code
+is bundled from the selected dependency versions so direct Pi installation works independently
+of Harness's file copier. Updating a helper rebuilds its installed consumers. Editable policy
+starters remain outside npm storage: project policies under `.harness/guards/` and personal
+Pi policies under `<agent-dir>/harness/`. Python transport supplies that personal policy
+location through `HARNESS_PI_SUPPORT_DIR`; helpers fall back to bundled defaults.
+
+The subagent toolkit is a separate, coupled skill dependency (`pi-subagents-toolkit`). It
+installs its canonical skill and task registry under conventional `skills/subagents-toolkit/`,
+where both Pi and the independent Python runtime read them. The subagent npm package contains
+the extension and remaining skills; it has no duplicate toolkit copy. Harness removes the
+companion skill when no installed consumer requires it, as it does other shared skill dependencies.
+The current subagent runtime pin predates the extension's `inbox_scan` operation. Checkout-runtime
+acceptance passes, while four shipped-pin journeys require publishing and pinning the existing
+runtime changes from local commit `ba136dd`; native npm packaging does not resolve that release gap.
+
+Pi selects a trusted project package over the matching user npm identity before binding tools,
+commands and event handlers. Unrelated user packages remain loaded. Plain local package paths
+have distinct absolute-path identities even when their manifests share a name. Honor native
+package trust and resource filters, preserve filters through upgrades, and retain declarations
+that predate Harness installation. The native package precedence journey verifies reload,
+copied checkouts, local-only updates, direct Pi install/remove, disabled or untrusted projects,
+and user fallback. This layout assumes fresh Pi installations and provides no migration path.
+
+Aboard lets Pi assign fresh-session IDs and binds the observed ID through its authenticated
+startup lifecycle. Resume and fork retain explicit IDs. This avoids Pi 1.2.0's warning when
+`--session-id` creates an intentionally new session, without filtering provider diagnostics.
+
 The [Pi E2E implementation guide](../tests/e2e/README.md) describes the implemented JSON/RPC
 fixture, which reuses the fake OpenAI Responses endpoint and isolated Pi configuration. It was
 verified against installed Pi 1.2.0. The first tool journey installs the actual catalogue package,
@@ -124,10 +161,10 @@ browser profile and daemon identity are isolated from personal installations.
 `calm` additionally ships a Pi-only presentation extension in
 `harness/productivity/calm/`. Its `/calm` command persists an agent-directory preference
 without inference. It hides all tool rows and collapsed thinking labels while retaining
-Pi's normal running indicator. Version 1.2.0 shows the latest requested/executing tool's name
-and command/path in a transient chat block. Version 1.6.0 keeps each displayed call visible
-through execution and for three seconds after its completion, coalesces rapid updates to the latest
-call, and defers request/settlement clearing until that hold elapses. Native tool completion events
+Pi's normal running indicator. Version 1.9.0 shows every requested/executing tool's name
+and command/path in its own transient chat block, including parallel and nested calls.
+Each block stays visible through execution and disappears independently three seconds after
+completion; provider requests and agent settlement preserve these holds. Native tool completion events
 replace the spinner with a green success or red failure dot. Timers never delay tool execution and are cancelled on session
 replacement, reload and shutdown. The local fork preserves the upstream MIT license and carries
 Pi 1.2.0 renderer-copy compatibility plus native PowerShell coverage. Since 1.8.0, the common
@@ -140,17 +177,28 @@ reasoning expansion, image preservation and reload against the installed Pi SDK.
 `harness/productivity/background-shell/`. It overrides `bash` and Windows `powershell` with
 an explicit `run_in_background` parameter, reuses Pi's native shell resolution and execution,
 and owns bounded job receipts/logs, cancellation, and automatic completion messages.
-Version 2.0.0 automatically moves foreground commands to the background when their wait limit
-expires (`timeout`, default 120 seconds), preserving the running process and output from launch.
-`execution_timeout` sets an optional hard deadline from launch, including time after handoff;
-explicitly backgrounded commands retain their optional hard `timeout` deadline.
+Foreground commands automatically move to the background after a configurable limit
+(`backgroundShell.foregroundTimeout` in Pi settings, default 120 seconds), preserving the running
+process and output from launch. The agent-visible `timeout` is a hard deadline from launch in
+either mode: at or below the foreground limit the command is cancelled without handoff, above it
+the same deadline cancels the background job. Version 2.2.0 removed `execution_timeout`.
+Version 3.0.1 sends completions as steering with idle wake-up, so busy tasks receive them at
+the next agent-loop boundary rather than after final settlement. Executing tool batches are
+not interrupted; the agent should end its response when only background work remains.
+Version 3.0.0 replaces the action-based `shell_job` tool with ID-required
+`get_background_shell_status` (optional `show_output`) and `cancel_background_shell`. Six-hex-character
+IDs are collision-checked within the live session. User-started turns receive a hidden running-count
+reminder when jobs remain; custom completion turns do not. There is no agent listing tool.
 Version 2.1.0 adds optional job titles, a running count, compact completion rendering and `/ps`.
 Its bounded selector/output panel replaces the editor beneath one separator, restoring the
 previous editor and draft on close. Native fullscreen chat paging is disabled in memory only
 while the menu is open; the panel handles Page Up/Down and normalized wheel events over its
-output. Cancelled rows disappear on reopening. Final tool results consume pending notifications;
-failed submissions retain their receipts for capped retries and settlement-triggered delivery.
-It has no npm or shared Python dependency and installs through ordinary extension file mappings,
+output. Cancelled rows disappear on reopening. Final tool results consume extension-pending
+notifications, not messages already queued in Pi. Submission and session delivery are distinct
+`notification_state` values, with `message_end` confirming session delivery. Only synchronous
+submission rejections are retried with capped backoff and on settlement; Pi's void send API
+exposes no per-message asynchronous failure result. Ambiguous submissions are not blindly resent.
+It has no runtime npm or shared Python dependency and installs as a native Pi npm package,
 without instruction or configuration fragments. Background jobs are scoped to the live session;
 reload, tree navigation, session changes, and shutdown cancel jobs and discard logs.
 Command guards still evaluate the original shell call; background receipts are not completed
@@ -166,6 +214,24 @@ expand skill bodies. Real Pi 1.2.0 project JSON and user RPC journeys against th
 endpoint verify resource precedence, configured and explicit-only skills, exact request counts,
 reference reads/writes, image preservation, failure handling, and receipt-driven removal.
 See `tests/e2e/tools/pi-mid-prompt-skills/`.
+
+`file-mentions` additionally ships a Pi-only input extension in 1.2.0, outside the original
+backlog. User `@path` references append escaped file/directory containers with absolute paths,
+per-message canonical-path deduplication, fresh UTF-8 file bytes, bounded shallow directory
+samples and explicit unavailable/omitted metadata. A native user-Markdown transformer hides the
+snapshot in the interactive transcript, leaving the original user block unchanged. Live user
+`message_end` events emit relative-path loaded/skipped/truncated statuses through Pi's native
+grey info notifications after the user block. Rendering and history replay never emit notifications.
+Model context and stored snapshots retain the content; old 1.0 snapshots also receive content
+hiding on replay. Real installed user-message component checks cover hidden contents, unchanged
+user blocks, relative labels, special characters and reload. RPC checks verify native info
+notification payloads and their ordering after user-message start. Code examples
+and expanded skill/context blocks are excluded; input text/images are preserved. Limits are
+20 reference spellings, 256 KiB per file, 1 MiB aggregate raw content and 100 entries/16 KiB per
+listing. These extension-owned reads are not tool-outcome evidence for path guards. Real Pi
+1.2.0 project/user JSON and RPC journeys verify resource bytes/paths, fresh content, directory
+bounds, skips, native receipt writes, exact inference counts and receipt-driven removal.
+See `tests/e2e/tools/pi-file-mentions/`.
 
 `slash-command-guard` additionally ships a Pi-only input extension in 1.0.0, outside the
 original backlog. Native UI and extension commands dispatch before its input handler;
@@ -215,9 +281,9 @@ without adding it to an existing installation's selections automatically.
 | Logical destination | Project installation | User installation |
 | --- | --- | --- |
 | `platform` | `<project>/.pi` | `<agent-dir>` |
-| `skills` | `.pi/skills` | `<agent-dir>/skills` |
-| `extensions` | `.pi/extensions` | `<agent-dir>/extensions` |
-| `support` (Python/TypeScript helpers and user policy starters) | `.pi/harness` | `<agent-dir>/harness` |
+| `skills` (skill-only tools) | `.pi/skills` | `<agent-dir>/skills` |
+| Packaged `extensions`, `skills`, `support` | `.pi/npm/node_modules/harness-pi-<tool>/{extensions,skills,harness}` | `<agent-dir>/npm/node_modules/harness-pi-<tool>/{extensions,skills,harness}` |
+| Editable user policy starters | Project policies use `workspace` | `<agent-dir>/harness` |
 | `workspace` (shared policies) | `<project>/.harness/...` | Existing user Harness configuration paths |
 
 `<agent-dir>` defaults to `~/.pi/agent` and respects `PI_CODING_AGENT_DIR`, as documented in
@@ -232,10 +298,8 @@ the first tool journey verifies that separation. A Pi user receipt also records 
 namespace, keeping it separate from a project rooted in the same agent directory.
 Claude/ChatGPT receipt identities are unchanged.
 
-The table describes the intended full layout. The current slice supports skill and extension payloads without
-configuration fragments. Pi user `workspace` payloads and configuration fragments explicitly
-fail until shared-workspace ownership and native settings reconciliation are implemented;
-the three path guards keep user starters beside helpers rather than using user workspace mappings.
+Pi user `workspace` payloads remain unsupported. User policy starters use the external
+`support` destination; executable helpers use the package-internal `harness/` directory.
 
 Source packages retain their root-level shared skill/core files and shallow `pi/` overlays:
 
@@ -250,11 +314,14 @@ harness/<category>/<tool>/
 
 Installed Pi resources:
 .pi/skills/<skill>/SKILL.md
-.pi/extensions/harness-<tool>/index.ts
-.pi/harness/<tool>_hook.py
-.pi/harness/pi-transport/transport.ts
-.pi/harness/pi-path-guards/path_guards.ts and path_guards.py
-.pi/harness/pi-issue-workflows/workflows.ts
+.pi/npm/node_modules/harness-pi-<tool>/
+    package.json
+    extensions/.harness-<tool>/index.ts
+    skills/<skill>/SKILL.md
+    harness/<tool>_hook.py
+    harness/pi-transport/transport.ts
+    harness/pi-path-guards/path_guards.ts and path_guards.py
+    harness/pi-issue-workflows/workflows.ts
 ```
 
 The file mappings install the entry point as `index.ts`; source overlays never appear inside
@@ -264,17 +331,12 @@ Map only each skill's shared files, excluding ChatGPT metadata. Prefer Pi-owned 
 and Claude symlink installations. Use startup diagnostics to identify the selected skill source.
 Do not silently disable the user's own shared skill discovery.
 
-Use conventional resource directories for the first release; most packages need no Pi settings
-fragment. Before adding fragments, move configuration addition/shared-removal accounting behind
-the adapter: `installer.py` currently calls `settings_merge.additions` and `remove_shared`
-directly. Pi settings resource filters and package objects need native identity semantics, not
-Claude hook-array reconciliation. Preserve unrelated resource filters, models, tools, and settings.
-Harness must not own Pi authentication, trust decisions, native sessions, or unrelated extensions.
-[Pi Packages](PI-REFERENCES/docs/packages.md) remain an optional later distribution format;
-Harness continues to own the files it installs rather than introducing a second installer owner.
-
-Pi itself is an external prerequisite for this release. The current host-action schema supports
-pinned Python tools and VSIXs; adding npm/CLI ownership would be a separate design change.
+Pi owns package installation, removal and npm metadata. Harness records selected sources,
+merges resource filters, manages editable starters and host actions, and restores local files
+and settings if a native command fails. Preserve unrelated models, tools and settings.
+Harness must not own Pi authentication, native sessions or unrelated extensions.
+See [Pi Packages](PI-REFERENCES/docs/packages.md) for the native lifecycle and identity rules.
+Pi itself remains an external prerequisite.
 
 ## Shared Pi support and Python reuse
 
@@ -401,7 +463,7 @@ session replacement, invalidate stale round context after branch navigation, can
 shutdown, and preserve queued answers on disconnect, failed submission, or loss of ownership.
 Keep current configuration/credentials outside model-facing context.
 
-This requires additive `pi` support in [`protocol/grill/v1/states.json`](../protocol/grill/v1/states.json),
+This requires additive `pi` support in [`docs/protocol/grill/v1/states.json`](protocol/grill/v1/states.json),
 hosted schemas/API validation, Pi session/title extraction, and a **new** database migration
 widening existing provider constraints. Do not rewrite the initial migration. A publication-only
 port is incomplete: round publication, assets, presence, queued answers, and confirmed delivery
@@ -702,7 +764,7 @@ at 2 MiB and ten seconds, with cancellation on session replacement/shutdown. Gua
 errors deny native edits; reminder errors append diagnostics while preserving successful results.
 Original tool content and structured output are preserved.
 
-User policy starters live beside Python helpers under `<PI_CODING_AGENT_DIR>/harness/`
+User policy starters live outside npm packages under `<PI_CODING_AGENT_DIR>/harness/`
 (default `~/.pi/agent/harness/`). This avoids
 adding user workspace ownership to this slice. Shared home and project policies still load later.
 Branch receipts record observed ranges and content digests, complete denial deliveries, and
@@ -777,7 +839,7 @@ blocks covered calls. Native approval/rejection and their `/skill:` forms make z
 Publication uses exclusive hard-link creation followed by draft removal, so an existing destination
 cannot be overwritten by a concurrent approval. Unsupported hard links leave the draft for correction.
 Native custom messages persist outcomes on the active branch; current pending drafts are refreshed
-from disk before model turns. Pi user policy starters live beside the installed helpers in `harness/`; shared home and
+from disk before model turns. Pi user policy starters live outside npm packages in `<agent-dir>/harness/`; shared home and
 project policies also apply. Arbitrary scripts, third-party mutators, trusted extension command dispatch
 and direct extension I/O remain outside the protection boundary.
 
@@ -865,12 +927,13 @@ Delivery follows these boundaries:
    can recover its own outstanding claim. Credentials travel only through internal transport.
 2. An external atomic journal binds a random persistent instance ID to the exact session file.
    A process lock excludes simultaneous resumptions; dead-process reclamation is serialized.
-   Before submission it records the delivery ID, round, content hash and activation identity.
+   Before submission it records the delivery ID, round, content hash, last session entry ID and activation identity.
    Only one user message is submitted per tick, because asynchronous input preflight can delay
    Pi's busy state. Slash/skill expansion is disabled for answers.
-3. The injected user message carries a delivery correlation marker. Acknowledgement requires
-   a matching persisted user entry in the exact JSONL file, with the native session header and
-   complete content hash checked. A custom session receipt links the delivery to that entry.
+3. The injected user message is exactly the reviewed board prompt. Acknowledgement requires
+   a matching persisted user entry after the recorded session entry in the exact JSONL file,
+   with the native session header and complete content hash checked. A custom session receipt
+   links the delivery to that entry without adding metadata to the user message.
    Reload can acknowledge an accepted message after an outage without resending it. An
    in-memory matching user message also prevents resubmission while awaiting persistence.
 4. Shutdown, reload, new/fork and tree navigation stop the old relay and abort transport.

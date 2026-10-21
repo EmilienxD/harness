@@ -9,6 +9,8 @@ export const MEDIA_TYPES = [
   "image/gif",
   "image/avif",
   "image/svg+xml",
+  "video/mp4",
+  "video/webm",
 ] as const;
 
 export const optionSchema = z.object({
@@ -43,16 +45,22 @@ export const roundPayloadSchema = z
     if (new Set(ids).size !== ids.length) context.addIssue({ code: "custom", message: "Question IDs must be unique" });
   });
 
-export const assetManifestSchema = z.object({
-  reference: z.string().min(1),
-  media_type: z.enum(MEDIA_TYPES),
-  byte_size: z
-    .number()
-    .int()
-    .positive()
-    .max(6 * 1024 * 1024),
-  sha256: z.string().regex(/^[a-f0-9]{64}$/i),
-});
+export const MAX_IMAGE_BYTES = 6 * 1024 * 1024;
+export const MAX_VIDEO_BYTES = 20 * 1024 * 1024;
+export const MAX_ROUND_BYTES = 50 * 1024 * 1024;
+
+export const assetManifestSchema = z
+  .object({
+    reference: z.string().min(1),
+    media_type: z.enum(MEDIA_TYPES),
+    byte_size: z.number().int().positive().max(MAX_VIDEO_BYTES),
+    sha256: z.string().regex(/^[a-f0-9]{64}$/i),
+  })
+  .superRefine((asset, context) => {
+    if (!asset.media_type.startsWith("video/") && asset.byte_size > MAX_IMAGE_BYTES) {
+      context.addIssue({ code: "custom", path: ["byte_size"], message: "Images cannot exceed 6 MiB" });
+    }
+  });
 
 export const publicationSchema = z
   .object({
@@ -70,8 +78,8 @@ export const publicationSchema = z
     assets: z.array(assetManifestSchema).max(20).default([]),
   })
   .superRefine((publication, context) => {
-    if (publication.assets.reduce((total, asset) => total + asset.byte_size, 0) > 24 * 1024 * 1024) {
-      context.addIssue({ code: "custom", message: "Round assets exceed 24 MiB" });
+    if (publication.assets.reduce((total, asset) => total + asset.byte_size, 0) > MAX_ROUND_BYTES) {
+      context.addIssue({ code: "custom", message: "Round assets exceed 50 MiB" });
     }
     if (new Set(publication.assets.map((asset) => asset.reference)).size !== publication.assets.length) {
       context.addIssue({ code: "custom", message: "Asset references must be unique" });

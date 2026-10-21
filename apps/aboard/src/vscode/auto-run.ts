@@ -11,6 +11,7 @@ import type { AutoRunState } from "../auto/engine.js";
 import { currentPhase } from "../auto/engine.js";
 import type { AutoRunDryRunResult, PlannedIssue, SkippedIssue } from "../domain/auto-run.js";
 import { formatTimestamp } from "../shared/time.js";
+import { sessionTitleLabel } from "../domain/session-title.js";
 
 export type AutoRunPreview = Extract<AutoRunDryRunResult, { readonly inspected: true }>;
 
@@ -103,7 +104,7 @@ export type AutoRunCard =
 
 export type AutoRunNode =
   | { readonly kind: "card"; readonly card: AutoRunCard }
-  | { readonly kind: "issue"; readonly issue: FrozenIssue; readonly progress: IssueProgress; readonly title: string; readonly handoff?: { readonly type: "address" | "review"; readonly agentId: string }; readonly workingBranch: string }
+  | { readonly kind: "issue"; readonly issue: FrozenIssue; readonly progress: IssueProgress; readonly title: string; readonly handoff?: { readonly type: "address" | "review"; readonly agentId: string; readonly title?: string }; readonly workingBranch: string }
   | { readonly kind: "forecast-issue"; readonly issue: PlannedIssue; readonly position: number; readonly total: number; readonly branchMode: "per-issue" | "single-branch" };
 
 export interface AutoRunTreeItem {
@@ -125,7 +126,8 @@ export interface AutoRunViewSources {
   /** Live issue titles, for display only; the plan's frozen titles do the work. */
   readonly titles: () => Readonly<Record<string, string>>;
   /** The live worker conversation currently available as this issue's handoff. */
-  readonly liveHandoff?: (issueNumber: number) => { readonly type: "address" | "review"; readonly agentId: string } | undefined;
+  readonly liveHandoff?: (issueNumber: number) => { readonly type: "address" | "review"; readonly agentId: string; readonly title?: string } | undefined;
+  readonly sessionTitle?: (sessionId: string) => string | undefined;
 }
 
 export function autoRunCard(sources: AutoRunViewSources): AutoRunCard {
@@ -210,13 +212,13 @@ export class AutoRunTreeModel {
   }
 
   public item(node: AutoRunNode): AutoRunTreeItem {
-    if (node.kind === "card") return cardItem(node.card);
+    if (node.kind === "card") return cardItem(node.card, this.sources.sessionTitle);
     return node.kind === "issue" ? issueItem(node) : forecastIssueItem(node);
   }
 }
 
 // The card reports state; its actions belong exclusively in the inline menu.
-function cardItem(card: AutoRunCard): AutoRunTreeItem & { readonly command?: never } {
+function cardItem(card: AutoRunCard, titleFor?: (sessionId: string) => string | undefined): AutoRunTreeItem & { readonly command?: never } {
   switch (card.kind) {
     case "idle":
       return {
@@ -291,7 +293,7 @@ function cardItem(card: AutoRunCard): AutoRunTreeItem & { readonly command?: nev
       return {
         label: `Auto-run ${record.runId}`,
         description: `Waiting for acceptance commit · issue #${state.currentIssue ?? "?"}`,
-        tooltip: `${runTooltip(record, state)}${waitingHandoff(record, state.currentIssue)}\n\nCreate exactly one non-empty commit containing all accepted changes; Aboard continues automatically once the checkout is clean.`,
+        tooltip: `${runTooltip(record, state)}${waitingHandoff(record, state.currentIssue, titleFor)}\n\nCreate exactly one non-empty commit containing all accepted changes; Aboard continues automatically once the checkout is clean.`,
         icon: "person",
         contextValue: "aboard.autoRun.waiting",
         collapsible: true,
@@ -342,7 +344,7 @@ function issueItem(node: Extract<AutoRunNode, { kind: "issue" }>): AutoRunTreeIt
       issue.difficulty === undefined ? "Difficulty: unrated" : `Difficulty: ${issue.difficulty}`,
       issue.chrome === true ? "Chrome browser: required by [AI]-chrome" : "",
       `Branch: ${node.workingBranch}`,
-      handoff === undefined ? "" : `Handoff session: ${handoff.type} ${handoff.agentId}`,
+      handoff === undefined ? "" : `Handoff session: ${sessionTitleLabel(handoff.title ?? title)}`,
       issue.dependsOn.length === 0 ? "" : `Depends on ${issue.dependsOn.map((number) => `#${number}`).join(", ")}`,
     ].filter(Boolean).join("\n"),
     // Row clicks are terminal-only. Pending issues therefore do nothing, while
@@ -375,11 +377,11 @@ function forecastIssueItem(node: Extract<AutoRunNode, { kind: "forecast-issue" }
   };
 }
 
-function waitingHandoff(record: AutoRunRecord, issueNumber: number | undefined): string {
+function waitingHandoff(record: AutoRunRecord, issueNumber: number | undefined, titleFor?: (sessionId: string) => string | undefined): string {
   const worker = record.workerSession;
   return worker === undefined || worker.issueNumber !== issueNumber || (worker.type !== "address" && worker.type !== "review")
     ? ""
-    : `\n\nHandoff session: ${worker.type} ${worker.agentId} (${worker.sessionId}).`;
+    : `\n\nHandoff session: ${sessionTitleLabel(titleFor?.(worker.sessionId) ?? `Issue #${issueNumber}`)}.`;
 }
 
 function forecastTooltip(forecast: AutoRunForecast & { readonly preview: AutoRunPreview }): string {

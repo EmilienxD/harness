@@ -29,7 +29,7 @@ export async function runPiCalmJourney(scope: "project" | "user") {
   try {
     const { workspace } = fixture;
     const resources = scope === "project" ? join(workspace.projectRoot, ".pi") : workspace.agentDir;
-    const extension = join(resources, "extensions", "harness-calm", "index.ts");
+    const extension = join(resources, "npm/node_modules/harness-pi-calm", "extensions", ".harness-calm", "index.ts");
     const preference = join(workspace.agentDir, "calm");
     const settings = join(workspace.projectRoot, ".pi", "settings.json");
     const before = await readFile(settings, "utf8");
@@ -66,10 +66,10 @@ export async function runPiCalmJourney(scope: "project" | "user") {
         cwd: workspace.projectRoot, env: workspace.env, windowsHide: true, timeout: 30_000,
       });
     }
-    assert.equal(await readFile(settings, "utf8"), before);
     assert.equal(fixture.assertions().inferenceRequests, 3);
     assert.equal(fixture.assertions().unexpectedRequests, 0);
     await runFixtureInstaller(workspace, "uninstall", ["calm"], { scope });
+    assert.deepEqual(JSON.parse(await readFile(settings, "utf8")), JSON.parse(before));
     await assert.rejects(access(extension));
     assert.equal(await readFile(preference, "utf8"), "on\n");
     return { version: fixture.version, scope, inferenceRequests: 3 };

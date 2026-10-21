@@ -26,7 +26,7 @@ def select_jobs(paths: list[str] | None) -> dict[str, bool]:
     return {
         "python": any(
             path in DEPENDENCIES
-            or path.startswith(("src/", "harness/", "scripts/", "protocol/", "apps/aboard/assets/runtime/"))
+            or path.startswith(("src/", "harness/", "scripts/", "apps/aboard/assets/runtime/"))
             or (path.startswith("tests/") and not path.startswith("tests/e2e/"))
             for path in paths
         ),
@@ -38,7 +38,7 @@ def select_jobs(paths: list[str] | None) -> dict[str, bool]:
         ),
         "shared_e2e": any(
             path in DEPENDENCIES
-            or path.startswith(("src/", "harness/", "protocol/", "tests/e2e/"))
+            or path.startswith(("src/", "harness/", "tests/e2e/"))
             for path in paths
         ),
     }

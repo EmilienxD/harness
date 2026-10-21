@@ -15,7 +15,9 @@ test("ChatGPT resumability reads the exact thread through the configured Codex c
   const probe = new ChatGptSessionProbe({
     exchange: async (request) => {
       calls.push(request);
-      return { thread: { id: sessionId, ephemeral: false, status: { type: "notLoaded" } } };
+      return request.method === "thread/read"
+        ? { thread: { id: sessionId, ephemeral: false, status: { type: "notLoaded" } } }
+        : { data: [{ items: [{ type: "userMessage", content: [{ type: "text", text: "Repair login" }] }] }] };
     },
   });
 
@@ -25,7 +27,28 @@ test("ChatGPT resumability reads the exact thread through the configured Codex c
     cwd: "C:/work",
     method: "thread/read",
     params: { threadId: sessionId, includeTurns: false },
+  }, {
+    command: ["wrapper", "codex"], cwd: "C:/work", method: "thread/turns/list",
+    params: { threadId: sessionId, limit: 1, sortDirection: "asc", itemsView: "full" },
   }]);
+});
+
+test("a saved Codex name or preview does not make a conversation without user messages reopenable", async () => {
+  const probe = new ChatGptSessionProbe({ exchange: async (request) => request.method === "thread/read"
+    ? { thread: { id: sessionId, name: "Draft task", preview: "A goal", status: { type: "idle" } } }
+    : { data: [] } });
+  assert.equal((await probe.inspect(sessionId, "C:/work")).state, "non-resumable");
+  assert.equal(await probe.title(sessionId, "C:/work"), undefined);
+});
+
+test("Codex finds the first user message after a turn containing only setup items", async () => {
+  const probe = new ChatGptSessionProbe({ exchange: async (request) => {
+    if (request.method === "thread/read") return { thread: { id: sessionId, name: null, preview: "A goal" } };
+    return request.params.cursor === "next"
+      ? { data: [{ items: [{ type: "userMessage", content: [{ type: "text", text: "Repair login" }] }] }], nextCursor: null }
+      : { data: [{ items: [] }], nextCursor: "next" };
+  } });
+  assert.equal(await probe.title(sessionId, "C:/work"), "Repair login");
 });
 
 test("ChatGPT resumability distinguishes missing and non-persisted conversations", async () => {

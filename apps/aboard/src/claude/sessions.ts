@@ -50,6 +50,7 @@ export async function claudeSessionTitle(
   let generated: string | undefined;
   let named: string | undefined;
   let preview: string | undefined;
+  let hasUserMessage = false;
   try {
     const lines = createInterface({ input: stream, crlfDelay: Infinity });
     try {
@@ -63,24 +64,33 @@ export async function claudeSessionTitle(
         if (record.sessionId !== sessionId) continue;
         if (record.type === "ai-title" && typeof record.aiTitle === "string") generated = displayTitle(record.aiTitle);
         if (record.type === "custom-title" && typeof record.customTitle === "string") named = displayTitle(record.customTitle);
-        if (preview === undefined && record.type === "user" && record.isMeta !== true) {
+        if (!hasUserMessage && isUserMessage(record)) {
+          hasUserMessage = true;
           const message = record.message;
           if (typeof message === "object" && message !== null && !Array.isArray(message)) {
             const content = (message as Record<string, unknown>).content;
-            if (typeof content === "string" && !content.trimStart().startsWith("<")) preview = displayTitle(content);
+            if (typeof content === "string") preview = displayTitle(content);
+            else if (Array.isArray(content)) preview = displayTitle(content.flatMap((block: unknown) =>
+              typeof block === "object" && block !== null && "type" in block && block.type === "text" && "text" in block && typeof block.text === "string" ? [block.text] : []).join(" "));
           }
         }
       }
     } finally { lines.close(); }
   } catch { return undefined; }
   finally { stream.destroy(); }
+  if (!hasUserMessage) return undefined;
   return named !== undefined && !/^aboard-(?:interactive|explore|prototype|websearch|brainstorm|general|address|review)-\d+$/u.test(named)
     ? named : generated ?? preview;
 }
 
 function displayTitle(value: string): string | undefined {
-  const title = value.trim().split(/\r?\n/u)[0]?.trim();
-  return title === undefined || title.length === 0 ? undefined : title.slice(0, 120);
+  const title = value.trim();
+  return title === undefined || title.length === 0 ? undefined : title;
+}
+
+function isUserMessage(record: Record<string, unknown>): boolean {
+  return record.type === "user" && record.isMeta !== true && typeof record.message === "object" && record.message !== null
+    && (record.message as { role?: unknown }).role === "user";
 }
 
 export async function transcriptHoldsConversation(path: string): Promise<boolean> {
@@ -89,7 +99,9 @@ export async function transcriptHoldsConversation(path: string): Promise<boolean
     const lines = createInterface({ input: stream, crlfDelay: Infinity });
     try {
       for await (const line of lines) {
-        if (isConversationRecord(line)) return true;
+        try {
+          if (isUserMessage(JSON.parse(line) as Record<string, unknown>)) return true;
+        } catch { /* The final line may still be in flight. */ }
       }
       return false;
     } finally {

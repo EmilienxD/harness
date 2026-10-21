@@ -135,9 +135,9 @@ export function agentActivity(
   session: AgentSession,
   outcome: AgentOutcome,
   at: IsoTimestamp,
-  options: { readonly reason?: string; readonly terminalId?: TerminalId } = {},
+  options: { readonly reason?: string; readonly terminalId?: TerminalId; readonly conversationStarted?: boolean } = {},
 ): AgentActivityEntry {
-  const reopenable = canReopenSession(session);
+  const reopenable = canReopenSession(session) && options.conversationStarted !== false;
 
   const durationMs = elapsedMs(session.lifecycle.startedAt, at);
   const launchFacts: ReopenableSession = {
@@ -156,6 +156,7 @@ export function agentActivity(
     agentId: session.identity.agentId,
     type: session.identity.type,
     description: describeTerminalName(session.terminal.name),
+    ...(session.title === undefined ? {} : { title: session.title }),
     outcome,
     ...(durationMs === undefined ? {} : { durationMs }),
     ...(options.reason === undefined ? {} : { reason: options.reason }),
@@ -271,6 +272,7 @@ export function reopenCandidates(
       type,
       sessionId: session.sessionId,
       description: describeTerminalName(session.terminal.name),
+      ...(session.title === undefined ? {} : { title: session.title }),
       origin: "live",
       at: session.lifecycle.startedAt,
       terminalId: session.terminal.terminalId,

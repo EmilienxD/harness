@@ -68,7 +68,7 @@ export type FleetEvent =
   | {
       readonly sequence: number;
       readonly occurredAt: IsoTimestamp;
-      readonly type: "telemetry-updated";
+      readonly type: "telemetry-updated" | "title-updated";
       readonly agentId: AgentId;
     };
 
@@ -175,6 +175,14 @@ export class FleetRegistry {
     return [...this.sessionsByAgent.values()];
   }
 
+  public setTitle(sessionId: SessionId, title: string, occurredAt: IsoTimestamp): void {
+    const session = this.getBySession(sessionId);
+    const clean = title.trim();
+    if (session === undefined || !clean || session.title === clean) return;
+    this.sessionsByAgent.set(session.identity.agentId, { ...session, title: clean });
+    this.record({ type: "title-updated", agentId: session.identity.agentId }, occurredAt);
+  }
+
   /** Atomically replaces a provisional provider identity with its discovered id. */
   public canBindSession(agentId: AgentId, expected: SessionId, actual: SessionId): boolean {
     const session = this.sessionsByAgent.get(agentId);
@@ -246,9 +254,10 @@ export class FleetRegistry {
       this.agentBySession.set(sessionId, agentId);
     }
     const from = session.lifecycle.status;
-    const { lastResult: _lastResult, attended: _attended, ...withoutResult } = session;
+    const { lastResult: _lastResult, attended: _attended, title: _title, ...withoutResult } = session;
     this.sessionsByAgent.set(agentId, {
       ...withoutResult,
+      ...(session.title === undefined || (sessionId !== undefined && sessionId !== session.sessionId) ? {} : { title: session.title }),
       ...(attended === undefined ? (session.attended === true ? { attended: true as const } : {}) : attended ? { attended: true as const } : {}),
       ...(sessionId === undefined ? {} : { sessionId }),
       ...(resultDelivery === undefined ? {} : { resultDelivery }),
@@ -286,9 +295,10 @@ export class FleetRegistry {
       this.agentBySession.set(sessionId, agentId);
     }
     const from = session.lifecycle.status;
-    const { attended: _attended, ...withoutAttended } = session;
+    const { attended: _attended, title: _title, ...withoutAttended } = session;
     this.sessionsByAgent.set(agentId, {
       ...withoutAttended,
+      ...(session.title === undefined || (sessionId !== undefined && sessionId !== session.sessionId) ? {} : { title: session.title }),
       ...(attended === undefined ? (session.attended === true ? { attended: true as const } : {}) : attended ? { attended: true as const } : {}),
       ...(sessionId === undefined ? {} : { sessionId }),
       ...(resultDelivery === undefined ? {} : { resultDelivery }),

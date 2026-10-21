@@ -14,15 +14,24 @@ COMMAND = re.compile(r"^\s*(?:/auto|\$auto|\[\$auto\]\([^\r\n]+\))(?P<arguments>
 
 
 def deny(message: str) -> int:
+    if "--chatgpt" in sys.argv[1:]:
+        print(json.dumps({"decision": "block", "reason": message}))
+        return 0
     sys.stderr.write("\n\n" + message)
     return 2
 
 
 def main() -> int:
     try:
-        payload = json.load(sys.stdin)
-    except (OSError, ValueError):
-        return 0
+        return handle_prompt()
+    except Exception as error:
+        return deny(f"Aboard could not handle /auto ({type(error).__name__}): {error}")
+
+
+def handle_prompt() -> int:
+    payload = json.load(sys.stdin)
+    if not isinstance(payload, dict):
+        raise ValueError("hook input must be a JSON object")
     prompt = payload.get("prompt")
     match = COMMAND.fullmatch(prompt) if isinstance(prompt, str) else None
     if match is None:

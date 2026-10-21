@@ -1,5 +1,5 @@
 name = "copy-all"
-version = "1.0.1"
+version = "1.0.2"
 description = "Copy the current Pi conversation's user and assistant messages to the clipboard"
 docs = "https://github.com/EmilienxD/harness/blob/main/README.md#copy-all"
 
@@ -16,25 +16,25 @@ status = "supported"
 
 [[files]]
 src = "pi/index.ts"
-dest = "harness-copy-all/index.ts"
+dest = ".harness-copy-all/index.ts"
 root = "extensions"
 platforms = ["pi"]
 
 [[files]]
 src = "pi/package.json"
-dest = "harness-copy-all/package.json"
+dest = ".harness-copy-all/package.json"
 root = "extensions"
 platforms = ["pi"]
 
 [[files]]
 src = "pi/package-lock.json"
-dest = "harness-copy-all/package-lock.json"
+dest = ".harness-copy-all/package-lock.json"
 root = "extensions"
 platforms = ["pi"]
 
 [[files]]
 src = "pi/tsconfig.json"
-dest = "harness-copy-all/tsconfig.json"
+dest = ".harness-copy-all/tsconfig.json"
 root = "extensions"
 platforms = ["pi"]
 

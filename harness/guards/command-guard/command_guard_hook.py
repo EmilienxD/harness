@@ -16,8 +16,9 @@ CONFIG_NAME = "command-guard.toml"
 
 def _config_sources(root: Path) -> list[Path]:
     """Bundled defaults, then shared user and project configuration."""
+    personal = Path(os.environ.get("HARNESS_PI_SUPPORT_DIR", Path(__file__).parent)) / CONFIG_NAME
     candidates = [
-        Path(__file__).with_name(CONFIG_NAME),
+        personal if personal.is_file() else Path(__file__).with_name(CONFIG_NAME),
         Path.home() / ".harness" / "guards" / CONFIG_NAME,
         root / ".harness" / "guards" / CONFIG_NAME,
     ]
@@ -99,29 +100,33 @@ def _deny(reason: str) -> None:
 
 def main() -> int:
     try:
-        payload = json.load(sys.stdin)
-    except (json.JSONDecodeError, OSError):
-        return 0
+        check_action()
+    except Exception as error:
+        _deny(f"Command guard could not check this action ({type(error).__name__}): {error}")
+    return 0
+
+
+def check_action() -> None:
+    payload = json.load(sys.stdin)
     if not isinstance(payload, dict):
-        return 0
+        raise ValueError("hook input must be a JSON object")
     tool_input = payload.get("tool_input")
     if not isinstance(tool_input, dict):
-        return 0
+        raise ValueError("shell action must contain tool_input")
     command = tool_input.get("command")
     if not isinstance(command, str) or not command:
-        return 0
+        raise ValueError("shell action must contain a non-empty command")
 
     try:
         configured_root = os.environ.get("CLAUDE_PROJECT_DIR") or payload.get("cwd")
         root = Path(configured_root).resolve() if isinstance(configured_root, str) and configured_root else Path.cwd().resolve()
     except (OSError, UnicodeError, ValueError):
         _deny(MALFORMED_POLICY_MESSAGE)
-        return 0
+        return
 
     reason = denial_reason(command, root)
     if reason:
         _deny(reason)
-    return 0
 
 
 if __name__ == "__main__":

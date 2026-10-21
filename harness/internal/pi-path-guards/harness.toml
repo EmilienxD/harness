@@ -1,5 +1,5 @@
 name = "pi-path-guards"
-version = "1.0.1"
+version = "1.0.2"
 description = "Internal Pi path-guard event handling and branch-local receipts"
 selectable = false
 dependencies = [{ name = "pi-transport", version = ">=1.0.0,<2.0.0", lifecycle = "coupled", platforms = ["pi"] }]

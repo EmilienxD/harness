@@ -83,9 +83,14 @@ export async function runLivePiIssues(scope: "project" | "user") {
     await exec("git", ["remote", "add", "origin", `https://github.com/${REPOSITORY}.git`], { cwd: project, windowsHide: true });
     await runFixtureInstaller(fixture.workspace, "install", ["issue-readers", "issue-writers"], { scope });
     const platform = scope === "project" ? join(project, ".pi") : fixture.workspace.agentDir;
+    const originalSkills = new Map<string, string>();
     for (const [skill, marker] of [["draft-issues", draftMarker], ["address-this", addressMarker], ["review-this", reviewMarker]]) {
-      const path = join(platform, "skills", skill!, "SKILL.md");
-      await writeFile(path, (await readFile(path, "utf8")) + `\n${marker}\n`);
+      const path = skill === "draft-issues"
+        ? join(platform, "npm/node_modules/harness-pi-issue-writers", "skills", skill, "SKILL.md")
+        : join(platform, "skills", skill!, "SKILL.md");
+      const original = await readFile(path, "utf8");
+      originalSkills.set(path, original);
+      await writeFile(path, original + `\n${marker}\n`);
     }
     const rpc = fixture.rpc({ timeoutMs: 180_000 });
     assert.equal((await rpc.prompt("/skill:draft-issues fixture batch", 60_000)).status, "success");
@@ -117,8 +122,9 @@ export async function runLivePiIssues(scope: "project" | "user") {
     assert.equal((await fixture.rpc().prompt(`/skill:address-this ${childNumber}`)).status, "handled");
     assert.equal(fixture.assertions().inferenceRequests, 7);
     assert.equal(fixture.assertions().unexpectedRequests, 0);
+    for (const [path, original] of originalSkills) await writeFile(path, original);
     await runFixtureInstaller(fixture.workspace, "uninstall", ["issue-writers", "issue-readers"], { scope });
-    await assert.rejects(access(join(platform, "harness", "pi-issue-workflows", "workflows.ts")));
+    await assert.rejects(access(join(platform, "npm/node_modules/harness-pi-pi-issue-workflows", "harness", "pi-issue-workflows", "workflows.ts")));
     return { version: fixture.version, scope, repository: REPOSITORY, publishedIssues: [parentNumber, childNumber], inferenceRequests: 7, publishInferenceRequests: 0 };
   } finally {
     try {

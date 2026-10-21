@@ -8,6 +8,16 @@ import { piLegacyDirectoryWarningCount } from "../core/pi-startup.js";
 import { createPiToolScenario } from "../core/pi-scenario.js";
 import { piSmokeScenario, runPiSmokeJourney, stagePiProbe } from "../tools/pi-smoke/run.js";
 
+test("Pi RPC launch overrides reject paid providers and invalid thinking levels before spawning", async () => {
+  const fixture = await createPiFixture(piSmokeScenario);
+  try {
+    assert.throws(() => fixture.rpc({ model: "openai/gpt-6.1-sol" }), /fake provider/u);
+    assert.throws(() => fixture.rpc({ thinkingLevel: "invalid" }), /thinking level/u);
+    assert.equal(fixture.assertions().inferenceRequests, 0);
+    assert.equal(fixture.assertions().unexpectedRequests, 0);
+  } finally { await fixture.close(); }
+});
+
 test("installed Pi startup detects project and user legacy hooks directories", { timeout: 90_000 }, async () => {
   const fixture = await createPiFixture(piSmokeScenario);
   try {

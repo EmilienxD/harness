@@ -1,5 +1,5 @@
 name = "slash-command-guard"
-version = "1.0.0"
+version = "1.0.1"
 description = "Reject unknown leading slash commands in Pi before they reach the model"
 docs = "https://github.com/EmilienxD/harness/blob/main/README.md#slash-command-guard"
 
@@ -16,6 +16,6 @@ status = "supported"
 
 [[files]]
 src = "pi/extension.ts"
-dest = "harness-slash-command-guard/index.ts"
+dest = ".harness-slash-command-guard/index.ts"
 root = "extensions"
 platforms = ["pi"]

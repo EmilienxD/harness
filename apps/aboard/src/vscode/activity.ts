@@ -2,7 +2,9 @@
 import { describeActivity, type ActivityDto, type ActivityEntry, type AgentOutcome } from "../domain/activity.js";
 import { formatIssueNumbers } from "../shared/issues.js";
 import { formatTimestamp } from "../shared/time.js";
-import { agentLabel, type TerminalId } from "../domain/contracts.js";
+import { agentLabel, agentPlatformName, type TerminalId } from "../domain/contracts.js";
+import { sessionTitleLabel } from "../domain/session-title.js";
+import { basename } from "node:path";
 
 export interface ActivityNode {
   readonly kind: "activity";
@@ -43,7 +45,7 @@ export class ActivityTreeModel {
     if (entry.kind === "agent" && entry.reopen !== undefined && !live) capabilities.push("reopen");
     return {
       // The side panel is narrow, so lead with the conversation title when known.
-      label: entry.kind === "agent" ? entry.title ?? agentLabel(entry) : describeActivity(entry),
+      label: entry.kind === "agent" ? sessionTitleLabel(entry.title) : describeActivity(entry),
       description: describeDetail(entry),
       tooltip: tooltip(entry),
       icon: icon(entry),
@@ -63,9 +65,10 @@ export function canOpenActivityIssue(entry: ActivityEntry): entry is ActivityEnt
 function describeDetail(entry: ActivityEntry): string {
   const parts = entry.kind === "agent" ? [
     agentOutcome(entry.outcome),
-    entry.title === undefined ? "" : agentLabel(entry),
+    entry.reopen === undefined ? "" : agentPlatformName(entry.reopen.platform),
+    entry.reopen?.cwd === undefined ? "" : basename(entry.reopen.cwd.replaceAll("\\", "/")),
     // Terminals are usually named after the agent; repeat only a description that adds something.
-    entry.description === agentLabel(entry) ? "" : entry.description,
+    entry.description.startsWith(agentLabel(entry)) ? "" : entry.description,
     entry.issueNumbers === undefined || entry.issueNumbers.length === 0 ? "" : formatIssueNumbers(entry.issueNumbers),
     entry.pullRequest === undefined ? "" : `PR #${entry.pullRequest}`,
     formatDuration(entry.durationMs),
@@ -94,6 +97,7 @@ function agentOutcome(outcome: AgentOutcome): string {
 
 function tooltip(entry: ActivityEntry): string {
   return [
+    entry.kind === "agent" ? entry.title ?? "" : "",
     entry.kind === "agent" ? agentLabel(entry) : "",
     describeActivity(entry),
     describeDetail(entry),

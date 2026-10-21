@@ -43,7 +43,7 @@ async function drive(file: string | undefined, commandArgs: readonly string[], p
   const statusRoot = process.env.HARNESS_E2E_CLI_DIR;
   const marker = role === "child" ? process.env.HARNESS_E2E_CHILD_COMPLETE : process.env.HARNESS_E2E_PARENT_COMPLETE;
   if (!file || !statusRoot || !marker) {
-    writeStatus(statusRoot, role, { status: "invalid-environment", markerSeen: false, timedOut: false, exitCode: null });
+    writeStatus(statusRoot, role, { status: "invalid-environment", markerSeen: false, timedOut: false, exitCode: null }, provider);
     return;
   }
 
@@ -67,7 +67,7 @@ async function drive(file: string | undefined, commandArgs: readonly string[], p
   child.once("error", () => {
     clearTimeout(timeout);
     settled = true;
-    writeStatus(statusRoot, role, { status: "spawn-failed", markerSeen, timedOut, exitCode: null });
+    writeStatus(statusRoot, role, { status: "spawn-failed", markerSeen, timedOut, exitCode: null }, provider);
   });
   child.once("close", (exitCode) => {
     clearTimeout(timeout);
@@ -79,16 +79,20 @@ async function drive(file: string | undefined, commandArgs: readonly string[], p
       timedOut,
       exitCode,
       executable: basename(file).toLowerCase().includes("node") ? "node-cli" : basename(file).toLowerCase(),
-    });
+    }, provider);
   });
 }
 
 
-function writeStatus(root: string | undefined, role: string, value: Record<string, unknown>): void {
+function writeStatus(root: string | undefined, role: string, value: Record<string, unknown>, provider: boolean): void {
   if (!root) return;
   mkdirSync(root, { recursive: true });
   const content = `${JSON.stringify({ schemaVersion: 1, role, cwd: process.cwd(), ...value }, null, 2)}\n`;
-  writeFileSync(join(root, `${role}.json`), content, "utf8");
+  // Interactive launches have both a provider bridge and an outer terminal driver.
+  // Only the outer driver can certify the whole launch ended; otherwise its late
+  // write can resurrect a deleted status while a resumed launch is still running.
+  const interactive = ["interactive", "loop"].includes(process.env.HARNESS_EXECUTION_MODE ?? "");
+  if (!provider || !interactive) writeFileSync(join(root, `${role}.json`), content, "utf8");
   // Journeys with several launches of one role need every process's outcome.
   writeFileSync(join(root, `${role}-${process.pid}.json`), content, "utf8");
 }

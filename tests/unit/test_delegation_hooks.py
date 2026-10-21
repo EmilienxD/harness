@@ -126,31 +126,73 @@ def test_ask_skill_invocation_after_prose_opens_its_grant(
         assert connection.execute("SELECT parent_session_id FROM session_delegation").fetchone() == (f"existing-{provider}-session",)
 
 
-def test_shell_created_request_is_inert_but_exact_structured_write_launches(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    parent = configured(tmp_path, monkeypatch)
-    output = hooks.handle({
-        "session_id": parent, "hook_event_name": "UserPromptSubmit",
-        "prompt": "/work-with-agent", "cwd": str(tmp_path),
-    })
+@pytest.mark.parametrize("provider", ["claude", "chatgpt"])
+@pytest.mark.parametrize("event,tool,response", [
+    ("PostToolUse", "Bash", {}),
+    ("PostToolUse", "exec_command", {"isError": True}),
+    ("PostToolUse", "mcp__custom__tool", {}),
+    ("PostToolUseFailure", "Bash", {}),
+])
+def test_any_tool_completion_scans_only_the_sessions_inbox(tmp_path, monkeypatch, provider, event, tool, response):
+    from subagents_runtime.delegation import enable_delegation
+    parent = configured(tmp_path, monkeypatch, provider)
+    inbox = enable_delegation(parent, "work-with-agent").inbox
+    other = "other-parent"
+    sessions.register_observed(other, tmp_path, provider)
+    foreign = enable_delegation(other, "work-with-agent").inbox
+    body = "---\ntask: general\nmode: interactive\n---\n\nDo it.\n"
+    (inbox / "child.md").write_text(body, encoding="utf-8-sig")
+    (foreign / "child.md").write_text(body, encoding="utf-8")
+    partial = inbox / "child.tmp"
+    partial.write_text("---\ntask:", encoding="utf-8")
+    launched = []
+    monkeypatch.setattr(sessions, "launch_delegated", lambda parsed, *_args: launched.append(parsed) or "child")
+
+    payload = {"session_id": parent, "hook_event_name": event, "tool_name": tool,
+               "tool_response": response, "cwd": str(tmp_path)}
+    output = hooks.handle(payload, provider=provider)
+    hooks.handle(payload, provider=provider)
+
+    assert len(launched) == 1
+    assert launched[0].mode == "interactive"
     assert output is not None
-    inbox = __import__("subagents_runtime.delegation",fromlist=["enable_delegation"]).enable_delegation(parent,"work-with-agent").inbox
-    request = inbox / "child.md"
-    request.write_text("---\ntask: general\nmode: auto\n---\n\nDo it.\n", encoding="utf-8")
-    launched: list[str] = []
-    monkeypatch.setattr(sessions, "launch_delegated", lambda parsed, _request, _number, _cwd: launched.append(parsed.prompt) or "child")
+    assert (foreign / "child.md").exists()
+    assert partial.read_text() == "---\ntask:"
+    with sessions._connect() as db:
+        assert db.execute("SELECT state FROM requests WHERE parent_session_id=?", (parent,)).fetchall() == [("pending",)]
 
-    assert hooks.handle({
-        "session_id": parent, "hook_event_name": "PostToolUse",
-        "tool_name": "Bash", "tool_input": {"command": f"write {request}"},
-    }) is None
-    assert launched == []
 
-    result = hooks.handle({
-        "session_id": parent, "hook_event_name": "PostToolUse",
-        "tool_name": "Write", "tool_input": {"file_path": str(request), "content": "..."},
-    })
-    assert launched == ["Do it."]
-    assert result is not None
+@pytest.mark.parametrize("provider", ["claude", "chatgpt"])
+def test_stop_discovers_a_shell_request_before_waiting(tmp_path, monkeypatch, provider):
+    from subagents_runtime.delegation import enable_delegation, has_pending_children
+    parent = configured(tmp_path, monkeypatch, provider)
+    inbox = enable_delegation(parent, "work-with-agent").inbox
+    (inbox / "child.md").write_text("---\ntask: general\nmode: interactive\n---\nDo it.", encoding="utf-8-sig")
+    monkeypatch.setattr(sessions, "launch_delegated", lambda *_args: "child")
+    waited = []
+    def wait(session_id, **_kwargs):
+        waited.append(has_pending_children(session_id))
+    monkeypatch.setattr(hooks, "wait_parent_delivery", wait)
+
+    hooks.handle({"session_id": parent, "hook_event_name": "Stop", "cwd": str(tmp_path),
+                  "last_assistant_message": "Waiting."}, provider=provider)
+
+    assert waited == [True]
+    assert not list(inbox.glob("*.md*"))
+
+
+@pytest.mark.parametrize("provider", ["claude", "chatgpt"])
+def test_resume_discovers_queued_requests_without_a_tool_event(tmp_path, monkeypatch, provider):
+    from subagents_runtime.delegation import enable_delegation
+    parent = configured(tmp_path, monkeypatch, provider)
+    inbox = enable_delegation(parent, "work-with-agent").inbox
+    (inbox / "child.md").write_text("---\ntask: general\nmode: auto\n---\nDo it.", encoding="utf-8")
+    launched = []
+    monkeypatch.setattr(sessions, "launch_delegated", lambda parsed, *_args: launched.append(parsed) or "child")
+
+    hooks.handle({"session_id": parent, "hook_event_name": "SessionStart", "source": "resume", "cwd": str(tmp_path)}, provider=provider)
+
+    assert len(launched) == 1
 
 
 def test_codex_apply_patch_alias_can_launch_multiple_exact_files(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

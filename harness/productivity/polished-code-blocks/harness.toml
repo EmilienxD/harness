@@ -1,5 +1,5 @@
 name = "polished-code-blocks"
-version = "1.1.0"
+version = "1.1.1"
 description = "Render numbered Pi code blocks with rounded frames, syntax highlighting and exact-content copying"
 docs = "https://github.com/EmilienxD/harness/blob/main/README.md#polished-code-blocks"
 
@@ -16,12 +16,12 @@ status = "supported"
 
 [[files]]
 src = "pi/extension.ts"
-dest = "harness-polished-code-blocks/index.ts"
+dest = ".harness-polished-code-blocks/index.ts"
 root = "extensions"
 platforms = ["pi"]
 
 [[files]]
 src = "pi/renderer.ts"
-dest = "harness-polished-code-blocks/renderer.ts"
+dest = ".harness-polished-code-blocks/renderer.ts"
 root = "extensions"
 platforms = ["pi"]
