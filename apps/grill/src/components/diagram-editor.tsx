@@ -1,9 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { Excalidraw } from "@excalidraw/excalidraw";
+import { CaptureUpdateAction, Excalidraw, restoreElements } from "@excalidraw/excalidraw";
 import type { ExcalidrawImperativeAPI } from "@excalidraw/excalidraw/types";
-import { sceneAppState, type DiagramRecord, type DiagramSceneStore } from "@/lib/diagram-scene";
-import { summarizeDiagram } from "@/lib/diagram-feedback";
+import { copyScene, sceneAppState, type DiagramRecord, type DiagramSceneStore } from "@/lib/diagram-scene";
 import "@excalidraw/excalidraw/index.css";
 import "./diagram-editor.css";
 
@@ -90,7 +89,7 @@ export default function DiagramEditor({
     if (hidden && !readOnly) void store.flush().catch(() => {});
   }, [hidden, readOnly, store]);
   useEffect(() => {
-    // Feedback and surrounding cards can move the canvas without resizing it.
+    // Surrounding cards can move the canvas without resizing it.
     // Keep native pointer-to-scene coordinates aligned with the current layout.
     const refresh = () => api.current?.refresh();
     const observer = new ResizeObserver(refresh);
@@ -116,6 +115,25 @@ export default function DiagramEditor({
     api.current = null;
     if (next) returnFocus.current = document.activeElement as HTMLElement;
     setFullscreen(next);
+  };
+  const resetToOriginal = () => {
+    const current = recordRef.current;
+    const instance = api.current;
+    if (!current || !instance || readOnly) return;
+    const original = copyScene(current.baseline);
+    instance.addFiles(Object.values(original.files));
+    instance.updateScene({
+      elements: restoreElements(original.elements, instance.getSceneElementsIncludingDeleted()),
+      appState: {
+        viewBackgroundColor: original.appState.viewBackgroundColor ?? "#ffffff",
+        selectedElementIds: {},
+        selectedGroupIds: {},
+        editingGroupId: null,
+      },
+      captureUpdate: CaptureUpdateAction.IMMEDIATELY,
+    });
+    instance.scrollToContent(instance.getSceneElements(), { fitToContent: true });
+    capture();
   };
   const content = (
     <div
@@ -152,6 +170,11 @@ export default function DiagramEditor({
       <div className="diagram-toolbar">
         <span>{readOnly ? "Read only" : editing ? "Editing diagram" : "Viewing diagram"}</span>
         {!readOnly && (
+          <button type="button" disabled={!record || !!failure} onClick={resetToOriginal}>
+            Reset to original
+          </button>
+        )}
+        {!readOnly && (
           <button
             type="button"
             disabled={!record || !!failure}
@@ -167,7 +190,7 @@ export default function DiagramEditor({
           {fullscreen ? "Close fullscreen" : "Fullscreen"}
         </button>
       </div>
-      <EditorFeedback store={store} questionId={questionId} id={id} />
+      <DiagramSaveError store={store} />
       {failure ? (
         <div className="diagram-error" role="alert">
           <p>This diagram could not be loaded or prepared. {failure}</p>
@@ -245,24 +268,17 @@ export default function DiagramEditor({
     : content;
 }
 
-function EditorFeedback({ store, questionId, id }: { store: DiagramSceneStore; questionId: string; id: string }) {
+function DiagramSaveError({ store }: { store: DiagramSceneStore }) {
   const [, refresh] = useState(0);
   useEffect(() => store.subscribe(() => refresh((value) => value + 1)), [store]);
-  const record = store.get(questionId, id);
   return (
     <>
       {store.error && (
         <div role="alert">
           Diagram changes could not be saved or exported. {store.error}{" "}
-          <button type="button" onClick={() => void store.flush(true).catch(() => {})}>
+          <button type="button" onClick={() => void store.flush().catch(() => {})}>
             Retry diagram save
           </button>
-        </div>
-      )}
-      {record && (
-        <div className="diagram-feedback" aria-label="Diagram feedback">
-          <strong>Diagram feedback</strong>
-          <p style={{ whiteSpace: "pre-line" }}>{summarizeDiagram(record.baseline, record.scene)}</p>
         </div>
       )}
     </>

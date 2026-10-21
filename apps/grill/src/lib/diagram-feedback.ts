@@ -1,4 +1,5 @@
 import type { DiagramScene } from "./diagram-scene.ts";
+import { parseFragment, type DefaultTreeAdapterTypes } from "parse5";
 
 const bookkeeping = new Set(["version", "versionNonce", "updated", "index", "isDeleted"]);
 function canonical(value: unknown): unknown {
@@ -14,6 +15,47 @@ function canonical(value: unknown): unknown {
 }
 const stable = (value: unknown) => JSON.stringify(canonical(value));
 const live = (scene: DiagramScene) => scene.elements.filter((element) => !element.isDeleted);
+const svgCache = new Map<string, string>();
+function imageValue(file: DiagramScene["files"][string] | undefined) {
+  if (!file) return null;
+  let dataURL: string = file.dataURL;
+  if (file.mimeType === "image/svg+xml") {
+    const cached = svgCache.get(dataURL);
+    if (cached) dataURL = cached;
+    else {
+      try {
+        const payload = dataURL.slice(dataURL.indexOf(",") + 1);
+        const svg = dataURL.slice(0, dataURL.indexOf(",")).endsWith(";base64")
+          ? new TextDecoder().decode(Uint8Array.from(atob(payload), (char) => char.charCodeAt(0)))
+          : decodeURIComponent(payload);
+        const nodeValue = (node: DefaultTreeAdapterTypes.Node): unknown => {
+          if ("tagName" in node)
+            return {
+              tag: node.tagName,
+              attrs: node.attrs
+                .map((attr) => [attr.namespace ?? "", attr.name, attr.value])
+                .sort((a, b) => stable(a).localeCompare(stable(b))),
+              children: node.childNodes.map(nodeValue),
+            };
+          if ("childNodes" in node) return node.childNodes.map(nodeValue);
+          return "value" in node ? node.value : null;
+        };
+        // Excalidraw's XML serializer changes attribute order and empty-tag syntax on load.
+        // Compare SVG content so that this bookkeeping never creates user feedback.
+        const fragment = parseFragment(svg);
+        if (!fragment.childNodes.some((node) => "tagName" in node && node.tagName === "svg"))
+          throw new Error("Invalid SVG");
+        const value = stable(nodeValue(fragment));
+        if (svgCache.size >= 8) svgCache.delete(svgCache.keys().next().value!);
+        svgCache.set(dataURL, value);
+        dataURL = value;
+      } catch {
+        // Malformed data still compares by its original bytes.
+      }
+    }
+  }
+  return { dataURL, mimeType: file.mimeType };
+}
 function elementValue(element: DiagramScene["elements"][number]) {
   return Object.fromEntries(
     Object.entries(element)
@@ -33,14 +75,7 @@ export function meaningfulScene(scene: DiagramScene): string {
   return stable({
     elements: elements.map(elementValue),
     background: scene.appState.viewBackgroundColor ?? "#ffffff",
-    files: Object.fromEntries(
-      [...fileIds]
-        .sort()
-        .map((id) => [
-          id,
-          scene.files[id] ? { dataURL: scene.files[id].dataURL, mimeType: scene.files[id].mimeType } : null,
-        ]),
-    ),
+    files: Object.fromEntries([...fileIds].sort().map((id) => [id, imageValue(scene.files[id])])),
   });
 }
 export const diagramChanged = (baseline: DiagramScene, scene: DiagramScene) =>
@@ -135,7 +170,7 @@ export function summarizeDiagram(baseline: DiagramScene, scene: DiagramScene): s
         .filter((element) => element.type === "image" && element.fileId)
         .map((element) => {
           const file = drawing.files[element.type === "image" ? element.fileId! : ""];
-          return [element.id, file ? { dataURL: file.dataURL, mimeType: file.mimeType } : null];
+          return [element.id, imageValue(file)];
         }),
     );
   if (stable(referencedFiles(baseline)) !== stable(referencedFiles(scene))) lines.push("Changed image content.");

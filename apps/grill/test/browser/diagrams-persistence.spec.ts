@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import { execSync } from "node:child_process";
 import { expect, test } from "@playwright/test";
+import { meaningfulScene } from "../../src/lib/diagram-feedback";
 
 const headers = { Authorization: "Bearer 1234" };
 const figure = (id: string) =>
@@ -60,6 +61,12 @@ test("durable drawings, undo, retry, immutable reviewed images, authenticated me
       (row: { question_id: string; diagram_id: string }) => row.question_id === "Q1" && row.diagram_id === "flow",
     );
     const initialRevision = original.revision;
+    const savedFlow = async () =>
+      (await scenes()).find(
+        (row: { question_id: string; diagram_id: string }) => row.question_id === "Q1" && row.diagram_id === "flow",
+      );
+    const liveCount = (scene: typeof original.scene) =>
+      scene.elements.filter((element: { isDeleted: boolean }) => !element.isDeleted).length;
     const viewportOnly = structuredClone(original);
     Object.assign(viewportOnly.scene.appState, {
       scrollX: 300,
@@ -84,7 +91,7 @@ test("durable drawings, undo, retry, immutable reviewed images, authenticated me
     await page.mouse.move(canvas!.x + 90, canvas!.y + 280, { steps: 5 });
     await page.mouse.up();
     await page.keyboard.press("Escape");
-    await expect(editor.getByLabel("Diagram feedback")).toContainText("Added");
+    await expect.poll(async () => liveCount((await savedFlow()).scene)).toBe(liveCount(original.scene) + 1);
     await expect
       .poll(
         async () =>
@@ -94,7 +101,7 @@ test("durable drawings, undo, retry, immutable reviewed images, authenticated me
       )
       .not.toBe(initialRevision);
     await page.keyboard.press("ControlOrMeta+z");
-    await expect(editor.getByLabel("Diagram feedback")).toContainText("No changes were made to the diagram.");
+    await expect.poll(async () => meaningfulScene((await savedFlow()).scene)).toBe(meaningfulScene(original.scene));
     await page.keyboard.press("ControlOrMeta+a");
     // Saving fails while the browser keeps a recoverable draft.
     await page.route(`**/rounds/${roundId}/scenes/Q1/flow`, (route) =>
@@ -106,7 +113,7 @@ test("durable drawings, undo, retry, immutable reviewed images, authenticated me
     await expect(editor.getByRole("alert")).toContainText("Forced drawing save failure");
     await page.reload();
     await expect(editor.locator("canvas").first()).toBeVisible({ timeout: 30_000 });
-    await expect(editor.getByLabel("Diagram feedback")).toContainText("Moved");
+    await expect(editor.getByLabel("Diagram feedback", { exact: true })).toHaveCount(0);
     await page.unroute(`**/rounds/${roundId}/scenes/Q1/flow`);
     await editor.getByRole("button", { name: "Retry diagram save" }).click();
     await expect
@@ -125,12 +132,14 @@ test("durable drawings, undo, retry, immutable reviewed images, authenticated me
     await card.getByRole("button", { name: "Q2", exact: true }).click();
     await expect(card.getByRole("heading", { name: "Durable 2" })).toBeVisible();
     await card.getByRole("button", { name: "Q1", exact: true }).click();
-    await expect(editor.getByLabel("Diagram feedback")).toContainText("Moved");
-    await expect(card.locator('[data-diagram-editor="second"]').getByLabel("Diagram feedback")).toContainText(
-      "No changes were made to the diagram.",
+    await expect(editor.locator("canvas").first()).toBeVisible();
+    const second = (await scenes()).find(
+      (row: { question_id: string; diagram_id: string }) => row.question_id === "Q1" && row.diagram_id === "second",
     );
+    expect(meaningfulScene(second.scene)).toBe(meaningfulScene(second.baseline));
     await page.reload();
-    await expect(editor.getByLabel("Diagram feedback")).toContainText("Moved");
+    await expect(editor.locator("canvas").first()).toBeVisible();
+    expect(meaningfulScene((await savedFlow()).scene)).toBe(meaningfulScene(moved.scene));
     await card.getByRole("radio").first().check();
     const note = card.getByRole("textbox").first();
     await note.fill("My written notes stay separate.");

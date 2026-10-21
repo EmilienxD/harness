@@ -19,7 +19,6 @@ import type { HLJSApi } from "highlight.js";
 import { AuthoredDiagrams } from "@/components/authored-diagrams";
 import { discoverDiagrams, type DiagramTarget } from "@/lib/diagram-discovery";
 import { extractAuthoredDiagrams } from "@/lib/grill-diagrams";
-import { summarizeDiagram } from "@/lib/diagram-feedback";
 import { DiagramSceneStore } from "@/lib/diagram-scene";
 import { NOTES_ID, type AnswerDraft, type GrillQuestion } from "@/lib/grill-contract";
 import {
@@ -1355,33 +1354,6 @@ function Questionnaire({
   );
 }
 
-function QuestionDiagramFeedback({ question, store }: { question: GrillQuestion; store: DiagramSceneStore }) {
-  const [, refresh] = useState(0);
-  useEffect(() => store.subscribe(() => refresh((value) => value + 1)), [store]);
-  const diagrams = useMemo(() => extractAuthoredDiagrams(question.explanation_html), [question.explanation_html]);
-  if (!diagrams.length) return null;
-  return (
-    <section className="question-diagram-feedback" aria-label="Generated diagram feedback">
-      <h3>Diagram feedback</h3>
-      {diagrams.map((diagram) => {
-        const record = store.get(question.id, diagram.id);
-        return (
-          <div key={diagram.id} data-diagram-feedback={diagram.id}>
-            <strong>{diagram.id}</strong>
-            <p style={{ whiteSpace: "pre-line" }}>
-              {store.preparationError(question.id, diagram.id) || store.error
-                ? `Diagram feedback unavailable. ${store.preparationError(question.id, diagram.id) || store.error}`
-                : record
-                  ? summarizeDiagram(record.baseline, record.scene)
-                  : "Diagram feedback is being prepared."}
-            </p>
-          </div>
-        );
-      })}
-    </section>
-  );
-}
-
 function QuestionCard({
   round,
   diagramStore,
@@ -1662,7 +1634,6 @@ function QuestionCard({
               }
             />
           </div>
-          {!isNotes && <QuestionDiagramFeedback question={question} store={diagramStore} />}
           <div className="question__foot">
             {/* Progress shows in the page's save badge; only a failure, which needs this card's Retry, stays here. */}
             {!readOnly && failure ? (

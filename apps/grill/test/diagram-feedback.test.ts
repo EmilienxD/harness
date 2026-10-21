@@ -145,3 +145,33 @@ test("removal retains baseline labels and output is deterministic and bounded", 
   assert.ok(summary.split("\n").length <= 40);
   assert.ok(summary.split("\n").every((line) => line.length <= 200));
 });
+
+test("SVG serialization on editor load is unchanged, but edits to image content are meaningful", () => {
+  const baseline = fixture();
+  baseline.elements = [
+    { ...baseline.elements[0]!, type: "image", fileId: "svg" } as unknown as DiagramScene["elements"][number],
+  ];
+  const url = (svg: string) => `data:image/svg+xml;base64,${Buffer.from(svg).toString("base64")}`;
+  baseline.files = {
+    svg: {
+      id: "svg",
+      mimeType: "image/svg+xml",
+      created: 1,
+      dataURL: url('<svg width="100" xmlns="http://www.w3.org/2000/svg" height="100"><path d="M 0 0 L 10 10"/></svg>'),
+    },
+  } as unknown as DiagramScene["files"];
+  const loaded = copyScene(baseline);
+  Object.assign(loaded.files["svg"]!, {
+    dataURL: url('<svg xmlns="http://www.w3.org/2000/svg" height="100" width="100"><path d="M 0 0 L 10 10" /></svg>'),
+  });
+  assert.equal(diagramChanged(baseline, loaded), false);
+  assert.equal(summarizeDiagram(baseline, loaded), "No changes were made to the diagram.");
+  Object.assign(loaded.files["svg"]!, {
+    dataURL: url('<svg xmlns="http://www.w3.org/2000/svg" height="100" width="100"><path d="M 0 0 L 20 20" /></svg>'),
+  });
+  assert.equal(diagramChanged(baseline, loaded), true);
+  assert.match(summarizeDiagram(baseline, loaded), /image content/u);
+  Object.assign(baseline.files["svg"]!, { dataURL: url("not an SVG") });
+  Object.assign(loaded.files["svg"]!, { dataURL: url("different invalid SVG") });
+  assert.equal(diagramChanged(baseline, loaded), true);
+});

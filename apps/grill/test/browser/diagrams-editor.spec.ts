@@ -174,7 +174,8 @@ test("published diagrams share inline/fullscreen edits, isolate navigation, scro
     expect(renamed.elements.find((element) => element.id === originalLabel.id)?.text?.replace(/\s+/gu, " ")).toBe(
       "Revised start",
     );
-    await expect(editor.getByLabel("Diagram feedback")).toContainText(/Revised\s+start/u);
+    await expect(page.getByLabel("Diagram feedback", { exact: true })).toHaveCount(0);
+    await expect(page.getByLabel("Generated diagram feedback", { exact: true })).toHaveCount(0);
     await page.keyboard.press("Escape");
     // Add a native arrow using the editor tool and drag gesture.
     await page.keyboard.press("a");
@@ -234,6 +235,7 @@ test("published diagrams share inline/fullscreen edits, isolate navigation, scro
       historical.locator('[data-diagram-editor="flow"]').getByText("Read only", { exact: true }),
     ).toBeVisible();
     await expect(historical.getByRole("button", { name: "Edit diagram", exact: true })).toHaveCount(0);
+    await expect(historical.getByRole("button", { name: "Reset to original", exact: true })).toHaveCount(0);
     await page.screenshot({ path: info.outputPath("historical-diagrams.png"), fullPage: true });
   } finally {
     await request.delete(`/api/v1/sessions/chatgpt/${session}`, { headers });
