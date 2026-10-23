@@ -37,7 +37,8 @@ function diagramAssets(): Plugin {
 }
 
 export default defineConfig(({ command }) => ({
-  server: { host: "::", port: 8080 },
+  server: { host: "::", port: 55430, strictPort: true },
+  preview: { host: "::", port: 55430, strictPort: true },
   resolve: { alias: { "@": fileURLToPath(new URL("./src", import.meta.url)) } },
   plugins: [
     diagramAssets(),

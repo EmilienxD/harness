@@ -96,18 +96,36 @@ For an existing personal deployment, apply `20261021120000_add_video_assets.sql`
 
 ## Local development
 
-Copy `.env.example` to `.env`, replace every placeholder, and point it at a development Supabase project. Then run:
+Use `.env.development.local` for development credentials. For the included local Supabase stack:
 
 ```sh
 cd apps/grill
 npm ci
+npx supabase start
+npx supabase status
+```
+
+Copy `.env.example` to `.env.development.local`, replace its placeholder secrets, and set
+`SUPABASE_SECRET_KEY` to the local secret key reported by `supabase status` (or its
+`SERVICE_ROLE_KEY`). Keep `SUPABASE_URL=http://127.0.0.1:55421` and
+`HARNESS_GRILL_URL=http://localhost:55430`. Then run:
+
+```sh
 npm run dev
 ```
 
-For a local Supabase stack, run `npx supabase start` from `apps/grill` and set
-`SUPABASE_URL=http://127.0.0.1:55421` in your local environment file. Get the
-local secret key from `npx supabase status`. Grill reserves ports 55420–55429 in
-`supabase/config.toml`, leaving Supabase's default ports available to other projects.
+The board opens at `http://localhost:55430`. Development and preview commands use port
+55430 and fail if it is occupied. Supabase reserves ports 55420–55429 in
+`supabase/config.toml`, leaving its default ports available to other projects. A separate
+development Supabase project can be used instead by changing its URL and secret key.
+
+Production credentials belong in Vercel. If local production-mode builds or diagnostics need
+them, keep a separate, ignored `.env.production.local`; it is loaded for production mode,
+including `npm run build`, but not for `npm run dev`. Keep production values out of `.env`
+and `.env.local`, which Vite loads in every mode. Variables already set in the shell override
+env files. The server needs only the variables listed under **Personal deployment**;
+`VITE_SUPABASE_*`, publishable keys, project IDs and Vercel OIDC tokens are not needed.
+Both credential files stay out of Git. Restart the server after changing either file.
 
 Useful checks are:
 
