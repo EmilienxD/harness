@@ -1,5 +1,5 @@
 name = "cleanup-git"
-version = "1.2.3"
+version = "1.2.4"
 description = "Explain every local branch and worktree before confirming cleanup"
 requires = ["git"]
 dependencies = [{ name = "pi-transport", version = ">=1.0.0,<2.0.0", lifecycle = "coupled", platforms = ["pi"] }]

@@ -8,7 +8,7 @@ import re
 import subprocess
 import sys
 
-from cleanup_git import FactError, collect, prepared_inventory, render_inventory
+from cleanup_git import FactError, prepared_inventory, render_inventory
 
 
 def handle(payload: dict) -> dict | None:
