@@ -1,5 +1,7 @@
 # Handoff grilling
 
+Platforms: **Claude Code, ChatGPT, Pi**. Install with `harness install handoff-grilling`; see [installation and scope](../../getting-started.md).
+
 ## Use it
 
 Use `/handoff-grilling` in Claude Code or `$handoff-grilling` in ChatGPT when a `grill-me` discussion will continue in another session. You can append the next session's focus.
@@ -11,3 +13,7 @@ The skill writes a detailed document in the operating system's temporary directo
 ## Practical note
 
 The handoff distinguishes confirmed facts, user choices, accepted recommendations, and unverified inferences. Its initial-request quote stays verbatim except for any secret value that must be redacted. Use the regular `handoff` skill when a compact continuation summary is enough.
+
+## Pi usage
+
+Use `/skill:handoff-grilling`. The shared design-conversation handoff keeps temporary-file and secret-redaction rules.

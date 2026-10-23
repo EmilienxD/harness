@@ -1,5 +1,7 @@
 # On Edit Block
 
+Platforms: **Claude Code, Pi**. Install with `harness install on-edit-block`; see [installation and scope](../../getting-started.md).
+
 `on-edit-block` is a Claude Code PreToolUse hook and a native Pi extension. It denies Write, Edit, or MultiEdit on a matching path until the agent has read the required guidance in the current session.
 
 Install with `harness install on-edit-block --platform claude`, restart Claude Code, and configure `.harness/guards/on-edit-block.toml` or `~/.harness/guards/on-edit-block.toml` at user scope. The starter contains commented examples only:
@@ -33,3 +35,7 @@ Approve the project's resources when Pi requests trust. Project rules use the sa
 project rules load afterward. Pi requires uv or Python 3.11+ on `PATH`.
 
 Pi blocks native `write`/`edit` until complete guidance was successfully read or fully included in a denial on the active branch. Large guidance stays blocked until read; partial or failed reads cannot authorize edits. Native read ranges accumulate only for the same file contents. Simple complete shell reads can also satisfy guidance when their successful output contains the complete file. Reload and resume recover branch receipts; abandoned branches grant no access. Shell writes and unrelated custom tools need their own controls; nested native calls are covered.
+
+## Implementation and verification
+
+The [read/edit guard implementation](../guards-and-extensions.md#readedit-guard-implementation-and-verification) describes shared Python policy reuse, bounded transport, active-branch receipts and the Windows Pi 1.2.0 project/user JSON/RPC journeys. This tool retains the triggering and cooldown rules described above. Guard loading, unknown mutators and operating-system isolation follow the [admission limits](../guards-and-extensions.md#guard-admission-and-evidence).

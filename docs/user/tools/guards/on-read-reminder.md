@@ -1,5 +1,7 @@
 # On Read Reminder
 
+Platforms: **Claude Code, Pi**. Install with `harness install on-read-reminder`; see [installation and scope](../../getting-started.md).
+
 `on-read-reminder` is a Claude Code PostToolUse hook and a native Pi extension. After the agent reads a path matched by policy, it asks the agent to read the listed guidance files. It does not block the original read.
 
 Install with `harness install on-read-reminder --platform claude`, restart Claude Code, and edit `.harness/guards/on-read-reminder.toml` (or `~/.harness/guards/on-read-reminder.toml` at user scope). The starter contains only commented examples, so add a rule to activate it:
@@ -33,3 +35,7 @@ Approve the project's resources when Pi requests trust. Project rules use the sa
 project rules load afterward. Pi requires uv or Python 3.11+ on `PATH`.
 
 Pi reminds after successful native `read` and recognized `bash`/`powershell` reads, including partial reads. Failed reads produce no reminder. Each successful matching read can remind again.
+
+## Implementation and verification
+
+The [read/edit guard implementation](../guards-and-extensions.md#readedit-guard-implementation-and-verification) describes shared Python policy reuse, bounded transport, active-branch receipts and the Windows Pi 1.2.0 project/user JSON/RPC journeys. This tool retains the triggering and cooldown rules described above. Guard loading, unknown mutators and operating-system isolation follow the [admission limits](../guards-and-extensions.md#guard-admission-and-evidence).

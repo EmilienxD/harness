@@ -1,5 +1,7 @@
 # Zoom out
 
+Platforms: **Claude Code, ChatGPT, Pi**. Install with `harness install zoom-out`; see [installation and scope](../../getting-started.md).
+
 ## Use it
 
 Invoke `/zoom-out` in Claude Code or `$zoom-out` in ChatGPT with the code area you want to understand, for example `$zoom-out authentication middleware`.
@@ -11,3 +13,7 @@ The agent moves up a level of abstraction and maps relevant modules and callers 
 ## Practical note
 
 Name a package, module, or feature that exists in the current project. The output is a map of its place in the system and the callers around it, which you can use to choose what to inspect next.
+
+## Pi usage
+
+Use `/skill:zoom-out [scope]`. The shared codebase abstraction-map workflow applies unchanged.

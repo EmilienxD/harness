@@ -1,5 +1,7 @@
 # Set up a Git worktree maker
 
+Platforms: **Claude Code, ChatGPT, Pi**. Install with `harness install setup-git-worktree-maker`; see [installation and scope](../../getting-started.md).
+
 ## When to use
 
 Use this skill to create a repeatable repository-specific worktree setup command. The skill writes that command; it does not itself create a worktree.
@@ -14,8 +16,12 @@ The agent surveys manifests, lockfiles, setup docs, ignored local files, existin
 
 ## Files and prerequisites
 
-Both providers are supported. Git and a working checkout are required. The output script, alias, copied paths, and optional `Create Git Worktree` VS Code task depend on the approved plan; no fixed output path is installed.
+Claude Code, ChatGPT, and Pi are supported. Git and a working checkout are required. The output script, alias, copied paths, and optional `Create Git Worktree` VS Code task depend on the approved plan; no fixed output path is installed.
 
 ## Example
 
 `/setup-git-worktree-maker Copy local app configuration and initialize both Python and JavaScript workspaces` produces a plan for review before implementation.
+
+## Pi usage
+
+Use `/skill:setup-git-worktree-maker`. Include ignored project Pi resources only when the new checkout needs them. Keep personal authentication and native session state out of copied assets; validation does not create a worktree.

@@ -1,5 +1,7 @@
 # On Edit Reminder
 
+Platforms: **Claude Code, Pi**. Install with `harness install on-edit-reminder`; see [installation and scope](../../getting-started.md).
+
 `on-edit-reminder` is a Claude Code PostToolUse hook and a native Pi extension. It lets a matching edit land, then asks the agent to read required guidance and correct any violations. Use it when feedback after an edit is sufficient.
 
 Install with `harness install on-edit-reminder --platform claude`, restart Claude Code, and configure `.harness/guards/on-edit-reminder.toml` or the user-scope `~/.harness/guards/on-edit-reminder.toml`. The starter has commented examples only:
@@ -33,3 +35,7 @@ Approve the project's resources when Pi requests trust. Project rules use the sa
 project rules load afterward. Pi requires uv or Python 3.11+ on `PATH`.
 
 Pi reminds after successful native `write`/`edit`, with a 120-second cooldown per guidance file. A complete successful guidance read on the active branch suppresses further reminders. Failed edits produce no reminder.
+
+## Implementation and verification
+
+The [read/edit guard implementation](../guards-and-extensions.md#readedit-guard-implementation-and-verification) describes shared Python policy reuse, bounded transport, active-branch receipts and the Windows Pi 1.2.0 project/user JSON/RPC journeys. This tool retains the triggering and cooldown rules described above. Guard loading, unknown mutators and operating-system isolation follow the [admission limits](../guards-and-extensions.md#guard-admission-and-evidence).

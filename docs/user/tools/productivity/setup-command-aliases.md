@@ -1,5 +1,7 @@
 # Setup command aliases
 
+Platforms: **Claude Code, ChatGPT, Pi**. Install with `harness install setup-command-aliases`; see [installation and scope](../../getting-started.md).
+
 ## Use it
 
 Ask the agent to add a shell shortcut with `/setup-command-aliases` in Claude Code or `$setup-command-aliases` in ChatGPT, for example `$setup-command-aliases add gs for git status`.
@@ -11,3 +13,7 @@ On Windows, the skill edits the PowerShell profile and, for a cross-platform req
 ## What happens
 
 The agent reads the existing shell file, checks for conflicts, then appends the new definition. For `gs` mapped to `git status`, PowerShell gets `function gs { git status $args }`; Bash and Zsh get `alias gs='git status'`. Source the updated profile or open a new terminal before trying the alias.
+
+## Pi usage
+
+Use `/skill:setup-command-aliases [alias request]`. Preserve the existing PowerShell, Bash or Zsh configuration. A requested Pi wrapper is a shell alias, not a new provider installer action.

@@ -1,5 +1,7 @@
 # Websearch
 
+Platforms: **Claude Code, ChatGPT, Pi**. Install with `harness install websearch`; see [installation and scope](../../getting-started.md).
+
 ## When to use
 
 Use `websearch` when you need current external documentation or a source-backed answer to a research question. It is a read-only research workflow apart from maintaining its source index.
@@ -19,3 +21,7 @@ Claude Code, ChatGPT, and Pi are supported. The package installs a user-editable
 ## Example
 
 `/websearch What changed in the latest version of our database driver?` asks for a cited answer grounded in current sources.
+
+## Pi usage
+
+Use `/skill:websearch <question>`. The shared research skill uses Context7 for library documentation and available search/fetch tools. Missing web access is a reported coverage gap. Native discovery, invocation, index reads and removal are covered by the shared-skill journeys.

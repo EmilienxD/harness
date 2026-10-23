@@ -4,12 +4,7 @@
 
 Harness is a catalogue and installer for small, independently selectable agent skills, hooks, command-line tools, and the optional Aboard VS Code extension. It supports Claude Code and ChatGPT without making you adopt an all-or-nothing workflow.
 
-Pi supports 24 shared skill packages and Web Toolkit with its CLI and two native web tools, plus native
-extensions for path guards, comment budgets, document drafts, issue workflows, Git cleanup,
-cloud interviews, session commits, desktop notifications, Discord gotcha reports, and Calm's
-minimal terminal display.
-The [architecture and initial tool scope](docs/PI-ARCHITECTURE.md) track
-shipped skills and the remaining extension and runtime ports.
+Pi is an opt-in installation target. Each [tool guide](docs/user/index.md) lists its supported platforms, configuration, implementation decisions and verification limits.
 
 The project is built around deliberate control. Most skills run only when you invoke them. Hooks act at narrow, visible lifecycle boundaries, with editable policies where configuration is needed. Aboard keeps delegated and automated work in visible terminals that you can inspect, stop, and resume.
 
@@ -812,7 +807,7 @@ Harness leaves running browser sessions alone.
 
 Fetch tries plain HTTP with a browser-like fingerprint first. Bot challenges, blocked responses, pages with little text or an empty application root, and every search use one shared headless Chrome: the first command that needs it starts it with a dedicated profile, concurrent commands each work in their own tab, and it closes after 10 idle minutes. Search reads public engine result pages, trying DuckDuckGo, Startpage, Bing, and Google in that order and answering from the first engine whose results match the query. An installed Google Chrome or Microsoft Edge is required (or Chromium; set `WEB_TOOLKIT_BROWSER` to choose an executable). The browser state lives in `~/.harness/web-toolkit/` (or `$HARNESS_STATE_DIR/web-toolkit/`). Chrome runs without its own process sandbox, which cannot start inside agent sandboxes.
 
-Installation adds the CLI. Claude Code and ChatGPT receive the fallback skill for when native web tools are unavailable. Pi receives only the native `web_search` and `web_fetch` tools, without the fallback skill; restart Pi or reload extensions after installation. `web_search` takes one required string, `query`; `web_fetch` takes one required string, `url`. Both return `{ output: string, exitCode: integer }`, where `output` is the CLI text followed by any stderr. Nonzero exits are tool errors and preserve HTTP error pages. Calls have a 120-second deadline, a 256 KiB output limit, and support cancellation. The extension invokes the CLI directly with literal arguments and uses the current Pi working directory. It requires `web-toolkit` on Pi's PATH and works at project or user scope.
+Installation adds the CLI. Claude Code and ChatGPT receive a skill that directs agents to use Web Toolkit for web searches and source reading. Pi receives the native `web_search` and `web_fetch` tools; restart Pi or reload extensions after installation. `web_search` takes one required string, `query`; `web_fetch` takes one required string, `url`. Both return `{ output: string, exitCode: integer }`, where `output` is the CLI text followed by any stderr. Nonzero exits are tool errors and preserve HTTP error pages. Calls have a 120-second deadline, a 256 KiB output limit, and support cancellation. The extension invokes the CLI directly with literal arguments and uses the current Pi working directory. It requires `web-toolkit` on Pi's PATH and works at project or user scope.
 
 Pi's `web_search` also accepts optional `allowed_domains` and `blocked_domains` arrays, for example `{ "query": "asyncio TaskGroup", "allowed_domains": ["docs.python.org"], "blocked_domains": ["legacy.docs.python.org"] }`. Use bare domain names rather than URLs. Allowed domains match as alternatives, both filters include subdomains, and exclusions win. Empty arrays apply no restriction. Put website filters in these parameters when using them; combining them with inline `site:` operators is rejected to avoid conflicting restrictions. The CLI continues to accept its existing `site:` query syntax.
 
@@ -860,22 +855,11 @@ The access cookie is marked `Secure` whenever the request arrives over HTTPS, so
 
 ## Development
 
-### Provider research and reference documentation
+### Tool documentation and upstream references
 
-Pi is an opt-in target for all 24 shared skill packages, including `caveman` and `setup-help`, the three path guards, comment budgets, document draft approval, Git cleanup inventory, both issue workflows, and the cloud interview extension. Project skills use `.pi/skills`;
-user installs use `~/.pi/agent/skills` or the configured `PI_CODING_AGENT_DIR`. Omitted `--platform`
-continues to select Claude Code and ChatGPT. Persistent `subagents` and Aboard also support Pi; other Pi extensions are pending.
-The [Pi architecture proposal](docs/PI-ARCHITECTURE.md) records the requested 35-package backlog
-in priority order: 22 packages primarily reuse shared skills and 13 need native extensions.
-It defines provider-owned install roots, receipt ownership, a versioned bridge to existing Python
-cores, explicit commands, branch-aware session state, hosted answer delivery, and acceptance gates.
-`/ship` remains a later provider integration; Aboard's Pi adapter is shipped.
+Maintain usage, provider support, implementation decisions and acceptance limits in the relevant [tool guide](docs/user/index.md). Shared installation roots, receipt ownership and dependency packaging belong in [Configuration](docs/user/configuration.md#installation-roots-and-ownership). A proposed port remains identified as proposed in its tool guide; `/ship` does not yet support Pi loop implementers.
 
-The [Pi compatibility report](docs/PI-COMPATIBILITY.md) supplies catalogue-wide feasibility and
-API evidence. [Pi's official references and key extension examples](docs/PI-REFERENCES/README.md)
-include 50 mirrored upstream files alongside Claude Code and ChatGPT, refreshed by the daily/manual
-documentation workflow. The mirror tracks upstream; supported runtime versions will require
-separate verification.
+[Pi's official reference mirror](docs/PI-REFERENCES/README.md), alongside the Claude Code and ChatGPT mirrors, supplies upstream API evidence. The mirrors track upstream and are refreshed by the daily/manual documentation workflow; a refresh does not certify another runtime version. Tool guides retain their own tested baseline and verification boundary.
 
 Refresh all provider reference sets locally:
 

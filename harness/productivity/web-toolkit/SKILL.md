@@ -1,9 +1,9 @@
 ---
 name: web-toolkit
-description: Fallback web search and page reading through the Web Toolkit CLI when native web tools are unavailable.
+description: Use Web Toolkit to search the web and read pages, PDFs, or text files.
 ---
 
-Web Toolkit provides free, local web search. Use native web tools when available. Otherwise, run `web-toolkit` through the shell when it fits the user's web tool preference. Tell the user if the command is not installed.
+Run `web-toolkit` through the shell whenever you need to search the web or read a web source. Use `search` to find sources and `fetch` to read their content. Tell the user if the command is not installed.
 
 `search` prints up to 10 numbered results, each with a title, URL, and snippet. `fetch` prints a page, PDF, or text file as Markdown after a short header. A long page prints its beginning, the later headings with their line numbers, and a `Full text:` path holding the whole page: read or grep that file for the rest instead of fetching again.
 

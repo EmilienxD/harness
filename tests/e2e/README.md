@@ -368,7 +368,7 @@ requested Gemini service; command integration uses fake inference, never paid Pi
 
 `test:pi-web-toolkit` installs the actual `web-toolkit` package, host CLI and native extension
 in isolated uv directories. Project JSON and user RPC journeys use real Pi 1.2.0 with the
-fake OpenAI Responses API shared with Codex. They verify that no fallback skill is installed
+fake OpenAI Responses API shared with Codex. They verify that no Web Toolkit skill is installed
 or discovered and invoke the native tools directly. Local HTTP pages verify fetch, redirects,
 Unicode, saved full text, HTTP error bodies, validation, missing executable handling and
 RPC cancellation. Search runs the real CLI and Chrome DOM extraction/filtering; a fixture
@@ -547,7 +547,7 @@ The two native-path journeys verify `@`, tilde, file URL and Unicode-space expan
 MSYS/WSL/Cygwin paths and casing, aliases into docs, docs links outside the project and linked
 draft rejection. Both installation scopes deny twelve creations on Windows and preserve exact
 native write/edit and approved bytes. The complete gate has seven journeys; commands add zero
-inference requests. See the [implementation decision and source evidence](../../docs/PI-ARCHITECTURE.md#shipped-document-cleanup-and-test-workflow-slice)
+inference requests. See the [document-guard implementation and source evidence](../../docs/user/tools/guards/no-new-documents.md#implementation-and-verification)
 for the event-guard choice and coverage boundary.
 
 `test:pi-cleanup-git` verifies project JSON and user RPC invocation through native skill expansion.

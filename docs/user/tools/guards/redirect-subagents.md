@@ -1,5 +1,7 @@
 # Redirect Subagents
 
+Platforms: **Claude Code**. Install with `harness install redirect-subagents --platform claude`; see [installation and scope](../../getting-started.md).
+
 `redirect-subagents` intercepts configured Claude Code built-in Agent subagents and runs them through another command or provider, returning the result to the parent session. It is Claude-only and separate from Harness's `subagents` delegation package.
 
 Install with `harness install redirect-subagents --platform claude` and restart Claude Code. Edit the installed starter at `.claude/harness-redirect-subagents/subagents.json`. Its `Explore` example has `disabled: true`, so no route is active until you enable one. A simple route is:
@@ -21,3 +23,7 @@ Install this when you want particular built-in Claude Agent tasks, such as `Expl
 ## Example and limits
 
 With `"Explore": "auto"`, an Explore Agent call routes to `claude -p --model auto` and its result returns to the parent. Keep the `disabled` flag in place until the backend command is installed and tested. Routes are local configuration; a missing executable or failed child command cannot produce a successful redirected result.
+
+## Pi status
+
+This intercepts Claude Code's built-in Agent tool and remains Claude-only. Pi delegation belongs to the persistent subagents workflow.
