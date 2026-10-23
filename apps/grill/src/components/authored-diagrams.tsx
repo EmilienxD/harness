@@ -1,11 +1,15 @@
 import { Component, useEffect, useState, type ComponentType, type ReactNode } from "react";
 import { createPortal } from "react-dom";
+import { createClientOnlyFn } from "@tanstack/react-start";
 import type { DiagramTarget } from "@/lib/diagram-discovery";
 import type DiagramEditor from "./diagram-editor";
 import type { DiagramSceneStore } from "@/lib/diagram-scene";
 
 type Editor = typeof DiagramEditor;
 type Props = Parameters<Editor>[0];
+// Remove the browser-only editor from the server build's dependency graph.
+const loadDiagramEditor = createClientOnlyFn(() => import("./diagram-editor"));
+
 class DiagramBoundary extends Component<{ children: ReactNode }, { failed: boolean; attempt: number }> {
   override state = { failed: false, attempt: 0 };
   static getDerivedStateFromError() {
@@ -36,7 +40,7 @@ function DiagramMount(props: Props) {
     if (props.hidden) return;
     let live = true;
     setFailed(false);
-    void import("./diagram-editor")
+    void loadDiagramEditor()
       .then((module) => {
         if (live) setEditor(() => module.default);
       })

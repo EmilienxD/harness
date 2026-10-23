@@ -1,6 +1,10 @@
 import { diagramChanged, meaningfulScene } from "./diagram-feedback.ts";
+import { createClientOnlyFn } from "@tanstack/react-start";
 import type { ExcalidrawElement } from "@excalidraw/excalidraw/element/types";
 import type { AppState, BinaryFiles } from "@excalidraw/excalidraw/types";
+
+// Dynamic imports alone still let the production bundler share browser code with React.
+const loadDiagramConversion = createClientOnlyFn(() => import("./diagram-conversion"));
 
 /** Serializable scene boundary for conversion, editing, future storage and snapshot export. */
 export type DiagramScene = {
@@ -132,7 +136,7 @@ export class DiagramSceneStore {
           throw new Error(`Diagram ${questionId}/${diagramId} has different saved source. Its drawing is preserved.`);
         return restored;
       }
-      const { convertDiagram } = await import("./diagram-conversion");
+      const { convertDiagram } = await loadDiagramConversion();
       const record = await convertDiagram(source);
       this.set(questionId, diagramId, record, persist);
       return record;
@@ -211,7 +215,7 @@ export class DiagramSceneStore {
             diagramChanged(record.baseline, captured) &&
             this.exported.get(key) !== this.revisions.get(key)
           ) {
-            const { exportDiagramPng } = await import("./diagram-conversion");
+            const { exportDiagramPng } = await loadDiagramConversion();
             const png = await exportDiagramPng(captured);
             if (png.size > 2_900_000)
               throw new Error(
