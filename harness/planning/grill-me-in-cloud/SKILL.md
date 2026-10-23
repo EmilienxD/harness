@@ -28,13 +28,13 @@ The session is done when the frontier is empty: every branch of the design tree 
 
 The runtime supplies an inbox file, an assets directory, and an assets URL prefix outside the project, reserved for this session. Write supporting assets first, then write the complete round JSON directly to the supplied inbox file; that successful tool call triggers publication. Use the updated locations returned with each publication result or validation error for the next write.
 
-After publication succeeds, reply only `Round n with m questions available at <url>`, using the reported round number, question count, and URL, then end your turn and wait for answers. Reviewed answers arrive as a user message through Aboard for Claude/ChatGPT or the board's **Send to Pi** action for Pi; the user can also copy them manually.
+After publication succeeds, reply only `Round <round-number> with <questions-count> questions available at <url>`. End your turn and wait for answers.
 
-On a validation rejection, fix the reported problem and write the complete round to the updated inbox file. On a setup or publication failure, report the error briefly and stop; queued publications retry on the next user message. If the runtime supplies no inbox file at startup, or writing a round gets no publication result, report that the grill runtime did not respond and stop.
+On a validation rejection, fix the reported problem and write the complete round to the updated inbox file. On a setup or publication failure such as no inbox file supplied, report the error without diagnosing it and stop.
 
 Nothing persists between rounds or between questions: give every question all the context, styles, scripts, and media it needs. The user answers from the board alone, with no access to the codebase: a file path is only a label, so when a decision depends on specific code, quote those lines as a code block captioned with the path and line range, inside `<details>` when long.
 
-> The following JSON + HTML inbox system is strictly reserved for grilling questions; once a shared understanding has been reached, you must forget this system and continue communicating through normal text messages.
+The following JSON + HTML inbox system is strictly reserved for grilling questions; once a shared understanding has been reached, you must forget this system and continue communicating through normal text messages.
 
 ## Round JSON
 
