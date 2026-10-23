@@ -1,73 +1,16 @@
 name = "report-gotchas"
-version = "1.2.3"
+version = "2.0.0"
 description = "Send noteworthy agent handoff gotchas to Discord"
 docs = "https://github.com/EmilienxD/harness/blob/main/README.md#model-invoked-skills"
-requires = ["git"]
 
 [platforms.claude]
 status = "supported"
-fragment = "claude/settings.fragment.json"
 
 [platforms.chatgpt]
 status = "supported"
-fragment = "chatgpt/hooks.fragment.json"
 
 [platforms.pi]
 status = "supported"
-
-[[dependencies]]
-name = "pi-transport"
-version = ">=1.0.0,<2.0.0"
-platforms = ["pi"]
-lifecycle = "coupled"
-
-[[files]]
-src = "pi/extension.ts"
-dest = ".harness-report-gotchas/index.ts"
-root = "extensions"
-platforms = ["pi"]
-
-[[files]]
-src = "report_gotchas_pi.py"
-dest = "report_gotchas_pi.py"
-root = "support"
-platforms = ["pi"]
-
-[[files]]
-src = "runtime/src/report_gotchas/__init__.py"
-dest = "report_gotchas/__init__.py"
-root = "support"
-platforms = ["pi"]
-
-[[files]]
-src = "runtime/src/report_gotchas/cli.py"
-dest = "report_gotchas/cli.py"
-root = "support"
-platforms = ["pi"]
-
-[[files]]
-src = "runtime/src/report_gotchas/config.py"
-dest = "report_gotchas/config.py"
-root = "support"
-platforms = ["pi"]
-
-[[files]]
-src = "runtime/src/report_gotchas/reports.py"
-dest = "report_gotchas/reports.py"
-root = "support"
-platforms = ["pi"]
-
-[[files]]
-src = "runtime/src/report_gotchas/discord.py"
-dest = "report_gotchas/discord.py"
-root = "support"
-platforms = ["pi"]
-
-[[files]]
-src = "runtime/src/report_gotchas/hooks.py"
-dest = "report_gotchas/hooks.py"
-root = "support"
-platforms = ["pi"]
 
 [[files]]
 src = "SKILL.md"
@@ -83,4 +26,4 @@ platforms = ["chatgpt"]
 [[actions]]
 type = "uv-tool"
 package = "harness-report-gotchas-runtime"
-source = "git+https://github.com/EmilienxD/harness@104eb10632fbfc2a3eaa47ad057e471e70969af6#subdirectory=harness/productivity/report-gotchas/runtime"
+source = "git+https://github.com/EmilienxD/harness@65afc165c07b7894c8adc0013e52896fbc79279d#subdirectory=harness/productivity/report-gotchas/runtime"

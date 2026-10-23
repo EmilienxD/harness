@@ -116,7 +116,7 @@ it can also include shared skills. Rows marked implemented ship the stated Pi re
 | 30 | `issue-writers` | Extension | Implemented in 2.3.0. Supply native session draft paths for the four drafting/spec skills; intercept the fifth (`publish-issues`) through a native command with existing locks and ordering, without inference. |
 | 31 | `cleanup-git` | Extension | Implemented. Inject the existing read-only inventory before native skill expansion; keep approval and live-state checks before cleanup. |
 | 32 | `enable-desktop-notification` | Extension | Implemented in 1.1.0. Native zero-inference enable/disable, session-persistent opt-in and one final-settlement notification through the shared OS notifier. |
-| 33 | `report-gotchas` | Extension | Implemented in 1.2.0. Native structured submission binds Pi identity before durable queue publication; session-wide deduplication, serialized workers and zero-inference retry reuse the shared Python runtime. |
+| 33 | `report-gotchas` | Skill | Checkout 2.0.0 uses one shared skill and CLI. Submission waits for Discord confirmation; no provider extension or Git metadata. The catalogue pins the synchronous runtime commit. |
 | 34 | `commit` | Extension | Implemented in 1.7.0. Native zero-inference command, shared staging/Git/message generation and verified successful-write attribution on the active Pi session branch; uncertain ownership stops before staging. |
 | 35 | `grill-me-in-cloud` | Extension | Implemented in 2.2.0. Shared publication/assets/outbox core, native round preparation and standalone persisted-message answer relay. Additive hosted contract/migration deployed; real Pi project/user journeys pass against local and production services. |
 
@@ -679,59 +679,29 @@ before opt-in; successful submission does not certify that OS settings display t
 
 ## Shipped gotcha reports
 
-`report-gotchas` 1.2.1 installs its shared model-invoked skill and a native `report_gotchas`
-tool, plus `/report-gotchas-retry`. The existing host CLI remains responsible for webhook
-configuration. The extension and receipt-owned copy of the shared Python runtime install at
-both scopes, with the coupled `pi-transport` transport. The Pi worker explicitly loads this
-installed runtime, so the older independently pinned configuration CLI does not select Pi's
-submission/delivery implementation. Pi reads the shared webhook configuration, then keeps its
-queue, deduplication markers and locks under the state directory's `pi/` namespace. Legacy
-host CLI retries cannot see or race that queue; native retry owns Pi delivery. There is no
-provider-specific copy of Discord formatting,
-Git collection, queue progress or retry policy.
+The `report-gotchas` 2.0.0 checkout installs one provider-neutral model-invoked skill and
+`harness-report-gotchas`. Pi needs no extension, transport dependency or reporting tool.
+Skills install in the conventional skills directory. All providers run the same CLI.
 
-The implementation decision follows the mirrored [extension contract](PI-REFERENCES/docs/extensions.md#tools),
-[tool/context declarations](PI-REFERENCES/src/core/extensions/types.ts),
-[session identity/tree format](PI-REFERENCES/docs/session-format.md), and installed Pi 1.2.0's
-`agent-session.js`/`nested-tool-calls.js`. A shell `tool_result` receipt parser would inherit
-shell quoting, output truncation and receipt-spoofing ambiguity. A native tool accepts Markdown
-directly and captures `ctx.sessionManager.getSessionId()` and `ctx.cwd` itself. Model arguments
-cannot choose the provider or session identity. Native tools also participate in nested calls,
-normal tool permissions, cancellation and structured results. Reporting creates no extra model
-request; the agent's normal follow-up can acknowledge accepted titles.
+`submit` posts the supplied Markdown directly with Discord's `wait=true` and waits for a
+created-message response. It prints "Report successfully posted to Discord." only after
+all parts are confirmed. Reports longer than Discord's message limit are split in memory;
+mentions are disabled. A failed post exits nonzero, identifies any already-posted parts,
+and leaves the caveat for the agent's final response. Requests have a ten-second timeout.
+There are no background workers, local report files, queues, receipts, provider/session/Git
+metadata, retry command, hook fragments, migration or compatibility paths. `configure`
+stores only the webhook configuration; submitting a report writes no local state.
 
-Python validates nonempty Markdown and derives a deterministic receipt from provider, native
-session ID and Markdown after CRLF normalization and outer whitespace trimming. An OS file lock
-serializes publication of each receipt; the queue is written atomically before the acceptance
-marker. A retry recovers a queue published immediately before a crash. The marker contains only
-receipt/provider/session identity, remains after successful delivery and belongs to the entire
-session rather than its active ancestry: navigating backward cannot unsend a Discord report.
-Reload/resume preserve deduplication; new/fork sessions get a separate namespace. Semantically
-equivalent rewrites still require the shared skill's judgment to avoid duplicate gotchas.
+The live journey was verified through real headless Claude Code, Codex and Pi, fake model
+inference, and the configured real Discord webhook. Each provider made exactly three model
+requests. The user confirmed all three notifications arrived. Local HTTPS fixture journeys
+add project/user and JSON/RPC coverage, missing configuration, empty reports, Unicode,
+mention suppression, multipart posts, HTTP failures and rate limits. They verify real CLI
+exit status and Discord effects without prompt-text assertions or mocked runtime functions.
 
-Receipt acceptance means durable local queuing. Missing configuration leaves the report queued
-and tells the user to configure Discord. The detached worker runs the shared formatter and
-retry logic, labels the provider **Pi**, disables mentions, and saves multipart progress after
-each acknowledged message. Delivery locks serialize competing workers and release on process
-exit; retries preserve already acknowledged parts. `/report-gotchas-retry` schedules pending
-receipts without inference, including missing-configuration and argument errors. Queue and
-submission history are user data and survive uninstall. Webhook secrets stay in user-owned
-configuration/environment, outside model arguments and native status messages.
-
-Discord webhooks have no transactional idempotency key: a crash or lost HTTP acknowledgement
-after remote acceptance but before local progress persistence can repeat a part. The local
-contract prevents repeat submissions and competing workers from resetting/replaying acknowledged
-progress; it does not claim exactly-once remote delivery.
-
-`test:pi-report-gotchas` runs real Pi 1.2.0 project/user × JSON/RPC journeys with the fake
-Responses API shared with Codex. A loopback HTTPS Discord fixture replaces only the remote
-webhook: production URL validation, TLS verification, urllib, worker processes, rate-limit
-retry and multipart progress remain real. Checks cover native skill/tool discovery, actual
-session/Git metadata, missing configuration, empty input/helper failure, duplicate/nested
-submissions, reload/resume/tree/fork/new-session behavior, multipart failure/recovery, mentions,
-no-gotcha turns, exact inference counts and receipt-driven removal. These Windows headless
-checks certify integration; interactive rendering, POSIX acceptance, real Discord service
-delivery and unscripted caveat selection require their own applicable evidence.
+These checks explicitly install the checkout runtime with `--local`. The catalogue pins
+the synchronous 2.0.0 runtime commit; that commit must be published before remote installs
+can fetch it. Pi TUI and POSIX remain outside the Windows headless gate.
 
 ## Later provider consumers
 

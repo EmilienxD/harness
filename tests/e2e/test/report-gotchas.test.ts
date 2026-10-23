@@ -11,7 +11,7 @@ for (const platform of ["claude", "chatgpt"] as const) {
     const result = await runReportGotchasJourney(platform);
     assert.deepEqual(result.checkpoints, ["skill-loaded", "report-submitted", "complete"]);
     assert.equal(result.delivered, true);
-    assert.match(result.finalText, /Discord report delivered/iu);
+    assert.equal(result.inferenceRequests, 3);
     assert.equal(result.unexpectedRequests, 0);
   });
 }

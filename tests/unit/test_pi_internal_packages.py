@@ -14,7 +14,7 @@ GUARDS = {"on-read-reminder", "on-edit-reminder", "on-edit-block"}
 ISSUES = {"issue-readers", "issue-writers"}
 TRANSPORT_ONLY = {
     "command-guard", "prefer-fewer-comments", "no-new-documents", "commit",
-    "cleanup-git", "grill-me-in-cloud", "enable-desktop-notification", "report-gotchas",
+    "cleanup-git", "grill-me-in-cloud", "enable-desktop-notification",
 }
 
 

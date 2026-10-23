@@ -6,8 +6,8 @@
 
 ## Manual reports and configuration
 
-You can invoke `/report-gotchas` in Claude Code or `$report-gotchas` in ChatGPT. For a manual report, pipe Markdown to `harness-report-gotchas submit`, or run `harness-report-gotchas submit -m "**Task**: concrete issue and consequence."`. The command adds session and Git context automatically, so leave secrets out of the report. Run `harness-report-gotchas retry` to resend queued reports. `HARNESS_REPORT_GOTCHAS_STATE_DIR` changes its state directory; `HARNESS_REPORT_GOTCHAS_WEBHOOK_URL` supplies the webhook through the environment.
+You can invoke `/report-gotchas` in Claude Code or `$report-gotchas` in ChatGPT. For a manual report, pipe Markdown to `harness-report-gotchas submit`, or run `harness-report-gotchas submit -m "**Task**: concrete issue and consequence."`. The command posts only the supplied Markdown and waits for Discord to confirm delivery. It prints "Report successfully posted to Discord." on success and exits with an error if posting fails. Keep secrets out of the report. `HARNESS_REPORT_GOTCHAS_STATE_DIR` changes its state directory; `HARNESS_REPORT_GOTCHAS_WEBHOOK_URL` supplies the webhook through the environment.
 
 ## Practical note
 
-The package requires Git. A useful report names the task, then lists specific caveats and their consequences. Avoid resubmitting an issue already reported in the same session; when delivery fails, keep the caveat in the agent's final response so it is still visible.
+A useful report names the task, then lists specific caveats and their consequences. Avoid resubmitting an issue already reported in the same session; when delivery fails, keep the caveat in the agent's final response so it is still visible.
