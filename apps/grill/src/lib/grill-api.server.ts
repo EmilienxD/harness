@@ -111,13 +111,10 @@ export async function promptForRound(roundId: string) {
     );
     if (!changed && !(answers ?? []).some((answer) => answer.question_id === question.id && answer.state === "queued"))
       continue;
-    feedback[question.id] = diagrams.map((diagram) => {
+    feedback[question.id] = diagrams.flatMap((diagram) => {
       const row = (scenes ?? []).find((scene) => scene.question_id === question.id && scene.diagram_id === diagram.id);
-      const summary = row
-        ? summarizeDiagram(row.baseline as DiagramScene, row.scene as DiagramScene)
-        : "No changes were made to the diagram.";
-      if (!row || !diagramChanged(row.baseline as DiagramScene, row.scene as DiagramScene))
-        return `Diagram ${diagram.id}: ${summary}`;
+      if (!row || !diagramChanged(row.baseline as DiagramScene, row.scene as DiagramScene)) return [];
+      const summary = summarizeDiagram(row.baseline as DiagramScene, row.scene as DiagramScene);
       const asset = (images ?? []).find(
         (item) =>
           item.question_id === question.id && item.diagram_id === diagram.id && item.scene_revision === row.revision,
