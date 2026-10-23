@@ -11,7 +11,7 @@ The board is designed for one person. It uses a shared four-digit access code in
 - Shows one question at a time, including the agent's explanation, recommendation, and optional interactive content.
 - Accepts an option, a note, or a custom answer. Every edit saves automatically and is included in the prompt.
 - Offers **Add Additional Notes** after the final question in every round. The last **Notes** card autosaves round-wide context and includes it after question answers in the reviewed prompt.
-- Produces a read-only prompt that can be copied, sent through Aboard, or sent to Pi when its session relay is connected. Pi claims answers only while idle and confirms receipt from its saved session.
+- Produces a read-only, single-line prompt with ` | ` between questions and before additional notes. Line breaks in answers, notes, and diagram feedback become spaces before review, so copy and delivery use the reviewed text. It can be copied, sent through Aboard, or sent to Pi when its session relay is connected. Pi claims answers only while idle and confirms receipt from its saved session.
 - Keeps unfinished sessions indefinitely. Finishing a session moves it to the archive and starts a 30-day period before the daily cleanup removes its data and stored media. Finished sessions can be restored during that period, and a newly published round restores its session automatically.
 
 ## Default hosted board
