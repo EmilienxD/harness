@@ -26,11 +26,15 @@ The session is done when the frontier is empty: every branch of the design tree 
 
 ## Publishing a round
 
-The runtime supplies the round path, the assets directory with its URL prefix, and the publishing steps, then reports each publication's outcome; follow it exactly. If it supplies no path, or writing a round gets no reply, tell the user the grill runtime did not respond and stop. Pi uses a native extension for this workflow; its board's **Send to Pi** action returns reviewed answers to the originating session. `/grill-cloud-stop` disconnects that session's interview while preserving its board history.
+The runtime supplies an inbox file, an assets directory, and an assets URL prefix outside the project, reserved for this session. Write supporting assets first, then write the complete round JSON directly to the supplied inbox file; that successful tool call triggers publication. Use the updated locations returned with each publication result or validation error for the next write.
+
+After publication succeeds, reply only `Round <round-number> with <questions-count> questions available at <url>`. End your turn and wait for answers.
+
+On a validation rejection, fix the reported problem and write the complete round to the updated inbox file. On a setup or publication failure such as no inbox file supplied, report the error without diagnosing it and stop.
 
 Nothing persists between rounds or between questions: give every question all the context, styles, scripts, and media it needs. The user answers from the board alone, with no access to the codebase: a file path is only a label, so when a decision depends on specific code, quote those lines as a code block captioned with the path and line range, inside `<details>` when long.
 
-> The following JSON + HTML inbox system is strictly reserved for grilling questions; once a shared understanding has been reached, you must forget this system and continue communicating through normal text messages.
+The following JSON + HTML inbox system is strictly reserved for grilling questions; once a shared understanding has been reached, you must forget this system and continue communicating through normal text messages.
 
 ## Round JSON
 
@@ -65,9 +69,32 @@ Prefer visuals over long prose text.
 Every visual explains the decision rather than decorating it:
 
 - **Comparisons** align the same criteria and show costs as plainly as benefits.
+
 - **Tables** hold rows that share fields; say what the table shows before it. The board scrolls every table horizontally when it is too wide, so never force cell widths or wrapping.
-- **Diagrams** show one concept each in inline SVG (`viewBox`, `width="100%"`, `<title>`), with page variables, short labels, and prose outside. SVGs loaded through `<img>` cannot read page variables, so give them literal fallbacks such as `var(--surface, #fbfaf6)`.
+
+- **Static diagrams** use inline SVG (`viewBox`, `width="100%"`, `<title>`) for illustrations that need explicit visual composition, with page variables, short labels, and prose outside. SVGs loaded through `<img>` cannot read page variables, so give them literal fallbacks such as `var(--surface, #fbfaf6)`.
+
+- **Dynamic & editable diagrams** use the Mermaid figure:
+
+```html
+<figure data-grill-diagram="publication-flow">
+  <pre class="mermaid">flowchart LR
+    A[Write assets] --&gt; B[Publish round]
+    B --&gt; C[User reviews]</pre>
+  <figcaption>Assets are ready before the user sees the round.</figcaption>
+</figure>
+```
+
+Give each figure a stable, descriptive `data-grill-diagram` ID unique within its question: start with a letter, then use letters, digits, `_` or `-`, up to 64 characters. Keep the same ID when moving a diagram or retaining its meaning in a later round. Different questions may reuse an ID.
+
+Each figure has one direct `<pre class="mermaid">` with nonempty Mermaid source and one direct, nonempty `<figcaption>` explaining what the diagram helps decide. HTML-escape source characters (`&amp;`, `&lt;`, `&gt;`); keep source as text inside the `<pre>`. Supply source and caption without initialization JavaScript or external Mermaid scripts; the system auto converts it into an Excalidraw canva.
+
+To review diagram changes, you will receive either an image path directly or a remote image ID (depending on user settings). No path or ID means no changes. Download each remote image ID with `<skill-directory>/scripts/download_grill_image.py <id>`. If a download fails, report the error. Otherwise the script will return the path. Then, read each image from its local path.
+
 - **Images**, such as real project screenshots for UI decisions, use the assets URL prefix and useful alt text.
-- **Videos** use the same assets directory and URL prefix as images: `<video src="assets/round-001/demo.mp4" controls playsinline preload="none" aria-label="Checkout interaction preview"></video>`. Use MP4 or WebM, target clips under a minute, and explain what to compare in nearby prose or a `<figcaption>`. Optional `poster` images and `<source src>` references use the same asset workflow. The publisher checks the installed `ffmpeg` on PATH and prepares browser-ready clips locally before uploading; keep each source and prepared video within 20 MiB, images within 6 MiB, and each round within 50 MiB / 20 assets. Write all assets before the round JSON.
+
+- **Videos** use the same assets directory and URL prefix as images: `<video src="assets/round-001/demo.mp4" controls playsinline preload="none" aria-label="Checkout interaction preview"></video>`. Use `<figcaption>` for optional caption. Optional `poster` images and `<source src>` references use the same asset workflow. Keep each source and prepared video within 20 MiB. Skip format preparation; the system will convert with ffmpeg if needed.
+
 - **Demos** use native controls wired in `init_js`, which runs once after mounting with `root` as the question's explanation element; `<script>` tags never run. Query within `root`, prefix IDs with the question ID (`Q1-preview`), keep the explanation clear without interaction, and leave answering to the board's form.
+
 - **Custom CSS** is scoped under `#explanation-Q1`; custom grids use `minmax(0, 1fr)` and `min-width: 0`. Check narrow widths and that SVG labels fit their shapes.

@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { extractAuthoredDiagrams } from "./grill-diagrams.ts";
 
 export const SCHEMA_VERSION = 1 as const;
 // Reserved draft identity for round-wide notes; generated question IDs are always Q<number>.
@@ -31,6 +32,11 @@ export const questionSchema = z
     options: z.array(optionSchema).min(1).max(4),
   })
   .superRefine((question, context) => {
+    try {
+      extractAuthoredDiagrams(question.explanation_html);
+    } catch (error) {
+      context.addIssue({ code: "custom", path: ["explanation_html"], message: (error as Error).message });
+    }
     const letters = question.options.map((_option, index) => String.fromCharCode(65 + index));
     if (question.options.some((option, index) => option.letter !== letters[index])) {
       context.addIssue({ code: "custom", message: "Option letters must be consecutive from A" });
@@ -41,7 +47,9 @@ export const questionSchema = z
   });
 
 export const roundPayloadSchema = z
-  .object({ questions: z.array(questionSchema).min(1) })
+  .object({
+    questions: z.array(questionSchema).min(1),
+  })
   .superRefine((payload, context) => {
     const ids = payload.questions.map((question) => question.id);
     if (new Set(ids).size !== ids.length) context.addIssue({ code: "custom", message: "Question IDs must be unique" });
@@ -97,7 +105,11 @@ export type AnswerDraft = {
   state: "draft" | "queued";
 };
 
-export function compilePrompt(payload: RoundPayload, answers: readonly AnswerDraft[]): string {
+export function compilePrompt(
+  payload: RoundPayload,
+  answers: readonly AnswerDraft[],
+  diagramFeedback: Record<string, string[]> = {},
+): string {
   const queued = new Map(
     answers.filter((answer) => answer.state === "queued").map((answer) => [answer.question_id, answer]),
   );
@@ -105,11 +117,14 @@ export function compilePrompt(payload: RoundPayload, answers: readonly AnswerDra
   const bullets: string[] = [];
   for (const question of payload.questions) {
     const answer = queued.get(question.id);
-    if (!answer) continue;
-    const note = answer.note?.trim() ?? "";
-    if (!answer.selected_option && !note) continue;
-    const choice = answer.selected_option ?? "None of these";
-    bullets.push(`- ${question.id}: ${choice}.${note ? ` ${note}` : ""}`);
+    const feedback = diagramFeedback[question.id] ?? [];
+    if (!answer && !feedback.length) continue;
+    const note = answer?.note?.trim() ?? "";
+    if (!answer?.selected_option && !note && !feedback.length) continue;
+    const choice = answer ? (answer.selected_option ?? "None of these") : "Diagram feedback";
+    bullets.push(
+      `- ${question.id}: ${choice}.${note ? ` ${note}` : ""}${feedback.length ? `\n${feedback.map((line) => `  ${line}`).join("\n")}` : ""}`,
+    );
   }
   const notes = queued.get(NOTES_ID)?.note?.trim();
   if (notes) bullets.push(`- Additional Notes:\n${notes}`);

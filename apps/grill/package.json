@@ -9,18 +9,23 @@
     "lint": "eslint .",
     "test": "node --experimental-strip-types --test test/*.test.ts",
     "format": "prettier --write .",
-    "test:e2e": "playwright test"
+    "test:e2e": "playwright test",
+    "test:ui": "playwright test --config playwright.ui.config.ts"
   },
   "overrides": {
     "rolldown": "1.2.1"
   },
   "dependencies": {
+    "@excalidraw/excalidraw": "0.18.1",
+    "@excalidraw/mermaid-to-excalidraw": "2.2.2",
     "@supabase/supabase-js": "2.116.0",
     "@tanstack/react-query": "5.101.1",
     "@tanstack/react-router": "1.170.41",
     "@tanstack/react-start": "1.168.60",
     "highlight.js": "11.12.0",
     "lucide-react": "0.575.0",
+    "mermaid": "11.12.1",
+    "parse5": "8.0.0",
     "react": "19.2.0",
     "react-dom": "19.2.0",
     "zod": "3.25.76"

@@ -222,7 +222,6 @@ export async function runPiGrill(options: { scope: "project" | "user"; mode?: "r
     assert.equal(fixture.assertions().inferenceRequests, 7 + offset);
     const disconnected = await api("pi/sync", "POST", { instance_id: `e2e-abandoned-${randomUUID()}`, sessions: [{ provider: "pi", session_id: sessionId, active_round_id: randomUUID(), accepting: true }], acknowledgements: [] });
     assert.equal(disconnected.deliveries.length, 0);
-    assert.equal((await receiver.prompt("/grill-cloud-stop")).status, "handled");
     assert.equal((await receiver.prompt("/e2e-grill-reload")).status, "handled");
     assert.equal(fixture.assertions().inferenceRequests, 7 + offset);
     assert.equal((await receiver.prompt("/e2e-grill-new")).status, "handled");

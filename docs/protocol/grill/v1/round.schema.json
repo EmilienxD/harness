@@ -17,7 +17,10 @@
         "properties": {
           "id": { "type": "string", "pattern": "^Q[1-9][0-9]*$" },
           "question": { "type": "string", "minLength": 1 },
-          "explanation_html": { "type": "string", "minLength": 1 },
+          "explanation_html": {
+            "type": "string", "minLength": 1,
+            "description": "HTML. Editable Mermaid uses <figure data-grill-diagram=\"stable-id\"><pre class=\"mermaid\">HTML-escaped source</pre><figcaption>Caption</figcaption></figure>. IDs match ^[A-Za-z][A-Za-z0-9_-]{0,63}$ and are unique within each question; source and caption are nonempty direct children. Existing HTML and optional init_js remain supported."
+          },
           "recommendation": { "type": "string", "pattern": "^[A-D]$" },
           "init_js": { "type": "string" },
           "options": {

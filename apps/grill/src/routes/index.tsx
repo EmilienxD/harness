@@ -16,6 +16,10 @@ import {
   X,
 } from "lucide-react";
 import type { HLJSApi } from "highlight.js";
+import { AuthoredDiagrams } from "@/components/authored-diagrams";
+import { discoverDiagrams, type DiagramTarget } from "@/lib/diagram-discovery";
+import { extractAuthoredDiagrams } from "@/lib/grill-diagrams";
+import { DiagramSceneStore } from "@/lib/diagram-scene";
 import { NOTES_ID, type AnswerDraft, type GrillQuestion } from "@/lib/grill-contract";
 import {
   ignoresShortcuts,
@@ -297,7 +301,12 @@ function GrillBoard() {
   const [selected, setSelected] = useState<string | null>(requestedSession);
   const [detail, setDetail] = useState<SessionDetail | null>(null);
   const [rounds, setRounds] = useState<Round[]>([]);
-  const [review, setReview] = useState<{ roundId: string; prompt: string } | null>(null);
+  const [review, setReview] = useState<{
+    roundId: string;
+    snapshotId: string;
+    prompt: string;
+    diagramRevisions: Record<string, string>;
+  } | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<SessionSummary | null>(null);
   const [finishTarget, setFinishTarget] = useState<SessionSummary | null>(null);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
@@ -315,82 +324,111 @@ function GrillBoard() {
   const scrolledActiveRound = useRef<{ session: string; roundId: string | null } | null>(null);
   // Answer saves bump the generation when they start and finish, so polls can detect answers read before them.
   const writes = useRef({ pending: 0, generation: 0 });
+  // Identity changes immediately on navigation, before an old request can publish its result.
+  const selection = useRef({ key: selected });
+  const loadingSelection = useRef<typeof selection.current | null>(null);
+  const sessionListRequest = useRef(0);
+  const sessionList = useRef(sessions);
+  const deleting = useRef(new Set<string>());
 
   useEffect(() => {
     setRailOpen(window.matchMedia("(min-width: 901px)").matches);
   }, []);
 
+  const selectSession = useCallback((key: string | null) => {
+    if (selection.current.key === key) return;
+    selection.current = { key };
+    setSelected(key);
+    setDetail(null);
+    setRounds([]);
+    setDisplayedRoundId(null);
+    setReview(null);
+    setError("");
+    setSwitching(Boolean(key));
+    window.history.replaceState(null, "", key ? `/?session=${encodeURIComponent(key)}` : "/");
+  }, []);
+
   const loadSessions = useCallback(async () => {
+    const request = ++sessionListRequest.current;
     try {
       const result = await api<{ sessions: SessionSummary[] }>("sessions");
+      if (request !== sessionListRequest.current) return;
       setAuthorized(true);
+      sessionList.current = result.sessions;
       setSessions(result.sessions);
       setError("");
       const first = preferredSession(result.sessions);
-      setSelected((current) => current ?? (first ? `${first.provider}:${first.provider_session_id}` : null));
+      if (!selection.current.key && first) selectSession(`${first.provider}:${first.provider_session_id}`);
     } catch (cause) {
+      if (request !== sessionListRequest.current) return;
       if ((cause as ApiError).code === "unauthorized") setAuthorized(false);
       else setError((cause as Error).message);
     }
-  }, []);
-
-  /** Superseded rounds are frozen, so polling only refetches the round that can still change. */
-  const loadRounds = useCallback(async (summaries: RoundSummary[]) => {
-    const generation = writes.current.generation;
-    const loaded: Round[] = [];
-    for (const summary of summaries) {
-      const cached = cache.current.get(summary.id);
-      if (cached && summary.status === "superseded" && cached.status === "superseded") {
-        loaded.push(cached);
-        continue;
-      }
-      const result = await api<{ round: Round }>(`rounds/${summary.id}`);
-      cache.current.set(summary.id, result.round);
-      loaded.push(result.round);
-    }
-    // A save that overlapped this poll makes its answers older than the board's; the next poll catches up.
-    const overlapped = writes.current.pending > 0 || writes.current.generation !== generation;
-    setRounds((current) =>
-      overlapped ? loaded.map((round) => current.find((item) => item.id === round.id) ?? round) : loaded,
-    );
-  }, []);
+  }, [selectSession]);
 
   const loadSelected = useCallback(async () => {
-    if (!selected) {
-      setDetail(null);
-      setRounds([]);
-      return;
-    }
-    const separator = selected.indexOf(":");
+    const current = selection.current;
+    const key = current.key;
+    if (!key || deleting.current.has(key) || loadingSelection.current === current) return;
+    loadingSelection.current = current;
+    const isCurrent = () => selection.current === current && !deleting.current.has(key);
+    const separator = key.indexOf(":");
     try {
       if (separator < 1) return;
       const next = await api<SessionDetail>(
-        `sessions/${encodeURIComponent(selected.slice(0, separator))}/${encodeURIComponent(selected.slice(separator + 1))}`,
+        `sessions/${encodeURIComponent(key.slice(0, separator))}/${encodeURIComponent(key.slice(separator + 1))}`,
       );
+      if (!isCurrent()) return;
+      const generation = writes.current.generation;
+      const loaded: Round[] = [];
+      // Superseded rounds are frozen, so only refetch the round that can still change.
+      for (const summary of next.rounds) {
+        const cached = cache.current.get(summary.id);
+        if (cached && summary.status === "superseded" && cached.status === "superseded") {
+          loaded.push(cached);
+          continue;
+        }
+        const { round } = await api<{ round: Round }>(`rounds/${summary.id}`);
+        if (!isCurrent()) return;
+        cache.current.set(summary.id, round);
+        loaded.push(round);
+      }
+      if (!isCurrent()) return;
+      // Publish the detail and its questions together, only for the current selection.
       setDetail(next);
-      await loadRounds(next.rounds);
+      const overlapped = writes.current.pending > 0 || writes.current.generation !== generation;
+      setRounds((rounds) =>
+        overlapped ? loaded.map((round) => rounds.find((item) => item.id === round.id) ?? round) : loaded,
+      );
     } catch (cause) {
-      setError((cause as Error).message);
+      if (isCurrent()) setError((cause as Error).message);
     } finally {
-      setSwitching(false);
+      if (loadingSelection.current === current) loadingSelection.current = null;
+      if (isCurrent()) setSwitching(false);
     }
-  }, [loadRounds, selected]);
+  }, []);
 
   useEffect(() => {
     void loadSessions();
   }, [loadSessions]);
   useEffect(() => {
     if (authorized) void loadSelected();
-  }, [authorized, loadSelected]);
+  }, [authorized, loadSelected, selected]);
   useEffect(() => {
     if (!authorized) return;
-    const timer = window.setInterval(() => {
-      void (async () => {
-        await loadSessions();
-        await loadSelected();
-      })();
-    }, 1_000);
-    return () => window.clearInterval(timer);
+    let live = true;
+    let timer: number;
+    const poll = async () => {
+      await loadSessions();
+      if (!live) return;
+      await loadSelected();
+      if (live) timer = window.setTimeout(() => void poll(), 1_000);
+    };
+    timer = window.setTimeout(() => void poll(), 1_000);
+    return () => {
+      live = false;
+      window.clearTimeout(timer);
+    };
   }, [authorized, loadSessions, loadSelected]);
 
   useLayoutEffect(() => {
@@ -450,16 +488,9 @@ function GrillBoard() {
     (session: SessionSummary) => {
       const key = `${session.provider}:${session.provider_session_id}`;
       if (!window.matchMedia("(min-width: 901px)").matches) setRailOpen(false);
-      // Re-selecting the current session would leave the spinner waiting on a load that never reruns.
-      if (key === selected) return;
-      setSelected(key);
-      setRounds([]);
-      setDisplayedRoundId(null);
-      setReview(null);
-      setSwitching(true);
-      window.history.replaceState(null, "", `/?session=${encodeURIComponent(key)}`);
+      selectSession(key);
     },
-    [selected],
+    [selectSession],
   );
 
   useEffect(() => {
@@ -543,24 +574,30 @@ function GrillBoard() {
   const deleteSession = useCallback(
     async (session: SessionSummary) => {
       const key = `${session.provider}:${session.provider_session_id}`;
-      await api(`sessions/${encodeURIComponent(session.provider)}/${encodeURIComponent(session.provider_session_id)}`, {
-        method: "DELETE",
-      });
-      const remaining = sessions.filter((item) => item.id !== session.id);
-      setSessions(remaining);
-      cache.current.clear();
-      if (selected === key) {
-        const next = preferredSession(remaining);
-        const nextKey = next ? `${next.provider}:${next.provider_session_id}` : null;
-        setSelected(nextKey);
-        setDetail(null);
-        setRounds([]);
-        setReview(null);
-        setSwitching(Boolean(nextKey));
-        window.history.replaceState(null, "", nextKey ? `/?session=${encodeURIComponent(nextKey)}` : "/");
+      deleting.current.add(key);
+      try {
+        await api(
+          `sessions/${encodeURIComponent(session.provider)}/${encodeURIComponent(session.provider_session_id)}`,
+          {
+            method: "DELETE",
+          },
+        );
+        // A list fetched before the delete must not restore the deleted session afterward.
+        sessionListRequest.current += 1;
+        const remaining = sessionList.current.filter((item) => item.id !== session.id);
+        sessionList.current = remaining;
+        setSessions(remaining);
+        cache.current.clear();
+        setError("");
+        if (selection.current.key === key) {
+          const next = preferredSession(remaining);
+          selectSession(next ? `${next.provider}:${next.provider_session_id}` : null);
+        }
+      } finally {
+        deleting.current.delete(key);
       }
     },
-    [selected, sessions],
+    [selectSession],
   );
 
   const reloadRound = useCallback(async (id: string) => {
@@ -786,11 +823,20 @@ function GrillBoard() {
                             onSaveState={reportSave}
                             onRevealRound={() => scrollToRound(item.id)}
                             onReview={async () => {
-                              const result = await api<{ prompt: string }>(`rounds/${item.id}/prompt-preview`, {
+                              const result = await api<{
+                                snapshot_id: string;
+                                prompt: string;
+                                diagram_revisions: Record<string, string>;
+                              }>(`rounds/${item.id}/prompt-preview`, {
                                 method: "POST",
                                 body: "{}",
                               });
-                              setReview({ roundId: item.id, prompt: result.prompt });
+                              setReview({
+                                roundId: item.id,
+                                snapshotId: result.snapshot_id,
+                                prompt: result.prompt,
+                                diagramRevisions: result.diagram_revisions ?? {},
+                              });
                             }}
                           />
                         </div>
@@ -802,6 +848,8 @@ function GrillBoard() {
                       round={reviewed}
                       session={detail.session}
                       prompt={review.prompt}
+                      snapshotId={review.snapshotId}
+                      diagramRevisions={review.diagramRevisions}
                       aboardReady={online}
                       onClose={closeReview}
                       onReload={() => reloadRound(reviewed.id)}
@@ -1153,7 +1201,9 @@ function Questionnaire({
   const [active, setActive] = useState(0);
   const deck = useRef<HTMLDivElement>(null);
   const [reviewing, setReviewing] = useState(false);
+  const [diagramFailure, setDiagramFailure] = useState("");
   const flushers = useRef(new Map<string, () => Promise<boolean>>());
+  const diagramStore = useMemo(() => new DiagramSceneStore(round.id, api), [round.id]);
   // Notes shares the same draft lifecycle, but stays outside the published questions.
   const questions = useMemo(
     () => [
@@ -1189,11 +1239,28 @@ function Questionnaire({
         setActive(failed);
         return;
       }
+      if (!readOnly) {
+        for (const question of round.payload.questions) {
+          for (const diagram of extractAuthoredDiagrams(question.explanation_html)) {
+            try {
+              await diagramStore.prepare(question.id, diagram.id, diagram.source);
+            } catch (cause) {
+              throw new Error(
+                `Diagram ${question.id}/${diagram.id} could not be prepared. ${(cause as Error).message}`,
+              );
+            }
+          }
+        }
+        await diagramStore.flush(true);
+      }
+      setDiagramFailure("");
       await onReview();
+    } catch (cause) {
+      setDiagramFailure((cause as Error).message);
     } finally {
       setReviewing(false);
     }
-  }, [onReview, questions]);
+  }, [onReview, questions, diagramStore, readOnly, round.payload.questions]);
 
   // A new question starts reading from the top of the round, as on page load.
   const showQuestion = useCallback(
@@ -1236,6 +1303,14 @@ function Questionnaire({
 
   return (
     <div className="deck-wrap">
+      {diagramFailure && (
+        <div role="alert">
+          Diagram changes are still in your draft. {diagramFailure}{" "}
+          <button type="button" onClick={() => void reviewPrompt()}>
+            Retry review
+          </button>
+        </div>
+      )}
       <div
         ref={deck}
         className={`deck ${active === questions.length - 2 ? "is-penult" : ""} ${active === questions.length - 1 ? "is-last" : ""}`}
@@ -1244,6 +1319,7 @@ function Questionnaire({
           <QuestionCard
             key={question.id}
             round={round}
+            diagramStore={diagramStore}
             question={question}
             answer={answerFor(question.id)}
             readOnly={readOnly}
@@ -1280,6 +1356,7 @@ function Questionnaire({
 
 function QuestionCard({
   round,
+  diagramStore,
   question,
   answer,
   readOnly,
@@ -1296,6 +1373,7 @@ function QuestionCard({
   onReview,
 }: {
   round: Round;
+  diagramStore: DiagramSceneStore;
   question: GrillQuestion;
   answer: Answer | undefined;
   readOnly: boolean;
@@ -1497,7 +1575,9 @@ function QuestionCard({
           <span className="round-label">Round {round.number}</span>
         </div>
         <h2>{question.question}</h2>
-        {!isNotes && <Explanation question={question} hidden={hidden} />}
+        {!isNotes && (
+          <Explanation key={round.id} question={question} hidden={hidden} readOnly={readOnly} store={diagramStore} />
+        )}
         <div className="answer-form">
           {!isNotes && (
             <div ref={options} className="options">
@@ -1647,7 +1727,18 @@ function wrapTables(root: HTMLElement) {
   }
 }
 
-function Explanation({ question, hidden }: { question: GrillQuestion; hidden: boolean }) {
+function Explanation({
+  question,
+  hidden,
+  readOnly,
+  store,
+}: {
+  question: GrillQuestion;
+  hidden: boolean;
+  readOnly: boolean;
+  store: DiagramSceneStore;
+}) {
+  const [targets, setTargets] = useState<DiagramTarget[]>([]);
   const root = useRef<HTMLDivElement>(null);
   const [failed, setFailed] = useState(false);
   // React 19 rewrites innerHTML whenever this object's identity changes, which would reset open
@@ -1724,8 +1815,17 @@ function Explanation({ question, hidden }: { question: GrillQuestion; hidden: bo
       setFailed(true);
     }
   }, [question.id, question.init_js, question.explanation_html]);
+  useLayoutEffect(() => {
+    if (!root.current) return;
+    const found = discoverDiagrams(root.current);
+    setTargets(found);
+    return () => {
+      for (const target of found) target.host.remove();
+    };
+  }, [question.id, question.explanation_html]);
   return (
     <>
+      <AuthoredDiagrams targets={targets} questionId={question.id} store={store} hidden={hidden} readOnly={readOnly} />
       <div ref={root} id={`explanation-${question.id}`} className="explanation" dangerouslySetInnerHTML={html} />
       {failed && <div className="explanation-error">This question's interactive explanation could not initialize.</div>}
     </>
@@ -1733,6 +1833,8 @@ function Explanation({ question, hidden }: { question: GrillQuestion; hidden: bo
 }
 
 function PromptModal({
+  snapshotId,
+  diagramRevisions,
   round,
   session,
   prompt,
@@ -1740,6 +1842,8 @@ function PromptModal({
   onClose,
   onReload,
 }: {
+  snapshotId: string;
+  diagramRevisions: Record<string, string>;
   round: Round;
   session: SessionSummary;
   prompt: string;
@@ -1755,9 +1859,8 @@ function PromptModal({
   const shortcuts = useShortcuts();
   const readOnly = round.status !== "active";
   // Only a confirmed delivery counts: retrying after a failed send needs no warning.
-  const alreadySent = round.prompt_snapshots.some(
-    (item) =>
-      item.reason === "aboard" && item.grill_deliveries.some((delivery) => delivery.status === "submitted-to-terminal"),
+  const alreadySent = round.prompt_snapshots.some((item) =>
+    item.grill_deliveries.some((delivery) => delivery.status === "submitted-to-terminal"),
   );
 
   const snapshot = useCallback(
@@ -1767,25 +1870,32 @@ function PromptModal({
       const record = () =>
         api<{ snapshot: { id: string; prompt: string } }>(`rounds/${round.id}/prompt-snapshots`, {
           method: "POST",
-          body: JSON.stringify({ reason, expected_prompt: prompt }),
+          body: JSON.stringify({
+            reason,
+            snapshot_id: snapshotId,
+            expected_prompt: prompt,
+            expected_diagram_revisions: diagramRevisions,
+          }),
         }).then((result) => result.snapshot);
       if (reason === "copy") {
         try {
-          await copyText(prompt);
+          const recorded = readOnly ? Promise.resolve({ prompt }) : record();
+          // Start clipboard permission within the gesture; Safari awaits the snapshot Blob.
+          if (typeof ClipboardItem !== "undefined" && navigator.clipboard.write) {
+            await navigator.clipboard.write([
+              new ClipboardItem({
+                "text/plain": recorded.then((value) => new Blob([value.prompt], { type: "text/plain" })),
+              }),
+            ]);
+          } else {
+            await recorded;
+            await copyText(prompt);
+          }
           confirmCopy();
         } catch (cause) {
           setMessage((cause as Error).message);
-          return;
         } finally {
           setBusy("");
-        }
-        if (readOnly) return;
-        // Recording is useful history, but the visible prompt is ready to copy without a round trip.
-        try {
-          await record();
-          // The regular poll refreshes snapshot history without delaying the copy confirmation.
-        } catch (cause) {
-          setMessage(`Prompt copied, but the copy was not recorded. ${(cause as Error).message}`);
         }
         return;
       }
@@ -1793,7 +1903,7 @@ function PromptModal({
         const recorded = await record();
         const { delivery } = await api<{ delivery: { id: string } }>(`prompt-snapshots/${recorded.id}/deliveries`, {
           method: "POST",
-          body: "{}",
+          body: JSON.stringify({ delivery_id: crypto.randomUUID() }),
         });
         await awaitDelivery(delivery.id);
         confirmSend();
@@ -1804,7 +1914,7 @@ function PromptModal({
         setBusy("");
       }
     },
-    [confirmCopy, confirmSend, onReload, prompt, readOnly, round.id],
+    [confirmCopy, confirmSend, onReload, prompt, readOnly, round.id, diagramRevisions, snapshotId],
   );
 
   useEffect(() => {

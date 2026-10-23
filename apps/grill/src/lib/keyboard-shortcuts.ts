@@ -134,12 +134,18 @@ function isTextEntry(target: EventTarget | null): target is HTMLElement {
  * and Enter keeps activating a focused button instead of reviewing the prompt.
  */
 export function ignoresShortcuts(event: KeyboardEvent): boolean {
+  if (
+    document.querySelector(".diagram-shell.is-fullscreen") ||
+    (event.target instanceof Element && event.target.closest("[data-diagram-shortcuts]"))
+  )
+    return true;
   if (event.isComposing || isTextEntry(event.target)) return true;
   return event.key === "Enter" && event.target instanceof Element && Boolean(event.target.closest(ACTIVATES_ON_ENTER));
 }
 
 /** Escape inside a text field only leaves it, handing the keyboard back to the shortcuts. */
 export function leaveTextEntry(event: KeyboardEvent): void {
+  if (event.target instanceof Element && event.target.closest("[data-diagram-shortcuts]")) return;
   if (event.isComposing || !matchesShortcut(event, "closeOverlay") || !isTextEntry(event.target)) return;
   event.preventDefault();
   event.target.blur();

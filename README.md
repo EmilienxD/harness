@@ -131,7 +131,7 @@ For Codex, deterministic command failures reject the prompt rather than falling 
 
 - **`breakdown-help-wanted-issue`**: Explores a request against the codebase and helps you agree on what to build, with questions and concrete recommendations. With no argument, it fetches the oldest open `[AI]-help-wanted` GitHub issue.
 
-- **`grill-me-in-cloud`**: Stress-tests a plan through branching rounds on a persistent hosted board. Hooks or Pi's native extension supply fresh round and asset paths outside the project, upload local explanation images and video previews, publish without waiting for answers, and return the session URL. Drafts survive refreshes; only queued answers enter the deterministic prompt. Copy the reviewed prompt, send through Aboard for Claude/ChatGPT, or choose **Send to Pi** for Pi's standalone relay. Pi confirms a persisted user message and recovers delivery after reload without resubmission; `/grill-cloud-stop` disconnects the interview. Pi requires the current hosted app and additive provider migration.
+- **`grill-me-in-cloud`**: Stress-tests a plan through branching rounds on a persistent hosted board. Hooks or Pi's native extension supply inbox and asset locations outside the project, upload local explanation images and video previews, publish without waiting for answers, and return the round number, question count, and session URL. Drafts survive refreshes; only queued answers enter the deterministic prompt. Copy the reviewed prompt, send through Aboard for Claude/ChatGPT, or choose **Send to Pi** for Pi's standalone relay. Pi confirms a persisted user message and recovers delivery after reload without resubmission. Pi requires the current hosted app and additive provider migration.
 
 - **`prototype`**: Builds a throwaway logic or UI prototype to answer one explicit design question. It follows user or project instructions; otherwise it requires a clean working tree, creates and switches to a new `proto/<prototype-name>` branch. It exercises only the decisive paths and reports what the result supports and where its evidence stops.
 
@@ -587,11 +587,12 @@ Restart Pi or run `/reload`, then use `/clear`.
 
 `calm` is a Pi-only extension that hides every tool's transcript output and file diffs,
 including built-in, extension, SDK, and MCP tools. Web summaries show the search query or fetched URL.
-Each tool call appears independently in a compact chat block, such as `read src/app.ts`
-or `bash npm test`. Parallel and nested calls can display multiple blocks at once.
+Each tool call appears independently in a compact chat block. Its tool name sits on the
+top border beside the left corner, with the command, path, or query inside the block.
+Parallel and nested calls can display multiple blocks at once.
 Commands preserve line breaks and wrap to fit the terminal. Summaries are capped at 350
 characters, including a trailing `…` when truncated.
-An animated Braille spinner sits to the left while the tool runs. Completion replaces it
+An animated Braille spinner sits to the left of the tool name while the tool runs. Completion replaces it
 with a green `•` on success or a red `•` on failure. Each call stays visible while
 running and disappears independently three seconds after it completes, even if other calls
 are still running or the agent has already finished. No calls are coalesced or queued for display.

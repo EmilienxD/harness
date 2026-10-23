@@ -28,6 +28,7 @@
     "e2e:ship:build": "npm run e2e:subagents:bridge && esbuild tools/ship/cli.ts --bundle --platform=node --format=cjs --target=node22 --outfile=dist/tools/ship/cli.js",
     "e2e:ship": "npm run e2e:ship:build && node dist/tools/ship/cli.js",
     "check": "tsc --noEmit",
+    "e2e:grill-images": "esbuild ../../apps/aboard/src/grill/images.ts --bundle --platform=node --format=cjs --target=node22 --outfile=../../apps/aboard/dist/grill-image-acceptance.js && esbuild tools/grill-images/run.ts --bundle --platform=node --format=cjs --target=node22 --outfile=dist/tools/grill-images/run.js && node dist/tools/grill-images/run.js",
     "test:build": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\" && esbuild test/*.test.ts --bundle --platform=node --format=cjs --target=node22 --outdir=dist/test && npm run e2e:subagents:bridge",
     "test": "npm run test:build && node --test --test-concurrency=2 dist/test/*.test.js",
     "test:pi-all": "esbuild test/pi*.test.ts --bundle --platform=node --format=cjs --target=node22 --outdir=dist/test && node --test --test-concurrency=1 dist/test/pi*.test.js",

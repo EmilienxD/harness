@@ -18,10 +18,12 @@ Claude/ChatGPT use hooks; Pi uses an extension and Python publisher, with no Abo
 
 Board connection can be configured in Harness config under `grill`; workspace-local `.harness/config.local.json` is ignored by project installs and can hold the URL and code. Drafts, round assets, and Pi's delivery journal live outside the project. The relay advertises the exact session and accepts answers when Pi is idle. Delivery is confirmed only after that session's saved JSONL contains the correlated user message. Reload/resume recover accepted answers without submitting them again. A second process resuming the same session cannot take over a live relay.
 
-Use `/grill-cloud-stop` to disconnect the Pi interview. Its board history and answers remain available; invoke the skill again to reconnect. An outage or expired delivery preserves the saved answers: reconnect and send a newly reviewed prompt, or copy it into the session. Forked sessions need their own explicit invocation, and tree navigation invalidates the previous branch's relay.
+An outage or expired delivery preserves the saved answers: reconnect and send a newly reviewed prompt, or copy it into the session. Forked sessions need their own explicit invocation, and tree navigation invalidates the previous branch's relay. Background relay retries run silently. Published rounds are announced as `Round n with m questions available at <url>`.
 
 ## Example
 
 `/grill-me-in-cloud Review the checkout redesign` opens a hosted decision round for that proposal.
 
 Video previews use the same local asset workflow as images. The publisher checks for the installed `ffmpeg` on PATH and prepares MP4/WebM clips locally; it never bundles FFmpeg. Videos support native inline controls and optional poster images. Each source and prepared clip is limited to 20 MiB, with 50 MiB / 20 assets per round. Personal deployments need the current app and video asset migration.
+
+Edited diagrams travel with the reviewed answers as private immutable PNGs. The review shows authenticated asset endpoints and a snapshot-specific Python command using the installed helper. Aboard downloads and verifies them into an external runtime cache before sending the prompt; copy/paste and Pi's native relay retain the authenticated references and command. Run that command from the project directory to retrieve all images together, including their question and diagram identities. It resolves the same local, shared URL, user and environment configuration as publication, without putting the access code in commands or output. Retrying reuses verified cached files and repairs corrupt files.

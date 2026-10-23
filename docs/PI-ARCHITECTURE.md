@@ -940,10 +940,14 @@ Delivery follows these boundaries:
    Native start/stop and round receipts are reconstructed from active ancestry and bound to
    the native session ID. Tree navigation appends a non-context branch receipt to persist the
    selected leaf immediately; a restart therefore cannot revive the prior branch's outbox.
-   Forks require an explicit new invocation. `/grill-cloud-stop` creates
-   a branch-local stop receipt without inference or remote deletion. Accepted messages on an
+   Forks require an explicit new invocation. Accepted messages on an
    abandoned branch still count as received for delivery idempotency; that history never
    supplies the current branch's round authority.
+
+The shared skill owns publishing and response rules. Runtime context supplies initial or
+changed inbox/asset locations, publication results with round number, question count and URL,
+and actionable errors. Ordinary follow-up turns add no preparation reminders. Pi background
+relay retries add no conversation messages; launch failures use UI notifications only.
 
 The additive migration widens all four provider checks and the claim function result adds
 `round_id`. Internal v1 snapshot reason `aboard` and success status `submitted-to-terminal`

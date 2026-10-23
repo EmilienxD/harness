@@ -120,6 +120,7 @@ def validate_round(data: object) -> dict:
         for field in ("question", "explanation_html"):
             if not isinstance(question.get(field), str) or not question[field].strip():
                 raise RoundError(f"{qid}: {field} must be nonempty text")
+        discover_diagrams(question["explanation_html"])
         if "init_js" in question and not isinstance(question["init_js"], str):
             raise RoundError(f"{qid}: init_js must be text")
         options = question.get("options")
@@ -135,6 +136,71 @@ def validate_round(data: object) -> dict:
         if question.get("recommendation") not in letters:
             raise RoundError(f"{qid}: recommendation must name an available option")
     return data
+
+
+class _DiagramParser(HTMLParser):
+    """Read only explicit diagram figures; unrelated explanation HTML stays untouched."""
+
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self.diagrams: list[dict[str, str]] = []
+        self.ids: set[str] = set()
+        self.stack: list[str] = []
+        self.diagram: dict[str, str] | None = None
+        self.sources = 0
+        self.captions = 0
+        self.part: str | None = None
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        values = dict(attrs)
+        if "data-grill-diagram" in values:
+            identity = values["data-grill-diagram"] or ""
+            if self.diagram is not None or tag != "figure" or not re.fullmatch(r"[A-Za-z][A-Za-z0-9_-]{0,63}", identity) or identity in self.ids:
+                raise RoundError("Diagram figures need unique IDs starting with a letter (up to 64 letters, digits, _ or -)")
+            self.ids.add(identity)
+            self.diagram = {"id": identity, "source": "", "caption": ""}
+            self.stack = []
+            self.sources = self.captions = 0
+            return
+        if self.diagram is None:
+            return
+        if self.stack and self.stack[0] == "pre":
+            raise RoundError("Diagram pre.mermaid must contain escaped source text")
+        if not self.stack and tag == "pre" and "mermaid" in (values.get("class") or "").split():
+            self.sources += 1
+            self.part = "source"
+        elif not self.stack and tag == "figcaption":
+            self.captions += 1
+            self.part = "caption"
+        elif not self.stack:
+            self.part = None
+        if tag not in {"area", "base", "br", "col", "embed", "hr", "img", "input", "link", "meta", "param", "source", "track", "wbr"}:
+            self.stack.append(tag)
+
+    def handle_endtag(self, tag: str) -> None:
+        if self.diagram is None:
+            return
+        if tag == "figure" and not self.stack:
+            diagram = self.diagram
+            if self.sources != 1 or self.captions != 1 or not diagram["source"].strip() or not diagram["caption"].strip():
+                raise RoundError(f"Diagram {diagram['id']} needs one direct pre.mermaid containing escaped source text and one nonempty figcaption")
+            self.diagrams.append({key: value.replace("\r\n", "\n").replace("\r", "\n").strip() for key, value in diagram.items()})
+            self.diagram = None
+        elif self.stack and self.stack[-1] == tag:
+            self.stack.pop()
+
+    def handle_data(self, data: str) -> None:
+        if self.diagram is not None and self.stack and self.part:
+            self.diagram[self.part] += data
+
+
+def discover_diagrams(html: str) -> list[dict[str, str]]:
+    parser = _DiagramParser()
+    parser.feed(html)
+    parser.close()
+    if parser.diagram is not None:
+        raise RoundError("Diagram figure must have a closing tag")
+    return parser.diagrams
 
 
 def _srcset_urls(value: str) -> list[str]:
@@ -562,6 +628,7 @@ class InterviewRuntime:
                 if target is not None:
                     self.client.upload(target, publication_path.parent / asset["file"], asset["media_type"])
         result = self.client.request("POST", f"/api/v1/publications/{publication['id']}/commit", {}, key)
+        result["question_count"] = len(staged["payload"]["questions"])
         shutil.rmtree(publication_path.parent)
         return result
 
@@ -597,24 +664,21 @@ class InterviewRuntime:
         return self._publish_staged(publication)
 
 
-STOP = "Tell the user in one line and stop."
-
-
 def context(event: str, text: str) -> dict:
     return {"hookSpecificOutput": {"hookEventName": event, "additionalContext": text}}
 
 
-def instructions(interview: Interview) -> str:
+def locations(interview: Interview) -> str:
     return (
-        "Publish the next grill round by writing its complete JSON directly to this reserved path:\n"
-        f"{interview.source}\n"
-        f"Write supporting images and MP4/WebM videos first under {interview.assets} and reference them with the URL prefix "
-        f"{interview.assets_url}.\n"
-        "The system owns and creates both directories and their parents outside the project. They are reserved "
-        "to your session and you are their sole writer; create the files directly at these exact paths without "
-        "listing the directories or reading a template. Write the round file last: a successful write publishes "
-        "it automatically."
+        f"Inbox file:\n{interview.source}\n"
+        f"Assets directory: {interview.assets}\n"
+        f"Assets URL prefix: {interview.assets_url}"
     )
+
+
+def publication_result(published: dict) -> str:
+    return (f"Round {published['round_number']} with {published['question_count']} questions "
+            f"available at {published['url']}")
 
 
 def _last_jsonl_value(path: Path, match: str, key: str, value: str) -> str:
@@ -682,7 +746,7 @@ def _handle(payload: dict, provider: str, runtime: InterviewRuntime) -> dict | N
         return None
     grilling = invocation or skill_loaded or runtime.current(provider, session) is not None
     if runtime.configuration_error is not None:
-        return context(event, f"Hosted grill is not configured: {runtime.configuration_error}. {STOP}") if grilling else None
+        return context(event, f"Hosted grill is not configured: {runtime.configuration_error}") if grilling else None
     project = project_root(payload)
     if event == "UserPromptSubmit" or skill_loaded:
         return _prepare(event, provider, session, project, runtime, invocation or skill_loaded, grilling)
@@ -695,12 +759,12 @@ def _retry_queued(runtime: InterviewRuntime, provider: str, session: str) -> tup
         published = runtime.retry_pending(provider, session)
     except HostedError as error:
         if not error.retryable:
-            return f"The queued round cannot be published: {error}. {STOP}", True
+            return f"The queued round cannot be published: {error}", True
         return f"The queued round is still unpublished ({error}); it retries on the next user message.\n\n", False
     if not published:
         return "", False
     latest = published[-1]
-    return f"Queued round {latest['round_number']} is now published: {latest['url']}\n\n", False
+    return publication_result(latest) + "\n\n", False
 
 
 def _prepare(
@@ -711,13 +775,16 @@ def _prepare(
         queued, stopped = _retry_queued(runtime, provider, session)
         if stopped:
             return context(event, queued)
+        previous = runtime.current(provider, session)
         interview = runtime.start(provider, session, project) if starting else runtime.recover(provider, session, project)
     except (HostedError, OSError, ValueError) as error:
         # Every prompt looks up a hosted session, so an outage stays silent outside grill sessions.
-        return context(event, f"Grill setup failed: {error}. {STOP}") if grilling else None
+        return context(event, f"Grill setup failed: {error}") if grilling else None
     if interview is None:
         return context(event, queued.rstrip()) if queued else None
-    return context(event, queued + instructions(interview))
+    if (starting and event == "UserPromptSubmit") or previous is None or previous.source != interview.source or queued:
+        return context(event, queued + locations(interview))
+    return None
 
 
 def _publish(payload: dict, provider: str, session: str, project: Path, runtime: InterviewRuntime) -> dict | None:
@@ -727,22 +794,19 @@ def _publish(payload: dict, provider: str, session: str, project: Path, runtime:
     except RoundError as error:
         return context(
             event,
-            f"Round rejected: {error}\nFix it and write the complete round, assets included, to the new paths below.\n\n"
-            f"{instructions(runtime.current(provider, session))}",
+            f"Round rejected: {error}\n{locations(runtime.current(provider, session))}",
         )
     except HostedError as error:
         if error.retryable:
-            return context(event, f"Round not published yet: {error}. It is queued and retries on the user's next message. {STOP}")
-        return context(event, f"Round cannot be published: {error}. {STOP}")
+            return context(event, f"Round not published yet: {error}. It is queued and retries on the user's next message.")
+        return context(event, f"Round cannot be published: {error}")
     except (OSError, ValueError) as error:
-        return context(event, f"Round cannot be published: {error}. {STOP}")
+        return context(event, f"Round cannot be published: {error}")
     if published is None:
         return None
     return context(
         event,
-        f"Round {published['round_number']} was published: {published['url']}\n"
-        "Only reply \"Round available at: <URL>\", replacing `<URL>` with the round's URL, then end your turn; the user's answer will be automatically routed to you as the next user message.\n\n"
-        f"A fresh path is reserved for a later round.\n{instructions(runtime.current(provider, session))}",
+        f"{publication_result(published)}\n{locations(runtime.current(provider, session))}",
     )
 
 
