@@ -12,7 +12,7 @@ Use `/tdd <feature or bug>` in Claude Code or `$tdd <feature or bug>` in ChatGPT
 
 ## What happens
 
-The agent identifies and agrees on public test seams first. It writes one failing test, adds only enough implementation to pass it, and repeats in vertical slices. Tests should use independent expected values and survive internal refactors; the skill rejects implementation-coupled and tautological tests. Refactoring belongs to review after the red-green loop.
+The agent tests critical paths and complex logic through public interfaces. It writes one failing test, adds only enough implementation to pass it, and repeats in vertical slices. Tests should use independent expected values and survive internal refactors; the skill rejects implementation-coupled and tautological tests. Refactoring belongs to review after the red-green loop.
 
 ## Files and prerequisites
 

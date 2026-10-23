@@ -265,7 +265,7 @@ Custom roles use Harness's native background or visible-terminal launch path. Ab
 
 - **`chrome-devtools`**: Installs the upstream Chrome DevTools CLI and its model-invoked `chrome-devtools-cli` skill for browser interaction, screenshots, network inspection, and performance debugging. Supports Claude Code, ChatGPT, and Pi. Described below.
 
-- **`tdd`**: Applies behavior-focused test-driven development in vertical red-green slices. It agrees on public test seams first, rejects implementation-coupled or tautological tests, and adds only enough implementation to satisfy one failing test at a time.
+- **`tdd`**: Applies behavior-focused test-driven development in vertical red-green slices. It tests critical paths and complex logic through public interfaces, rejects implementation-coupled or tautological tests, and adds only enough implementation to satisfy one failing test at a time.
 
 - **`writing-for-agents`**: Guides the creation of predictable skills and agent instruction files. It treats invocation pointers, information hierarchy, completion criteria, progressive disclosure, leading words, and pruning as concrete controls over agent behavior and document load.
 
