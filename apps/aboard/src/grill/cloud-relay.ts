@@ -156,9 +156,8 @@ export class GrillCloudRelay {
           if (!delivery.snapshot_id) throw new Error("Missing snapshot identity");
           prompt = await prepareImages(prompt, delivery.snapshot_id, this.options.origin, this.options.code, AbortSignal.timeout(Math.max(1, Math.min(8_000, deadline - Date.now() - 5_000))), this.options.imageCacheDirectory ?? imageCache(process.env, this.options.workspaceRoot));
         } catch {
-          // Keep the reviewed references and helper invocation intact on failure.
-          prompt += "\n\nAboard could not download the diagram images. Use the authenticated snapshot download command above and retry if needed.";
-          this.options.log("Grill image download failed; the authenticated references and fallback command were retained.");
+          // Preserve the reviewed image IDs for the skill's download workflow.
+          this.options.log("Grill image download failed; the reviewed image IDs were retained.");
         }
       }
       const current = this.options.fleet.getBySession(delivery.session_id as SessionId);

@@ -8,7 +8,6 @@ import os
 import re
 import secrets
 import shutil
-import shlex
 import signal
 import subprocess
 import sys
@@ -372,15 +371,6 @@ class Interview:
         return f"assets/round-{self.sequence:03d}/"
 
 
-def image_command() -> str:
-    executable = str(Path(sys.executable).resolve())
-    helper = str(Path(__file__).resolve().with_name("grill_images.py"))
-    if os.name == "nt":
-        quote = lambda value: "'" + value.replace("'", "''") + "'"
-        return "& " + quote(executable) + " " + quote(helper)
-    return shlex.join([executable, helper])
-
-
 class HostedClient:
     def __init__(self, origin: str, code: str, timeout: float = 15.0):
         if not re.fullmatch(r"\d{4}", code):
@@ -602,7 +592,7 @@ class InterviewRuntime:
         staged = {
             "provider": provider, "session_id": session, "title": title,
             "schema_version": SCHEMA_VERSION, "idempotency_key": publication_key,
-            "payload": payload | {"image_command": image_command(), "image_shell": "powershell" if os.name == "nt" else "sh"}, "assets": assets,
+            "payload": payload, "assets": assets,
         }
         if project is not None:
             staged["project"] = project

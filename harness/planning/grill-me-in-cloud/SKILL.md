@@ -65,16 +65,12 @@ Prefer visuals over long prose text.
 Every visual explains the decision rather than decorating it:
 
 - **Comparisons** align the same criteria and show costs as plainly as benefits.
+
 - **Tables** hold rows that share fields; say what the table shows before it. The board scrolls every table horizontally when it is too wide, so never force cell widths or wrapping.
-- **Diagrams** use the Mermaid figure convention below for relationships, flows, and architecture. Use inline SVG (`viewBox`, `width="100%"`, `<title>`) for illustrations that need explicit visual composition, with page variables, short labels, and prose outside. SVGs loaded through `<img>` cannot read page variables, so give them literal fallbacks such as `var(--surface, #fbfaf6)`.
-- **Images**, such as real project screenshots for UI decisions, use the assets URL prefix and useful alt text.
-- **Videos** use the same assets directory and URL prefix as images: `<video src="assets/round-001/demo.mp4" controls playsinline preload="none" aria-label="Checkout interaction preview"></video>`. Use MP4 or WebM, target clips under a minute, and explain what to compare in nearby prose or a `<figcaption>`. Optional `poster` images and `<source src>` references use the same asset workflow. The publisher checks the installed `ffmpeg` on PATH and prepares browser-ready clips locally before uploading; keep each source and prepared video within 20 MiB, images within 6 MiB, and each round within 50 MiB / 20 assets. Write all assets before the round JSON.
-- **Demos** use native controls wired in `init_js`, which runs once after mounting with `root` as the question's explanation element; `<script>` tags never run. Query within `root`, prefix IDs with the question ID (`Q1-preview`), keep the explanation clear without interaction, and leave answering to the board's form.
-- **Custom CSS** is scoped under `#explanation-Q1`; custom grids use `minmax(0, 1fr)` and `min-width: 0`. Check narrow widths and that SVG labels fit their shapes.
 
-### Mermaid figures
+- **Static diagrams** use inline SVG (`viewBox`, `width="100%"`, `<title>`) for illustrations that need explicit visual composition, with page variables, short labels, and prose outside. SVGs loaded through `<img>` cannot read page variables, so give them literal fallbacks such as `var(--surface, #fbfaf6)`.
 
-Embed each diagram in `explanation_html` using this HTML (JSON-escape it when writing the round):
+- **Dynamic & editable diagrams** use the Mermaid figure:
 
 ```html
 <figure data-grill-diagram="publication-flow">
@@ -87,6 +83,14 @@ Embed each diagram in `explanation_html` using this HTML (JSON-escape it when wr
 
 Give each figure a stable, descriptive `data-grill-diagram` ID unique within its question: start with a letter, then use letters, digits, `_` or `-`, up to 64 characters. Keep the same ID when moving a diagram or retaining its meaning in a later round. Different questions may reuse an ID.
 
-Each figure has one direct `<pre class="mermaid">` with nonempty Mermaid source and one direct, nonempty `<figcaption>` explaining what the diagram helps decide. HTML-escape source characters (`&amp;`, `&lt;`, `&gt;`); keep source as text inside the `<pre>`. Grill owns conversion, editor setup, and diagram controls: supply source and caption without initialization JavaScript or external Mermaid scripts. Existing `init_js` remains available for other interactive demos.
+Each figure has one direct `<pre class="mermaid">` with nonempty Mermaid source and one direct, nonempty `<figcaption>` explaining what the diagram helps decide. HTML-escape source characters (`&amp;`, `&lt;`, `&gt;`); keep source as text inside the `<pre>`. Supply source and caption without initialization JavaScript or external Mermaid scripts; the system auto converts it into an Excalidraw canva.
 
-When reviewed answers include edited diagrams, read each returned local image before continuing the design tree. Aboard prepares verified image files automatically. For copied answers or Pi's native relay, execute the exact snapshot download command included in the reviewed prompt from the project directory. One invocation returns all question and diagram identities with absolute local paths; open those files with the provider's image-capable read tool. If downloading fails, report the useful error and keep the reviewed snapshot identity for retry. Credentials are resolved internally from Harness configuration.
+To review diagram changes, you will receive either an image path directly or a remote image ID (depending on user settings). No path or ID means no changes. Download each remote image ID with `<skill-directory>/scripts/download_grill_image.py <id>`. If a download fails, report the error. Otherwise the script will return the path. Then, read each image from its local path.
+
+- **Images**, such as real project screenshots for UI decisions, use the assets URL prefix and useful alt text.
+
+- **Videos** use the same assets directory and URL prefix as images: `<video src="assets/round-001/demo.mp4" controls playsinline preload="none" aria-label="Checkout interaction preview"></video>`. Use `<figcaption>` for optional caption. Optional `poster` images and `<source src>` references use the same asset workflow. Keep each source and prepared video within 20 MiB. Skip format preparation; the system will convert with ffmpeg if needed.
+
+- **Demos** use native controls wired in `init_js`, which runs once after mounting with `root` as the question's explanation element; `<script>` tags never run. Query within `root`, prefix IDs with the question ID (`Q1-preview`), keep the explanation clear without interaction, and leave answering to the board's form.
+
+- **Custom CSS** is scoped under `#explanation-Q1`; custom grids use `minmax(0, 1fr)` and `min-width: 0`. Check narrow widths and that SVG labels fit their shapes.

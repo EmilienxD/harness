@@ -575,7 +575,7 @@ async function promptOperation(request: Request, roundId: string, operation: str
   const snapshotId = typeof proposed === "string" ? proposed : randomUUID();
   let result: Awaited<ReturnType<typeof promptForRound>>;
   try {
-    result = await promptForRound(roundId, snapshotId, process.env["HARNESS_GRILL_URL"] || new URL(request.url).origin);
+    result = await promptForRound(roundId);
   } catch (cause) {
     return problem(
       409,
@@ -587,7 +587,7 @@ async function promptOperation(request: Request, roundId: string, operation: str
   if (result.missingImages)
     return problem(409, "diagram_export_required", "A changed diagram needs its saved image. Retry review.");
   if (operation === "prompt-preview") {
-    // Reserve the actual immutable identity before displaying its invocation, including history copies.
+    // Freeze reviewed image references before displaying the prompt, including history copies.
     if (result.images.length) {
       const { data, error } = await supabaseAdmin.rpc("grill_snapshot_diagrams", {
         target_round: roundId,

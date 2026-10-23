@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
-import { mkdir, readFile, readdir, writeFile } from "node:fs/promises";
+import { mkdir, readFile, readdir, writeFile, access } from "node:fs/promises";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import { deflateSync } from "node:zlib";
@@ -32,12 +32,12 @@ async function api(path: string, body?: unknown, method = body ? "POST" : "GET",
   if (!response.ok) throw new Error(`Local Grill ${method} returned ${response.status}`);
   return response.json();
 }
-async function findHelper(root: string): Promise<string> {
+async function findInstalledFile(root: string, name: string): Promise<string> {
   for (const entry of await readdir(root, { withFileTypes: true })) {
-    if (entry.isFile() && entry.name === "grill_images.py") return join(root, entry.name);
-    if (entry.isDirectory()) { try { return await findHelper(join(root, entry.name)); } catch { /* Continue the owned install tree. */ } }
+    if (entry.isFile() && entry.name === name) return join(root, entry.name);
+    if (entry.isDirectory()) { try { return await findInstalledFile(join(root, entry.name), name); } catch { /* Continue the owned install tree. */ } }
   }
-  throw new Error("Installed helper missing");
+  throw new Error(`Installed file missing: ${name}`);
 }
 
 /** Actual installation, publication, saved edit, immutable review and receiving CLI effects. */
@@ -47,6 +47,7 @@ export async function runGrillImages(platform: "claude" | "chatgpt" | "pi", rout
   const transition = (request: OpenAiResponsesRequest): OpenAiScenarioResponse => {
     const outputs = request.input.filter((item) => item.type === "function_call_output" || item.type === "custom_tool_call_output");
     const index = outputs.length;
+    if (outputs.some(item => JSON.stringify(item).includes("Download helper failed") || JSON.stringify(item).includes("image verification failed"))) throw new Error("Real receiving command failed");
     if (index > commands.length) throw new Error("Unexpected receiving history");
     if (index === commands.length) return { scenario: "grill-images", checkpoint: "complete", output: { type: "message", id: "msg_grill_images", role: "assistant", status: "completed", content: [{ type: "output_text", text: "Diagram received.", annotations: [] }] } };
     const id = `call_grill_images_${index}`;
@@ -54,8 +55,8 @@ export async function runGrillImages(platform: "claude" | "chatgpt" | "pi", rout
     const output = platform === "pi"
       ? { type: "function_call" as const, id: `fc_${id}`, call_id: id, name: "powershell", arguments: JSON.stringify({ command }), status: "completed" as const }
       : request.codeMode
-        ? { type: "custom_tool_call" as const, id: `ctc_${id}`, call_id: id, name: "exec", input: `const r = await tools.exec_command(${JSON.stringify({ cmd: command, yield_time_ms: 10_000, max_output_tokens: 2000 })}); text(r.output);`, status: "completed" as const }
-        : { type: "function_call" as const, id: `fc_${id}`, call_id: id, name: "exec_command", arguments: JSON.stringify({ cmd: command, yield_time_ms: 10_000, max_output_tokens: 2000 }), status: "completed" as const };
+        ? { type: "custom_tool_call" as const, id: `ctc_${id}`, call_id: id, name: "exec", input: `const r = await tools.exec_command(${JSON.stringify({ cmd: command, shell: "powershell.exe", login: false, yield_time_ms: 10_000, max_output_tokens: 2000 })}); text(r.output);`, status: "completed" as const }
+        : { type: "function_call" as const, id: `fc_${id}`, call_id: id, name: "exec_command", arguments: JSON.stringify({ cmd: command, shell: "powershell.exe", login: false, yield_time_ms: 10_000, max_output_tokens: 2000 }), status: "completed" as const };
     return { scenario: "grill-images", checkpoint: `command-${index}`, output };
   };
   const fixture = await createPiFixture({ scenarioCatalogHash: "grill-images-v1", transition });
@@ -65,11 +66,13 @@ export async function runGrillImages(platform: "claude" | "chatgpt" | "pi", rout
     const project = fixture.workspace.projectRoot;
     Object.assign(fixture.workspace.env, { HARNESS_GRILL_URL: origin, HARNESS_GRILL_CODE: "1234" });
     await runFixtureInstaller(fixture.workspace, "install", ["grill-me-in-cloud"], { platform, pinnedRuntimes: false });
-    const helper = await findHelper(join(project, platform === "claude" ? ".claude" : platform === "chatgpt" ? ".codex" : ".pi"));
+    const publisher = await findInstalledFile(join(project, platform === "claude" ? ".claude" : platform === "chatgpt" ? ".codex" : ".pi"), "grill_me_in_cloud_hook.py");
+    const downloader = await findInstalledFile(join(project, platform === "claude" ? ".claude" : platform === "chatgpt" ? ".agents" : ".pi"), "download_grill_image.py");
     const harness = await findHarnessRoot();
+    const python = (await execute("uv", ["run", "--offline", "--no-sync", "--project", harness, "python", "-c", "import sys; print(sys.executable)"], { env: fixture.workspace.env, windowsHide: true, timeout: 10_000 })).stdout.trim();
     const { prepareImages } = await import(pathToFileURL(join(harness, "apps/aboard/dist/grill-image-acceptance.js")).href);
     const publishScript = join(fixture.root, "publish.py");
-    await writeFile(publishScript, `import sys,json\nfrom pathlib import Path\nsys.path.insert(0,${JSON.stringify(join(helper, ".."))})\nfrom grill_me_in_cloud_hook import InterviewRuntime\nr=InterviewRuntime.from_environment(project=Path.cwd())\ni=r.start(${JSON.stringify(platform)},${JSON.stringify(session)},Path.cwd())\ni.source.write_text(json.dumps({"questions":[{"id":"Q1","question":"Review diagram","explanation_html":'<figure data-grill-diagram="flow"><pre class="mermaid">flowchart LR\\n A[Start] --&gt; B[Finish]</pre><figcaption>Flow</figcaption></figure>',"recommendation":"A","options":[{"letter":"A","label":"Keep","detail":"Keep it"}]}]}),encoding="utf-8")\nprint(json.dumps(r.publish(${JSON.stringify(platform)},${JSON.stringify(session)},project=Path.cwd())))\n`);
+    await writeFile(publishScript, `import sys,json\nfrom pathlib import Path\nsys.path.insert(0,${JSON.stringify(join(publisher, ".."))})\nfrom grill_me_in_cloud_hook import InterviewRuntime\nr=InterviewRuntime.from_environment(project=Path.cwd())\ni=r.start(${JSON.stringify(platform)},${JSON.stringify(session)},Path.cwd())\ni.source.write_text(json.dumps({"questions":[{"id":"Q1","question":"Review diagram","explanation_html":'<figure data-grill-diagram="flow"><pre class="mermaid">flowchart LR\\n A[Start] --&gt; B[Finish]</pre><figcaption>Flow</figcaption></figure>',"recommendation":"A","options":[{"letter":"A","label":"Keep","detail":"Keep it"}]}]}),encoding="utf-8")\nprint(json.dumps(r.publish(${JSON.stringify(platform)},${JSON.stringify(session)},project=Path.cwd())))\n`);
     await execute("uv", ["run", "--offline", "--no-sync", "--project", harness, "python", publishScript], { cwd: project, env: fixture.workspace.env, windowsHide: true, timeout: 20_000 });
     const detail = await api(`sessions/${platform}/${session}`);
     const round = detail.rounds?.[0] ?? detail.session?.grill_rounds?.[0];
@@ -87,18 +90,27 @@ export async function runGrillImages(platform: "claude" | "chatgpt" | "pi", rout
     assert.equal(snapshot.id, preview.snapshot_id);
     assert.equal(snapshot.images.length, 1);
     const cache = join(fixture.workspace.env.HARNESS_STATE_DIR!, "grill", "image-cache");
-    const path = join(cache, `${snapshot.images[0].sha256}.png`);
+    const path = route === "copy"
+      ? join(fixture.workspace.env.HARNESS_STATE_DIR!, "grill", "images", `${snapshot.images[0].asset_id}.png`)
+      : join(cache, `${snapshot.images[0].sha256}.png`);
     const receipt = join(project, "received.json");
     let receivingPrompt = snapshot.prompt;
     if (route === "copy") {
-      const invocation = snapshot.prompt.split("\n").at(-1)!;
-      commands.push(`${invocation} > images.json`);
+      const configPath = platform === "claude"
+        ? join(project, ".harness", "config.local.json")
+        : platform === "chatgpt" ? join(fixture.workspace.env.HARNESS_STATE_DIR!, "config.json") : undefined;
+      if (configPath) {
+        await mkdir(join(configPath, ".."), { recursive: true });
+        await writeFile(configPath, JSON.stringify({ version: 1, grill: { code: "1234", url: origin } }));
+        delete fixture.workspace.env.HARNESS_GRILL_CODE;
+      }
+      commands.push(`& ${quote(python)} ${quote(downloader)} ${quote(snapshot.images[0].reference)}; if ($LASTEXITCODE -ne 0) { throw "Download helper failed" }`);
     } else {
       const prepared = await prepareImages(snapshot.prompt, snapshot.id, origin, "1234", AbortSignal.timeout(8000), cache);
       receivingPrompt = prepared;
       assert.equal(prepared.slice(snapshot.images[0].reference_start, snapshot.images[0].reference_start + JSON.stringify(path).length), JSON.stringify(path));
     }
-    const verify = `if ((Get-FileHash -Algorithm SHA256 -LiteralPath ${quote(path)}).Hash.ToLowerInvariant() -ne ${quote(snapshot.images[0].sha256)}) { throw 'image verification failed' }; [IO.File]::WriteAllText(${quote(receipt)}, ${quote(JSON.stringify({ question_id: "Q1", diagram_id: "flow", sha256: snapshot.images[0].sha256 }))})`;
+    const verify = `$ErrorActionPreference = 'Stop'; if ((Get-FileHash -Algorithm SHA256 -LiteralPath ${quote(path)}).Hash.ToLowerInvariant() -ne ${quote(snapshot.images[0].sha256)}) { throw 'image verification failed' }; [IO.File]::WriteAllText(${quote(receipt)}, ${quote(JSON.stringify({ question_id: "Q1", diagram_id: "flow", sha256: snapshot.images[0].sha256 }))})`;
     commands.push(verify);
     let state;
     if (platform === "pi") {
@@ -131,12 +143,9 @@ export async function runGrillImages(platform: "claude" | "chatgpt" | "pi", rout
       assert.equal(run.code, 0, `${platform} receiving process failed (${["unexpected argument", "unrecognized", "invalid value", "Error loading", "config", "not found", "model", "API", "--skip-git-repo-check", "--dangerously-bypass-hook-trust", "requires a value"].filter((value) => run.stderr.includes(value)).join(", ")})`); assert.equal(run.timedOut, false);
       state = anthropic.assertions();
     }
+    await access(receipt).catch(() => { throw new Error(`${platform}/${route} real CLI wrote no receipt`); });
     assert.deepEqual(JSON.parse(await readFile(receipt, "utf8")), { question_id: "Q1", diagram_id: "flow", sha256: createHash("sha256").update(bytes).digest("hex") });
     assert.deepEqual(await readFile(path), bytes);
-    if (route === "copy") {
-      const result = JSON.parse((await readFile(join(project, "images.json"))).toString("utf16le").replace(/^\uFEFF/u, ""));
-      assert.equal(result.snapshot_id, snapshot.id); assert.equal(result.images[0].path, path);
-    }
     assert.equal(state.unexpectedRequests, 0);
     assert.equal(state.inferenceRequests, commands.length + 1);
     return { platform, route, inferenceRequests: state.inferenceRequests, unexpectedRequests: state.unexpectedRequests, verifiedImages: 1 };

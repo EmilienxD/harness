@@ -79,7 +79,7 @@ export async function prepareImages(prompt: string, snapshotId: string, origin: 
   if (snapshot.id !== snapshotId || snapshot.prompt !== prompt || !Array.isArray(snapshot.images) || snapshot.images.length > 20) throw new Error("Invalid image snapshot");
   let previous = 0, total = 0;
   for (const item of snapshot.images) {
-    if (!uuid.test(item.asset_id) || !/^[a-f0-9]{64}$/u.test(item.sha256) || item.media_type !== "image/png" || !Number.isInteger(item.byte_size) || item.byte_size <= 0 || item.byte_size > MAX_IMAGE || !item.question_id || !item.diagram_id || !Number.isInteger(item.reference_start) || !Number.isInteger(item.reference_end) || item.reference_start < previous || item.reference_end <= item.reference_start || item.reference_end > prompt.length || prompt.slice(item.reference_start, item.reference_end) !== item.reference || item.reference !== `${origin}/api/v1/assets/${item.asset_id} (authenticated Grill image)`) throw new Error("Invalid image metadata");
+    if (!uuid.test(item.asset_id) || !/^[a-f0-9]{64}$/u.test(item.sha256) || item.media_type !== "image/png" || !Number.isInteger(item.byte_size) || item.byte_size <= 0 || item.byte_size > MAX_IMAGE || !item.question_id || !item.diagram_id || !Number.isInteger(item.reference_start) || !Number.isInteger(item.reference_end) || item.reference_start < previous || item.reference_end <= item.reference_start || item.reference_end > prompt.length || prompt.slice(item.reference_start, item.reference_end) !== item.reference || item.reference !== item.asset_id) throw new Error("Invalid image metadata");
     previous = item.reference_end;
     total += item.byte_size;
   }

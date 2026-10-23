@@ -25,7 +25,6 @@ test("feedback waits for review and reset restores the original native and fallb
         title: "Review and reset diagrams",
         schema_version: 1,
         payload: {
-          image_command: "python fixture-grill-images.py",
           questions: [
             {
               id: "Q1",
@@ -166,7 +165,6 @@ test("feedback waits for review and reset restores the original native and fallb
     const prompt = await review.locator("pre").innerText();
     expect(prompt.match(/No changes were made to the diagram\./g)).toHaveLength(2);
     expect(prompt).not.toContain("Moved");
-    expect(prompt).not.toContain("authenticated Grill image");
   } finally {
     await request.delete(`/api/v1/sessions/chatgpt/${session}`, { headers });
   }

@@ -62,7 +62,7 @@ export async function getRound(roundId: string) {
   return { ...round, answers: answers ?? [], assets: assets ?? [], prompt_snapshots: snapshots ?? [] };
 }
 
-export async function promptForRound(roundId: string, snapshotId?: string, origin = DEFAULT_GRILL_URL) {
+export async function promptForRound(roundId: string) {
   // Preview and snapshot validation only need the payload and answers. The full round also
   // fetches assets and every historical snapshot, which grows with each copy.
   const [
@@ -126,7 +126,7 @@ export async function promptForRound(roundId: string, snapshotId?: string, origi
         missingImages = true;
         return `Diagram ${diagram.id}: ${summary}`;
       }
-      const reference = `${origin}/api/v1/assets/${asset.id} (authenticated Grill image)`;
+      const reference = asset.id;
       snapshotImages.push({
         asset_id: asset.id,
         question_id: question.id,
@@ -152,11 +152,6 @@ export async function promptForRound(roundId: string, snapshotId?: string, origi
     prompt = prompt.slice(0, start) + image.reference + prompt.slice(start + marker.length);
     image.reference_start = start;
     image.reference_end = start + image.reference.length;
-  }
-  if (snapshotImages.length) {
-    if (!payload.image_command || !snapshotId)
-      throw new Error("Republish this round with the latest Grill skill to retrieve its images.");
-    prompt += `\n\nGrill snapshot: ${snapshotId}\nDownload all diagram images (run in the project directory using ${payload.image_shell ?? "the configured shell"}):\n${payload.image_command} ${snapshotId}`;
   }
   return {
     round,

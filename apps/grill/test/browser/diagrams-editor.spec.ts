@@ -97,7 +97,6 @@ test("published diagrams share inline/fullscreen edits, isolate navigation, scro
         title: "Diagram editor acceptance",
         schema_version: 1,
         payload: {
-          image_command: "python fixture-grill-images.py",
           questions: [1, 2].map((index) => ({
             id: `Q${index}`,
             question: `Diagram question ${index}`,

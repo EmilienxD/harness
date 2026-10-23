@@ -1,5 +1,5 @@
 name = "grill-me-in-cloud"
-version = "2.5.0"
+version = "2.7.0"
 description = "Publishes visual design interviews to a persistent hosted board"
 docs = "https://github.com/EmilienxD/harness/blob/main/README.md#user-invoked-skills"
 requires = []
@@ -59,13 +59,6 @@ root = "skills"
 platforms = ["chatgpt"]
 
 [[files]]
-src = "grill_images.py"
-dest = "grill_images.py"
-root = "hooks"
-platforms = ["claude", "chatgpt"]
-
-[[files]]
-src = "grill_images.py"
-dest = "grill_images.py"
-root = "support"
-platforms = ["pi"]
+src = "scripts/download_grill_image.py"
+dest = "grill-me-in-cloud/scripts/download_grill_image.py"
+root = "skills"

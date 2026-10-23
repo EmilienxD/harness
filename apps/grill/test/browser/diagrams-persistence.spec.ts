@@ -24,7 +24,6 @@ test("durable drawings, undo, retry, immutable reviewed images, authenticated me
         title: "Durable diagram acceptance",
         schema_version: 1,
         payload: {
-          image_command: "python fixture-grill-images.py",
           questions: [1, 2].map((index) => ({
             id: `Q${index}`,
             question: `Durable ${index}`,
@@ -198,7 +197,7 @@ test("durable drawings, undo, retry, immutable reviewed images, authenticated me
     const image = first.images[0];
     expect(image).toMatchObject({ question_id: "Q1", diagram_id: "flow", media_type: "image/png" });
     expect(image.scene_revision).toBe(first.diagram_revisions["Q1/flow"]);
-    expect(image.reference).toBe(`http://localhost:8087/api/v1/assets/${image.asset_id} (authenticated Grill image)`);
+    expect(image.reference).toBe(image.asset_id);
     expect(first.prompt.slice(image.reference_start, image.reference_end)).toBe(image.reference);
     const png = await request.get(`/api/v1/assets/${image.asset_id}`, { headers });
     expect(png.status()).toBe(200);

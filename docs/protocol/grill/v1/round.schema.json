@@ -7,8 +7,6 @@
   "additionalProperties": false,
   "required": ["questions"],
   "properties": {
-    "image_command": { "type": "string", "minLength": 1, "maxLength": 8000, "$comment": "Publisher-supplied actual installed helper invocation; authors omit it." },
-    "image_shell": { "enum": ["powershell", "sh"], "$comment": "Publisher-supplied command shell." },
     "questions": {
       "type": "array",
       "minItems": 1,

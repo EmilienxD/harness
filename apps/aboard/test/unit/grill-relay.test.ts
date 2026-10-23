@@ -162,7 +162,7 @@ function harness(t: { after(fn: () => void): void }, confirmationTimeoutMs: numb
   const bytes = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGP4z8DwHwAFAAH/iZk9HQAAAABJRU5ErkJggg==", "base64");
   const cache = mkdtempSync(join(tmpdir(), "aboard image relay "));
   t.after(() => rmSync(cache, { recursive: true, force: true }));
-  const image = { asset_id: "22222222-2222-4222-8222-222222222222", question_id: "Q1", diagram_id: "flow", sha256: createHash("sha256").update(bytes).digest("hex"), byte_size: bytes.length, media_type: "image/png", reference: "https://grill.example.test/api/v1/assets/22222222-2222-4222-8222-222222222222 (authenticated Grill image)", reference_start: payload.length, reference_end: 0 };
+  const image = { asset_id: "22222222-2222-4222-8222-222222222222", question_id: "Q1", diagram_id: "flow", sha256: createHash("sha256").update(bytes).digest("hex"), byte_size: bytes.length, media_type: "image/png", reference: "22222222-2222-4222-8222-222222222222", reference_start: payload.length, reference_end: 0 };
   image.reference_end = image.reference_start + image.reference.length;
   const reviewed = options.imagePreparation === "success" ? payload + image.reference : payload;
   const path = join(cache, `${image.sha256}.png`);

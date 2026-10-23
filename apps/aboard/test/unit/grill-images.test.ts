@@ -34,7 +34,7 @@ test("authenticated immutable image retrieval replaces generated ranges only and
   await new Promise<void>((done) => server.listen(0, "127.0.0.1", done));
   t.after(async () => { server.closeAllConnections(); await new Promise<void>((done) => server.close(() => done())); await rm(cache, { recursive: true, force: true }); });
   const origin = `http://127.0.0.1:${(server.address() as { port: number }).port}`;
-  const reference = `${origin}/api/v1/assets/${asset} (authenticated Grill image)`;
+  const reference = asset;
   const prefix = `User notes: ${reference}\nGenerated image: `;
   const prompt = `${prefix}${reference}\nOther: https://example.test/keep`;
   snapshot = { id, prompt, images: [{ asset_id: asset, question_id: "Q1", diagram_id: "flow", media_type: "image/png", sha256: createHash("sha256").update(bytes).digest("hex"), byte_size: bytes.length, reference, reference_start: prefix.length, reference_end: prefix.length + reference.length }] };
