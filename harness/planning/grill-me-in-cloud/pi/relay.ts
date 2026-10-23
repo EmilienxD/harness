@@ -22,7 +22,6 @@ export class GrillRelay {
   private journal: Journal;
   private session: string;
   private file: string;
-  private reported = false;
 
   constructor(private pi: any, private ctx: any, private config: Config) {
     this.session = ctx.sessionManager.getSessionId();
@@ -144,12 +143,8 @@ export class GrillRelay {
         // Pi's asynchronous input preflight may not mark the session busy before this void call returns.
         break;
       }
-      this.reported = false;
     } catch {
-      if (!this.stopped && !this.reported) {
-        this.reported = true;
-        this.pi.sendMessage({ customType: "harness-grill-relay-status", content: "Cloud answer relay is disconnected. Answers remain on the board; reconnect or copy the reviewed prompt.", display: true }, { triggerTurn: false });
-      }
+      // Transient sync failures retry without adding messages to the conversation.
     } finally {
       this.running = false;
       if (!this.stopped) this.timer = setTimeout(() => { this.timer = undefined; void this.tick(); }, 2_000);

@@ -98,7 +98,8 @@ def test_diagrams_publish_without_assets_or_initialization_javascript(tmp_path, 
     del payload["questions"][0]["init_js"]
     payload["questions"].append(payload["questions"][0] | {"id": "Q2"})
     interview.source.write_text(json.dumps(payload), encoding="utf-8")
-    runtime.publish(provider, "session")
+    result = runtime.publish(provider, "session")
+    assert result["question_count"] == 2
     prepared = next(body for method, path, body in client.requests if method == "POST" and path.endswith("/prepare"))
     assert prepared["payload"]["questions"] == payload["questions"]
     assert prepared["assets"] == []
@@ -484,6 +485,65 @@ def hook_event(project, event, **fields):
 
 def hook_context(result):
     return result["hookSpecificOutput"]["additionalContext"]
+
+
+@pytest.mark.parametrize("provider,invocation", [("claude", "/grill-me-in-cloud"), ("chatgpt", "$grill-me-in-cloud")])
+def test_followup_prompts_add_no_context_until_a_result_or_location_change(tmp_path, provider, invocation):
+    project = tmp_path / "project"
+    project.mkdir()
+    client = HostedBoard()
+    runtime = InterviewRuntime(tmp_path / "runtime", client)
+    start = hook_event(project, "UserPromptSubmit", prompt=invocation)
+    assert grill_me_in_cloud_hook.handle(start, provider, runtime) is not None
+    interview = runtime.current(provider, "session")
+    assert interview.assets.is_dir()
+
+    followup = hook_event(project, "UserPromptSubmit", prompt="continue")
+    assert grill_me_in_cloud_hook.handle(followup, provider, runtime) is None
+    assert runtime.current(provider, "session").source == interview.source
+    assert client.requests == []
+    loaded = hook_event(project, "PostToolUse", tool_name="Skill", tool_input={"skill": "grill-me-in-cloud"})
+    assert grill_me_in_cloud_hook.handle(loaded, provider, runtime) is None
+
+    interview.source.write_text(json.dumps(round_data()), encoding="utf-8")
+    result = grill_me_in_cloud_hook.handle(hook_event(project, "PostToolUse", tool_name="Write"), provider, runtime)
+    assert result is not None
+    assert runtime.current(provider, "session").source != interview.source
+    assert grill_me_in_cloud_hook.handle(followup, provider, runtime) is None
+
+
+def test_pi_followup_preparation_is_silent_and_publication_reports_question_count(tmp_path, monkeypatch):
+    import grill_cloud_pi
+
+    class PiBoard(HostedBoard):
+        origin = "https://grill.test"
+        code = "1234"
+
+        def request(self, method, path, body=None, idempotency_key=None):
+            if path == "/api/v1/capabilities":
+                return {"providers": ["pi"], "pi_relay": 1}
+            return super().request(method, path, body, idempotency_key)
+
+    project = tmp_path / "project"
+    project.mkdir()
+    runtime = grill_cloud_pi.PiInterviewRuntime(tmp_path / "runtime", PiBoard())
+    monkeypatch.setattr(grill_cloud_pi.PiInterviewRuntime, "from_environment", lambda **kwargs: runtime)
+    request = {"version": 1, "operation": "prepare", "cwd": str(project), "sessionId": "session",
+               "sessionFile": str(tmp_path / "session.jsonl"), "anchor": "entry", "branchIds": ["entry"]}
+    initial = grill_cloud_pi.handle(request | {"initial": True})
+    assert initial["ok"]
+    assert Path(initial["source"]).parent.is_dir()
+    followup = grill_cloud_pi.handle(request)
+    assert followup["ok"] and not followup["message"]
+    assert followup["source"] == initial["source"]
+
+    Path(initial["source"]).write_text(json.dumps(round_data()), encoding="utf-8")
+    published = grill_cloud_pi.handle(request | {"operation": "publish"})
+    assert published["ok"]
+    assert published["published"]["question_count"] == 1
+    assert published["source"] != initial["source"]
+    followup = grill_cloud_pi.handle(request)
+    assert followup["ok"] and not followup["message"]
 
 
 def test_queued_rounds_retry_on_the_next_user_message_not_on_every_tool_call(tmp_path):

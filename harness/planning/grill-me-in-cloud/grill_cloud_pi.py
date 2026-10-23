@@ -6,7 +6,7 @@ import sys
 from pathlib import Path
 
 from grill_me_in_cloud_hook import (
-    HostedError, InterviewRuntime, RoundError, atomic_write, instructions, project_identity,
+    HostedError, InterviewRuntime, RoundError, atomic_write, locations, publication_result, project_identity,
 )
 
 
@@ -63,6 +63,7 @@ def handle(request: dict) -> dict:
             if not acquired:
                 raise ValueError("This Pi interview is busy; retry after the current operation")
             published = None
+            previous = runtime.current("pi", session)
             if request["operation"] == "prepare":
                 queued = runtime.retry_pending("pi", session)
                 published = queued[-1] if queued else None
@@ -73,14 +74,10 @@ def handle(request: dict) -> dict:
                     raise ValueError("Start /grill-me-in-cloud before publishing a round")
                 published = runtime.publish("pi", session, request.get("title") or session, project=project)
                 interview = runtime.current("pi", session)
-            message = instructions(interview)
+            changed = previous is None or previous.source != interview.source
+            message = locations(interview) if request.get("initial") or changed or request["operation"] == "publish" else ""
             if published:
-                message = (
-                    f"Round {published['round_number']} was published: {published['url']}\n"
-                    'Only reply "Round available at: <URL>" with this URL, then end your turn. '
-                    "The board's Send to Pi action returns the user's reviewed answers to this session.\n\n"
-                    + message
-                )
+                message = f"{publication_result(published)}\n{locations(interview)}"
             return {
                 "version": 1, "ok": True, "message": message,
                 "published": published, "source": str(interview.source),
@@ -90,7 +87,7 @@ def handle(request: dict) -> dict:
     except RoundError as error:
         interview = runtime.current("pi", session)
         return {"version": 1, "ok": False, "source": str(interview.source),
-                "message": f"Round rejected: {error}\n{instructions(interview)}"}
+                "message": f"Round rejected: {error}\n{locations(interview)}"}
     except HostedError as error:
         if error.status == 404:
             message = "This board does not support Pi. Upgrade the hosted app and database."
@@ -98,7 +95,7 @@ def handle(request: dict) -> dict:
             message = str(error)
         if error.retryable and runtime._outboxes("pi", session):
             message += " The round is queued and retries on the next user message"
-        return {"version": 1, "ok": False, "message": f"Hosted grill failed: {message}. Tell the user and stop."}
+        return {"version": 1, "ok": False, "message": f"Hosted grill failed: {message}"}
 
 
 if __name__ == "__main__":

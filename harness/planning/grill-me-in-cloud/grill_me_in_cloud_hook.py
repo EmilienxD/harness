@@ -628,6 +628,7 @@ class InterviewRuntime:
                 if target is not None:
                     self.client.upload(target, publication_path.parent / asset["file"], asset["media_type"])
         result = self.client.request("POST", f"/api/v1/publications/{publication['id']}/commit", {}, key)
+        result["question_count"] = len(staged["payload"]["questions"])
         shutil.rmtree(publication_path.parent)
         return result
 
@@ -663,24 +664,21 @@ class InterviewRuntime:
         return self._publish_staged(publication)
 
 
-STOP = "Tell the user in one line and stop."
-
-
 def context(event: str, text: str) -> dict:
     return {"hookSpecificOutput": {"hookEventName": event, "additionalContext": text}}
 
 
-def instructions(interview: Interview) -> str:
+def locations(interview: Interview) -> str:
     return (
-        "Publish the next grill round by writing its complete JSON directly to this reserved path:\n"
-        f"{interview.source}\n"
-        f"Write supporting images and MP4/WebM videos first under {interview.assets} and reference them with the URL prefix "
-        f"{interview.assets_url}.\n"
-        "The system owns and creates both directories and their parents outside the project. They are reserved "
-        "to your session and you are their sole writer; create the files directly at these exact paths without "
-        "listing the directories or reading a template. Write the round file last: a successful write publishes "
-        "it automatically."
+        f"Inbox file:\n{interview.source}\n"
+        f"Assets directory: {interview.assets}\n"
+        f"Assets URL prefix: {interview.assets_url}"
     )
+
+
+def publication_result(published: dict) -> str:
+    return (f"Round {published['round_number']} with {published['question_count']} questions "
+            f"available at {published['url']}")
 
 
 def _last_jsonl_value(path: Path, match: str, key: str, value: str) -> str:
@@ -748,7 +746,7 @@ def _handle(payload: dict, provider: str, runtime: InterviewRuntime) -> dict | N
         return None
     grilling = invocation or skill_loaded or runtime.current(provider, session) is not None
     if runtime.configuration_error is not None:
-        return context(event, f"Hosted grill is not configured: {runtime.configuration_error}. {STOP}") if grilling else None
+        return context(event, f"Hosted grill is not configured: {runtime.configuration_error}") if grilling else None
     project = project_root(payload)
     if event == "UserPromptSubmit" or skill_loaded:
         return _prepare(event, provider, session, project, runtime, invocation or skill_loaded, grilling)
@@ -761,12 +759,12 @@ def _retry_queued(runtime: InterviewRuntime, provider: str, session: str) -> tup
         published = runtime.retry_pending(provider, session)
     except HostedError as error:
         if not error.retryable:
-            return f"The queued round cannot be published: {error}. {STOP}", True
+            return f"The queued round cannot be published: {error}", True
         return f"The queued round is still unpublished ({error}); it retries on the next user message.\n\n", False
     if not published:
         return "", False
     latest = published[-1]
-    return f"Queued round {latest['round_number']} is now published: {latest['url']}\n\n", False
+    return publication_result(latest) + "\n\n", False
 
 
 def _prepare(
@@ -777,13 +775,16 @@ def _prepare(
         queued, stopped = _retry_queued(runtime, provider, session)
         if stopped:
             return context(event, queued)
+        previous = runtime.current(provider, session)
         interview = runtime.start(provider, session, project) if starting else runtime.recover(provider, session, project)
     except (HostedError, OSError, ValueError) as error:
         # Every prompt looks up a hosted session, so an outage stays silent outside grill sessions.
-        return context(event, f"Grill setup failed: {error}. {STOP}") if grilling else None
+        return context(event, f"Grill setup failed: {error}") if grilling else None
     if interview is None:
         return context(event, queued.rstrip()) if queued else None
-    return context(event, queued + instructions(interview))
+    if (starting and event == "UserPromptSubmit") or previous is None or previous.source != interview.source or queued:
+        return context(event, queued + locations(interview))
+    return None
 
 
 def _publish(payload: dict, provider: str, session: str, project: Path, runtime: InterviewRuntime) -> dict | None:
@@ -793,22 +794,19 @@ def _publish(payload: dict, provider: str, session: str, project: Path, runtime:
     except RoundError as error:
         return context(
             event,
-            f"Round rejected: {error}\nFix it and write the complete round, assets included, to the new paths below.\n\n"
-            f"{instructions(runtime.current(provider, session))}",
+            f"Round rejected: {error}\n{locations(runtime.current(provider, session))}",
         )
     except HostedError as error:
         if error.retryable:
-            return context(event, f"Round not published yet: {error}. It is queued and retries on the user's next message. {STOP}")
-        return context(event, f"Round cannot be published: {error}. {STOP}")
+            return context(event, f"Round not published yet: {error}. It is queued and retries on the user's next message.")
+        return context(event, f"Round cannot be published: {error}")
     except (OSError, ValueError) as error:
-        return context(event, f"Round cannot be published: {error}. {STOP}")
+        return context(event, f"Round cannot be published: {error}")
     if published is None:
         return None
     return context(
         event,
-        f"Round {published['round_number']} was published: {published['url']}\n"
-        "Only reply \"Round available at: <URL>\", replacing `<URL>` with the round's URL, then end your turn; the user's answer will be automatically routed to you as the next user message.\n\n"
-        f"A fresh path is reserved for a later round.\n{instructions(runtime.current(provider, session))}",
+        f"{publication_result(published)}\n{locations(runtime.current(provider, session))}",
     )
 
 

@@ -80,7 +80,7 @@ Use the same values in the VS Code extension host if you want Aboard delivery. E
 
 Open the deployed URL, enter the four-digit code, and publish a test round before relying on the board for active work.
 
-For Pi, install Harness's `grill-me-in-cloud` package with `--platform pi`, reload Pi, and invoke `/grill-me-in-cloud` or `/skill:grill-me-in-cloud`. Its extension owns publication and the answer relay; Aboard is optional. The board labels this connection **Pi** and offers **Send to Pi**. `/grill-cloud-stop` disconnects without deleting rounds or answers.
+For Pi, install Harness's `grill-me-in-cloud` package with `--platform pi`, reload Pi, and invoke `/grill-me-in-cloud` or `/skill:grill-me-in-cloud`. Its extension owns publication and the answer relay; Aboard is optional. The board labels this connection **Pi** and offers **Send to Pi**. Background relay retries run silently.
 
 When upgrading an existing board for Pi, apply `20261014120000_add_pi_grill_relay.sql` before deploying the app. It widens provider constraints, adds snapshot idempotency for Pi, and extends the shared claim function with native round binding and recovery of an owner's outstanding claims. `GET /api/v1/capabilities` lets the extension reject older services before inference. Existing Claude/ChatGPT session identities and delivery status values remain compatible.
 
