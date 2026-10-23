@@ -20,7 +20,7 @@ def assert_only_prefixes_deleted(before, after, count):
         assert before[start] in "/$"
 
 
-@pytest.mark.parametrize("provider", ["claude", "chatgpt"])
+@pytest.mark.parametrize("provider", ["claude", "chatgpt", "pi"])
 def test_every_builtin_command_loses_exactly_its_prefix(tmp_path, provider):
     # This is syntax normalization: assert removed prefix positions, never
     # wording in an agent's instructions.
@@ -28,6 +28,7 @@ def test_every_builtin_command_loses_exactly_its_prefix(tmp_path, provider):
         token = "/" + name
         converted = sanitize_prompt_commands(token, provider)
         assert_only_prefixes_deleted(token, converted, 1)
+        assert_only_prefixes_deleted(converted, sanitize_prompt_commands(converted, provider), 0)
 
 
 @pytest.mark.parametrize("provider,prefix", [("claude", "/"), ("chatgpt", "$")])
@@ -56,11 +57,12 @@ def test_claude_bundled_skills_and_aliases_survive(name):
     assert_only_prefixes_deleted(token, sanitize_prompt_commands(token, "claude"), 0)
 
 
-@pytest.mark.parametrize("provider", ["claude", "chatgpt"])
+@pytest.mark.parametrize("provider", ["claude", "chatgpt", "pi"])
 @pytest.mark.parametrize("token", [
     "/taxonomy", "/taxonomy/catalog", "/tmp", "/usr", "/clear/file",
     r"/clear\file", "$HOME", "$unknown-skill", "/unknown-skill",
     "https://example.com/clear", "./clear", "../clear", "~/clear", "/clear.py",
+    "é/resume", "Ⅻ/resume", "/skill:prototype", "/plugin:custom-audit",
 ])
 def test_paths_unknown_names_and_variables_survive(tmp_path, provider, token):
     converted = sanitize_prompt_commands(token, provider)

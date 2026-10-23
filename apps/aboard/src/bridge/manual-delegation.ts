@@ -2,6 +2,7 @@ import { isRequestedEffort, type RequestedEffort } from "../platform/effort.js";
 import type { AgentPlatformId } from "../platform/agent-platform.js";
 import { AGENT_PLATFORM_IDS, type AgentType, type AgentSession, type ExecutionMode, type TerminalId } from "../domain/contracts.js";
 import { validateResumeMessage, type TerminalController } from "../platform/terminals.js";
+import { sanitizePromptCommands } from "../platform/prompt-commands.js";
 import type { DelegationTask } from "../platform/launch-configuration.js";
 import { isAbsolute, relative, resolve, sep } from "node:path";
 import { createHash } from "node:crypto";
@@ -35,7 +36,6 @@ const DESCRIPTIONS: Readonly<Record<string, string>> = {
   review: "Review",
   loop: "Implementer",
 };
-const SKILL_INVOCATION = /^[/\$][A-Za-z0-9_-]+(?:\s|$)/u;
 
 /** A claim whose launch never reported an outcome: callers must verify, not retry. */
 class StartupUncertain extends Error {}
@@ -170,7 +170,6 @@ function parse(body: unknown): ManualDelegationLaunch | undefined {
   if (value.provider === "pi" && value.mode === "loop") return undefined;
   if (!(task.modes as readonly string[]).includes(value.mode)) return undefined;
   if (typeof value.prompt !== "string" || value.prompt.trim().length === 0) return undefined;
-  if (value.resumeAgentId === undefined && SKILL_INVOCATION.test(value.prompt.trim())) return undefined;
   if (typeof value.cwd !== "string" || value.cwd.trim().length === 0) return undefined;
   const skill = SKILLS[value.task];
   return {
@@ -262,8 +261,9 @@ export function createDelegationRoutes(
             throw new StartupUncertain("Delegation startup is uncertain; verify the existing execution before retrying");
           }
         }
-        const launched = await (parsed.resumeAgentId === undefined ? launcher.launch(parsed)
-          : launcher.resume?.(parsed) ?? Promise.reject(new Error("Delegation resume is unavailable")));
+        const launchRequest = { ...parsed, prompt: sanitizePromptCommands(parsed.prompt, parsed.provider) };
+        const launched = await (parsed.resumeAgentId === undefined ? launcher.launch(launchRequest)
+          : launcher.resume?.(launchRequest) ?? Promise.reject(new Error("Delegation resume is unavailable")));
         if (recordPath !== undefined) {
           if (parsed.harnessSessionId !== undefined && options.stateDirectory !== undefined) {
             const binding: DelegationBinding = { harnessSessionId: parsed.harnessSessionId, terminalId: launched.terminalId, agentId: launched.agentId, sessionId: launched.sessionId, type: parsed.type, task: parsed.task, provider: parsed.provider, executionMode: parsed.executionMode, cwd: parsed.cwd, description: parsed.description, ...(parsed.harnessPython === undefined ? {} : { harnessPython: parsed.harnessPython }), ...(parsed.parentSessionId === undefined ? {} : { parentSessionId: parsed.parentSessionId }), ...(parsed.harnessStateDirectory === undefined ? {} : { harnessStateDirectory: parsed.harnessStateDirectory }), ...(parsed.harnessRuntimePath === undefined ? {} : { harnessRuntimePath: parsed.harnessRuntimePath }) };

@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import commandRules from "../../../../harness/productivity/subagents/runtime/src/subagents_runtime/prompt-commands.json";
 
 import { createDelegationRoutes, continueHarnessDelegation, delegationParentSession, providerSession } from "../../src/bridge/manual-delegation.js";
 
@@ -14,23 +15,30 @@ test("Pi loop delegation is refused before starting a process", async () => {
   assert.equal(response.status, 400);
 });
 
-test("manual delegation forwards an explicit model and omits it otherwise", async () => {
+test("manual delegation preserves skills and neutralizes built-in commands with explicit or default models", async () => {
   const launches: unknown[] = [];
   const handler = createDelegationRoutes({ launch: async (request) => {
     launches.push(request);
     return { agentId: "agent", sessionId: "child", terminalId: "terminal" };
   } });
-  for (const provider of ["claude", "chatgpt"] as const) {
-    for (const model of [undefined, provider === "claude" ? "claude-opus-5-5" : "gpt-6.1-sol"]) {
+  for (const provider of ["claude", "chatgpt", "pi"] as const) {
+    const selector = `${provider === "claude" ? "/" : provider === "pi" ? "/skill:" : "$"}prototype`;
+    const commands = commandRules.commands[provider];
+    const preserved = [selector, "/resume/file", "é/resume", "Ⅻ/resume", "$HOME", "/plugin:custom-audit", "/unknown-skill"];
+    const prompt = [...preserved, ...commands.map((name) => `/${name}`)].join("\n");
+    for (const model of [undefined, provider === "claude" ? "claude-opus-5-5" : provider === "pi" ? "openai/gpt-6.1-sol" : "gpt-6.1-sol"]) {
       const response = await handler({
         method: "POST", url: new URL("http://localhost/delegations"), headers: {}, signal: new AbortController().signal,
-        body: { requestId: `${provider}-${model}`, task: "general", provider, mode: "interactive", prompt: "Work.", cwd: "C:\\work",
+        body: { requestId: `${provider}-${model}`, task: "general", provider, mode: "interactive", prompt, cwd: "C:\\work",
           ...(model === undefined ? {} : { model }) },
       });
       assert.equal(response.status, 201);
       const received = launches.at(-1) as Record<string, unknown>;
       assert.equal(received.model, model);
       assert.equal(Object.hasOwn(received, "model"), model !== undefined);
+      const forwarded = received.prompt as string;
+      assert.equal(prompt.length - forwarded.length, commands.length);
+      assert.deepEqual(forwarded.match(/[/\$][\p{L}\p{N}_:/-]+/gu), preserved.map((token) => token.slice(token.search(/[/\$]/u))));
     }
   }
 });
@@ -180,7 +188,6 @@ test("manual delegation rejects unknown fields and task-mode combinations", asyn
     { requestId: "prototype-auto", task: "prototype", provider: "claude", mode: "auto", prompt: "x", cwd: "C:\\work" },
     { requestId: "request-1", task: "explore", provider: "claude", mode: "interactive", prompt: "x", cwd: "C:\\work" },
     { requestId: "request-2", task: "general", provider: "claude", mode: "auto", prompt: "x", cwd: "C:\\work", token: "leak" },
-    { requestId: "request-3", task: "general", provider: "claude", mode: "auto", prompt: "/prototype substitute", cwd: "C:\\work" },
   ]) {
     const response = await handler({ method: "POST", url: new URL("http://x/delegations"), headers: {}, body, signal: new AbortController().signal });
     assert.equal(response.status, 400);
@@ -228,19 +235,22 @@ test("the published delegation credential cannot escape its workspace", async ()
 });
 
 
-test("resume delivers the next message without launch skill restrictions", async () => {
+test("resume preserves skills and neutralizes built-in commands", async () => {
   let resumed = false;
   const handler = createDelegationRoutes({
     launch: async () => { throw new Error("must continue the existing child"); },
     resume: async (request) => {
       resumed = true;
-      assert.equal(request.prompt, "$address-this next task");
+      assert.deepEqual(request.prompt.match(/[/\$][\w-]+/gu), ["$address-this"]);
       return { agentId: "child", sessionId: "saved", terminalId: "process-2" };
     },
   });
-  const response = await handler({ method: "POST", url: new URL("http://127.0.0.1/delegations"), headers: {}, body: { requestId: "resume-1", task: "general", provider: "claude", mode: "auto", prompt: "$address-this next task", cwd: "C:\\work", resumeAgentId: "child", resumeSessionId: "saved" }, signal: new AbortController().signal });
-  assert.equal(response.status, 201);
-  assert.equal(resumed, true);
+  for (const provider of ["claude", "chatgpt", "pi"]) {
+    resumed = false;
+    const response = await handler({ method: "POST", url: new URL("http://127.0.0.1/delegations"), headers: {}, body: { requestId: `resume-${provider}`, task: "general", provider, mode: "auto", prompt: "$address-this next task\n/resume /compact", cwd: "C:\\work", resumeAgentId: "child", resumeSessionId: "saved" }, signal: new AbortController().signal });
+    assert.equal(response.status, 201);
+    assert.equal(resumed, true);
+  }
 });
 
 test("delegation deduplication survives bridge restart and rejects conflicting reuse", async () => {
@@ -250,13 +260,13 @@ test("delegation deduplication survives bridge restart and rejects conflicting r
   const root = await mkdtemp(join(tmpdir(), "harness-delegation-"));
   let launches = 0;
   const launcher = { launch: async () => { launches += 1; return { agentId: "agent-1", sessionId: "saved", terminalId: "process-1" }; } };
-  const request = { method: "POST", url: new URL("http://127.0.0.1/delegations"), headers: {}, body: { requestId: "persistent", task: "general", provider: "claude", mode: "auto", prompt: "Task", cwd: root }, signal: new AbortController().signal };
+  const request = { method: "POST", url: new URL("http://127.0.0.1/delegations"), headers: {}, body: { requestId: "persistent", task: "general", provider: "claude", mode: "auto", prompt: "/resume", cwd: root }, signal: new AbortController().signal };
   try {
     assert.equal((await createDelegationRoutes(launcher, { stateDirectory: root })(request)).status, 201);
     const restarted = createDelegationRoutes(launcher, { stateDirectory: root });
     assert.equal((await restarted(request)).status, 201);
     assert.equal(launches, 1);
-    assert.equal((await restarted({ ...request, body: { ...request.body, prompt: "Different" } })).status, 409);
+    assert.equal((await restarted({ ...request, body: { ...request.body, prompt: "resume" } })).status, 409);
   } finally {
     await rm(root, { recursive: true, force: true });
   }
