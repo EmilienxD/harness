@@ -629,6 +629,17 @@ class CatalogueInstaller:
         """Reject receipt paths that could make an operation touch elsewhere."""
         root = self.target.scope_root.resolve()
         for package, receipt in packages.items():
+            # Pi's user receipt follows its agent directory, while shared user
+            # data lives at home. Allow only declared workspace file paths there.
+            workspace_paths = set()
+            if self.target.platform is Platform.PI and self.target.is_user:
+                tool = self.available.get(package)
+                if tool is not None:
+                    workspace_paths = {
+                        self.target.destination_path(file.root, file.dest).absolute()
+                        for file in tool.expand(Platform.PI, "user")
+                        if file.root == "workspace"
+                    }
             native = receipt.get("piPackage") if self.target.platform is Platform.PI else None
             if native and (not isinstance(native, str) or not native.startswith(f"npm:harness-pi-{package}@file:")):
                 raise InstallError(f"invalid Pi package source in receipt for {package}")
@@ -639,8 +650,10 @@ class CatalogueInstaller:
                 except OSError as exc:
                     raise InstallError(f"cannot resolve receipt path for {package}: {path}") from exc
                 absolute = path.absolute()
-                if (absolute != root and root not in absolute.parents) or (
-                    resolved != root and root not in resolved.parents
+                shared_workspace = absolute in workspace_paths and resolved == absolute
+                if not shared_workspace and (
+                    (absolute != root and root not in absolute.parents)
+                    or (resolved != root and root not in resolved.parents)
                 ):
                     raise InstallError(f"receipt path for {package} escapes target root: {path}")
             for record in receipt.get("links", []):

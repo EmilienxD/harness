@@ -12,15 +12,15 @@ Research the user's query and answer it directly in the end turn message. This i
 
 You may quickly search the codebase when its dependencies, versions, terminology, or implementation details would make the research more accurate.
 
-Before doing any search, read `.harness/websearch/INDEX.md` to get a list of common, known, and validated sources for the project. Without a project index, use the user-scope index: `INDEX.md` beside this skill on Pi, or `~/.harness/websearch/INDEX.md` on Claude Code and ChatGPT. Use any source that is relevant to the task and fetch it.
+Before doing any search, read `.harness/websearch/INDEX.md` to get a list of common, known, and validated sources for the project. Without a project index, use `~/.harness/websearch/INDEX.md`. Keep using the selected index for this research. Use any source that is relevant to the task and fetch it.
 
-If the user requests you to use specific search tools, use them. Otherwise, default to the Context7 npx CLI and complete the search with your default web search and page-fetching tools. If web tools are unavailable, report the coverage gap and synthesize only from sources you could access.
+If the user requests you to use specific search tools, use them. Otherwise, default to the Context7 npx CLI and complete the search with your available web search tools. If web tools are unavailable, report the coverage gap and synthesize only from sources you could access.
 
 How to use the Context7 CLI:
 - Resolve a library name to a Context7 library ID: `npx ctx7@latest library <name> [topic]` where `name` is the library name to search for and `topic` is what to look up in the library's documentation.
 - Query documentation for a library: `npx ctx7@latest docs <library-id> <query>` where library-id is the Context7 library ID (e.g., /facebook/react) and `query` is a single-topic question to get docs for (run a separate query per distinct concept, unless asking how they interact)
 
-Trace your sources in INDEX.md for the next sessions to pick up. ONLY save the relevant and trusted sources found during the search. Use 1 concise bullet point per source with the format `- title: source` where title is a title you define and source is the info needed to fetch (e.g. a Context7 id, or url)
+Trace your sources in the selected index for the next sessions to pick up. ONLY save the relevant and trusted sources found during the search. Use 1 concise bullet point per source with the format `- title: source` where title is a title you define and source is the info needed to fetch (e.g. a Context7 id, or url)
 
 Avoid incidental findings, duplicates, and low-quality sources.
 
