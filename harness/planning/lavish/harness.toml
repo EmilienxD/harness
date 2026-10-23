@@ -1,8 +1,8 @@
 name = "lavish"
-version = "1.1.0"
+version = "1.2.0"
 description = "Create reviewable HTML artifacts with the Lavish Editor"
-docs = "https://github.com/EmilienxD/harness/blob/main/harness/planning/lavish/SKILL.md"
-requires = ["npx"]
+docs = "https://github.com/kunchenguid/lavish-axi"
+requires = ["npm", "git"]
 
 [platforms.claude]
 status = "supported"
@@ -13,13 +13,7 @@ status = "supported"
 [platforms.pi]
 status = "supported"
 
-[[files]]
-src = "SKILL.md"
-dest = "lavish/SKILL.md"
-root = "skills"
-
-[[files]]
-src = "chatgpt/openai.yaml"
-dest = "lavish/agents/openai.yaml"
-root = "skills"
-platforms = ["chatgpt"]
+[[actions]]
+type = "upstream-skill"
+source = "kunchenguid/lavish-axi"
+skill = "lavish"

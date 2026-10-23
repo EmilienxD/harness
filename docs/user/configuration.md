@@ -79,6 +79,8 @@ Shared home and project policies still apply after the Pi user starter. Each gua
 
 ### Package lifecycle and shared helpers
 
+Upstream skill bridges declare an `upstream-skill` action with a GitHub `source` (`owner/repository`) and `skill` name. They contain no local payloads or host actions. Harness runs the upstream `skills add` installer in a temporary project, copies its output unchanged to the selected provider's skill root, and records file ownership normally. Acquisition uses npm and Git with network access; catalogue discovery and receipt-driven removal do not fetch upstream. Explicit upgrades acquire current content and include its fingerprint in the receipt version. Bridge packages do not maintain forks or provider-specific metadata.
+
 Harness builds a complete npm archive for each selected extension package, bundling its extension entry points, skills and required helpers. It invokes `pi install npm:harness-pi-<tool>@file:<absolute archive>` (project scope adds `--local --approve`) and uses `pi remove` for the receipt-owned source. The immutable content-addressed archive remains in the receipt store's `pi-packages/` cache after uninstall because copied worktrees can still reference it. There is no second archive in the Pi configuration directory.
 
 Pi owns npm metadata. Harness preserves resource filters, user declarations, unrelated models/tools/settings, and restores local files/settings when a native command fails. A trusted project package takes precedence over the same user npm identity; unrelated packages stay loaded. Plain local directory packages have separate absolute-path identities. This layout assumes fresh native npm installations; it does not provide a migration from earlier copied-extension layouts.

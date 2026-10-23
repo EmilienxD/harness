@@ -16,7 +16,7 @@ from collections.abc import Iterable, Sequence
 from pathlib import Path
 from typing import Any
 
-from harness_cli import gitignore, pi_packages, settings_merge
+from harness_cli import gitignore, pi_packages, settings_merge, upstream_skills
 from harness_cli.catalogue import CatalogueError, ResolvedPackage, resolve_dependencies, satisfies
 from harness_cli.host_actions import HostActionError, PreparedAction, apply as apply_host_action
 from harness_cli.host_actions import prepare as prepare_host_action
@@ -358,6 +358,7 @@ class CatalogueInstaller:
         self._pi_package_directory: tempfile.TemporaryDirectory | None = None
         self._pi_payloads: dict[tuple[str, str], list[ExpandedFile]] = {}
         self._pi_caches: dict[tuple[str, str], tuple[Path, Path]] = {}
+        self._upstream_staging: upstream_skills.Staging | None = None
 
     def _has_shared_skill_links(self) -> bool:
         """Recover the shared layout when a checkout has no local skill receipts."""
@@ -370,6 +371,11 @@ class CatalogueInstaller:
             for payload in tool.expand(Platform.CLAUDE, scope)
             if payload.root == "skills"
         }
+        names.update(
+            str(action.data["skill"])
+            for tool in self.available.values() for action in tool.actions
+            if action.type == "upstream-skill"
+        )
         return any(
             (link := self.target.scope_root / ".claude" / "skills" / name).is_symlink()
             and link.resolve() == (self.target.scope_root / ".agents" / "skills" / name).resolve()
@@ -388,7 +394,10 @@ class CatalogueInstaller:
             name for name in self._preserved
             if not (
                 self.target.platform is Platform.CLAUDE
-                and any(payload.root == "skills" for payload in self._payloads(self.available[name]))
+                and (
+                    any(payload.root == "skills" for payload in self._payloads(self.available[name]))
+                    or any(action.type == "upstream-skill" for action in self.available[name].actions)
+                )
                 and current[name].get("skillMode", "copy") != self.skill_mode
             )
         }
@@ -438,6 +447,22 @@ class CatalogueInstaller:
                         required.add(dependency.name)
                     pending.append(dependency.name)
             if not required:
+                pending = list(requested_names)
+                visited = set()
+                while pending:
+                    name = pending.pop()
+                    if name in visited or name not in available:
+                        continue
+                    visited.add(name)
+                    tool = available[name]
+                    pending.extend(dependency.name for dependency in tool.dependencies)
+                    if any(action.type == "upstream-skill" for action in tool.actions):
+                        if self._upstream_staging is None:
+                            self._upstream_staging = upstream_skills.Staging()
+                        try:
+                            available[name] = self._upstream_staging.acquire(tool)
+                        except (OSError, RuntimeError, subprocess.SubprocessError) as exc:
+                            raise InstallError(f"could not acquire {name}: {exc}") from exc
                 return available
             self._preserved.difference_update(required)
 

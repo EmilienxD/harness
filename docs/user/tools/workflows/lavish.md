@@ -2,26 +2,10 @@
 
 Platforms: **Claude Code, ChatGPT, Pi**. Install with `harness install lavish`; see [installation and scope](../../getting-started.md).
 
-## When to use
+Harness is an installation bridge to [kunchenguid/lavish-axi](https://github.com/kunchenguid/lavish-axi). The skill belongs to that upstream project. Harness does not vendor, customize, or supply metadata for it.
 
-Use `lavish` when a plan, comparison, diagram, code view, report, or other agent output will be easier to review as an annotated browser page.
+The bridge runs the upstream-recommended `npx skills add kunchenguid/lavish-axi --skill lavish` workflow noninteractively in a temporary project, then installs the resulting skill files unchanged into the selected provider and scope. Harness records the files in its receipts for removal. It does not install a global Lavish CLI, session hooks, or plugins.
 
-## Invocation
+Installation and upgrades require network access, Git, and Node.js/npm compatible with the upstream `skills` installer. Lavish runs its CLI on demand through `npx`. Explicit upgrades fetch the current upstream skill; receipt versions include a content fingerprint so upstream changes are detected without maintaining a local copy. Installing unrelated packages preserves the existing Lavish receipt.
 
-Use `/lavish [artifact request]` in Claude Code or `$lavish [artifact request]` in ChatGPT. With no argument, the agent infers a useful artifact from the conversation.
-
-## What happens
-
-The skill asks the `lavish-axi` CLI for its current workflow, design guidance, and relevant playbook rather than relying on possibly stale installed instructions. The agent creates an HTML artifact and opens it with `npx -y lavish-axi <html-file>`. You can annotate the page and send feedback back to the agent.
-
-## Files and prerequisites
-
-Claude Code, ChatGPT, and Pi are supported and `npx` is required. The HTML output path is chosen during the task; the package does not install a fixed project configuration or global CLI binary. The CLI is invoked through `npx -y`.
-
-## Example
-
-`/lavish Make the migration trade-offs reviewable` asks for an annotated comparison artifact.
-
-## Pi usage
-
-Use `/skill:lavish [artifact request]`. Pi appends the request as skill arguments. The shared skill uses `npx -y lavish-axi`; browser review and annotations require the external browser workflow.
+Use `/lavish` in Claude Code, `$lavish` in ChatGPT, or `/skill:lavish` in Pi. Refer to the [upstream usage guide](https://github.com/kunchenguid/lavish-axi#quick-start) for current behavior and prerequisites. Provider skill discovery is supported; the upstream browser review workflow has not been certified by Harness's deterministic Pi E2E fixture.
