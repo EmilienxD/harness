@@ -114,7 +114,7 @@ export function compilePrompt(
     answers.filter((answer) => answer.state === "queued").map((answer) => [answer.question_id, answer]),
   );
   // The agent still holds the round it authored, so the reply only needs the choice itself.
-  const bullets: string[] = [];
+  const sections: string[] = [];
   for (const question of payload.questions) {
     const answer = queued.get(question.id);
     const feedback = diagramFeedback[question.id] ?? [];
@@ -122,11 +122,14 @@ export function compilePrompt(
     const note = answer?.note?.trim() ?? "";
     if (!answer?.selected_option && !note && !feedback.length) continue;
     const choice = answer ? (answer.selected_option ?? "None of these") : "Diagram feedback";
-    bullets.push(
-      `- ${question.id}: ${choice}.${note ? ` ${note}` : ""}${feedback.length ? `\n${feedback.map((line) => `  ${line}`).join("\n")}` : ""}`,
+    sections.push(
+      `${question.id}: ${choice}.${note ? ` ${note}` : ""}${feedback.length ? ` ${feedback.join(" ")}` : ""}`,
     );
   }
   const notes = queued.get(NOTES_ID)?.note?.trim();
-  if (notes) bullets.push(`- Additional Notes:\n${notes}`);
-  return bullets.join("\n");
+  if (notes) sections.push(`Additional Notes: ${notes}`);
+  // Flatten before review and snapshotting so copy and delivery use the same single line.
+  return sections
+    .map((section) => section.replace(/\s*[\r\n\u0085\u2028\u2029]+\s*/gu, " "))
+    .join(" | ");
 }

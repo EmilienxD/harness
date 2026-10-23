@@ -12,7 +12,7 @@ Use `/grill-me-in-cloud [plan or design]` in Claude Code, `$grill-me-in-cloud` i
 
 ## What happens
 
-The agent asks the current frontier of decisions, with options and recommendations. Its hook supplies fresh round and asset paths outside the project, uploads local explanation images, publishes the round, and returns the session URL. Only queued answers enter the next prompt. Unanswered questions retain their IDs in later rounds; the process continues until decisions are settled and you confirm shared understanding.
+The agent asks the current frontier of decisions, with options and recommendations. Its hook supplies fresh round and asset paths outside the project, uploads local explanation images, publishes the round, and returns the session URL. Only queued answers enter the next prompt. The board formats the prompt as one line before review, separating questions and additional notes with ` | ` and replacing line breaks in answers, notes, and diagram feedback with spaces. Copy and delivery use that reviewed text. Unanswered questions retain their IDs in later rounds; the process continues until decisions are settled and you confirm shared understanding.
 
 ## Files and prerequisites
 
