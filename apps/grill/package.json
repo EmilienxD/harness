@@ -8,6 +8,7 @@
     "build": "vite build",
     "lint": "eslint .",
     "test": "node --experimental-strip-types --test test/*.test.ts",
+    "test:production": "npm run build && node --experimental-strip-types --test test/production/*.test.ts",
     "format": "prettier --write .",
     "test:e2e": "playwright test",
     "test:ui": "playwright test --config playwright.ui.config.ts"
