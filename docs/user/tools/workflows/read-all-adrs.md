@@ -1,5 +1,7 @@
 # Read all ADRs
 
+Platforms: **Claude Code, ChatGPT, Pi**. Install with `harness install read-all-adrs`; see [installation and scope](../../getting-started.md).
+
 ## When to use
 
 Use `read-all-adrs` when the current task needs every recorded architectural decision, not just a search result or summary of one ADR.
@@ -14,8 +16,12 @@ The agent reads every Markdown ADR in the project's `docs/adr/` directory from s
 
 ## Files and prerequisites
 
-Both providers are supported. The project needs its ADRs under `docs/adr/`. This is a reading workflow: it does not create or revise records. Use `writing-adrs` for authoring.
+Claude Code, ChatGPT, and Pi are supported. The project needs its ADRs under `docs/adr/`. This is a reading workflow: it does not create or revise records. Use `writing-adrs` for authoring.
 
 ## Example
 
 `/read-all-adrs payment rules` loads all ADRs before discussing a payment-related change.
+
+## Pi usage
+
+Use `/skill:read-all-adrs`. Read every Markdown ADR completely. Large inventories still require enough model context; report any coverage limit rather than claiming an exhaustive read.

@@ -1,24 +1,27 @@
 # Planning, building, and shipping workflows
 
-Install any package below from the Harness catalogue, or run `harness install <package-name>` from your project. Skills are invoked as `/skill-name` in Claude Code and `$skill-name` in ChatGPT. The `commit` command is handled by a prompt hook. Packages with hooks need the target application restarted after installation.
+Install any package below from the Harness catalogue, or run `harness install <package-name>` from your project. Invoke skills as `/skill-name` in Claude Code, `$skill-name` in ChatGPT, or `/skill:name` in Pi. Deterministic commands such as `commit` use hooks or native extension commands; their tool guides list supported forms. Restart after installing hooks, or restart/reload Pi extensions.
 
-| Package | When and how to use it |
-| --- | --- |
-| [`audit`](workflows/audit.md) | Invoke `audit` with a repository, path, or audit focus. It reads code and reports ranked findings with file and line evidence, confidence, and remediation difficulty. |
-| [`breakdown-help-wanted-issue`](workflows/breakdown-help-wanted-issue.md) | Invoke with a request to explore it against the codebase and agree on scope. With no argument it fetches the oldest open GitHub issue labeled `[AI]-help-wanted`; this path needs `gh` access. |
-| [`grill-me`](workflows/grill-me.md) | Invoke with a plan or design. It asks all currently answerable decisions in rounds, recommends options, and waits for explicit answers before proceeding. |
-| [`grill-me-in-cloud`](workflows/grill-me-in-cloud.md) | Invoke with a plan or design to run the same decision interview on a persistent hosted board. Its hook supplies round and asset paths outside the repository, then publishes the round and returns the session URL. |
-| [`lavish`](workflows/lavish.md) | Invoke with an artifact request when a plan, comparison, report, diagram, or prototype deserves a reviewable browser page. It uses `npx -y lavish-axi`; the CLI supplies the current design and feedback workflow. |
-| [`prototype`](workflows/prototype.md) | Invoke with one design question to test. It follows user or project instructions; otherwise it requires a clean working tree and builds a disposable prototype on a new `proto/<prototype-name>` branch. It reports the evidence and its limits. |
-| [`read-all-adrs`](workflows/read-all-adrs.md) | Invoke before architecture work to read every Markdown decision record under `docs/adr/`. |
-| [`websearch`](workflows/websearch.md) | Invoke with a research question for a concise cited answer. It reads and updates the trusted-source index at `.harness/websearch/INDEX.md`; documentation queries can use the Context7 CLI. |
-| [`writing-adrs`](workflows/writing-adrs.md) | Invoke after an architectural decision is settled to create an ADR or update its existing record in place. |
-| [`issue-readers`](workflows/issue-readers.md) | Installs `address-this` and `review-this`. Invoke either with an issue or commit to prepare bounded context for implementation or review. Their starter skill bodies are editable; Git and authenticated `gh` are required. |
-| [`issue-writers`](workflows/issue-writers.md) | Use `draft-issue`, `draft-issues`, `to-spec`, or `to-spec-draft-issue` to prepare local Markdown in `.harness/issue-drafts/`. Review or edit the draft, then invoke `publish-issues` to create GitHub issues; `--dry` previews the publication. Requires Git and authenticated `gh`. |
-| [`tdd`](workflows/tdd.md) | Invoke for behavior-focused test-driven work. It agrees on public test seams, then proceeds in small failing-test and implementation slices. This skill may also be selected automatically when relevant. |
-| [`commit`](workflows/commit.md) | Enter `/commit <message>` to stage files changed by the current session and commit without a model call. Use `--dry` to preview or `--ai` for a Gemini-generated message; only `--ai` needs an API key. |
-| [`resolving-merge-conflicts`](workflows/resolving-merge-conflicts.md) | Invoke during an in-progress Git merge or rebase. It investigates both sides, resolves conflicts, runs project checks, and completes the operation. |
-| [`setup-git-worktree-maker`](workflows/setup-git-worktree-maker.md) | Invoke to create or update a project-specific worktree setup command. It derives copied local files, setup steps, an alias, and optionally a VS Code task, then validates the command without creating a worktree. |
-| [`setup-help`](workflows/setup-help.md) | Invoke for an installation or configuration task that benefits from one verified action at a time. It maintains a short view of the remaining setup steps as prerequisites emerge. |
+| Package | Platforms | Purpose |
+| --- | --- | --- |
+| [`audit`](workflows/audit.md) | Claude Code, ChatGPT, Pi | Audits a codebase and reports evidence-backed findings |
+| [`breakdown-help-wanted-issue`](workflows/breakdown-help-wanted-issue.md) | Claude Code, ChatGPT, Pi | Explore a request and agree with the user on what to build |
+| [`commit`](workflows/commit.md) | Claude Code, ChatGPT, Pi | Zero-model-turn /commit with native Pi branch attribution and shared Git/message generation |
+| [`flush-out-useless-tests`](workflows/flush-out-useless-tests.md) | Claude Code, ChatGPT, Pi | Audits passing tests in up to 35 test files and proposes cleanup for approval |
+| [`grill-me`](workflows/grill-me.md) | Claude Code, ChatGPT, Pi | Interviews you to stress-test a plan or design |
+| [`grill-me-in-cloud`](workflows/grill-me-in-cloud.md) | Claude Code, ChatGPT, Pi | Publishes visual design interviews to a persistent hosted board |
+| [`issue-readers`](workflows/issue-readers.md) | Claude Code, ChatGPT, Pi | Prepare issue and commit context for address and review workers |
+| [`issue-writers`](workflows/issue-writers.md) | Claude Code, ChatGPT, Pi | Draft and publish GitHub issues |
+| [`lavish`](workflows/lavish.md) | Claude Code, ChatGPT, Pi | Create reviewable HTML artifacts with the Lavish Editor |
+| [`prototype`](workflows/prototype.md) | Claude Code, ChatGPT, Pi | Build throwaway design prototypes to answer a design question |
+| [`read-all-adrs`](workflows/read-all-adrs.md) | Claude Code, ChatGPT, Pi | Reads every project ADR for complete architectural context |
+| [`resolving-merge-conflicts`](workflows/resolving-merge-conflicts.md) | Claude Code, ChatGPT, Pi | Resolves in-progress Git merge and rebase conflicts |
+| [`setup-git-worktree-maker`](workflows/setup-git-worktree-maker.md) | Claude Code, ChatGPT, Pi | Creates a project-native command for fully initialized Git worktrees |
+| [`setup-help`](workflows/setup-help.md) | Claude Code, ChatGPT, Pi | Guides users through setup one step at a time |
+| [`ship`](workflows/ship.md) | Claude Code, ChatGPT | Agent-led issue delivery with guarded loop implementers |
+| [`tdd`](workflows/tdd.md) | Claude Code, ChatGPT, Pi | Test-driven development through behavior-focused red-green vertical slices |
+| [`test-workflows`](workflows/test-workflows.md) | Claude Code, ChatGPT, Pi | Define and confirm end-to-end workflows when their covered code changes |
+| [`websearch`](workflows/websearch.md) | Claude Code, ChatGPT, Pi | Web research with concise answers and a Markdown source index |
+| [`writing-adrs`](workflows/writing-adrs.md) | Claude Code, ChatGPT, Pi | Writes architectural decision records as durable decision contracts |
 
-`harness install` defaults to the current project and both providers. Add `--platform claude` or `--platform chatgpt` to target one provider, `--scope user` for a user installation, and `--dry-run` to inspect the installer plan.
+`harness install` defaults to the current project, Claude Code and ChatGPT. Add `--platform claude`, `--platform chatgpt`, or `--platform pi` to target a provider, `--scope user` for a user installation, and `--dry-run` to inspect the installer plan.

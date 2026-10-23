@@ -1,5 +1,7 @@
 # Writing for agents
 
+Platforms: **Claude Code, ChatGPT, Pi**. Install with `harness install writing-for-agents`; see [installation and scope](../../getting-started.md).
+
 ## Use it
 
 Invoke `/writing-for-agents` in Claude Code or `$writing-for-agents` in ChatGPT to write or revise an agent-facing document, such as `SKILL.md`, `AGENTS.md`, or `CLAUDE.md`. Specify the document and intended behavior, for example `$writing-for-agents revise the review skill to cover database changes`.
@@ -11,3 +13,7 @@ The skill guides invocation wording, information hierarchy, completion criteria,
 ## Practical note
 
 Give the agent the task that should trigger the document and what completion looks like. The skill treats a skill description or an `AGENTS.md` reference as the pointer that determines when deeper instructions are read. It encourages one clear source for each rule and placing branch-specific detail behind a reference when appropriate.
+
+## Pi usage
+
+Use `/skill:writing-for-agents [document or request]`. The shared guidance and `SKILL-MECHANICS.md` cover native skill discovery and invocation. Pi uses `disable-model-invocation` for explicit-only skills; Claude-specific frontmatter is not a universal execution contract.

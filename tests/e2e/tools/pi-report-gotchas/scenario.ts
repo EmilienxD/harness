@@ -2,20 +2,27 @@ import { createHash } from "node:crypto";
 import { createPiToolScenario } from "../../core/pi-scenario.js";
 import { OpenAiProtocolError, type OpenAiResponsesRequest } from "../../core/openai-server.js";
 
-export const REPORT = '**Unverified Unicode 雪 result**\n\n## Caveats\n\n- A concrete acceptance check still needs human review. @everyone';
-export const LONG_REPORT = '**Partial delivery recovery**\n\n## Caveats\n\n' + 'A consequential Unicode 雪 caveat remains. '.repeat(110);
+export const REPORT = '**REPORT-GOTCHAS-E2E - Pi**\n\n- End-to-end verification: real headless Pi posted this Unicode \u96ea report using fake model inference. This test message can be deleted. @everyone';
+export const LONG_REPORT = '**Multipart report**\n\n## Caveats\n\n' + 'A consequential Unicode 雪 caveat remains. '.repeat(110);
 export const marker = (route: string) => `[E2E:pi-gotchas:${route}]`;
+export const shell = process.platform === "win32" ? "powershell" : "bash";
+export function submitCommand(message: string): string {
+  return process.platform === "win32"
+    ? `harness-report-gotchas submit -m @'\n${message}\n'@`
+    : `harness-report-gotchas submit <<'HARNESS_GOTCHAS'\n${message}\nHARNESS_GOTCHAS`;
+}
 export const scenarios = {
-  submit: [{ tool: "report_gotchas", input: { message: REPORT } }, { tool: "report_gotchas", input: { message: REPORT } }],
-  long: [{ tool: "report_gotchas", input: { message: LONG_REPORT } }],
-  empty: [{ tool: "report_gotchas", input: { message: " \n " } }],
-  nested: [{ tool: "gotchas_nested", input: {} }],
+  submit: [{ tool: shell, input: { command: submitCommand(REPORT) } }],
+  long: [{ tool: shell, input: { command: submitCommand(LONG_REPORT) } }],
+  empty: [{ tool: shell, input: { command: submitCommand(" \n ") } }],
   none: [],
 } as const;
 const routes = Object.entries(scenarios).map(([name, steps]) => ({ name, scenario: createPiToolScenario({ name: `pi-gotchas-${name}`, marker: marker(name), steps: steps.map((step, index) => ({ ...step, checkpoint: `${name}-${index}` })) }) }));
 export const scenario = {
   scenarioCatalogHash: createHash("sha256").update(routes.map(({ scenario }) => scenario.scenarioCatalogHash).join()).digest("hex"),
   transition(request: OpenAiResponsesRequest) {
+    if (request.tools.some(tool => tool.name === "report_gotchas"))
+      throw new OpenAiProtocolError("$.tools", "removed reporting tool is still offered", "pi-gotchas");
     const index = request.input.reduce((last, item, current) => item.role === "user" && JSON.stringify(item.content).includes("[E2E:pi-gotchas:") ? current : last, -1);
     const route = routes.find(({ name }) => JSON.stringify(request.input[index]?.content).includes(marker(name)));
     if (!route) throw new OpenAiProtocolError("$.input", "unknown gotcha fixture route", "pi-gotchas");

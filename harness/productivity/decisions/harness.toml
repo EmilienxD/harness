@@ -1,5 +1,5 @@
 name = "decisions"
-version = "1.1.0"
+version = "1.1.1"
 description = "Surfaces important decisions from the current work where confidence remains low"
 docs = "https://github.com/EmilienxD/harness/blob/main/harness/productivity/decisions/SKILL.md"
 

@@ -7,11 +7,15 @@ import os
 from pathlib import Path
 from urllib.parse import urlsplit
 
-from report_gotchas.reports import ReportError, state_dir
+
+class ReportError(RuntimeError):
+    pass
 
 
 def config_path() -> Path:
-    return state_dir() / "config.json"
+    configured = os.environ.get("HARNESS_REPORT_GOTCHAS_STATE_DIR")
+    directory = Path(configured).expanduser() if configured else Path.home() / ".harness" / "report-gotchas"
+    return directory / "config.json"
 
 
 def validate_webhook_url(value: str) -> str:

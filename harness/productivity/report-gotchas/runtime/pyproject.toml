@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "harness-report-gotchas-runtime"
-version = "1.2.0"
+version = "2.0.0"
 description = "Discord delivery runtime for Harness gotcha reports"
 requires-python = ">=3.11"
 license = { text = "MIT" }
@@ -12,7 +12,6 @@ dependencies = []
 
 [project.scripts]
 harness-report-gotchas = "report_gotchas.cli:main"
-harness-report-gotchas-hook = "report_gotchas.hooks:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/report_gotchas"]

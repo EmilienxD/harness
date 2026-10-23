@@ -38,11 +38,12 @@ alias aliasname='command'
 
 1. **Read the existing file** to preserve other content and check for conflicts.
 2. **Check for duplicates**: If the alias already exists, ask whether to replace it.
-3. **Add the alias**:
+3. **Verify the target command**: Check that the executable is installed and supports the requested options.
+4. **Add the alias**:
    - For PowerShell: Add as a function with `$args` to pass arguments
    - For Bash/Zsh: Add as an alias with single quotes
-4. **Append to the end** of the file, keeping existing content intact.
-5. **Report what was added** and how to activate it:
+5. **Append to the end** of the file, keeping existing content intact.
+6. **Report the alias and exact command it runs**, and how to activate it:
    - PowerShell: `. $PROFILE` or restart terminal
    - Bash: `source ~/.bashrc` or restart terminal
    - Zsh: `source ~/.zshrc` or restart terminal
@@ -62,8 +63,6 @@ User: "Add alias `dc` for `docker-compose`"
 - Bash/Zsh: `alias dc='docker-compose'`
 
 ## Multi-platform Requests
-
-For a requested Pi shortcut, verify the installed `pi` CLI and build the alias from the user's requested command and supported options. State the exact Pi command it runs and how to activate the shell configuration. A shell alias launches the CLI; an in-session skill is invoked as `/skill:name` and requires no shell alias.
 
 When the user asks for "cross-platform" or mentions multiple shells, update all applicable files for their system:
 - On Windows: Update both PowerShell profile and `~/.bashrc` (for Git Bash)

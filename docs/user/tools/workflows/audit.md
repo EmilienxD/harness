@@ -1,5 +1,7 @@
 # Audit
 
+Platforms: **Claude Code, ChatGPT, Pi**. Install with `harness install audit`; see [installation and scope](../../getting-started.md).
+
 ## When to use
 
 Use `audit` for a read-only assessment of a codebase or selected path. It supports general, security, architecture, quality, performance, reliability, testing, dependencies, and privacy reviews.
@@ -14,8 +16,12 @@ The agent first maps files, entry points, tests, and configuration within scope.
 
 ## Files and prerequisites
 
-Both providers are supported. The skill installs no project configuration. It does not edit code unless you separately ask for fixes. Explorer agents depend on the provider's available delegation tools.
+Claude Code, ChatGPT, and Pi are supported. The skill installs no project configuration. It does not edit code unless you separately ask for fixes. Explorer agents depend on the provider's available delegation tools.
 
 ## Example
 
 `/audit src/auth security agents=none` requests a focused, solo security review of that path.
+
+## Pi usage
+
+Use `/skill:audit [scope] [type] [agents=N] [focus]`. The read-only single-session workflow uses the shared skill. Explorer delegation requires available delegation tools; install [subagents](../productivity/subagents.md) when using Harness persistent explorers. Discovery tests do not certify unscripted audit judgments.

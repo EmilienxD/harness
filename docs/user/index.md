@@ -2,7 +2,7 @@
 
 <img class="harness-hero" src="assets/harness_banner.png" alt="Harness ship sailing through rough water">
 
-Harness installs independent skills, hooks, command-line tools, and the optional Aboard extension for Claude Code and ChatGPT. This site explains how to use and configure them after installation.
+Harness installs independent skills, hooks, command-line tools, and the optional Aboard extension for Claude Code, ChatGPT, and Pi. Each tool guide states its supported platforms, usage, configuration, and verification limits.
 
 Start with [Get started](getting-started.md) if Harness is new to you. Open [Configuration](configuration.md) when you need to edit a file under `.harness/` or understand where a setting comes from. The tool guides list the current catalogue by purpose:
 

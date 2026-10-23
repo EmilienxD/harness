@@ -10,7 +10,7 @@ disable-model-invocation: true
 
 Update the AutoHotkey startup script at `A_Startup\CodingHotstrings.ahk` (`A_Startup` is AutoHotkey's per-user Startup folder).
 
-This workflow requires Windows and AutoHotkey. Verify both are available before editing; on another platform or without AutoHotkey, report the missing requirement. Pi supplies no desktop automation automatically: use available shell tools to edit and relaunch the script, and report a reload that could not be completed.
+This workflow requires Windows and AutoHotkey. Verify both are available before editing; on another platform or without AutoHotkey, report the missing requirement. Use available shell tools to edit and relaunch the script, and report a reload that could not be completed.
 
 - Add ordinary replacements as `:*:trigger::replacement`; `*` expands immediately after the final trigger character.
 - Preserve existing entries. If the trigger already exists, ask whether to replace it.

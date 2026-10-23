@@ -7,7 +7,7 @@ import { join } from "node:path";
 import { promisify } from "node:util";
 import type { Duplex } from "node:stream";
 
-/** Replace only Discord's HTTPS boundary. Real urllib, TLS validation and worker stay intact. */
+/** Replace only Discord's HTTPS boundary. Real urllib and TLS validation stay intact. */
 export async function startDiscordFixture(root: string) {
   const key = join(root, "discord-key.pem");
   const cert = join(root, "discord-cert.pem");

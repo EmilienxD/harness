@@ -13,8 +13,8 @@ and version; older guides using `@mariozechner/pi-coding-agent` may describe dif
 - Hook replacements: [extensions](docs/extensions.md), [API declarations](src/core/extensions/types.ts).
 - Persistent sessions and orchestration: [CLI](docs/cli.md), [sessions](docs/sessions.md),
   [session format](docs/session-format.md), [JSON events](docs/json.md), [RPC](docs/rpc.md), [SDK](docs/sdk.md).
-- Research conclusions and tool-by-tool coverage: [Pi compatibility report](../PI-COMPATIBILITY.md).
-- Initial tool priorities, packaging, and provider boundaries: [Pi architecture proposal](../PI-ARCHITECTURE.md).
+- Harness behavior, support and acceptance evidence: [tool guides](../user/index.md).
+- Installation roots, ownership and packaging: [configuration](../user/configuration.md#installation-roots-and-ownership).
 
 ## Maintenance
 
@@ -26,7 +26,7 @@ uv run python scripts/update_references.py docs/CLAUDE-REFERENCES docs/CHATGPT-R
 
 The daily/manual `update-references` GitHub Actions workflow refreshes all three sets and commits
 changed mirrors. Source URLs track upstream `main`; they are not a supported-runtime version pin.
-The compatibility report records the revision examined and is not automatically rewritten.
+Each tool guide records its relevant implementation evidence and acceptance limits independently.
 
 Payloads are unmodified upstream text, covered by the mirrored MIT [license](LICENSE).
 Upstream-relative directories are retained where practical. This is a curated mirror, not a runnable

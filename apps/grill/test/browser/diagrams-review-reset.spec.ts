@@ -85,13 +85,16 @@ test("feedback waits for review and reset restores the original native and fallb
     await card.getByRole("textbox").first().fill("Keep my written feedback.");
     expect(previews).toBe(0);
     await noFeedback();
+    const editedPreview = page.waitForResponse((response) => response.url().endsWith("/prompt-preview"));
     await card.getByRole("button", { name: "Review prompt", exact: true }).click();
     const review = page.getByRole("dialog", { name: "Prompt review" });
     await expect(review).toBeVisible();
-    await expect(review.locator("pre")).toContainText("Moved");
-    expect((await review.locator("pre").innerText()).match(/Moved rectangle "Start"/g)).toHaveLength(1);
-    await expect(review.locator("pre")).toContainText("Keep my written feedback.");
-    await expect(review.locator("pre")).toContainText("No changes were made to the diagram.");
+    const { snapshot_id: editedSnapshot } = await (await editedPreview).json();
+    const snapshot = await request.get(`/api/v1/prompt-snapshots/${editedSnapshot}`, { headers });
+    expect(snapshot.ok()).toBeTruthy();
+    expect((await snapshot.json()).snapshot.images.map((image: { diagram_id: string }) => image.diagram_id)).toEqual([
+      "flow",
+    ]);
     expect(previews).toBe(1);
     await review.getByRole("button", { name: "Back to questions", exact: true }).last().click();
     await noFeedback();
@@ -160,11 +163,12 @@ test("feedback waits for review and reset restores the original native and fallb
     await expect(fallback.locator("canvas").first()).toBeVisible();
     await expect(card.getByRole("textbox").first()).toHaveValue("Keep my written feedback.");
     await noFeedback();
+    const resetPreview = page.waitForResponse((response) => response.url().endsWith("/prompt-preview"));
     await card.getByRole("button", { name: "Review prompt", exact: true }).click();
     await expect(review).toBeVisible();
-    const prompt = await review.locator("pre").innerText();
-    expect(prompt.match(/No changes were made to the diagram\./g)).toHaveLength(2);
-    expect(prompt).not.toContain("Moved");
+    const { snapshot_id: resetSnapshot } = await (await resetPreview).json();
+    // With both drawings restored, review has no edited images to freeze in a snapshot.
+    expect((await request.get(`/api/v1/prompt-snapshots/${resetSnapshot}`, { headers })).status()).toBe(404);
   } finally {
     await request.delete(`/api/v1/sessions/chatgpt/${session}`, { headers });
   }

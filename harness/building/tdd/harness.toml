@@ -1,5 +1,5 @@
 name = "tdd"
-version = "1.1.0"
+version = "1.1.1"
 description = "Test-driven development through behavior-focused red-green vertical slices"
 docs = "https://github.com/EmilienxD/harness/blob/main/harness/building/tdd/SKILL.md"
 

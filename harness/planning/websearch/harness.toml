@@ -1,5 +1,5 @@
 name = "websearch"
-version = "1.5.0"
+version = "1.6.0"
 description = "Web research with concise answers and a Markdown source index"
 
 [platforms.claude]
@@ -21,23 +21,6 @@ src = "INDEX.md"
 dest = ".harness/websearch/INDEX.md"
 root = "workspace"
 starter = true
-platforms = ["claude", "chatgpt"]
-
-[[files]]
-src = "INDEX.md"
-dest = ".harness/websearch/INDEX.md"
-root = "workspace"
-starter = true
-platforms = ["pi"]
-scopes = ["project"]
-
-[[files]]
-src = "INDEX.md"
-dest = "websearch/INDEX.md"
-root = "skills"
-starter = true
-platforms = ["pi"]
-scopes = ["user"]
 
 [[files]]
 src = "chatgpt/openai.yaml"

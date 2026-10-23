@@ -77,7 +77,7 @@ class PackageDependency:
 
 @dataclass(frozen=True)
 class HostAction:
-    """A machine-level action performed by the catalogue installer."""
+    """An acquisition or machine-level action performed by the installer."""
 
     type: str
     data: dict[str, object]
@@ -240,9 +240,18 @@ def _parse_actions(data: dict, manifest_path: Path) -> tuple[HostAction, ...]:
         if not isinstance(entry, dict) or not isinstance(entry.get("type"), str):
             raise ManifestError(f"{manifest_path}: every [[actions]] entry needs a string 'type'")
         kind = entry["type"]
-        if kind not in {"uv-tool", "npm-tool", "vscode-extension"}:
+        if kind not in {"uv-tool", "npm-tool", "vscode-extension", "upstream-skill"}:
             raise ManifestError(f"{manifest_path}: unsupported host action type '{kind}'")
-        if kind == "uv-tool":
+        if kind == "upstream-skill":
+            if not isinstance(entry.get("source"), str) or not re.fullmatch(
+                r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", entry["source"]
+            ):
+                raise ManifestError(f"{manifest_path}: upstream-skill requires an owner/repository source")
+            if not isinstance(entry.get("skill"), str) or not re.fullmatch(
+                r"[a-z0-9]+(?:-[a-z0-9]+)*", entry["skill"]
+            ):
+                raise ManifestError(f"{manifest_path}: upstream-skill requires a skill name")
+        elif kind == "uv-tool":
             if not all(isinstance(entry.get(key), str) and entry[key] for key in ("source", "package")):
                 raise ManifestError(f"{manifest_path}: uv-tool action requires source and package")
             source = entry["source"]
@@ -328,6 +337,10 @@ def load_tool(directory: Path) -> Tool:
         raise ManifestError(f"{manifest_path}: at least one [[files]] or [[actions]] entry is required")
 
     files = []
+    if any(action.get("type") == "upstream-skill" for action in raw_actions if isinstance(action, dict)) and (
+        raw_files or any(action.get("type") != "upstream-skill" for action in raw_actions if isinstance(action, dict))
+    ):
+        raise ManifestError(f"{manifest_path}: upstream-skill bridges cannot include local payloads or host actions")
     for entry in raw_files:
         if "src" not in entry or "dest" not in entry:
             raise ManifestError(f"{manifest_path}: every [[files]] entry needs 'src' and 'dest'")

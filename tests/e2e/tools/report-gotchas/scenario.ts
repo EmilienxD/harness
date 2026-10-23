@@ -6,7 +6,7 @@ import { OpenAiProtocolError, type OpenAiResponseOutput, type OpenAiResponsesReq
 export const MARKER = "[E2E:report-gotchas]";
 export const REPORT_MARKER = "REPORT-GOTCHAS-LIVE-E2E";
 export const FINAL_MESSAGE = "Discord report delivered through the report-gotchas skill.";
-export const scenarioCatalogHash = createHash("sha256").update("report-gotchas:v1").digest("hex");
+export const scenarioCatalogHash = createHash("sha256").update("report-gotchas:v2").digest("hex");
 
 const CLAUDE_SKILL_ID = "toolu_e2e_report_gotchas_skill";
 const CLAUDE_SUBMIT_ID = "toolu_e2e_report_gotchas_submit";
@@ -34,15 +34,8 @@ export function claudeTransition(request: AnthropicMessagesRequest, submitComman
       content: [{ type: "tool_use", id: CLAUDE_SUBMIT_ID, name: "Bash", input: { command: submitCommand, description: "Report implementation caveat" } }],
     };
   }
-  const submittedText = deepText(submitted);
-  if (!/HARNESS_REPORT_GOTCHAS_RECEIPT:[0-9a-f]{32}/u.test(submittedText)) {
-    throw new E2eProtocolError(
-      "$.messages",
-      `submission did not return a receipt; tool result: ${submittedText.slice(0, 500)}`,
-      "report-gotchas",
-    );
-  }
-  if (!text.includes(REPORT_MARKER)) throw new E2eProtocolError("$.messages", "submitted command omitted the report marker", "report-gotchas");
+  if (submitted.is_error === true || !deepText(submitted).includes("Report successfully posted to Discord."))
+    throw new E2eProtocolError("$.messages", "Discord submission was not confirmed", "report-gotchas");
   return {
     scenario: "report-gotchas", checkpoint: "complete", messageId: stableId("claude-complete"), stopReason: "end_turn",
     content: [{ type: "text", text: FINAL_MESSAGE }],
@@ -53,14 +46,15 @@ export function codexTransition(request: OpenAiResponsesRequest, skillReadComman
   const text = deepText(request.input);
   if (!text.includes(MARKER)) throw new OpenAiProtocolError("$.input", "does not select the scenario", "report-gotchas");
   const outputs = request.input.filter((item) => item.type === "custom_tool_call_output" || item.type === "function_call_output");
-  if (outputs.length === 0) {
+  if (!outputs.some(item => item.call_id === CODEX_READ_ID)) {
     return { scenario: "report-gotchas", checkpoint: "skill-loaded", output: codexShellCall(request, CODEX_READ_ID, skillReadCommand) };
   }
-  if (!text.includes("HARNESS_REPORT_GOTCHAS_RECEIPT:")) {
+  const submitted = outputs.find(item => item.call_id === CODEX_SUBMIT_ID);
+  if (!submitted) {
     return { scenario: "report-gotchas", checkpoint: "report-submitted", output: codexShellCall(request, CODEX_SUBMIT_ID, submitCommand) };
   }
-  assertReceipt(text, "$.input", "report-gotchas");
-  if (!text.includes(REPORT_MARKER)) throw new OpenAiProtocolError("$.input", "submitted command omitted the report marker", "report-gotchas");
+  if (!deepText(submitted).includes("Report successfully posted to Discord."))
+    throw new OpenAiProtocolError("$.input", "Discord submission was not confirmed", "report-gotchas");
   return { scenario: "report-gotchas", checkpoint: "complete", output: finalOutput(FINAL_MESSAGE) };
 }
 
@@ -83,13 +77,6 @@ function resultFor(request: AnthropicMessagesRequest, id: string): Record<string
     }
   }
   return undefined;
-}
-
-function assertReceipt(text: string, field: string, scenario: string): void {
-  if (!/HARNESS_REPORT_GOTCHAS_RECEIPT:[0-9a-f]{32}/u.test(text)) {
-    if (scenario === "report-gotchas" && field === "$.input") throw new OpenAiProtocolError(field, "submission did not return a receipt", scenario);
-    throw new E2eProtocolError(field, "submission did not return a receipt", scenario);
-  }
 }
 
 function finalOutput(text: string): OpenAiResponseOutput {

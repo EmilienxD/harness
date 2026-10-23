@@ -139,9 +139,14 @@ class PiAdapter(PlatformAdapter):
         configured = os.environ.get("PI_CODING_AGENT_DIR")
         return (Path(configured).expanduser() if configured else Path.home() / ".pi" / "agent").resolve()
 
+    def destination_boundary(self, scope_root: Path, is_user: bool, root: str) -> Path:
+        if is_user and root == "workspace":
+            return Path.home().resolve()
+        return super().destination_boundary(scope_root, is_user, root)
+
     def destination_root(self, scope_root: Path, is_user: bool, root: str) -> Path:
         if is_user and root == "workspace":
-            raise ValueError("Pi user workspace payloads are not supported yet")
+            return Path.home().resolve()
         if root == "hooks":
             raise ValueError("Pi does not support the hooks destination; use extensions or support")
         if root == "extensions":

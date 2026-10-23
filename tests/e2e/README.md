@@ -368,7 +368,7 @@ requested Gemini service; command integration uses fake inference, never paid Pi
 
 `test:pi-web-toolkit` installs the actual `web-toolkit` package, host CLI and native extension
 in isolated uv directories. Project JSON and user RPC journeys use real Pi 1.2.0 with the
-fake OpenAI Responses API shared with Codex. They verify that no fallback skill is installed
+fake OpenAI Responses API shared with Codex. They verify that no Web Toolkit skill is installed
 or discovered and invoke the native tools directly. Local HTTP pages verify fetch, redirects,
 Unicode, saved full text, HTTP error bodies, validation, missing executable handling and
 RPC cancellation. Search runs the real CLI and Chrome DOM extraction/filtering; a fixture
@@ -391,25 +391,35 @@ POSIX and interactive Pi rendering remain separate acceptance boundaries.
 
 ## Pi gotcha reports
 
-`test:pi-report-gotchas` installs actual `report-gotchas` and its coupled bridge in all four
-project/user × JSON/RPC combinations. Real Pi 1.2.0 uses the same fake Responses endpoint as
-Codex. The shared Python queue and detached worker send HTTPS through a loopback-only CONNECT
-proxy to a temporary Discord TLS fixture; `openssl` is required to generate its per-run
-certificate. The proxy refuses every destination except the fixture's Discord host and never
-forwards externally. The isolated worker verifies the fixture with that temporary certificate. Webhook payloads
-stay in memory and all generated configuration/keys/queue/session files remain in the external
-temporary root. No real webhook configuration is read and no live Discord messages are sent.
+`test:pi-report-gotchas` installs the checkout `report-gotchas` skill and real uv-managed
+CLI in all four project/user and JSON/RPC combinations. It uses real headless Pi 1.2.0 and
+the fake Responses endpoint, with no reporting extension, hooks, transport dependency or Git
+repository. A loopback HTTPS Discord fixture preserves real URL validation, TLS, urllib,
+shell execution and CLI exit status. It requires `openssl` for its temporary certificate;
+its CONNECT proxy refuses every destination except the fixture host and never forwards
+externally. Webhook bodies remain in memory and fixture files stay in the external temporary root.
 
-The gate verifies native discovery/invocation, Pi session/cwd/Git binding, identical-report
-deduplication after delivery, parallel nested calls, missing configuration, empty input and
-helper outage, reload/exact saved resume/tree/fork/new identity, Unicode and mention suppression,
-429 retry, preserved multipart progress after permanent failure, zero-inference native retry
-and no-gotcha turns. Each journey uses exactly 30 inference requests. The installed host CLI
-configures the shared webhook; Pi's queue is isolated under the state directory's `pi/` child,
-so legacy CLI retry cannot race it. Uninstall removes the
-extension/runtime/last coupled bridge and preserves user-owned queue/deduplication history.
-Run `e2e:pi-report-gotchas` for project JSON and user RPC executable journeys. This certifies
-the Windows headless integration, not Pi TUI, POSIX or real Discord service acceptance.
+Checks cover confirmed direct posting, missing configuration, empty reports, Unicode, disabled
+mentions, multipart posts, explicit HTTP/rate-limit errors, exact inference counts, absence of
+local report storage and installer removal. The only reporting state is webhook configuration.
+No unit-test mock replaces the CLI or HTTP client.
+
+Explicit live acceptance uses the configured real Discord webhook:
+
+```powershell
+npm run e2e:report-gotchas                  # real headless Claude Code and Codex
+npm run e2e:pi-report-gotchas -- --live      # real headless Pi JSON
+```
+
+These commands each post clearly labeled test reports. They read the webhook from the user's
+configuration (or `HARNESS_REPORT_GOTCHAS_E2E_WEBHOOK_URL`) and pass it only in child environment
+variables; diagnostics never contain the URL or message bodies. Inference always goes to the
+fake loopback API. Each live provider journey requires exactly three inference requests and
+checks the real CLI's confirmed Discord success before completing. All three journeys passed
+on Windows, and the user confirmed receipt of the three notifications.
+
+The journeys use `--local` explicitly. The catalogue pins runtime 2.0; its commit must be
+published before remote installs can fetch it. Interactive Pi TUI and POSIX need separate checks.
 
 ## Pi persistent subagents
 
@@ -537,7 +547,7 @@ The two native-path journeys verify `@`, tilde, file URL and Unicode-space expan
 MSYS/WSL/Cygwin paths and casing, aliases into docs, docs links outside the project and linked
 draft rejection. Both installation scopes deny twelve creations on Windows and preserve exact
 native write/edit and approved bytes. The complete gate has seven journeys; commands add zero
-inference requests. See the [implementation decision and source evidence](../../docs/PI-ARCHITECTURE.md#shipped-document-cleanup-and-test-workflow-slice)
+inference requests. See the [document-guard implementation and source evidence](../../docs/user/tools/guards/no-new-documents.md#implementation-and-verification)
 for the event-guard choice and coverage boundary.
 
 `test:pi-cleanup-git` verifies project JSON and user RPC invocation through native skill expansion.

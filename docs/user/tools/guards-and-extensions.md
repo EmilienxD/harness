@@ -8,20 +8,22 @@ uvx --from "git+https://github.com/EmilienxD/harness" harness
 
 For a scripted project install, use `harness install command-guard no-new-documents`; add `--platform claude` or `--platform chatgpt` when needed. For Pi document protection, use `harness install no-new-documents --platform pi`. `--scope user` installs at user scope, and `--root <path>` chooses another project. Use `harness list` to inspect selections and `harness info <name>` for package details. Installed starter policies are preserved when you upgrade.
 
-| Package | Platforms | Behavior |
+| Package | Platforms | Purpose |
 | --- | --- | --- |
-| [`command-guard`](guards/command-guard.md) | Claude Code, ChatGPT | Denies shell commands matching policy regular expressions. This is a guardrail, not a security sandbox. |
-| [`no-new-documents`](guards/no-new-documents.md) | Claude Code, ChatGPT, Pi | Sends new files in protected documentation paths to user-approved drafts; existing files remain editable. |
-| [`on-read-reminder`](guards/on-read-reminder.md) | Claude Code | Prompts the agent to read required guidance after it reads matching paths. |
-| [`on-edit-reminder`](guards/on-edit-reminder.md) | Claude Code | Allows a matching edit, then asks the agent to read guidance and correct violations. |
-| [`on-edit-block`](guards/on-edit-block.md) | Claude Code | Denies a matching edit until required guidance has been read in the session. |
-| [`prefer-read-tool`](guards/prefer-read-tool.md) | Claude Code | Nudges the agent toward Read after shell-based file reads. |
-| [`prefer-edit-tool`](guards/prefer-edit-tool.md) | Claude Code | Nudges the agent toward Write/Edit after shell-based file changes. |
-| [`prefer-fewer-comments`](guards/prefer-fewer-comments.md) | Claude Code, ChatGPT | Flags added comments or docstrings above configurable budgets. |
-| [`redirect-subagents`](guards/redirect-subagents.md) | Claude Code | Routes configured built-in Agent subagents through alternate commands or providers. |
-| [`usage-limit-wait`](guards/usage-limit-wait.md) | Claude Code, ChatGPT | Waits for an exhausted subscription window to reset; usage-reader errors fail open. |
-| [`aboard`](extensions/aboard.md) | Claude Code, ChatGPT | Installs the Aboard VS Code extension for visible sessions and Auto Run. |
-| [`auto`](extensions/auto.md) | Claude Code, ChatGPT | Provides Aboard's `/auto` bridge (`$auto` in ChatGPT); installed with Aboard and not independently selectable. |
+| [`aboard`](extensions/aboard.md) | Claude Code, ChatGPT, Pi | Aboard VS Code integration for interactive and background agents and Auto Run |
+| [`auto`](extensions/auto.md) | Claude Code, ChatGPT, Pi | Routes /auto and /auto --dry to an active Aboard session |
+| [`command-guard`](guards/command-guard.md) | Claude Code, ChatGPT, Pi | Cross-platform PreToolUse guard that denies configured dangerous Bash and PowerShell commands |
+| [`exclude-unwanted-tools`](guards/exclude-unwanted-tools.md) | Pi | Exclude powershell, codemode, find, grep, and ls from Pi's tool registry |
+| [`no-new-documents`](guards/no-new-documents.md) | Claude Code, ChatGPT, Pi | Cross-platform guard that routes new files in configured documentation directories through user-approved drafts |
+| [`on-edit-block`](guards/on-edit-block.md) | Claude Code, Pi | PreToolUse hook that denies Write/Edit/MultiEdit on files matching gitignore-style patterns until the agent has read the required files |
+| [`on-edit-reminder`](guards/on-edit-reminder.md) | Claude Code, Pi | PostToolUse hook that lets edits to files matching gitignore-style patterns land, then makes the agent read the required files and fix what doesn't follow them |
+| [`on-read-reminder`](guards/on-read-reminder.md) | Claude Code, Pi | PostToolUse hook that reminds the agent to read key files when it reads paths matching gitignore-style patterns |
+| [`prefer-edit-tool`](guards/prefer-edit-tool.md) | Claude Code | PostToolUse nudge to prefer the Write/Edit tools over heredocs, redirects, sed -i and inline python for file writes |
+| [`prefer-fewer-comments`](guards/prefer-fewer-comments.md) | Claude Code, ChatGPT, Pi | Advisory comment and docstring budgets over newly written commentary, with native Pi mutation snapshots |
+| [`prefer-read-tool`](guards/prefer-read-tool.md) | Claude Code | PostToolUse nudge to prefer the Read tool over shell file-read commands |
+| [`redirect-subagents`](guards/redirect-subagents.md) | Claude Code | Redirect Claude Code's built-in Agent tool subagents to alternate providers, avoiding Claude subscription usage |
+| [`slash-command-guard`](guards/slash-command-guard.md) | Pi | Reject unknown leading slash commands in Pi before they reach the model |
+| [`usage-limit-wait`](guards/usage-limit-wait.md) | Claude Code, ChatGPT | Blocks the session until an exhausted Claude or ChatGPT subscription usage window resets, instead of failing the turn |
 
 ## Configure guard policies
 
@@ -43,36 +45,41 @@ exclude = true
 
 The installed read/edit policies contain commented examples, so configure at least one rule to make them useful. A matching exclusion clears requirements from earlier rules.
 
-`command-guard.toml` groups each reason with command-matching regular expressions. Its starter already includes dangerous shell, Git, credential, and Windows command patterns. For example:
+Each tool guide owns its policy schema, invocation, examples and provider differences. Open [No New Documents](guards/no-new-documents.md) for draft approval, [comment budgets](guards/prefer-fewer-comments.md) for comment limits, [subagent redirection](guards/redirect-subagents.md) for Claude routing, or [Aboard](extensions/aboard.md) and [Auto](extensions/auto.md) for visible workers and queue control.
 
-```toml
-version = 1
+## Read/edit guard implementation and verification
 
-[[rules]]
-reason = "network content piped into a shell"
-patterns = ['''(curl|wget).*\|\s*(ba|z)?sh''']
-```
+`on-read-reminder`, `on-edit-reminder`, and `on-edit-block` 2.2.1 use `pi-path-guards` 1.0.0
+and its `pi-transport` dependency through Pi-only coupled dependencies. The guard helper imports
+each package's existing Python parser and message builders. Transport selects the same uv/Python
+preference as the installer and records
+launch argv in session receipts. Subprocess requests and responses are versioned JSON, bounded
+at 2 MiB and ten seconds, with cancellation on session replacement/shutdown. Guard transport
+errors deny native edits; reminder errors append diagnostics while preserving successful results.
+Original tool content and structured output are preserved.
 
-In `no-new-documents.toml`, `protected` contains path patterns. The default is `protected = ["**/docs/**"]`; add paths such as `"project-notes/**"` if needed. If a new `docs/arch/plan.md` is blocked, the agent writes `.harness/doc-drafts/docs/arch/plan.md`. Review it, then run `/approve-doc-draft docs/arch/plan.md` or `/reject-doc-draft docs/arch/plan.md` in Claude Code; use `$approve-doc-draft` or `$reject-doc-draft` in ChatGPT. Run either command without a path to list drafts. A directory path handles its pending drafts together. Approval never overwrites an existing target file.
+User policy starters live outside npm packages under `<PI_CODING_AGENT_DIR>/harness/`
+(default `~/.pi/agent/harness/`). This avoids
+adding user workspace ownership to this slice. Shared home and project policies still load later.
+Branch receipts record observed ranges and content digests, complete denial deliveries, and
+reminder times. State comes from active ancestry on every event, including nested calls, so
+reload/resume and tree navigation do not import abandoned-branch permissions. A denial records
+only guidance actually inlined within the existing message budget, after an observed
+`tool_execution_end` error carries that denial. Pi skips `tool_result` for denied calls.
 
-`prefer-fewer-comments.toml` has optional `[limits]` values such as `max_comment_lines = 2`, `max_doc_lines = 5`, and `max_comment_ratio = 0.30`. Use ordered `[[rules]]` entries with `patterns = ["docs/**"]` and `exempt = true` to exempt paths, then a later `exempt = false` rule to include a narrower path again. Its starter comments list all settings and defaults.
+`npm run test:pi-path-guards` in `tests/e2e/` installs real catalogue payloads and tests Pi 1.2.0
+against the authenticated fake OpenAI Responses API. JSON/RPC and project/user checks cover
+reminders, cooldown, failed calls, denial/retry, partial-read coverage, shell reads, nested tools,
+reload, tree navigation, exact file effects, request counts, and coupled removal. These checks
+certify native read/write/edit integration on Windows; they do not certify arbitrary shell
+mutations, third-party tools, restricted-launch admission, or a security sandbox. Each tool guide states its own supported boundary.
 
-## Redirect Claude Code subagents
+## Guard admission and evidence
 
-Edit the installed `.claude/harness-redirect-subagents/subagents.json` to enable a route. Its starter `Explore` entry is disabled. A project entry can be as simple as:
+Pi project trust controls resource loading. Installed files alone do not prove a guard loaded. A Harness launch requiring mandatory restrictions must verify trusted resource discovery, helper readiness, supported native schemas and required registrations before admitting the launch. Missing or unknown mutation coverage blocks such a restricted launch. Ordinary sessions report resource gaps. Trust remains an explicit user decision; authentication state is not copied.
 
-```json
-{
-  "Explore": "auto"
-}
-```
+Tool events cover direct and nested native calls, including `ctx.executeTool()`. They do not cover arbitrary filesystem/subprocess calls made by trusted extensions or direct tool-definition execution. MCP/custom mutators need explicit adapters. Extensions can also transform inputs after another handler checked them, so controlled resource loading and ordering matter. A list of read-only tool names does not provide operating-system isolation; use OS/container enforcement when that guarantee is required.
 
-That shorthand runs `Explore` through `claude -p --model auto`. For another backend, configure an object with a `command`, or with a `profile`, `model`, and `effort` for the `clauder` backend; set `disabled: true` to turn an entry off. The named backend executable must be available on the host. Project entries take precedence over user entries. User definitions live at `~/.claude/harness-redirect-subagents/subagents.json` under `agents` and require a `projects` list naming each allowed project root. The directory also holds local job state and is git-ignored by the installed starter.
+Branch-sensitive evidence comes from observed successful outcomes and native session ancestry. Partial reads prove only their delivered range, failed reads confer no permission, and abandoned branches confer no authority. Pi's bounded nested-call transcript summaries can omit arguments, so tools persist their own minimal call-linked receipts. Reminder guidance preserves original content, structured output and successful status; blocking policies fail closed when required policy/transport evidence is missing.
 
-## Aboard and Auto Run
-
-Select `aboard` to install its verified VSIX and required worker assets. Harness installs the coupled `auto` bridge with it, plus the reusable `issue-readers` dependency. In VS Code, initialize the project once, then choose **Run Agent**, **Run Claude Code**, or **Run Codex** in the Aboard panel to open an attended terminal. **Agent Fleet** shows live sessions; **Recent Activity** keeps completed work available for inspection and supported reopen flows. Select a background agent in the Fleet, or run **Aboard: Watch Background Agent**, to follow its read-only progress.
-
-Auto Run processes labelled GitHub issues in a recoverable queue. Review its forecast in the panel or run `/auto --dry` in an Aboard-launched Claude session (`$auto --dry` in ChatGPT). Start it from the panel or use `/auto` (`$auto` in ChatGPT) when the forecast is right. The hook requires an active Aboard session. Auto Run uses visible worker terminals; its one-shot, read-only exploration runs in the background. It coordinates a RUN branch and issue work, then leaves the final pull request for review unless automatic merging is configured and succeeds.
-
-Project launch settings live in `.harness/config.json`; Aboard settings live in `.abd/settings.json`, with `aboard.*` VS Code settings providing user or profile defaults. A minimal launch config is `{ "version": 1 }`; omitted values use product defaults. Existing terminals keep their launch settings, while new launches read the current config. The [Aboard README](https://github.com/EmilienxD/harness/blob/main/apps/aboard/README.md) has more settings and workflow details for repository collaborators.
+Acceptance checks use the real CLI with isolated agent/config/session directories and authenticated loopback fake inference. They assert file/index effects, denied mutations, receipt state, lifecycle/schema contracts and inference-request counts. Shared-skill discovery checks certify integration rather than model judgment. Each tool's guide states its verified runtime and environment; a Windows JSON/RPC journey does not certify POSIX, the TUI, arbitrary tools or a newer runtime.

@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from harness_cli.installer import CatalogueInstaller, Target
+from harness_cli.installer import CatalogueInstaller, InstallError, Target
 from harness_cli.manifest import discover
 from harness_cli.receipts import ReceiptStore
 
@@ -66,7 +66,9 @@ def test_shared_unmodified_index_is_removed_after_both_platforms_are_uninstalled
 
 
 @pytest.mark.parametrize("edited", [False, True])
-def test_pi_user_index_is_bundled_and_preserves_user_edits(tmp_path, monkeypatch, edited):
+def test_pi_user_index_is_shared_and_preserves_user_edits(tmp_path, monkeypatch, edited):
+    home = tmp_path / "home"
+    monkeypatch.setattr(Path, "home", lambda: home)
     monkeypatch.setenv("PI_CODING_AGENT_DIR", str(tmp_path / "pi-agent"))
     target = Target.for_user("pi")
     store = ReceiptStore.load(tmp_path / "receipts.json")
@@ -75,7 +77,8 @@ def test_pi_user_index_is_bundled_and_preserves_user_edits(tmp_path, monkeypatch
     catalogue.reconcile({"websearch"})
 
     skill = target.destination_path("skills", "websearch/SKILL.md")
-    index = skill.with_name("INDEX.md")
+    index = home / ".harness/websearch/INDEX.md"
+    assert not skill.with_name("INDEX.md").exists()
     assert skill.read_bytes() == (SOURCE_DIR / "SKILL.md").read_bytes()
     assert index.read_bytes() == (SOURCE_DIR / "INDEX.md").read_bytes()
     assert not skill.with_name("agents").exists()
@@ -93,3 +96,42 @@ def test_pi_user_index_is_bundled_and_preserves_user_edits(tmp_path, monkeypatch
     assert index.exists() is edited
     if edited:
         assert index.read_bytes() == expected
+
+
+@pytest.mark.parametrize("edited", [False, True])
+def test_user_platforms_share_index_across_distinct_receipt_roots(tmp_path, monkeypatch, edited):
+    home = tmp_path / "home"
+    monkeypatch.setattr(Path, "home", lambda: home)
+    monkeypatch.setenv("PI_CODING_AGENT_DIR", str(tmp_path / "custom-agent"))
+    store = ReceiptStore.load(tmp_path / "receipts.json")
+    installers = [
+        CatalogueInstaller(discover(), Target.for_user(platform), store)
+        for platform in ("pi", "claude", "chatgpt")
+    ]
+    index = home / ".harness/websearch/INDEX.md"
+    installers[0].reconcile({"websearch"})
+    if edited:
+        index.write_text("# INDEX\n\n- Python: https://docs.python.org/3/", encoding="utf-8")
+    expected = index.read_bytes()
+    for installer in installers[1:]:
+        installer.reconcile({"websearch"})
+        assert index.read_bytes() == expected
+    for installer in installers[:-1]:
+        installer.reconcile(set())
+        assert index.read_bytes() == expected
+    installers[-1].reconcile(set())
+    assert index.exists() is edited
+
+
+def test_pi_user_receipt_rejects_undeclared_home_paths(tmp_path, monkeypatch):
+    home = tmp_path / "home"
+    monkeypatch.setattr(Path, "home", lambda: home)
+    monkeypatch.setenv("PI_CODING_AGENT_DIR", str(tmp_path / "agent"))
+    target = Target.for_user("pi")
+    store = ReceiptStore.load(tmp_path / "receipts.json")
+    installer = CatalogueInstaller(discover(), target, store)
+    installer.reconcile({"websearch"})
+    receipt = target.installation(store)["packages"]["websearch"]
+    receipt["files"].append({"path": str(home / "unrelated.txt"), "owned": True})
+    with pytest.raises(InstallError, match="escapes target root"):
+        installer.reconcile(set())

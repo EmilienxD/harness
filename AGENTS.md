@@ -3,11 +3,9 @@
 ## Project Shape
 
 Harness is the canonical catalogue and installer for independently selectable agent skills, hooks,
-command-line tools, and optional apps for Claude Code, ChatGPT, and Pi. Pi catalogue support includes
-25 shared skill packages, the `web-toolkit` CLI and skill, three path-guard extensions, the command guard, comment budgets, document draft approval, Git cleanup inventory,
-two issue workflow extensions, session commits, desktop notifications, gotcha reports, a background shell,
-a native cloud interview relay, and persistent subagents; other extensions remain proposed. Its deterministic real-CLI E2E environment is
-available. Harness also owns persistent visible-session
+command-line tools, and optional apps for Claude Code, ChatGPT, and Pi. Each tool guide records
+its supported platforms, implementation decisions and acceptance limits. The deterministic real-CLI
+E2E environment verifies native provider integrations. Harness also owns persistent visible-session
 commands and ask/reply state.
 
 `uvx --from <pinned source> harness` opens the interactive catalogue menu by default and also exposes the
@@ -20,20 +18,21 @@ operations distinct from the persistent-session commands `run`, `ask`, `reply`, 
   merging, and TUI.
 - `harness/productivity/subagents/`: Complete ask/reply bundle with internal provider hooks and an independently
   packaged persistent Python runtime.
-- `harness/<category>/<tool>/`: installable packages. User-facing documentation is centralized in the root
-  `README.md`; inspect a platform `SKILL.md` only when implementation details are needed.
+- `harness/<category>/<tool>/`: installable packages. User-facing usage, platform support,
+  implementation decisions and verification limits live in `docs/user/tools/` by tool;
+  the root `README.md` is the catalogue overview. Inspect a platform `SKILL.md` when implementation details are needed.
 - `harness/vscode/`: Aboard's VS Code installer package and its coupled Auto Run integration.
 - `harness/internal/`: non-selectable shared dependencies. Pi transport, path guards, and issue
   workflows are separate packages; tool-specific entry points and policy cores stay with their tools.
-- `apps/aboard/`: the sole documentation exception, with its own user-facing `README.md` and local `AGENTS.md`
+- `apps/aboard/`: application implementation, with its own user-facing `README.md` and local `AGENTS.md`
   navigation map.
 - `tests/unit/`: installer, catalogue, platform, settings, receipt, and session tests.
 - `tests/e2e/`: deterministic real-CLI E2E infrastructure shared with Aboard.
 - `docs/CLAUDE-REFERENCES/`: mirrored official Claude Code documentation.
 - `docs/CHATGPT-REFERENCES/`: mirrored official ChatGPT documentation.
 - `docs/PI-REFERENCES/`: mirrored official Pi documentation, API declarations, and selected extension examples.
-- `docs/PI-COMPATIBILITY.md`: catalogue-wide Pi feasibility and API evidence.
-- `docs/PI-ARCHITECTURE.md`: proposed Pi provider boundaries, requested 35-package backlog, and implementation gates.
+- `docs/user/tools/`: per-tool guides across providers; keep support status and acceptance evidence with each tool.
+- `docs/user/configuration.md`: shared installation roots, ownership, settings and dependency packaging.
 - `docs/CHATGPT-COMPATIBILITY.md`: native ChatGPT target feasibility and implementation map.
 - `scripts/update_references.py`: refreshes the mirrored upstream documentation.
 
@@ -68,9 +67,11 @@ Preserve real internal project trees such as `runtime/src/`; never mirror instal
 
 ## Pi Provider Work
 
-For Pi installer, package, extension, or session work, read `docs/PI-ARCHITECTURE.md` first; it owns
-the initial rollout scope and architecture proposal. Use `docs/PI-COMPATIBILITY.md` for feasibility
-outside that scope and `docs/PI-REFERENCES/README.md` to reach the relevant official API evidence.
+For tool work, read its guide under `docs/user/tools/` for shipped behavior, implementation
+decisions and acceptance limits. For installer or shared packaging changes, read
+`docs/user/configuration.md`. Use `docs/PI-REFERENCES/README.md` to reach official Pi API evidence.
+Keep provider-specific details in the relevant tool guide and shared installation rules in
+the configuration guide.
 
 - Keep proposed support distinct from shipped support in documentation and catalogue declarations.
   Add Pi mappings and bump package versions when the corresponding payload/support ships.

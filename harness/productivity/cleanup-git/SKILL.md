@@ -6,7 +6,7 @@ disable-model-invocation: true
 
 # Cleanup Git
 
-The installed hook or Pi extension supplies a **Git cleanup inventory**, describing every local branch and worktree. Pi supports `/cleanup-git` and `/skill:cleanup-git`, followed by your request; installation alone starts no cleanup. If inventory is absent or failed, fallback to read-only git/gh commands. Use the supplied `inventory_command` in `inventory_cwd` to refresh it. Inventory collection batches common checks such as `rev-parse`/`symbolic-ref` (repository and target), `for-each-ref` (branches, tips, upstreams), `worktree list --porcelain` (registrations and locks), `status --porcelain`/`ls-files --stage` (local/ignored files and submodules), `show`/`rev-list`/`merge-base --is-ancestor` (dates, divergence, merge evidence), and `config --get-regexp` (deletion protections); additional git/gh commands may be necessary depending on the situation.
+You should have received a **Git cleanup inventory**, describing every local branch and worktree. If absent or failed, fallback to read-only git/gh commands. Use the supplied `inventory_command` in `inventory_cwd` to refresh it. The hook is a shortcut that batches common checks such as `rev-parse`/`symbolic-ref` (repository and target), `for-each-ref` (branches, tips, upstreams), `worktree list --porcelain` (registrations and locks), `status --porcelain`/`ls-files --stage` (local/ignored files and submodules), `show`/`rev-list`/`merge-base --is-ancestor` (dates, divergence, merge evidence), and `config --get-regexp` (deletion protections); additional git/gh commands may be necessary depending on the situation.
 
 ## Process
 

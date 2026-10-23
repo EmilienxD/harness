@@ -1,5 +1,7 @@
 # Break down a help wanted issue
 
+Platforms: **Claude Code, ChatGPT, Pi**. Install with `harness install breakdown-help-wanted-issue`; see [installation and scope](../../getting-started.md).
+
 ## When to use
 
 Use this skill when a request is unclear and you want to agree on the actual solution before drafting issues or writing code.
@@ -14,8 +16,12 @@ The agent reads the request and relevant references, checks project context, exp
 
 ## Files and prerequisites
 
-Both providers are supported. `git` and `gh` are required; the default lookup needs access to the repository's issues. The package installs no project output file or configuration.
+Claude Code, ChatGPT, and Pi are supported. `git` and `gh` are required; the default lookup needs access to the repository's issues. The package installs no project output file or configuration.
 
 ## Example
 
 `/breakdown-help-wanted-issue #42` explores that issue with you. If the default lookup finds no issue, provide the request directly.
+
+## Pi usage
+
+Use `/skill:breakdown-help-wanted-issue [request]`. The shared clarification workflow is unchanged. Looking up the oldest help-wanted issue requires authenticated `gh`; Pi itself supplies no GitHub authentication.

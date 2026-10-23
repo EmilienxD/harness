@@ -1,6 +1,8 @@
 import { runPiGotchasJourney } from "./run.js";
 async function main() {
-  for (const [scope, mode] of [["project", "json"], ["user", "rpc"]] as const)
-    process.stdout.write(JSON.stringify(await runPiGotchasJourney(scope, mode)) + "\n");
+  const live = process.argv.includes("--live");
+  const journeys = live ? [["project", "json"]] as const : [["project", "json"], ["user", "rpc"]] as const;
+  for (const [scope, mode] of journeys)
+    process.stdout.write(JSON.stringify(await runPiGotchasJourney(scope, mode, live)) + "\n");
 }
-void main().catch(() => { process.stderr.write("Pi report-gotchas journey failed.\n"); process.exitCode = 1; });
+void main().catch((error: unknown) => { process.stderr.write(`${error instanceof Error ? error.message : "Pi report-gotchas journey failed"}\n`); process.exitCode = 1; });

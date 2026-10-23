@@ -1,27 +1,19 @@
+"""Synchronous Discord webhook delivery without local report storage."""
+
 from __future__ import annotations
 
-from datetime import datetime
-from typing import Any, Callable
 import json
 import urllib.error
 import urllib.request
+from typing import Any
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
-from report_gotchas.reports import QueuedReport, delete_queued, load_queued, save_queued, receipt_lock, _queue_path
+
+MESSAGE_BODY_LIMIT = 2000
 
 
-MESSAGE_BODY_LIMIT = 1800
-
-
-def _inline(value: str) -> str:
-    return value.replace("`", "'").replace("\r", " ").replace("\n", " ")
-
-
-def _webhook_with_wait(url: str) -> str:
-    parsed = urlsplit(url)
-    query = dict(parse_qsl(parsed.query, keep_blank_values=True))
-    query["wait"] = "true"
-    return urlunsplit((parsed.scheme, parsed.netloc, parsed.path, urlencode(query), parsed.fragment))
+class DeliveryError(RuntimeError):
+    pass
 
 
 def _discord_length(value: str) -> int:
@@ -35,38 +27,6 @@ def _fitting_index(value: str, limit: int) -> int:
         if units > limit:
             return index
     return len(value)
-
-
-def _header(report: QueuedReport) -> str:
-    import os
-
-    provider = {"chatgpt": "Codex", "claude": "Claude", "pi": "Pi"}.get(report.provider, report.provider)
-    timestamp = int(datetime.fromisoformat(report.reported_at).timestamp())
-    project = os.path.basename(report.cwd)
-
-    lines = [
-        "**Agent gotchas**",
-        f"**{provider}:** {_inline(report.session_id)}",
-        f"**Date:** <t:{timestamp}:F>",
-        f"**Project:** {_inline(project)}",
-    ]
-
-    git = report.git
-    if not git.root:
-        lines.append(f"**Git:** {git.status}")
-    else:
-        lines.append(f"**Git:** {_inline(git.branch)} @ {_inline(git.commit[:12])}")
-
-        if git.remote:
-            lines.append(f"**Origin:** {_inline(git.remote)}")
-
-        changed = [line for line in git.status.splitlines() if line and not line.startswith("##")]
-        lines.append(f"**Changed files:** {len(changed)}")
-        lines.extend(_inline(line) for line in changed[:10])
-        if len(changed) > 10:
-            lines.append(f"… truncated: {len(changed) - 10} more files")
-
-    return "\n".join(lines)
 
 
 def _split(text: str, limit: int = MESSAGE_BODY_LIMIT) -> list[str]:
@@ -93,93 +53,38 @@ def _split(text: str, limit: int = MESSAGE_BODY_LIMIT) -> list[str]:
     return chunks
 
 
-def messages(report: QueuedReport) -> list[str]:
-    chunks = _split(f"{_header(report)}\n\n\n{report.message}")
-
-    if len(chunks) == 1:
-        return chunks
-
-    return [
-        chunk if index == 0 else f"**Agent gotchas · {index + 1}/{len(chunks)}**\n\n{chunk}"
-        for index, chunk in enumerate(chunks)
-    ]
-
-
-def deliver(
-    receipt: str,
-    webhook_url: str,
-    *,
-    post: Callable[[str, dict[str, Any]], None] | None = None,
-) -> None:
-    with receipt_lock(receipt, operation="deliver"):
-        # Another worker may have completed while we waited for the lock.
-        if not _queue_path(receipt).exists():
-            return
-        _deliver_locked(receipt, webhook_url, post=post)
-
-
-def _deliver_locked(
-    receipt: str, webhook_url: str, *, post: Callable[[str, dict[str, Any]], None] | None = None,
-) -> None:
-    report = load_queued(receipt)
-    parts = messages(report)
-    url = _webhook_with_wait(webhook_url)
-    sender = post or post_json
-
-    for index in range(report.next_message, len(parts)):
-        sender(url, {"content": parts[index], "allowed_mentions": {"parse": []}})
-        report = save_queued(report, next_message=index + 1)
-
-    delete_queued(receipt)
-
-
-class DeliveryError(RuntimeError):
-    def __init__(
-        self,
-        message: str,
-        *,
-        retryable: bool,
-        retry_after: float | None = None,
-    ):
-        super().__init__(message)
-        self.retryable = retryable
-        self.retry_after = retry_after
+def deliver(message: str, webhook_url: str) -> None:
+    parts = _split(message)
+    parsed = urlsplit(webhook_url)
+    query = dict(parse_qsl(parsed.query, keep_blank_values=True))
+    query["wait"] = "true"
+    url = urlunsplit((parsed.scheme, parsed.netloc, parsed.path, urlencode(query), parsed.fragment))
+    for index, part in enumerate(parts):
+        try:
+            post_json(url, {"content": part, "allowed_mentions": {"parse": []}})
+        except DeliveryError as exc:
+            if index:
+                raise DeliveryError(f"{exc}; {index} of {len(parts)} report parts were already posted") from None
+            raise
 
 
 def post_json(url: str, payload: dict[str, Any]) -> None:
     request = urllib.request.Request(
         url,
         data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
-        headers={
-            "Content-Type": "application/json",
-            "User-Agent": "harness-report-gotchas/1.0",
-        },
+        headers={"Content-Type": "application/json", "User-Agent": "harness-report-gotchas/2.0"},
         method="POST",
     )
-
     try:
-        with urllib.request.urlopen(request, timeout=30) as response:
-            response.read()
+        with urllib.request.urlopen(request, timeout=10) as response:
+            confirmation = json.loads(response.read().decode("utf-8"))
+        if not isinstance(confirmation, dict) or not isinstance(confirmation.get("id"), str) or not confirmation["id"]:
+            raise DeliveryError("Discord did not confirm the posted message")
     except urllib.error.HTTPError as exc:
-        retry_after = None
-
         if exc.code == 429:
-            try:
-                retry_after = float(
-                    json.loads(exc.read().decode("utf-8"))["retry_after"]
-                )
-            except (KeyError, TypeError, ValueError, json.JSONDecodeError):
-                header = exc.headers.get("Retry-After")
-                retry_after = float(header) if header else None
-
-        raise DeliveryError(
-            f"Discord webhook returned HTTP {exc.code}",
-            retryable=exc.code == 429 or 500 <= exc.code < 600,
-            retry_after=retry_after,
-        ) from None
-
-    except (OSError, urllib.error.URLError) as exc:
-        raise DeliveryError(
-            "Discord webhook could not be reached",
-            retryable=True,
-        ) from exc
+            raise DeliveryError("Discord rate limit reached; wait before submitting again") from None
+        raise DeliveryError(f"Discord webhook returned HTTP {exc.code}") from None
+    except (OSError, urllib.error.URLError):
+        raise DeliveryError("Discord webhook could not be reached; delivery could not be confirmed") from None
+    except (ValueError, UnicodeError):
+        raise DeliveryError("Discord returned an invalid message confirmation") from None

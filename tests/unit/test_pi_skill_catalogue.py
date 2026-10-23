@@ -20,7 +20,6 @@ PI_SKILL_PACKAGES = (
     "writing-for-agents",
     "zoom-out",
     "prototype",
-    "lavish",
     "handoff",
     "handoff-grilling",
     "todo-hitl",

@@ -81,32 +81,62 @@ export function meaningfulScene(scene: DiagramScene): string {
 export const diagramChanged = (baseline: DiagramScene, scene: DiagramScene) =>
   meaningfulScene(baseline) !== meaningfulScene(scene);
 
-/** Deterministic and bounded; no user-written notes are modified. */
+/** A compact visual overview; exact change detection remains in meaningfulScene. */
 export function summarizeDiagram(baseline: DiagramScene, scene: DiagramScene): string {
-  if (!diagramChanged(baseline, scene)) return "No changes were made to the diagram.";
+  if (!diagramChanged(baseline, scene)) return "";
+  type Element = DiagramScene["elements"][number];
   const before = new Map(live(baseline).map((element) => [element.id, element]));
   const after = new Map(live(scene).map((element) => [element.id, element]));
-  const lines: string[] = [];
-  const clean = (value: string) => value.replace(/\s+/g, " ").slice(0, 80);
-  const label = (element: DiagramScene["elements"][number], drawing = scene) => {
-    const text =
-      element.type === "text"
-        ? element
-        : live(drawing).find((item) => item.type === "text" && item.containerId === element.id);
-    return `${element.type}${text?.type === "text" ? ` "${clean(text.text)}"` : ""}`;
+  const added = [...after.values()].filter((element) => !before.has(element.id));
+  const removed = [...before.values()].filter((element) => !after.has(element.id));
+  const categories = new Set<string>();
+  const renames: Array<[string, string]> = [];
+  const join = (items: string[]) =>
+    items.length < 3 ? items.join(" and ") : `${items.slice(0, -1).join(", ")} and ${items.at(-1)}`;
+  const cleanLabel = (value: string) => {
+    const text = value.replace(/\s+/g, " ").trim();
+    return text.length <= 32 ? text : null;
   };
-  const endpoint = (binding: unknown, drawing: DiagramScene) => {
-    const id = binding && typeof binding === "object" && "elementId" in binding ? binding.elementId : null;
-    const element = live(drawing).find((item) => item.id === id);
-    return element ? label(element, drawing) : "unbound endpoint";
+  const label = (element: Element, drawing: Map<string, Element>) => {
+    const text = [...drawing.values()].find((item) => item.type === "text" && item.containerId === element.id);
+    return text?.type === "text" ? cleanLabel(text.text) : null;
   };
-  for (const [id, element] of before) if (!after.has(id)) lines.push(`Removed ${label(element, baseline)}.`);
+  const kind = (element: Element) => {
+    if (element.type === "arrow" || element.type === "line") return "connection";
+    if (element.type === "text" || element.type === "freedraw") return "annotation";
+    if (element.type === "image") return "image";
+    return "node";
+  };
+  const describe = (elements: Element[], drawing: Map<string, Element>) => {
+    // Bound text belongs to its container, including a newly attached label on an existing node.
+    const independent = elements.filter(
+      (element) => !(element.type === "text" && element.containerId && drawing.has(element.containerId)),
+    );
+    if (independent.length === 1 && kind(independent[0]!) === "node") {
+      const name = label(independent[0]!, drawing);
+      if (name) return `“${name}”`;
+    }
+    const counts = new Map<string, number>();
+    for (const element of independent) counts.set(kind(element), (counts.get(kind(element)) ?? 0) + 1);
+    return join(
+      ["node", "connection", "annotation", "image"].flatMap((type) => {
+        const count = counts.get(type) ?? 0;
+        return count ? [`${count} ${type}${count === 1 ? "" : "s"}`] : [];
+      }),
+    );
+  };
+  for (const element of added.concat(removed)) {
+    if (
+      element.type === "text" &&
+      element.containerId &&
+      before.has(element.containerId) &&
+      after.has(element.containerId)
+    )
+      categories.add("labels");
+  }
   for (const [id, element] of after) {
     const previous = before.get(id);
-    if (!previous) {
-      lines.push(`Added ${label(element)}.`);
-      continue;
-    }
+    if (!previous) continue;
     const oldValue = elementValue(previous);
     const newValue = elementValue(element);
     const keys = new Set(
@@ -114,24 +144,26 @@ export function summarizeDiagram(baseline: DiagramScene, scene: DiagramScene): s
         (key) => stable(oldValue[key]) !== stable(newValue[key]),
       ),
     );
-    if (!keys.size) continue;
     const take = (fields: string[]) => {
       const changed = fields.some((field) => keys.has(field));
       fields.forEach((field) => keys.delete(field));
       return changed;
     };
-    const name = label(element);
-    if (element.type === "text" && previous.type === "text" && take(["text", "originalText"]))
-      lines.push(`Changed label "${clean(previous.text)}" to "${clean(element.text)}".`);
+    if (take(["text", "originalText"])) {
+      categories.add("labels");
+      if (element.type === "text" && previous.type === "text") renames.push([previous.text, element.text]);
+    }
+    // Binding focus/gap changes accompany node movement; only endpoint identity changes are connections.
+    if (take(["startBinding", "endBinding"])) {
+      const target = (value: unknown) =>
+        value && typeof value === "object" && "elementId" in value ? value.elementId : null;
+      if (["startBinding", "endBinding"].some((key) => target(oldValue[key]) !== target(newValue[key])))
+        categories.add("connections");
+      else categories.add("layout");
+    }
     const boundText = element.type === "text" && element.containerId && after.has(element.containerId);
-    if (take(["x", "y"]) && !boundText) lines.push(`Moved ${name}.`);
-    if (take(["width", "height"]) && !boundText) lines.push(`Resized ${name}.`);
-    if (take(["angle"])) lines.push(`Rotated ${name}.`);
-    if (take(["points", "pressures", "simulatePressure", "elbowed", "fixedSegments"])) lines.push(`Reshaped ${name}.`);
-    if (take(["startBinding", "endBinding"]))
-      lines.push(
-        `Reconnected ${name}: ${endpoint(oldValue["startBinding"], baseline)} -> ${endpoint(oldValue["endBinding"], baseline)} to ${endpoint(newValue["startBinding"], scene)} -> ${endpoint(newValue["endBinding"], scene)}.`,
-      );
+    if (take(["x", "y", "width", "height", "angle"]) && !boundText) categories.add("layout");
+    if (take(["points", "pressures", "simulatePressure", "elbowed", "fixedSegments"])) categories.add("layout");
     if (
       take([
         "strokeColor",
@@ -152,30 +184,45 @@ export function summarizeDiagram(baseline: DiagramScene, scene: DiagramScene): s
         "seed",
       ])
     )
-      lines.push(`Changed appearance of ${name}.`);
-    if (take(["boundElements", "containerId", "frameId", "groupIds"]))
-      lines.push(`Changed grouping or label binding of ${name}.`);
-    if (keys.size) lines.push(`Updated ${name}: ${[...keys].sort().join(", ")}.`);
+      categories.add("styling");
+    // Reciprocal boundElements updates are bookkeeping consequences of label/connection edits.
+    take(["boundElements"]);
+    if (take(["containerId"])) categories.add("labels");
+    if (take(["frameId", "groupIds"])) categories.add("layout");
+    if (
+      element.type === "image" &&
+      previous.type === "image" &&
+      stable(imageValue(baseline.files[previous.fileId ?? ""])) !==
+        stable(imageValue(scene.files[element.fileId ?? ""]))
+    )
+      categories.add("images");
+    if (take(["fileId"])) categories.add("images");
+    if (keys.size) categories.add("content");
   }
   if (
     stable([...before.keys()].filter((id) => after.has(id))) !==
     stable([...after.keys()].filter((id) => before.has(id)))
   )
-    lines.push("Changed drawing order.");
+    categories.add("layout");
   if ((baseline.appState.viewBackgroundColor ?? "#ffffff") !== (scene.appState.viewBackgroundColor ?? "#ffffff"))
-    lines.push("Changed canvas background.");
-  const referencedFiles = (drawing: DiagramScene) =>
-    Object.fromEntries(
-      live(drawing)
-        .filter((element) => element.type === "image" && element.fileId)
-        .map((element) => {
-          const file = drawing.files[element.type === "image" ? element.fileId! : ""];
-          return [element.id, imageValue(file)];
-        }),
-    );
-  if (stable(referencedFiles(baseline)) !== stable(referencedFiles(scene))) lines.push("Changed image content.");
-  if (!lines.length) lines.push("Updated drawing content.");
-  const bounded = lines.slice(0, 39).map((line) => line.slice(0, 200));
-  if (lines.length > 39) bounded.push(`${lines.length - 39} additional changes.`);
-  return bounded.join("\n");
+    categories.add("styling");
+
+  const additions = describe(added, after);
+  const removals = describe(removed, before);
+  const updates = ["labels", "connections", "layout", "styling", "images", "content"].filter((key) =>
+    categories.has(key),
+  );
+  const clauses = [additions && `Added ${additions}`, removals && `removed ${removals}`].filter(Boolean);
+  if (updates.length) {
+    const rename = renames.length === 1 && updates.length === 1 && !clauses.length ? renames[0] : null;
+    const oldName = rename && cleanLabel(rename[0]);
+    const newName = rename && cleanLabel(rename[1]);
+    clauses.push(oldName && newName ? `renamed “${oldName}” → “${newName}”` : `updated ${join(updates)}`);
+  }
+  if (!clauses.length) return "Updated drawing content.";
+  let summary = `${clauses.join("; ")}.`;
+  // Aggregate whole clauses instead of truncating labels or losing entire categories.
+  if (summary.length > 200)
+    summary = `${[additions && "added elements", removals && "removed elements", updates.length && `updated ${join(updates)}`].filter(Boolean).join("; ")}.`;
+  return summary[0]!.toUpperCase() + summary.slice(1);
 }
