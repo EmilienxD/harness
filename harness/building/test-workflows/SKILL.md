@@ -1,9 +1,9 @@
 ---
 name: test-workflows
-description: Create or run test workflows. A test workflow is a repeatable end-to-end acceptance check for a user-facing capability. It describes the starting conditions, the actions a user takes, and the observable results that prove the capability works, as Markdown. It helps maintain a product where static test files are limited. Use when defining or verifying feature acceptance criteria.
+description: Create or run test workflows. A test workflow is a repeatable end-to-end acceptance check for a user-facing capability. It describes the starting conditions, the actions a user takes, and the observable results that prove the capability works, as Markdown. It helps maintaining a product where static test files are limited. Use when defining or veryfing feature acceptance criteria.
 ---
 
-A single test workflow run is heavy by definition; test workflows must cover important situations only and stay simple and maintainable. The `test-workflows` CLI explained below manages their verification state. This CLI is essential. Alert the user if it's not installed.
+A single test workflow run is heavy by definition; test workflows must cover important situations only and stay simple and maintainable. The `test-workflows` CLI explained bellow allows running and maintaining them. This CLI is essential. Alert the user if it's not installed.
 
 ## Write a Test workflow
 
@@ -40,8 +40,6 @@ Steps and Acceptance Criteria headings and sections are required. Preconditions 
 ## Run a workflow
 
 Run `test-workflows status` explicitly when verifying covered changes, as you would run unit tests. Use the reported workflow states and changed files to choose the checks to run.
-
-`passed` means the covered file hashes match the last confirmation; it does not execute the workflow. Run `stale` workflows again. Repair `broken` coverage globs or `invalid` workflow/manifest formats before verification.
 
 Establish the preconditions, follow the steps, verify every acceptance criterion, and check for the listed problems. Save evidence outside the repository. Confirm only a passing run; report failures or blockers with evidence paths.
 

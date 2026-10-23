@@ -16,7 +16,7 @@ Claude Code uses `/skill-name`; ChatGPT uses `$skill-name`; Pi uses `/skill:skil
 
 ## Files and prerequisites
 
-Claude Code and ChatGPT are supported through hooks; Pi uses an extension and the same publishing core. `git` and `gh` are required; publication needs repository access. Drafts live in `.harness/issue-drafts/` as editable Markdown. Published drafts are deleted, and abandoned drafts are swept after a week. If `publish-issues` reaches the model, check that its hook is enabled and trusted.
+Claude Code and ChatGPT are supported through hooks; Pi uses an extension and the same publishing core. `git` and `gh` are required; publication needs repository access. Drafts live in `.harness/issue-drafts/` as editable Markdown. Published drafts are deleted, and abandoned drafts are swept after a week. If `publish-issues` reaches the model, check that its hook.
 
 ## Example
 

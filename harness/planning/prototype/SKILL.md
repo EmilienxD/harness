@@ -45,14 +45,8 @@ conventions.
 
 1. Write the question and material assumptions into the prototype.
 2. Build the smallest artifact that makes the answer observable.
-3. Run the decisive happy path and edge cases; fix only defects that obscure
-   the answer.
-   Use browser or UI automation only when those tools are actually available.
-   If they are unavailable, run the checks you can perform, give the user the
-   exact open/run instruction, and request the remaining visual or interaction
-   checks. Distinguish your verified results from checks awaiting the user.
-4. Put the runnable prototype in front of the user and incorporate feedback
-   while it sharpens the same question.
+3. Run the decisive happy path and edge cases; fix only defects that obscure the answer.
+4. Put the runnable prototype in front of the user and incorporate feedback while it sharpens the same question.
 5. Stop when the prototype supplies enough evidence for the named decision.
 
 Keep state in memory and use representative fixtures. Make startup obvious: one

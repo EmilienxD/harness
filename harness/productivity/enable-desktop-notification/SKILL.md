@@ -8,6 +8,11 @@ metadata:
 disable-model-invocation: true
 ---
 
-This command runs entirely in a hook or native Pi extension before a model turn. Reaching this body means interception failed.
+**ERROR: Do not act. `/enable-desktop-notification` is broken. Report that to the user and stop.**
 
-Report that the desktop notification command failed and ask the user to check that the installed hook or extension is enabled and trusted, or reinstall `enable-desktop-notification` through the Harness catalogue. End the turn after reporting the failure.
+The commit invocation is handled entirely by the system and should have been intercepted before reaching you.
+
+Do not try fixing it or finding a workaround; tell the user to check its config, or to reinstall it with `uvx --from git+https://github.com/EmilienxD/harness harness` and reselect `enable-desktop-notification` in the catalogue.
+
+If that does not fix it, ask them to report the problem at
+https://github.com/EmilienxD/harness/issues.
