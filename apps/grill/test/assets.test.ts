@@ -2,8 +2,66 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { assetResponse, mediaMatches } from "../src/lib/grill-assets.server.ts";
 import { assetManifestSchema, publicationSchema, MAX_IMAGE_BYTES, MAX_VIDEO_BYTES } from "../src/lib/grill-contract.ts";
+import { localAssetReferences } from "../src/lib/grill-media.ts";
 
 const asset = { object_path: "session/publication/digest", media_type: "video/mp4", sha256: "a".repeat(64) };
+
+function imagePublication(html: string, references: string[]) {
+  return {
+    provider: "chatgpt",
+    session_id: "dynamic-previews",
+    schema_version: 1,
+    payload: {
+      questions: [
+        {
+          id: "Q1",
+          question: "Choose a preview",
+          explanation_html: html,
+          recommendation: "A",
+          options: [{ letter: "A", label: "Continue", detail: "Use this layout" }],
+        },
+      ],
+    },
+    assets: references.map((reference) => ({
+      reference,
+      media_type: "image/png",
+      byte_size: 100,
+      sha256: asset.sha256,
+    })),
+  };
+}
+
+test("publication requires assets used only by dropdowns, full-size links, or lazy previews", () => {
+  for (const html of [
+    '<select><option value="A">Choice</option><option value="assets/round-001/alternate.png">Preview</option></select>',
+    '<a href="assets/round-001/alternate.png">Full size</a>',
+    '<button data-preview="assets/round-001/alternate.png">Load preview</button>',
+  ]) {
+    assert.equal(publicationSchema.safeParse(imagePublication(html, [])).success, false);
+    assert.equal(publicationSchema.safeParse(imagePublication(html, ["assets/round-001/alternate.png"])).success, true);
+  }
+});
+
+test("media validation decodes attributes and srcsets while ignoring escaped examples and external URLs", () => {
+  const html =
+    '<picture><source srcset="data:image/png;base64,AAAA 1x, assets/round-001/a&amp;b.png 2x">' +
+    '<img src="https://example.test/image.png"></picture>' +
+    '<option value="assets/round-001/a&amp;b.png">Same image</option>' +
+    '<pre>&lt;img src="assets/round-001/example.png"&gt;</pre>';
+  assert.deepEqual(localAssetReferences(html), ["assets/round-001/a&b.png"]);
+  assert.equal(publicationSchema.safeParse(imagePublication(html, [])).success, false);
+  assert.equal(publicationSchema.safeParse(imagePublication(html, ["assets/round-001/a&b.png"])).success, true);
+});
+
+test("publication accepts 30 media references and rejects a 31st", () => {
+  const references = Array.from({ length: 30 }, (_, index) => `assets/round-001/preview-${index}.png`);
+  const html = "<select>" + references.map((ref) => `<option value="${ref}">Preview</option>`).join("") + "</select>";
+  assert.equal(publicationSchema.safeParse(imagePublication(html, references)).success, true);
+  assert.equal(
+    publicationSchema.safeParse(imagePublication(html, [...references, "assets/round-001/extra.png"])).success,
+    false,
+  );
+});
 
 for (const method of ["GET", "HEAD"]) {
   test(`video ${method} redirects to private Storage without downloading video through the app`, async () => {

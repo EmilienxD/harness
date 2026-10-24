@@ -62,6 +62,47 @@ def test_round_contract_and_html_image_discovery():
         validate_round(round_data() | {"questions": [round_data()["questions"][0]] * 2})
 
 
+def test_dynamic_media_attributes_are_discovered_without_treating_choices_as_files():
+    payload = round_data('<select><option value="A">Choose</option>'
+                         '<option value="assets/round-001/alternate&amp;wide.png">Preview</option></select>'
+                         '<a href="assets/round-001/full.png">Full size</a>'
+                         '<button data-preview="assets/round-001/lazy.png">Load</button>'
+                         '<img src="assets/round-001/alternate&amp;wide.png">'
+                         '<pre>&lt;img src="assets/round-001/example.png"&gt;</pre>')
+    assert discover_references(payload) == [
+        "assets/round-001/alternate&wide.png", "assets/round-001/full.png", "assets/round-001/lazy.png",
+    ]
+
+
+@pytest.mark.parametrize("attribute", ["value", "href", "data-preview"])
+@pytest.mark.parametrize("reference", ["assets/round-001/missing.png", "assets/round-001/../outside.png"])
+def test_dynamic_media_must_exist_inside_the_round(tmp_path, attribute, reference):
+    (tmp_path.parent / "outside.png").write_bytes(b"\x89PNG\r\n\x1a\n")
+    with pytest.raises(RoundError):
+        validate_assets(round_data(f'<option {attribute}="{reference}">Preview</option>'), tmp_path, "assets/round-001/")
+
+
+@pytest.mark.parametrize("provider", ["claude", "chatgpt", "pi"])
+def test_publisher_uploads_every_dropdown_preview_and_enforces_asset_count(tmp_path, provider):
+    project = tmp_path / "project"
+    project.mkdir()
+    client = HostedBoard()
+    runtime = InterviewRuntime(tmp_path / "runtime", client)
+    interview = runtime.start(provider, "session", project)
+    references = [f"{interview.assets_url}preview-{index}.png" for index in range(31)]
+    for reference in references:
+        (interview.directory / reference).write_bytes(b"\x89PNG\r\n\x1a\n")
+    html = '<select>' + ''.join(f'<option value="{ref}">Preview</option>' for ref in references[:30]) + '</select>'
+    payload = round_data(html)
+    interview.source.write_text(json.dumps(payload), encoding="utf-8")
+    runtime.publish(provider, "session")
+    prepared = next(body for method, path, body in client.requests if path.endswith("/prepare"))
+    assert [asset["reference"] for asset in prepared["assets"]] == references[:30]
+    assert len(client.uploads) == 30
+    with pytest.raises(RoundError, match="30 local assets"):
+        validate_assets(round_data(html + f'<img src="{references[30]}">'), interview.assets, interview.assets_url)
+
+
 def diagram_figure(identity="flow", source="flowchart LR\n A --&gt; B", caption="Publish last"):
     return f'<figure data-grill-diagram="{identity}"><pre class="mermaid">{source}</pre><figcaption>{caption}</figcaption></figure>'
 

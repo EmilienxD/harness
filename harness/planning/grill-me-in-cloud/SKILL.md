@@ -91,7 +91,7 @@ Each figure has one direct `<pre class="mermaid">` with nonempty Mermaid source 
 
 To review diagram changes, you will receive either an image path directly or a remote image ID (depending on user settings). No path or ID means no changes. Download each remote image ID with `<skill-directory>/scripts/download_grill_image.py <id>`. If a download fails, report the error. Otherwise the script will return the path. Then, read each image from its local path.
 
-- **Images**, such as real project screenshots for UI decisions, use the assets URL prefix and useful alt text.
+- **Images**, such as real project screenshots for UI decisions, use the assets URL prefix and useful alt text. Declare every local media URL in an HTML attribute: `src`, `srcset`, `poster`, dropdown `value`, link `href`, or a `data-*` attribute. For interactive previews, have `init_js` read those attributes from `root`; publication uploads their files and replaces the attribute URLs. Keep each image within 6 MiB and each round within 30 local media references / 50 MiB.
 
 - **Videos** use the same assets directory and URL prefix as images: `<video src="assets/round-001/demo.mp4" controls playsinline preload="none" aria-label="Checkout interaction preview"></video>`. Use `<figcaption>` for optional caption. Optional `poster` images and `<source src>` references use the same asset workflow. Keep each source and prepared video within 20 MiB. Skip format preparation; the system will convert with ffmpeg if needed.
 

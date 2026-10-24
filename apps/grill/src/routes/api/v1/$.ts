@@ -26,6 +26,7 @@ import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import { NOTES_ID, PROVIDERS } from "@/lib/grill-contract";
 import { diagramOperation } from "@/lib/diagram-api.server";
 import { assetResponse, mediaMatches } from "@/lib/grill-assets.server";
+import { localAssetReferences } from "@/lib/grill-media";
 
 export const Route = createFileRoute("/api/v1/$")({
   server: {
@@ -458,6 +459,21 @@ async function commitPublication(request: Request, id: string): Promise<Response
     byte_size: number;
     sha256: string;
   }>;
+  const original = publication.original_payload as {
+    title?: string;
+    project?: { name: string; path: string };
+    payload: { questions: Array<{ explanation_html: string }> };
+  };
+  // Prepared publications from older publishers must pass the same completeness check.
+  const checked = validatePublication({
+    provider: publication.provider,
+    session_id: publication.provider_session_id,
+    schema_version: publication.schema_version,
+    ...original,
+    assets: manifest,
+  });
+  if (!checked.success)
+    return problem(422, "invalid_payload", "The publication payload is invalid.", checked.error.flatten());
   const verified = [];
   for (const item of manifest) {
     const { data: blob, error } = await supabaseAdmin.storage.from(BUCKET).download(item.object_path);
@@ -479,11 +495,6 @@ async function commitPublication(request: Request, id: string): Promise<Response
       sha256: digest,
     });
   }
-  const original = publication.original_payload as {
-    title?: string;
-    project?: { name: string; path: string };
-    payload: { questions: Array<{ explanation_html: string }> };
-  };
   const rewritten = structuredClone(original.payload);
   const rewrites = [...manifest]
     .sort((left, right) => right.reference.length - left.reference.length)
@@ -493,6 +504,12 @@ async function commitPublication(request: Request, id: string): Promise<Response
   for (const question of rewritten.questions) {
     for (const rewrite of rewrites)
       question.explanation_html = question.explanation_html.split(rewrite.variant).join(rewrite.target);
+    if (localAssetReferences(question.explanation_html).length)
+      return problem(
+        422,
+        "unresolved_asset",
+        "Local media URLs could not be rewritten. Use literal asset paths in HTML attributes.",
+      );
   }
   const { data, error } = await supabaseAdmin.rpc("grill_commit_publication", {
     target_publication: publication.id,

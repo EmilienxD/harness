@@ -26,7 +26,9 @@ An outage or expired delivery preserves the saved answers: reconnect and send a 
 
 `/grill-me-in-cloud Review the checkout redesign` opens a hosted decision round for that proposal.
 
-Video previews use the same local asset workflow as images. The publisher checks for the installed `ffmpeg` on PATH and prepares MP4/WebM clips locally; it never bundles FFmpeg. Videos support native inline controls and optional poster images. Each source and prepared clip is limited to 20 MiB, with 50 MiB / 20 assets per round. Personal deployments need the current app and video asset migration.
+Video previews use the same local asset workflow as images. The publisher checks for the installed `ffmpeg` on PATH and prepares MP4/WebM clips locally; it never bundles FFmpeg. Videos support native inline controls and optional poster images. Each source and prepared clip is limited to 20 MiB, with 50 MiB / 30 assets per round. Personal deployments need the current app and video asset migration.
+
+Interactive image comparisons declare local URLs in HTML attributes, including dropdown values, full-size links, and `data-*` attributes; initialization JavaScript reads the rewritten values from the DOM. Package 2.8.4 uploads these images even before they are displayed. The updated server rejects publication when a declared local media URL is absent from the manifest. Upgrade both publisher and server for the 30-asset limit; edited-diagram answer snapshots retain their separate 20-image limit.
 
 Edited diagrams travel with the reviewed answers as private immutable PNGs. The review shows authenticated asset endpoints and a snapshot-specific Python command using the installed helper. Aboard downloads and verifies them into an external runtime cache before sending the prompt; copy/paste and Pi's native relay retain the authenticated references and command. Run that command from the project directory to retrieve all images together, including their question and diagram identities. It resolves the same local, shared URL, user and environment configuration as publication, without putting the access code in commands or output. Retrying reuses verified cached files and repairs corrupt files.
 
@@ -121,3 +123,10 @@ stable prepared paths, idempotent commit, exact downloaded bytes and session del
 with `npx playwright test test/browser/publications.spec.ts --project desktop` from `apps/grill/`.
 Publisher unit tests cover legacy duplicate responses and upload rejection diagnostics. This
 acceptance does not establish deployment of the fix to the hosted board.
+
+`apps/grill/test/browser/dynamic-media.spec.ts` runs the shipped Python publisher against the
+local app, Supabase database and private Storage. It verifies 23 uploaded assets, switches through
+21 dropdown previews in the browser, loads a lazy preview, and checks full-size links. It also
+verifies rejection of incomplete manifests during preparation and commit of a publication accepted
+by the older server. Run it alongside `publications.spec.ts` with `--project desktop`. This does
+not establish provider hook execution or deployment to the hosted board.
