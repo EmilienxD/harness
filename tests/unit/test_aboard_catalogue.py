@@ -56,7 +56,7 @@ def test_auto_installs_one_shared_skill_body_for_both_platforms(tmp_path):
     assert ".codex/hooks/auto_hook.py" in command
 
 
-@pytest.mark.parametrize("prompt", ["/auto --dry", "$auto --dry", "[$auto](C:/project/.agents/skills/auto/SKILL.md) --dry"])
+@pytest.mark.parametrize("prompt", ["/auto --dry", "$auto --dry", "[$auto](C:/project/.agents/skills/auto/SKILL.md) --dry", "/auto caf\u00e9 \u65e5\u672c\u8a9e \U0001f600"])
 def test_auto_hook_prefers_the_runtime_session_id_from_chatgpt(tmp_path, monkeypatch, capsys, prompt):
     target = install("auto", tmp_path, "chatgpt")
     script = target.install_root / "hooks" / "auto_hook.py"
@@ -81,11 +81,11 @@ def test_auto_hook_prefers_the_runtime_session_id_from_chatgpt(tmp_path, monkeyp
     monkeypatch.setenv("ABOARD_BRIDGE_TOKEN", "secret")
     monkeypatch.setenv("ABOARD_SESSION_ID", "provisional")
     monkeypatch.setattr(hook.urllib.request, "urlopen", urlopen)
-    monkeypatch.setattr(hook.sys, "stdin", io.StringIO(json.dumps({
+    monkeypatch.setattr(hook.sys, "stdin", io.TextIOWrapper(io.BytesIO(json.dumps({
         "prompt": prompt,
         "hook_event_name": "UserPromptSubmit",
         "session_id": "runtime-assigned",
-    })))
+    }, ensure_ascii=False).encode("utf-8")), encoding="cp1252", errors="surrogateescape"))
     monkeypatch.setattr(hook.sys, "argv", [str(script), "--chatgpt"])
 
     assert hook.main() == 0
@@ -93,6 +93,8 @@ def test_auto_hook_prefers_the_runtime_session_id_from_chatgpt(tmp_path, monkeyp
     assert output["decision"] == "block"
     assert output["reason"] == "handled"
     assert captured["sessionId"] == "runtime-assigned"
+    if prompt.startswith("/auto"):
+        assert captured["prompt"] == prompt
 
 
 def test_issue_readers_owns_both_worker_skills():

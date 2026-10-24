@@ -1,4 +1,5 @@
 import json
+import io
 import hashlib
 import shutil
 import subprocess
@@ -610,3 +611,34 @@ def test_failed_video_preparation_preserves_an_older_queued_round(tmp_path, monk
     assert list((runtime.root / "outbox").rglob("publication.json")) == [older]
     runtime.client.fail = False
     assert runtime.retry_pending("claude", "session")[0]["round_number"] == 1
+
+
+@pytest.mark.parametrize("text", ["caf\u00e9 \u65e5\u672c\u8a9e \U0001f600", "lone \ud800 surrogate"])
+def test_hosted_client_preserves_unicode_json_values(monkeypatch, text):
+    requests = []
+    def urlopen(request, timeout):
+        requests.append(json.loads(request.data.decode("utf-8")))
+        return io.BytesIO(b'{"ok":true}')
+    monkeypatch.setattr(grill_me_in_cloud_hook.urllib.request, "urlopen", urlopen)
+    assert HostedClient("https://grill.test", "1234").request("POST", "/rounds", {"title": text}) == {"ok": True}
+    assert requests == [{"title": text}]
+
+
+@pytest.mark.parametrize("provider", ["claude", "pi"])
+@pytest.mark.parametrize("text", ["caf\u00e9 \u65e5\u672c\u8a9e \U0001f600", "lone \ud800 surrogate"])
+def test_staging_preserves_unicode_json_values(tmp_path, provider, text):
+    if provider == "pi":
+        from grill_cloud_pi import PiInterviewRuntime
+        runtime = PiInterviewRuntime(tmp_path / "runtime", HostedBoard())
+        runtime.bind({"sessionFile": "session.jsonl", "anchor": "entry", "branchIds": ["entry"]})
+    else:
+        runtime = InterviewRuntime(tmp_path / "runtime", HostedBoard())
+    payload = round_data()
+    payload["questions"][0]["question"] = text
+    publication = runtime._stage(provider, "session", payload, [], text, None)
+    staged = json.loads(publication.read_text(encoding="utf-8"))
+    assert staged["title"] == text
+    assert staged["payload"] == payload
+    if provider == "pi":
+        assert staged["pi_session_file"] == "session.jsonl"
+        assert staged["pi_anchor"] == "entry"

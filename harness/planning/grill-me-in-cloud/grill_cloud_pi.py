@@ -25,7 +25,7 @@ class PiInterviewRuntime(InterviewRuntime):
         staged = json.loads(publication.read_text(encoding="utf-8"))
         staged["pi_session_file"] = self.session_file
         staged["pi_anchor"] = self.anchor
-        atomic_write(publication, json.dumps(staged, ensure_ascii=False))
+        atomic_write(publication, json.dumps(staged, ensure_ascii=True))
         return publication
 
     def retry_pending(self, provider: str, session: str) -> list[dict]:

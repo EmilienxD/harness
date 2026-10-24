@@ -107,6 +107,8 @@ def main() -> int:
 
 
 def check_action() -> None:
+    if callable(getattr(sys.stdin, "reconfigure", None)):
+        sys.stdin.reconfigure(encoding="utf-8", errors="strict")
     payload = json.load(sys.stdin)
     if not isinstance(payload, dict):
         raise ValueError("hook input must be a JSON object")

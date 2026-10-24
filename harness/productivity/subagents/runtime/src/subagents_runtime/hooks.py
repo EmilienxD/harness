@@ -418,6 +418,9 @@ def main() -> int:
         return pi_main()
     payload = {}
     try:
+        reconfigure = getattr(sys.stdin, "reconfigure", None)
+        if callable(reconfigure):
+            reconfigure(encoding="utf-8", errors="strict")
         payload = json.load(sys.stdin)
         if not isinstance(payload, dict):
             raise ValueError("hook input must be a JSON object")

@@ -530,16 +530,19 @@ def _pending_notice(root: Path) -> str | None:
 def handle_prompt(payload: dict[str, Any]) -> int:
     text = payload.get("prompt")
     match = DRAFT_COMMAND.search(text) if isinstance(text, str) else None
-    root = _root(payload)
-    notices = _notice_path(root, str(payload.get("session_id") or "unknown"))
     if match is None:
         try:
+            root = _root(payload)
+        except (OSError, UnicodeError, ValueError):
+            return 0
+        try:
+            notices = _notice_path(root, str(payload.get("session_id") or "unknown"))
             notice = _flush_notice(notices)
         except Exception:  # noqa: BLE001 - a damaged notice never blocks a prompt
             notice = None
         try:
             pending = _pending_notice(root)
-        except OSError:
+        except (OSError, UnicodeError, ValueError):
             pending = None
         context = "\n".join(part for part in (notice, pending) if part)
         if context:
@@ -550,6 +553,8 @@ def handle_prompt(payload: dict[str, Any]) -> int:
                 }
             }))
         return 0
+    root = _root(payload)
+    notices = _notice_path(root, str(payload.get("session_id") or "unknown"))
     message, outcomes = draft_command(root, match.group(1), match.group(2))
     if outcomes:
         try:
@@ -564,6 +569,8 @@ def main() -> int:
     PROVIDER = PI if "--pi" in sys.argv[1:] else CHATGPT if "--" + CHATGPT in sys.argv[1:] else CLAUDE
     payload = {}
     try:
+        if callable(getattr(sys.stdin, "reconfigure", None)):
+            sys.stdin.reconfigure(encoding="utf-8", errors="strict")
         payload = json.load(sys.stdin)
         if not isinstance(payload, dict):
             raise ValueError("hook input must be a JSON object")

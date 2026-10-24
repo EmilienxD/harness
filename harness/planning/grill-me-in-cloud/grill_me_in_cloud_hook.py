@@ -413,7 +413,7 @@ class HostedClient:
         data = None
         if body is not None:
             headers["Content-Type"] = "application/json"
-            data = json.dumps(body, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+            data = json.dumps(body, separators=(",", ":"), ensure_ascii=True).encode("utf-8")
         if idempotency_key:
             headers["Idempotency-Key"] = idempotency_key
         request = urllib.request.Request(self.origin + path, data=data, headers=headers, method=method)
@@ -597,7 +597,7 @@ class InterviewRuntime:
         if project is not None:
             staged["project"] = project
         publication = directory / "publication.json"
-        atomic_write(publication, json.dumps(staged, ensure_ascii=False))
+        atomic_write(publication, json.dumps(staged, ensure_ascii=True))
         return publication
 
     def _publish_staged(self, publication_path: Path) -> dict:

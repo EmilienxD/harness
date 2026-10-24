@@ -62,7 +62,9 @@ export async function runHookFailureJourney(tool: HookTool, event: HookEvent, fa
     }
     const driver = join(root, "driver.py");
     await writeFile(driver, [
-      "import importlib.util, io, json, pathlib, sys",
+      "import importlib.util, io, json, os, pathlib, sys",
+      // Native Python subprocesses need native toolchain paths from the fixture.
+      `os.environ['PATH'] = ${JSON.stringify(process.env.PATH ?? "")}`,
       `source = pathlib.Path(${JSON.stringify(source)})`,
       "sys.path.insert(0, str(source.parent))",
       `sys.path.insert(0, ${JSON.stringify(runtimeSource)})`,
@@ -83,9 +85,9 @@ export async function runHookFailureJourney(tool: HookTool, event: HookEvent, fa
       await mkdir(policy, { recursive: true });
       await writeFile(join(policy, `${tool}.toml`), "invalid = [", "utf8");
     }
-    const python = await pythonCommand();
+    const python = (await execFileAsync(await pythonCommand(), ["-c", "import sys; print(sys.executable)"], { windowsHide: true })).stdout.trim().replaceAll("\\", "/");
     await writeFile(join(project, ".codex", "hooks.json"), JSON.stringify({ hooks: {
-      [event]: [{ hooks: [{ type: "command", command: `${python} "${driver}"`, timeout: 15 }] }],
+      [event]: [{ hooks: [{ type: "command", command: `${process.platform === "win32" ? "& " : ""}"${python}" "${driver}"`, timeout: 15 }] }],
     } }), "utf8");
     await writeFile(join(project, "sentinel.txt"), "before\n", "utf8");
     await initializeRepository(project);
@@ -106,7 +108,7 @@ export async function runHookFailureJourney(tool: HookTool, event: HookEvent, fa
       delete env.ABOARD_BRIDGE_PORT;
       delete env.ABOARD_BRIDGE_TOKEN;
     }
-    const prompt = tool === "auto" ? "$auto" : tool === "commit" ? (failure === "completed" ? "$commit fixture completion" : "$commit") : tool === "issue-writers" ? "$draft-issue fixture" : "fixture";
+    const prompt = tool === "auto" ? "$auto" : tool === "commit" ? (failure === "completed" ? "$commit fixture completion" : "$commit fixture failure") : tool === "issue-writers" ? "$draft-issue fixture" : "fixture";
     const result = await runCodex(["exec", "--json", "--dangerously-bypass-hook-trust", "--dangerously-bypass-approvals-and-sandbox", prompt], project, env, 30_000);
     if (result.timedOut) throw new Error(`Codex did not settle for ${tool} ${event}`);
     return {
@@ -126,7 +128,7 @@ function transition(request: OpenAiResponsesRequest, event: HookEvent, tool: Hoo
   if (event === "UserPromptSubmit" || event === "SessionStart") throw new OpenAiProtocolError("$.input", "blocked prompt reached inference", "hook-failures");
   const results = request.input.filter((item) => item.type === "function_call_output" || item.type === "custom_tool_call_output");
   if (event !== "Stop" && results.length === 0) {
-    const write = `node -e "require('node:fs').writeFileSync('sentinel.txt','after\\n')"`;
+    const write = `${process.platform === "win32" ? "& " : ""}"${process.execPath.replaceAll("\\", "/")}" -e "require('node:fs').writeFileSync('sentinel.txt','after\\n')"`;
     const command = tool === "no-new-documents" ? `echo fixture > docs/fixture.md; ${write}` : write;
     return { scenario: "hook-failures", checkpoint: "attempt", output: request.codeMode
       ? { type: "custom_tool_call", id: "ctc_failure", call_id: "call_failure", name: "exec", status: "completed", input: `const r = await tools.exec_command(${JSON.stringify({ cmd: command })}); text(JSON.stringify(r));` }

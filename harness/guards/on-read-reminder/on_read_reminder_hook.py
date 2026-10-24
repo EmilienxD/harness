@@ -201,6 +201,8 @@ def emit(message: str) -> None:
 
 def main() -> int:
     try:
+        if callable(getattr(sys.stdin, "reconfigure", None)):
+            sys.stdin.reconfigure(encoding="utf-8", errors="strict")
         event = json.load(sys.stdin)
     except (json.JSONDecodeError, ValueError):
         return 0

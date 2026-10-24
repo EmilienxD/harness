@@ -2014,7 +2014,9 @@ def _snapshot(repo_root: str) -> dict[str, Any]:
 def _atomic_json(path: Path, data: dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary = path.with_name(f".{path.name}.{os.getpid()}.tmp")
-    temporary.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+    # Escapes also preserve lone surrogates from provider input without asking
+    # the UTF-8 file writer to encode invalid Unicode scalar values.
+    temporary.write_text(json.dumps(data, ensure_ascii=True), encoding="utf-8")
     os.replace(temporary, path)
 
 
@@ -2172,7 +2174,7 @@ def _synthetic_transcript(root: Path, repo_root: str) -> str:
     handle, path = tempfile.mkstemp(prefix="harness-commit-context-", suffix=".jsonl")
     with os.fdopen(handle, "w", encoding="utf-8") as stream:
         for _, record in sorted(entries, key=lambda pair: pair[0]):
-            stream.write(json.dumps(record, ensure_ascii=False) + "\n")
+            stream.write(json.dumps(record, ensure_ascii=True) + "\n")
     return path
 
 
@@ -2205,22 +2207,28 @@ def _handle_commit(
 def chatgpt_main(payload: dict[str, Any]) -> None:
     cwd = str(payload.get("cwd") or ".")
     event = payload.get("hook_event_name")
-    repo_root = _repo_root(cwd)
-
     if event == "UserPromptSubmit":
         invocation = parse_invocation(str(payload.get("prompt") or ""))
         if invocation is not None:
+            repo_root = _repo_root(cwd)
             if repo_root is None:
                 finish("Not a git repository -- nothing to commit.")
             root = _session_dir(repo_root, str(payload.get("session_id") or "unknown"))
             _handle_commit(payload, repo_root, root, *invocation)
             return
 
-        if repo_root is not None:
-            root = _session_dir(repo_root, str(payload.get("session_id") or "unknown"))
-            _record_prompt(payload, root)
+        # Narrative is optional context for --ai. Its collection must never
+        # reject an unrelated user prompt, even when Git or storage fails.
+        try:
+            repo_root = _repo_root(cwd)
+            if repo_root is not None:
+                root = _session_dir(repo_root, str(payload.get("session_id") or "unknown"))
+                _record_prompt(payload, root)
+        except Exception:
+            pass
         allow()
 
+    repo_root = _repo_root(cwd)
     if repo_root is None:
         allow()
     root = _session_dir(repo_root, str(payload.get("session_id") or "unknown"))
@@ -2245,6 +2253,11 @@ def main(argv: list[str] | None = None) -> None:
         return
 
     global HOOK_EVENT
+    # Hook JSON is UTF-8 regardless of the Windows console code page or
+    # PYTHONIOENCODING. In-memory streams used by callers need no conversion.
+    reconfigure = getattr(sys.stdin, "reconfigure", None)
+    if callable(reconfigure):
+        reconfigure(encoding="utf-8", errors="strict")
     payload = json.load(sys.stdin)
     if not isinstance(payload, dict):
         raise ValueError("hook input must be a JSON object")

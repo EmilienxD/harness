@@ -27,6 +27,8 @@ def handle(payload: dict) -> dict | None:
 
 def main() -> None:
     try:
+        if hasattr(sys.stdin, "reconfigure"):
+            sys.stdin.reconfigure(encoding="utf-8", errors="strict")
         payload = json.load(sys.stdin)
         result = handle(payload) if isinstance(payload, dict) else None
         if result:
