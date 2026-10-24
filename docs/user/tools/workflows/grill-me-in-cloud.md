@@ -50,6 +50,11 @@ existing Python validation, immutable asset staging, idempotent preparation/comm
 This retains native tools and shared skill semantics, including nested tool results. Failed
 preparation consumes explicit invocations before inference. Malformed rounds receive new paths;
 network publication failures keep their staged payload/assets for retry on the next user input.
+Each asset reference receives its own immutable Storage path, including when different filenames
+contain identical bytes. Retries reuse the prepared manifest; known duplicate-object responses
+(HTTP 409 or Supabase's legacy HTTP 400) defer to commit's size, media and SHA256 verification.
+Upload failures identify the asset reference and available Storage error code. Publications already
+prepared with the older hash-only paths need a fresh submission if their references collide.
 Pi's local staged metadata binds retry to the exact native session file and an anchor still in
 the active ancestry; a queued round on an abandoned branch is preserved without being published.
 Unrelated sessions do not resolve configuration or poll the board. Titles come from
@@ -109,3 +114,10 @@ explicit `e2e:pi-grill:live` journey verifies the same successful publication/St
 boundaries against an actual configured service. It checks exact inference counts and deletes
 only its UUID-owned sessions/assets. Scripted inference certifies integration; TUI/browser
 rendering and unscripted design quality are outside this gate.
+
+`apps/grill/test/browser/publications.spec.ts` verifies identical PNGs under distinct references
+against the local app, Supabase database and private Storage, including partial-upload retries,
+stable prepared paths, idempotent commit, exact downloaded bytes and session deletion. It runs
+with `npx playwright test test/browser/publications.spec.ts --project desktop` from `apps/grill/`.
+Publisher unit tests cover legacy duplicate responses and upload rejection diagnostics. This
+acceptance does not establish deployment of the fix to the hosted board.

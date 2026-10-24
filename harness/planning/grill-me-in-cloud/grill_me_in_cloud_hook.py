@@ -437,8 +437,21 @@ class HostedClient:
             with urllib.request.urlopen(request, timeout=60) as response:
                 response.read()
         except urllib.error.HTTPError as error:
-            if error.code != 409:
-                raise HostedError(f"Asset upload failed ({error.code})", "upload_failed", error.code) from error
+            try:
+                detail = json.loads(error.read(4096).decode("utf-8"))
+            except (UnicodeError, json.JSONDecodeError):
+                detail = {}
+            if not isinstance(detail, dict):
+                detail = {}
+            duplicate = error.code == 409 or (error.code == 400 and (
+                str(detail.get("statusCode")) == "409" or detail.get("error") == "Duplicate" or
+                detail.get("code") in ("KeyAlreadyExists", "ResourceAlreadyExists")
+            ))
+            if not duplicate:
+                storage_code = detail.get("code") or detail.get("error")
+                reason = f" [{storage_code}]" if isinstance(storage_code, str) and re.fullmatch(r"[A-Za-z][A-Za-z0-9_]{0,79}", storage_code) else ""
+                reference = target.get("reference", path.name)
+                raise HostedError(f"Asset upload failed ({error.code}) for {reference}{reason}", "upload_failed", error.code) from error
         except (urllib.error.URLError, TimeoutError) as error:
             raise HostedError(f"Asset upload failed: {error}", "upload_failed") from error
 
