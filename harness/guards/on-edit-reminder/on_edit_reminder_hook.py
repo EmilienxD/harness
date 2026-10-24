@@ -331,7 +331,7 @@ def mark_reminded(marker: Path | None, reminded: dict[str, float], keys: Iterabl
             "".join(f"{stamp}\t{key}\n" for key, stamp in sorted(updated.items())),
             encoding="utf-8",
         )
-    except OSError:
+    except (OSError, UnicodeError):
         pass  # best-effort; worst case the same reminder repeats sooner
 
 
@@ -387,6 +387,8 @@ def build_message(rel_path: str, missing: list[str]) -> str:
 
 def main() -> int:
     try:
+        if callable(getattr(sys.stdin, "reconfigure", None)):
+            sys.stdin.reconfigure(encoding="utf-8", errors="strict")
         event = json.load(sys.stdin)
     except (json.JSONDecodeError, ValueError):
         return 0

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from pathlib import Path
 import uuid
 import time
@@ -175,7 +176,10 @@ def observe_event(session_id, event, prompt=None):
             if db.execute("SELECT 1 FROM loop_waits WHERE session_id=? AND state='expired'", (child,)).fetchone():
                 continue
             if event == "UserPromptSubmit" and isinstance(prompt, str):
-                db.execute("INSERT INTO loop_messages(session_id,source,message) VALUES (?,?,?)", (child, session_id, prompt))
+                # SQLite requires Unicode scalar values; preserve valid text and
+                # replace isolated JSON surrogate escapes only in stored narrative.
+                message = re.sub(r"[\ud800-\udfff]", "\ufffd", prompt)
+                db.execute("INSERT INTO loop_messages(session_id,source,message) VALUES (?,?,?)", (child, session_id, message))
             if child == session_id and event in {"UserPromptSubmit", "Interrupt", "StopFailure", "SessionEnd"}:
                 _pause(db, child, event)
 

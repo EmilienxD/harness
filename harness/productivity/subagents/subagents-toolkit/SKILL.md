@@ -130,4 +130,4 @@ resume: agent-3
 Continue with this next task.
 ```
 
-Any new request needs a fresh filename; do not waste time listing existing files; you are the only writer of this inbox, so you already know which filename is already taken (you created them earlier). The filename has no impact.
+Any new request needs a fresh filename; do not waste time listing existing files; you are the only writer of this inbox, so you already know which filename is already taken (you created them earlier). The filename has no impact. The system deletes each inbox `.md` file as soon as it processes the request no matter the outcome (success/fail). Every launch, continuation, or user-requested retry requires a new complete file with a fresh filename. 

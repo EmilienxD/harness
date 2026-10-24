@@ -1,6 +1,7 @@
 """Regression tests for the commit hook's native ChatGPT section."""
 import importlib.util
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -148,6 +149,76 @@ def test_chatgpt_unhandled_hook_exception_blocks_with_json(monkeypatch, capsys):
     output = json.loads(captured.out)
     assert output["decision"] == "block"
     assert "RuntimeError: adapter failure" in output["reason"]
+
+
+@pytest.mark.parametrize("dependency", ["_repo_root", "_session_dir", "_record_prompt"])
+def test_ordinary_prompt_survives_context_failure(repo, monkeypatch, capsys, dependency):
+    def fail(*args):
+        raise OSError("context storage unavailable")
+
+    monkeypatch.setattr(adapter, dependency, fail)
+    with pytest.raises(SystemExit) as stopped:
+        adapter.chatgpt_main({
+            "hook_event_name": "UserPromptSubmit", "cwd": str(repo),
+            "session_id": "context-failure", "prompt": "Explain this code",
+        })
+    assert stopped.value.code == 0
+    captured = capsys.readouterr()
+    assert not captured.out
+    assert not captured.err
+
+
+def test_explicit_commit_still_blocks_on_repository_failure(repo, monkeypatch, capsys):
+    def fail(*args):
+        raise OSError("repository unavailable")
+
+    monkeypatch.setattr(adapter, "_repo_root", fail)
+    with pytest.raises(SystemExit) as stopped:
+        adapter.guarded_main("ChatGPT", lambda: adapter.chatgpt_main({
+            "hook_event_name": "UserPromptSubmit", "cwd": str(repo),
+            "prompt": "$commit fixture",
+        }))
+    assert stopped.value.code == 0
+    output = json.loads(capsys.readouterr().out)
+    assert output["decision"] == "block"
+    assert "repository unavailable" in output["reason"]
+
+
+def test_utf8_stdin_overrides_windows_code_page(repo):
+    result = subprocess.run(
+        [sys.executable, str(ADAPTER), "--chatgpt"],
+        input=json.dumps({
+            "hook_event_name": "UserPromptSubmit", "cwd": str(repo),
+            "session_id": "unicode-stdin", "prompt": "Explain \u201cthis\u201d",
+        }, ensure_ascii=False).encode("utf-8"),
+        capture_output=True,
+        env={**os.environ, "PYTHONIOENCODING": "cp1252:surrogateescape"},
+        check=True,
+    )
+    assert not result.stdout
+    assert not result.stderr
+    records = adapter._records(adapter._session_dir(str(repo), "unicode-stdin"), "prompts")
+    assert len(records) == 1
+    # Strict encoding detects the surrogate corruption caused by cp1252 stdin.
+    records[0]["prompt"].encode("utf-8", errors="strict")
+
+
+def test_surrogates_survive_record_and_transcript_serialization(repo):
+    root = adapter._session_dir(str(repo), "surrogate-context")
+    adapter._record_prompt({"prompt": "Explain \udc9d"}, root)
+    transcript = Path(adapter._synthetic_transcript(root, str(repo)))
+    try:
+        assert len(adapter._records(root, "prompts")) == 1
+        assert len(list(adapter._iter_transcript(str(transcript)))) == 1
+    finally:
+        transcript.unlink()
+
+
+def test_atomic_json_round_trips_unicode_and_surrogates(tmp_path):
+    path = tmp_path / "record.json"
+    data = {"value": "\u201c\u201d\U0001f600\udc9d"}
+    adapter._atomic_json(path, data)
+    assert json.loads(path.read_text(encoding="utf-8")) == data
 
 
 def test_chatgpt_ai_key_uses_harness_local_config(repo, monkeypatch):

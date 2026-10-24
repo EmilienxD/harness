@@ -125,6 +125,9 @@ def reject(message: str, provider: str) -> None:
 
 def main(argv: list[str] | None = None) -> None:
     provider = provider_from_argv(sys.argv[1:] if argv is None else argv)
+    reconfigure = getattr(sys.stdin, "reconfigure", None)
+    if callable(reconfigure):
+        reconfigure(encoding="utf-8", errors="strict")
     payload = json.load(sys.stdin)
     if provider == CHATGPT:
         chatgpt_prompt(payload)

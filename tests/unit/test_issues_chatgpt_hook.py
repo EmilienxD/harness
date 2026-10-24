@@ -41,6 +41,45 @@ def _run(payload, monkeypatch, capsys):
     return json.loads(output) if output else None
 
 
+@pytest.mark.parametrize("prompt", ["ordinary message", "$draft-issue add a feature", "$publish-issues --dry"])
+def test_utf8_input_preserves_unicode_cwd_with_legacy_stdin(
+    tmp_path, monkeypatch, capsys, prompt,
+):
+    cwd = tmp_path / "caf\u00e9-\u4e2d\U0001f680"
+    cwd.mkdir()
+    monkeypatch.chdir(tmp_path)
+    payload = {"cwd": str(cwd), "session_id": "thr_unicode", "prompt": prompt}
+    stream = io.TextIOWrapper(
+        io.BytesIO(json.dumps(payload, ensure_ascii=False).encode("utf-8")),
+        encoding="cp1252", errors="surrogateescape",
+    )
+    monkeypatch.setattr(sys, "stdin", stream)
+
+    adapter.entrypoint(["--chatgpt"])
+
+    output = capsys.readouterr().out
+    assert Path.cwd() == cwd
+    if prompt == "ordinary message":
+        assert not output
+        assert not (cwd / ".harness/issue-drafts").exists()
+    elif prompt.startswith("$draft-issue"):
+        assert json.loads(output)["hookSpecificOutput"]["hookEventName"] == "UserPromptSubmit"
+        assert (cwd / ".harness/issue-drafts").is_dir()
+    else:
+        assert json.loads(output)["decision"] == "block"
+
+
+def test_invalid_utf8_input_keeps_explicit_hook_failure(monkeypatch, capsys):
+    stream = io.TextIOWrapper(
+        io.BytesIO(b'{"prompt":"\xff"}'), encoding="cp1252", errors="surrogateescape",
+    )
+    monkeypatch.setattr(sys, "stdin", stream)
+    with pytest.raises(SystemExit) as error:
+        adapter.entrypoint(["--chatgpt"])
+    assert error.value.code == 0
+    assert json.loads(capsys.readouterr().out)["decision"] == "block"
+
+
 def test_chatgpt_install_uses_native_hook_and_skill_roots(tmp_path):
     tool = discover()["issue-writers"]
     target = Target.for_project(tmp_path, platform="chatgpt")

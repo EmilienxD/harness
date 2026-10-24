@@ -29,6 +29,8 @@ def main() -> int:
 
 
 def handle_prompt() -> int:
+    if hasattr(sys.stdin, "reconfigure"):
+        sys.stdin.reconfigure(encoding="utf-8", errors="strict")
     payload = json.load(sys.stdin)
     if not isinstance(payload, dict):
         raise ValueError("hook input must be a JSON object")

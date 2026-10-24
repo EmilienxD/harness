@@ -1,5 +1,6 @@
 """Cleanup facts at the invocation hook boundary; Git runs against real repositories."""
 import importlib.util
+import io
 import json
 import os
 from pathlib import Path
@@ -444,3 +445,21 @@ def test_large_untracked_inventories_stay_bounded_with_an_omitted_count(tmp_path
     cells = re.findall(r'"(?:\\.|[^"\\])*"|[^,]+', row.strip())
     assert cells[columns.index("changes_count")] == "80"
     assert cells[columns.index("changes_omitted")] == "75"
+
+
+def test_hook_decodes_utf8_working_directory(tmp_path, monkeypatch, capsys):
+    monkeypatch.syspath_prepend(str(HOOK.parent))
+    spec = importlib.util.spec_from_file_location("cleanup_utf8_test", HOOK)
+    hook = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(hook)
+    visited = []
+    monkeypatch.setattr(hook, "prepared_inventory", lambda cwd: visited.append(cwd) or "inventory")
+    cwd = tmp_path / "caf\u00e9-\u65e5\u672c\u8a9e-\U0001f600"
+    payload = {"version": 1, "cwd": str(cwd), "hook_event_name": "UserPromptSubmit", "prompt": "/cleanup-git"}
+    stream = io.TextIOWrapper(io.BytesIO(json.dumps(payload, ensure_ascii=False).encode("utf-8")),
+                              encoding="cp1252", errors="surrogateescape")
+    monkeypatch.setattr(sys, "stdin", stream)
+    hook.main()
+    result = json.loads(capsys.readouterr().out)
+    assert visited == [cwd]
+    assert result["hookSpecificOutput"]["additionalContext"] == "inventory"

@@ -299,7 +299,7 @@ def mark_delivered(marker: Path | None, files: Iterable[str]) -> None:
     try:
         delivered = sorted(load_delivered(marker) | set(files))
         marker.write_text("\n".join(delivered) + "\n", encoding="utf-8")
-    except OSError:
+    except (OSError, UnicodeError):
         pass  # best-effort; worst case a file blocks again this session
 
 
@@ -340,6 +340,8 @@ def build_deny_message(rel_path: str, missing: list[tuple[str, str]]) -> str:
 
 def main() -> int:
     try:
+        if callable(getattr(sys.stdin, "reconfigure", None)):
+            sys.stdin.reconfigure(encoding="utf-8", errors="strict")
         event = json.load(sys.stdin)
     except (json.JSONDecodeError, ValueError):
         return 0

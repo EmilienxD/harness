@@ -49,6 +49,46 @@ def waiting(child):
 
 
 @pytest.mark.parametrize("provider", ["claude", "chatgpt"])
+@pytest.mark.parametrize("invalid_surrogate", [False, True])
+def test_utf8_prompt_storage_preserves_loop_takeover(
+    tmp_path, monkeypatch, capsys, provider, invalid_surrogate,
+):
+    child = configured(tmp_path, monkeypatch, provider)
+    narrative = "caf\u00e9 \u4e2d \U0001f680" + ("\ud800" if invalid_surrogate else "")
+    payload = {
+        "session_id": child, "cwd": str(tmp_path),
+        "hook_event_name": "UserPromptSubmit", "prompt": narrative,
+    }
+    # Keep the lone surrogate JSON-escaped, while valid text uses raw UTF-8.
+    raw = json.dumps(payload, ensure_ascii=False).encode("utf-8", errors="backslashreplace")
+    stream = io.TextIOWrapper(io.BytesIO(raw), encoding="cp1252", errors="surrogateescape")
+    monkeypatch.setattr(sys, "stdin", stream)
+    monkeypatch.setattr(sys, "argv", ["harness-subagents-hook", f"--{provider}"])
+    with ThreadPoolExecutor() as pool:
+        stopped = pool.submit(event, tmp_path, provider, child, "Stop", last_assistant_message="report")
+        token = waiting(child)
+        assert hooks.main() == 0
+        assert not capsys.readouterr().out
+        assert stopped.result(timeout=5) is None
+    assert loop.lookup(child)["active"] is True
+    assert loop.lookup(child)["wait"]["state"] == "taken-over"
+    with pytest.raises(sessions.SessionError):
+        loop.respond(child, token, feedback="stale verdict")
+    with sessions._connect() as db:
+        records = db.execute("SELECT source,message FROM loop_messages WHERE session_id=?", (child,)).fetchall()
+    # Stored user narrative is data, independent of generated agent instructions.
+    assert records == [(child, narrative.replace("\ud800", "\ufffd"))]
+
+
+def test_invalid_utf8_prompt_keeps_subagents_fail_closed(monkeypatch, capsys):
+    stream = io.TextIOWrapper(io.BytesIO(b'{"prompt":"\xff"}'), encoding="cp1252")
+    monkeypatch.setattr(sys, "stdin", stream)
+    monkeypatch.setattr(sys, "argv", ["harness-subagents-hook", "--chatgpt"])
+    assert hooks.main() == 0
+    assert json.loads(capsys.readouterr().out)["decision"] == "block"
+
+
+@pytest.mark.parametrize("provider", ["claude", "chatgpt"])
 @pytest.mark.parametrize("schema_version", [5, 6])
 def test_automatic_reports_feedback_and_release_use_same_session(tmp_path, monkeypatch, capsys, provider, schema_version):
     child = configured(tmp_path, monkeypatch, provider)

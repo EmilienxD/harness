@@ -147,3 +147,19 @@ def test_install_wires_native_hooks_and_uninstall_preserves_user_hook(tmp_path, 
     installer.reconcile(set())
     assert not installed.exists()
     assert json.loads(settings.read_text(encoding="utf-8"))["hooks"]["Stop"] == [user_hook]
+
+
+def test_stop_main_decodes_utf8_notification_text(hook, monkeypatch, capsys):
+    notifications = []
+    monkeypatch.setattr(hook, "backend_available", lambda: True)
+    monkeypatch.setattr(hook, "send_notification", lambda *args: notifications.append(args))
+    hook.handle({"hook_event_name": "UserPromptSubmit", "session_id": "session-one",
+                 "prompt": "/enable-desktop-notification"}, "claude")
+    message = "caf\u00e9 \u65e5\u672c\u8a9e \U0001f600"
+    payload = {"hook_event_name": "Stop", "session_id": "session-one", "last_assistant_message": message}
+    stream = io.TextIOWrapper(io.BytesIO(json.dumps(payload, ensure_ascii=False).encode("utf-8")),
+                              encoding="cp1252", errors="surrogateescape")
+    monkeypatch.setattr(sys, "stdin", stream)
+    assert hook.main(["--claude"]) == 0
+    assert json.loads(capsys.readouterr().out) == {}
+    assert notifications == [("Claude Code: session-one", message)]

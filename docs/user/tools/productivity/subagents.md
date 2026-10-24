@@ -10,6 +10,8 @@ The `subagents` package delegates bounded work to separate, persistent Claude Co
 
 Delegation defaults to `mode: auto`, which runs the child in the background. Ask for `mode: interactive` to work with the child in a visible terminal. Prototypes require interactive mode. You can request `provider: claude`, `provider: chatgpt` (`codex` is an alias), or `provider: pi`. On Pi, invoke `/skill:work-with-agent` or another installed launcher skill. An interactive child uses `reply-to-agent` to return its result. `resume-agent` continues a child with its original provider, mode, directory, and conversation.
 
+Delegated launch and resume prompts preserve skill invocations while neutralizing native CLI commands such as `/resume` by removing their slash prefix. Harness and Aboard use shared provider command lists and matching rules, including for direct Aboard bridge requests. Task-selected skills are added separately after sanitization.
+
 ## Persistent commands
 
 The package installs persistent session commands distinct from the catalogue installer:

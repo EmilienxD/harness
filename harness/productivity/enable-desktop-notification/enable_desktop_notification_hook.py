@@ -103,6 +103,8 @@ def handle(payload: dict, provider: str) -> dict:
 def main(argv: list[str] | None = None) -> int:
     args = sys.argv[1:] if argv is None else argv
     provider = "chatgpt" if "--chatgpt" in args else "claude"
+    if hasattr(sys.stdin, "reconfigure"):
+        sys.stdin.reconfigure(encoding="utf-8", errors="strict")
     payload = json.load(sys.stdin)
     try:
         output = handle(payload, provider)

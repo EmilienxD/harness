@@ -1,4 +1,5 @@
 import json
+import io
 import hashlib
 import shutil
 import subprocess
@@ -294,6 +295,52 @@ def test_signed_storage_uploads_use_put(tmp_path, monkeypatch):
     )
     HostedClient("https://grill.test", "1234").upload({"signed_url": "https://uploads.test/x"}, image, "image/png")
     assert seen[0][0] == "PUT"
+
+
+@pytest.mark.parametrize(("status", "body"), [
+    (409, b"Conflict"),
+    (400, b'{"statusCode":"409","error":"Duplicate","message":"The resource already exists"}'),
+    (400, b'{"code":"KeyAlreadyExists"}'),
+    (400, b'{"code":"ResourceAlreadyExists"}'),
+    (400, b'{"error":"Duplicate"}'),
+])
+def test_signed_upload_accepts_only_known_duplicate_responses(tmp_path, monkeypatch, status, body):
+    image = tmp_path / "diagram.png"
+    image.write_bytes(b"\x89PNG\r\n\x1a\n")
+
+    def fail(request, timeout):
+        raise grill_me_in_cloud_hook.urllib.error.HTTPError(request.full_url, status, "Rejected", {}, io.BytesIO(body))
+
+    monkeypatch.setattr(grill_me_in_cloud_hook.urllib.request, "urlopen", fail)
+    HostedClient("https://grill.test", "1234").upload({"signed_url": "https://uploads.test/x"}, image, "image/png")
+
+
+@pytest.mark.parametrize(("status", "body", "reason"), [
+    (400, b'{"code":"InvalidMimeType"}', "InvalidMimeType"),
+    (400, b'{"statusCode":"400","error":"InvalidRequest"}', "InvalidRequest"),
+    (400, b"Bad request", ""),
+    (400, b"[]", ""),
+    (400, b'{"code":[]}', ""),
+    (400, b'{"code":"https://uploads.test/x?token=secret"}', ""),
+    (401, b'{"statusCode":"409","error":"Duplicate"}', "Duplicate"),
+    (500, b'{"code":"InternalError"}', "InternalError"),
+])
+def test_upload_rejections_identify_asset_and_storage_code_without_signed_urls(tmp_path, monkeypatch, status, body, reason):
+    image = tmp_path / "asset-000.png"
+    image.write_bytes(b"\x89PNG\r\n\x1a\n")
+
+    def fail(request, timeout):
+        raise grill_me_in_cloud_hook.urllib.error.HTTPError(request.full_url, status, "Rejected", {}, io.BytesIO(body))
+
+    monkeypatch.setattr(grill_me_in_cloud_hook.urllib.request, "urlopen", fail)
+    with pytest.raises(HostedError) as raised:
+        HostedClient("https://grill.test", "1234").upload(
+            {"signed_url": "https://uploads.test/x?token=secret", "reference": "assets/round-001/diagram.png"},
+            image, "image/png",
+        )
+    assert raised.value.status == status
+    assert raised.value.code == "upload_failed"
+    assert str(raised.value) == f"Asset upload failed ({status}) for assets/round-001/diagram.png" + (f" [{reason}]" if reason else "")
 
 
 def test_retry_skips_assets_the_server_already_holds(tmp_path):
@@ -610,3 +657,34 @@ def test_failed_video_preparation_preserves_an_older_queued_round(tmp_path, monk
     assert list((runtime.root / "outbox").rglob("publication.json")) == [older]
     runtime.client.fail = False
     assert runtime.retry_pending("claude", "session")[0]["round_number"] == 1
+
+
+@pytest.mark.parametrize("text", ["caf\u00e9 \u65e5\u672c\u8a9e \U0001f600", "lone \ud800 surrogate"])
+def test_hosted_client_preserves_unicode_json_values(monkeypatch, text):
+    requests = []
+    def urlopen(request, timeout):
+        requests.append(json.loads(request.data.decode("utf-8")))
+        return io.BytesIO(b'{"ok":true}')
+    monkeypatch.setattr(grill_me_in_cloud_hook.urllib.request, "urlopen", urlopen)
+    assert HostedClient("https://grill.test", "1234").request("POST", "/rounds", {"title": text}) == {"ok": True}
+    assert requests == [{"title": text}]
+
+
+@pytest.mark.parametrize("provider", ["claude", "pi"])
+@pytest.mark.parametrize("text", ["caf\u00e9 \u65e5\u672c\u8a9e \U0001f600", "lone \ud800 surrogate"])
+def test_staging_preserves_unicode_json_values(tmp_path, provider, text):
+    if provider == "pi":
+        from grill_cloud_pi import PiInterviewRuntime
+        runtime = PiInterviewRuntime(tmp_path / "runtime", HostedBoard())
+        runtime.bind({"sessionFile": "session.jsonl", "anchor": "entry", "branchIds": ["entry"]})
+    else:
+        runtime = InterviewRuntime(tmp_path / "runtime", HostedBoard())
+    payload = round_data()
+    payload["questions"][0]["question"] = text
+    publication = runtime._stage(provider, "session", payload, [], text, None)
+    staged = json.loads(publication.read_text(encoding="utf-8"))
+    assert staged["title"] == text
+    assert staged["payload"] == payload
+    if provider == "pi":
+        assert staged["pi_session_file"] == "session.jsonl"
+        assert staged["pi_anchor"] == "entry"

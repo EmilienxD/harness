@@ -413,7 +413,7 @@ class HostedClient:
         data = None
         if body is not None:
             headers["Content-Type"] = "application/json"
-            data = json.dumps(body, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+            data = json.dumps(body, separators=(",", ":"), ensure_ascii=True).encode("utf-8")
         if idempotency_key:
             headers["Idempotency-Key"] = idempotency_key
         request = urllib.request.Request(self.origin + path, data=data, headers=headers, method=method)
@@ -437,8 +437,21 @@ class HostedClient:
             with urllib.request.urlopen(request, timeout=60) as response:
                 response.read()
         except urllib.error.HTTPError as error:
-            if error.code != 409:
-                raise HostedError(f"Asset upload failed ({error.code})", "upload_failed", error.code) from error
+            try:
+                detail = json.loads(error.read(4096).decode("utf-8"))
+            except (UnicodeError, json.JSONDecodeError):
+                detail = {}
+            if not isinstance(detail, dict):
+                detail = {}
+            duplicate = error.code == 409 or (error.code == 400 and (
+                str(detail.get("statusCode")) == "409" or detail.get("error") == "Duplicate" or
+                detail.get("code") in ("KeyAlreadyExists", "ResourceAlreadyExists")
+            ))
+            if not duplicate:
+                storage_code = detail.get("code") or detail.get("error")
+                reason = f" [{storage_code}]" if isinstance(storage_code, str) and re.fullmatch(r"[A-Za-z][A-Za-z0-9_]{0,79}", storage_code) else ""
+                reference = target.get("reference", path.name)
+                raise HostedError(f"Asset upload failed ({error.code}) for {reference}{reason}", "upload_failed", error.code) from error
         except (urllib.error.URLError, TimeoutError) as error:
             raise HostedError(f"Asset upload failed: {error}", "upload_failed") from error
 
@@ -597,7 +610,7 @@ class InterviewRuntime:
         if project is not None:
             staged["project"] = project
         publication = directory / "publication.json"
-        atomic_write(publication, json.dumps(staged, ensure_ascii=False))
+        atomic_write(publication, json.dumps(staged, ensure_ascii=True))
         return publication
 
     def _publish_staged(self, publication_path: Path) -> dict:

@@ -1,5 +1,5 @@
 name = "prefer-fewer-comments"
-version = "2.3.4"
+version = "2.3.5"
 description = "Advisory comment and docstring budgets over newly written commentary, with native Pi mutation snapshots"
 docs = "https://github.com/EmilienxD/harness/blob/main/README.md#hooks"
 

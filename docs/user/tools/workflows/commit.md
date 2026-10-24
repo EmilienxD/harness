@@ -24,6 +24,16 @@ Run `/commit --dry` to inspect the proposed commit, then `/commit Fix empty-cart
 
 ## Implementation and verification
 
+Version 1.7.6 reads ChatGPT hook input as UTF-8 and stores context using escaped JSON, including
+provider input containing lone surrogates. Ordinary prompts are recorded as optional
+context for a later `--ai` invocation; recording failures let the prompt continue.
+Explicit commit failures and tool-attribution failures retain their error handling.
+The real-CLI commit journey checks Windows Codex 0.162.1 with cp1252 stdin defaults:
+Unicode prompts reach inference, storage and Git-lookup failures allow ordinary prompts,
+and a resumed explicit commit adds no inference request. Separate failure journeys
+check explicit commit errors and pre/post-tool failures. Inference uses the authenticated
+loopback fixture; lone-surrogate serialization is covered by Python regression tests.
+
 `commit` 1.7.1 registers `/commit` and intercepts `/skill:commit` before skill expansion.
 Both reuse the existing Python flag parsing, staging, Git commit, dry-run and explicitly
 requested Gemini message generation. Pi passes native active-branch user/assistant context

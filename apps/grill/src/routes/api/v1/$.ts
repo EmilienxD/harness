@@ -347,11 +347,15 @@ async function preparePublication(request: Request): Promise<Response> {
   }
   const publicationId = randomUUID();
   const sessionHash = createHash("sha256").update(`${input.provider}:${input.session_id}`).digest("hex").slice(0, 24);
-  const manifest = input.assets.map((asset) => ({
-    ...asset,
-    id: randomUUID(),
-    object_path: `${sessionHash}/${publicationId}/${asset.sha256}`,
-  }));
+  const manifest = input.assets.map((asset) => {
+    const id = randomUUID();
+    return {
+      ...asset,
+      id,
+      // References with identical bytes still need distinct immutable objects and asset rows.
+      object_path: `${sessionHash}/${publicationId}/${id}/${asset.sha256}`,
+    };
+  });
   const { data: publication, error } = await supabaseAdmin
     .from("grill_publications")
     .insert({
@@ -390,9 +394,17 @@ function referenceVariants(reference: string): string[] {
 }
 
 function isDuplicateObject(error: unknown): boolean {
-  const detail = error as { statusCode?: string | number; status?: number; error?: string; message?: string };
+  const detail = error as {
+    statusCode?: string | number;
+    status?: number;
+    code?: string;
+    error?: string;
+    message?: string;
+  };
   return (
     String(detail.statusCode ?? detail.status ?? "") === "409" ||
+    detail.code === "KeyAlreadyExists" ||
+    detail.code === "ResourceAlreadyExists" ||
     detail.error === "Duplicate" ||
     /already exists/iu.test(detail.message ?? "")
   );
