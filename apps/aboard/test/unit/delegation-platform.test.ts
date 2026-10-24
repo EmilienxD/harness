@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 
-import { DelegationCoordinator, type DelegationConfigurationSource } from "../../src/bridge/delegation.js";
+import { DelegationCoordinator, type DelegationConfigurationSource, type DelegationCoordinatorOptions } from "../../src/bridge/delegation.js";
 import { ChatGptAgentPlatform } from "../../src/chatgpt/platform.js";
 import { ClaudeAgentPlatform } from "../../src/claude/platform.js";
 import { PiAgentPlatform } from "../../src/pi/platform.js";
@@ -14,6 +14,9 @@ import { TerminalController, type StartupProofTracker, type TerminalCreationOpti
 import type { AgentId, IsoTimestamp, SessionId, TerminalId } from "../../src/domain/contracts.js";
 import { FleetRegistry } from "../../src/domain/fleet.js";
 import { WriteLease } from "../../src/domain/lease.js";
+import { SessionStartupProofs } from "../../src/bridge/session-lifecycle.js";
+import { WorkerLifecycleReconciler } from "../../src/bridge/lifecycle.js";
+import { IdleProviderStartupUncertainError } from "../../src/runtime/idle-startup.js";
 import { parseFleetPersistenceDto } from "../../src/domain/validation.js";
 import type { AgentPlatform, ConfiguredLaunch, PlatformLaunchRequest } from "../../src/platform/agent-platform.js";
 
@@ -25,11 +28,12 @@ function configurationSource(get: (type: import("../../src/domain/contracts.js")
 
 class FakeTerminal implements TerminalHandle {
   public readonly sent: string[] = [];
+  public disposed = false;
   public readonly processId = Promise.resolve(123);
   public readonly exitStatus = undefined;
   public sendText(text: string): void { this.sent.push(text); }
   public show(): void {}
-  public dispose(): void {}
+  public dispose(): void { this.disposed = true; }
 }
 
 class FakeTerminalHost implements TerminalHost {
@@ -492,31 +496,16 @@ test("an explicitly interactive ChatGPT review remains attended", async () => {
   assert.equal(lease.current()?.agentId, agentId);
 });
 
-test("a ChatGPT reopen uses ChatGPT configuration even when Claude is the Auto Run default", async () => {
+function setupChatGptReopen(options: Pick<DelegationCoordinatorOptions, "awaitIdleStartup" | "settleFailedStartup"> = {}) {
   const sessionId = "af817a6c-cd41-41e2-a4db-44d3f43cd560" as SessionId;
   const agentId = "agent-1" as AgentId;
-  let resolveProof: ((value: unknown) => void) | undefined;
-  const proofs: StartupProofTracker = {
-    awaitStarted: () => new Promise((resolve) => { resolveProof = resolve; }),
-    cancel: () => undefined,
-  };
-  const platform: AgentPlatform = {
-    id: "chatgpt",
+  const proofs = new SessionStartupProofs();
+  const platform = new ChatGptAgentPlatform({
     lifecycleAssets: { settings: "hooks.json", script: "hook.py" },
-    capabilities: { sessionIdentity: "runtime-assigned", promptDelivery: ["none"], lifecycle: ["start"], models: [], reasoningEfforts: [] },
-    createSession: () => ({ sessionId, binding: "provisional" }),
-    bindSession: (current, observed) => current.sessionId === observed ? observed : undefined,
-    normalizeLifecycle: () => { throw new Error("not used"); },
-    requireEnforceableRestrictions: () => undefined,
-    planLaunch: () => { throw new Error("not used"); },
-    planSessionResume: (request) => ({
-      platform: "chatgpt", kind: "resume", agentId: request.agentId, sessionId: request.sessionId, agentType: request.agentType,
-      shell: request.shell, command: ["codex"], args: ["resume", sessionId], commandLine: `codex resume ${sessionId}`,
-      writeCapability: "write-capable", requiresWriteLease: false, promptDelivery: "none", runtimeDirectory: "C:/runtime/agents/agent-1",
-    }),
-    preflight: async () => undefined,
-    isResumable: async () => true,
-  };
+    commandRunner: async () => ({ code: 0, stdout: "codex-cli 0.162.1", stderr: "" }),
+    sessionProbe: { inspect: async () => ({ state: "resumable" }) },
+    policyProbe: { require: async () => undefined },
+  });
   const at = "2026-09-08T10:00:00.000Z" as IsoTimestamp;
   const fleet = new FleetRegistry();
   fleet.register({
@@ -545,22 +534,99 @@ test("a ChatGPT reopen uses ChatGPT configuration even when Claude is the Auto R
     platforms: new Map([["chatgpt", platform]]), prompts: { resolve: async () => undefined },
     spills: { prepare: async () => undefined, write: async () => "unused" }, shell: "powershell",
     agentIdFactory: () => "unused" as AgentId, startupTimeoutMs: 60_000,
+    ...options,
   });
+  const target = { platform: "chatgpt" as const, agentId, type: "interactive" as const, sessionId, cwd: "C:/work" };
+  return { coordinator, target, fleet, lease, terminals, proofs, host };
+}
 
+test("an idle ChatGPT reopen preserves its conversation and stays open beyond the startup deadline", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  let confirmIdle: (() => void) | undefined;
+  const { coordinator, target, fleet, lease, terminals, host } = setupChatGptReopen({
+    awaitIdleStartup: () => new Promise<void>((resolve) => { confirmIdle = resolve; }),
+  });
+  const { agentId, sessionId } = target;
   let settled = false;
-  const reopened = coordinator.reopen({
-    platform: "chatgpt", agentId, type: "interactive", sessionId, cwd: "C:/work",
-  }).then((value) => { settled = true; return value; });
+  const reopened = coordinator.reopen(target).then((value) => { settled = true; return value; });
   await new Promise((resolve) => setImmediate(resolve));
   assert.equal(settled, false);
   assert.equal(fleet.get(agentId)?.lifecycle.status, "starting");
   assert.equal(fleet.get(agentId)?.sessionId, sessionId);
   assert.equal(lease.current()?.sessionId, sessionId);
-  resolveProof?.({ agentId, sessionId });
+  assert.equal(typeof confirmIdle, "function");
+  confirmIdle?.();
 
   assert.equal((await reopened).terminalId, "new-terminal");
+  t.mock.timers.tick(60_001);
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(host.terminals[0]?.disposed, false);
+  assert.equal(terminals.liveTerminalForAgent(agentId), "new-terminal");
   assert.equal(fleet.get(agentId)?.lifecycle.status, "running");
+  assert.equal(fleet.get(agentId)?.sessionId, sessionId);
   assert.equal(lease.current()?.sessionId, sessionId);
+});
+
+test("an uncertain idle ChatGPT reopen leaves its original terminal available", async () => {
+  const uncertainty = new IdleProviderStartupUncertainError();
+  const { coordinator, target, terminals, lease, host } = setupChatGptReopen({
+    awaitIdleStartup: async () => { throw uncertainty; },
+  });
+
+  await assert.rejects(coordinator.reopen(target), (error: unknown) => error === uncertainty);
+  assert.equal(host.terminals[0]?.disposed, false);
+  assert.equal(terminals.liveTerminalForAgent(target.agentId), "new-terminal");
+  assert.equal(lease.current(), undefined);
+});
+
+test("a prompted ChatGPT reopen waits for lifecycle startup before admitting the session", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const { coordinator, target, fleet, proofs, host } = setupChatGptReopen({
+    awaitIdleStartup: async () => { throw new Error("A prompted resume needs lifecycle proof"); },
+  });
+  let admitted = false;
+  const reopened = coordinator.reopen({ ...target, prompt: "Continue" }).then((handles) => {
+    admitted = true;
+    return handles;
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(admitted, false);
+  assert.equal(fleet.get(target.agentId)?.lifecycle.status, "starting");
+
+  assert.equal(proofs.discharge({ agentId: target.agentId, sessionId: target.sessionId }), true);
+  assert.equal((await reopened).sessionId, target.sessionId);
+  assert.equal(fleet.get(target.agentId)?.lifecycle.status, "running");
+  t.mock.timers.tick(60_001);
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(host.terminals[0]?.disposed, false);
+});
+
+test("a prompted ChatGPT reopen still closes a launch that never confirms startup", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const { coordinator, target, lease, host } = setupChatGptReopen();
+  const reopened = coordinator.reopen({ ...target, prompt: "Continue" });
+  const rejected = assert.rejects(reopened, { name: "SessionStartTimeoutError" });
+  await new Promise((resolve) => setImmediate(resolve));
+
+  t.mock.timers.tick(60_001);
+  await rejected;
+  assert.equal(host.terminals[0]?.disposed, true);
+  assert.equal(lease.current(), undefined);
+});
+
+test("an interactive startup timeout settles without a worker result delivery route", async () => {
+  const { coordinator, target, fleet, lease } = setupChatGptReopen();
+  await coordinator.reopen(target);
+  const lifecycle = new WorkerLifecycleReconciler({
+    fleet, lease, completions: coordinator,
+    workingTree: { isClean: async () => { throw new Error("Startup timeout needs no repository inspection"); } },
+  });
+
+  assert.equal(await lifecycle.timeout(target.agentId, target.sessionId), true);
+  const ended = fleet.get(target.agentId);
+  assert.equal(ended?.lifecycle.status === "failed" && ended.lifecycle.failure.type, "timeout");
+  assert.equal(fleet.takeBlockingResult(target.agentId, "2026-10-24T13:12:44.000Z" as IsoTimestamp), undefined);
+  assert.equal(lease.current(), undefined);
 });
 
 test("an isolated auto-run ChatGPT continuation reapplies the original checkout boundary", async () => {

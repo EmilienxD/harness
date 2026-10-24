@@ -1,5 +1,5 @@
 import type { RequestedEffort } from "../platform/effort.js";
-import type { AgentPlatform, AgentPlatformId, ConfiguredLaunch, EffortLevel, PromptSpillStore, ResolvedPrompt, SessionWrapperLayout, ShellKind, TerminalController } from "../platform/agent-platform.js";
+import type { AgentPlatform, AgentPlatformId, ConfiguredLaunch, EffortLevel, PlatformLaunchPlan, PromptSpillStore, ResolvedPrompt, SessionWrapperLayout, ShellKind, TerminalController } from "../platform/agent-platform.js";
 import { basename, delimiter, dirname } from "node:path";
 import { existsSync } from "node:fs";
 import type { LaunchRestrictions, WriteCapability } from "../domain/capability.js";
@@ -342,6 +342,7 @@ export class DelegationCoordinator {
       ...(target.difficulty === undefined ? {} : { difficulty: target.difficulty }),
       ...(this.options.wrapper === undefined ? {} : { wrapper: this.options.wrapper }),
     });
+    const startupTimeoutMs = this.#startupTimeout(plan, executionMode);
     await platform.preflight(plan);
     const resumable = await platform.isResumable(target.sessionId, cwd, plan.command);
     if (!resumable) {
@@ -353,7 +354,6 @@ export class DelegationCoordinator {
       this.#acquire(plan.writeCapability, target.agentId, target.sessionId, occurredAt, leaseReason(origin));
     }
     let terminalStarted = false;
-    let startedTerminalId: AgentSession["terminal"]["terminalId"] | undefined;
     try {
       await this.options.spills.prepare(plan, target.cwd);
       if (plan.spill !== undefined) await this.options.spills.write(plan.spill, target.cwd);
@@ -385,12 +385,11 @@ export class DelegationCoordinator {
         attended,
         executionMode,
         ...(target.focus === undefined ? {} : { focus: target.focus }),
-        ...(this.options.startupTimeoutMs === undefined ? {} : { startupTimeoutMs: this.options.startupTimeoutMs }),
+        ...(startupTimeoutMs === undefined ? {} : { startupTimeoutMs }),
         providerEnvironment: { ...plan.providerEnvironment, ...harnessEnvironment(target), ...(target.harnessSessionId === undefined ? {} : { HARNESS_SESSION_ID: target.harnessSessionId }), ...(target.executionId === undefined ? {} : { HARNESS_EXECUTION_ID: target.executionId }), ...(target.parentTerminalUri === undefined ? {} : { HARNESS_PARENT_TERMINAL_URI: target.parentTerminalUri }) },
         ...(target.requestId === undefined ? {} : { harnessRequestId: target.requestId }),
       });
       terminalStarted = true;
-      startedTerminalId = terminal.terminalId;
       const fleetTerminal = { terminalId: terminal.terminalId, name: terminal.name };
       if (existing === undefined) {
         this.options.fleet.register({
@@ -434,20 +433,12 @@ export class DelegationCoordinator {
         this.options.fleet.setTitle(target.sessionId, target.title, occurredAt);
         this.options.terminals.setSessionTitle(target.sessionId, target.title);
       }
-      if (this.options.startupTimeoutMs !== undefined) {
-        const startup = this.options.terminals.waitForStartup(target.agentId);
-        if (startup === undefined) throw new Error(`No startup proof was armed for runtime-assigned ${platform.id} session ${target.agentId}`);
-        await startup;
-      }
+      await this.#awaitStartup(plan, terminal.terminalId, startupTimeoutMs);
       this.options.fleet.transition(target.agentId, { status: "running", startedAt: occurredAt }, occurredAt);
       return { agentId: target.agentId, sessionId: target.sessionId, terminalId: terminal.terminalId };
     } catch (error) {
       this.options.lease.release(target.agentId, occurredAt, "resume failed");
-      if (startedTerminalId !== undefined) {
-        try { this.options.terminals.kill(startedTerminalId); } catch { /* already closed */ }
-      }
-      if (!terminalStarted) await this.options.spills.remove?.(target.agentId).catch(() => undefined);
-      throw error;
+      throw await this.#startupFailure(target.agentId, terminalStarted, error);
     }
   }
 
@@ -519,7 +510,7 @@ export class DelegationCoordinator {
         failure: result.failure,
       }, finishedAt);
     }
-    this.options.fleet.recordResult(agentId, result, finishedAt);
+    if (session.resultDelivery.mode === "tool-result") this.options.fleet.recordResult(agentId, result, finishedAt);
     this.options.lease.releaseForTerminalOutcome(agentId, finishedAt, "agent finished");
     this.#waiters.get(agentId)?.(result);
     this.#waiters.delete(agentId);
@@ -571,16 +562,7 @@ export class DelegationCoordinator {
       maxInlinePromptChars: this.options.maxInlinePromptChars,
       ...(this.options.wrapper === undefined ? {} : { wrapper: this.options.wrapper }),
     });
-    // Codex creates an empty TUI before it starts an agentic turn. Its
-    // SessionStart hook therefore cannot fire until the user submits the first
-    // prompt. Admit that idle terminal under its provisional identity; the
-    // lifecycle hook binds the real conversation id on first use.
-    const startupProofRequired = this.options.startupTimeoutMs !== undefined && !(
-      platform.id === "chatgpt"
-      && executionMode === "interactive"
-      && plan.promptDelivery === "none"
-      && input.forkSessionId === undefined
-    );
+    const startupTimeoutMs = this.#startupTimeout(plan, executionMode, input.forkSessionId);
     await platform.preflight(plan);
     const occurredAt = this.#timestamp();
     if (leaseRequired(origin, attended)) {
@@ -610,9 +592,7 @@ export class DelegationCoordinator {
         executionMode,
         ...(input.requestId === undefined ? {} : { harnessRequestId: input.requestId }),
         providerEnvironment: { ...plan.providerEnvironment, ...harnessEnvironment(input), ...(input.harnessSessionId === undefined ? {} : { HARNESS_SESSION_ID: input.harnessSessionId }), ...(input.executionId === undefined ? {} : { HARNESS_EXECUTION_ID: input.executionId }), ...(input.parentTerminalUri === undefined ? {} : { HARNESS_PARENT_TERMINAL_URI: input.parentTerminalUri }) },
-        // Prompted starts and resumes must prove that the platform reached its
-        // lifecycle. A fresh idle Codex TUI cannot provide that proof yet.
-        ...(startupProofRequired ? { startupTimeoutMs: this.options.startupTimeoutMs } : {}),
+        ...(startupTimeoutMs === undefined ? {} : { startupTimeoutMs }),
       }, (createdTerminal) => {
         this.options.fleet.register({
           platform: platform.id,
@@ -635,22 +615,37 @@ export class DelegationCoordinator {
       });
       terminalStarted = true;
       onCreated?.();
-      if (startupProofRequired) {
-        const startup = this.options.terminals.waitForStartup(agentId);
-        if (startup === undefined) throw new Error(`No startup proof was armed for runtime-assigned ${platform.id} session ${agentId}`);
-        await startup;
-      } else {
-        await this.options.awaitIdleStartup?.(agentId, terminal.terminalId);
-      }
+      await this.#awaitStartup(plan, terminal.terminalId, startupTimeoutMs);
       const canonicalSessionId = this.options.fleet.get(agentId)?.sessionId ?? sessionId;
       this.options.fleet.transition(agentId, { status: "running", startedAt: occurredAt }, occurredAt);
 
       return { agentId, sessionId: canonicalSessionId, terminalId: terminal.terminalId };
     } catch (error) {
       this.options.lease.release(agentId, occurredAt, "launch failed");
-      if (!terminalStarted) await this.options.spills.remove?.(agentId).catch(() => undefined);
-      throw terminalStarted && this.options.settleFailedStartup !== undefined ? await this.options.settleFailedStartup(agentId, error) : error;
+      throw await this.#startupFailure(agentId, terminalStarted, error);
     }
+  }
+
+  #startupTimeout(plan: PlatformLaunchPlan, executionMode: ExecutionMode, forkSessionId?: SessionId): number | undefined {
+    // An idle Codex TUI, including a reopened conversation, has no SessionStart
+    // hook until its next prompt. Confirm its provider process instead.
+    if (plan.platform === "chatgpt" && executionMode === "interactive" && plan.promptDelivery === "none" && forkSessionId === undefined) return undefined;
+    return this.options.startupTimeoutMs;
+  }
+
+  async #awaitStartup(plan: PlatformLaunchPlan, terminalId: AgentSession["terminal"]["terminalId"], timeoutMs: number | undefined): Promise<void> {
+    if (timeoutMs === undefined) {
+      await this.options.awaitIdleStartup?.(plan.agentId, terminalId);
+      return;
+    }
+    const startup = this.options.terminals.waitForStartup(plan.agentId);
+    if (startup === undefined) throw new Error(`No startup proof was armed for runtime-assigned ${plan.platform} session ${plan.agentId}`);
+    await startup;
+  }
+
+  async #startupFailure(agentId: AgentId, terminalStarted: boolean, error: unknown): Promise<unknown> {
+    if (!terminalStarted) await this.options.spills.remove?.(agentId).catch(() => undefined);
+    return terminalStarted && this.options.settleFailedStartup !== undefined ? this.options.settleFailedStartup(agentId, error) : error;
   }
 
   #acquire(capability: WriteCapability, agentId: AgentId, sessionId: SessionId, occurredAt: IsoTimestamp, reason: string): void {
