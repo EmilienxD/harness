@@ -63,6 +63,8 @@ Guard policies use TOML rather than JSON. Each policy starts with `version = 1`.
 
 Installed Python hooks run with a persistent Python 3.11+ interpreter. Harness probes `python` then `py -3` on Windows, and `python3` then `python` on macOS/Linux. It records the probed interpreter's absolute path in Claude Code or ChatGPT hook configuration; a project or installer virtual environment is not selected. Set `HARNESS_PYTHON` to an executable path before installing or upgrading to choose a specific interpreter. An invalid override or an unavailable suitable interpreter stops installation with an error. The variable is read during installation; hooks do not need it afterward.
 
+On Windows, Codex hook commands use the interpreter's absolute path with forward slashes and no surrounding quotes. Codex does not start the hook when that executable path is quoted. Because the path must be unquoted, installation fails if the selected Python path contains spaces. Claude Code stores the interpreter separately from its argument list and accepts the native absolute path.
+
 Some tools keep separate settings. `agent-launcher` uses `.harness/agent-launcher/config.py` and related files. `report-gotchas` stores its private webhook at `~/.harness/report-gotchas/config.json`. Aboard uses `.abd/settings.json` and `aboard.*` VS Code settings. Open the relevant tool guide before changing one of these files.
 
 ## Installation roots and ownership

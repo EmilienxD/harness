@@ -825,7 +825,7 @@ def test_installed_hooks_use_absolute_python_even_when_uv_is_available(tmp_path,
     manager({tool.name: tool}, chatgpt, tmp_path / "chatgpt-receipts").reconcile({tool.name})
     chatgpt_hook = chatgpt.read_settings()["hooks"]["PostToolUse"][0]
     command = chatgpt_hook["command"]
-    assert command.startswith(f'"{base_python}" ' if os.name == "nt"
+    assert command.startswith(Path(base_python).as_posix() + " " if os.name == "nt"
                               else shlex.quote(base_python) + " ")
     assert "uv run" not in command
 
@@ -860,17 +860,26 @@ def test_python_probe_skips_old_version_and_uses_platform_fallback(monkeypatch):
     assert invoked[1][1:2] == (["-3"] if os.name == "nt" else ["-I"])
 
 
-def test_windows_hook_command_quotes_interpreter_and_preserves_backslashes(tmp_path):
+def test_windows_codex_hook_command_uses_unquoted_forward_slashes(tmp_path):
     if os.name != "nt":
         pytest.skip("Windows shell command")
     from harness_cli import settings_merge
 
     target = Target.for_project(tmp_path, Platform.CHATGPT)
-    path = r"C:\Program Files\Python 3.12\python.exe"
+    path = r"C:\Python313\python.exe"
     hook = _substitute({"type": "command", "command": '${PYTHON} "${HOOKS_DIR}/hook.py"'},
                        target, (path, []))
-    assert hook["command"].startswith(f'"{path}" ')
+    assert hook["command"].startswith("C:/Python313/python.exe ")
     assert settings_merge.identity(hook)[-1][0].endswith(".codex/hooks/hook.py")
+
+
+def test_windows_codex_hook_rejects_python_path_with_spaces(tmp_path):
+    if os.name != "nt":
+        pytest.skip("Windows shell command")
+    target = Target.for_project(tmp_path, Platform.CHATGPT)
+    with pytest.raises(InstallError, match="Python path without spaces"):
+        _substitute('${PYTHON} ".codex/hooks/hook.py"', target,
+                    (r"C:\Program Files\Python 3.12\python.exe", []))
 
 
 @pytest.mark.parametrize("scopes", ['"project"', '["machine"]', '[]'])

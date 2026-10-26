@@ -188,7 +188,16 @@ def _substitute(value: Any, target: Target, python: tuple[str, list[str]] | None
             if python is None:
                 raise InstallError("this package requires Python 3.11+")
             command = [python[0], *python[1]]
-            launcher = f'"{python[0]}"' if os.name == "nt" else shlex.join(command)
+            if target.platform is Platform.CHATGPT and os.name == "nt":
+                # Codex parses the executable from the command string itself.
+                # Quoting this path prevents the hook from starting on Windows.
+                launcher = Path(python[0]).as_posix()
+                if any(char.isspace() for char in launcher):
+                    raise InstallError(
+                        f"Codex hooks require a Python path without spaces on Windows: {launcher}"
+                    )
+            else:
+                launcher = subprocess.list2cmdline(command) if os.name == "nt" else shlex.join(command)
             value = value.replace("${PYTHON}", launcher)
         return value
     if isinstance(value, list):
