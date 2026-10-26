@@ -95,7 +95,6 @@ nav:
           - "Resolving merge conflicts": tools/workflows/resolving-merge-conflicts.md
           - "Set up a Git worktree maker": tools/workflows/setup-git-worktree-maker.md
           - "Setup help": tools/workflows/setup-help.md
-          - "Issue delivery with `/ship`": tools/workflows/ship.md
           - "Test-driven development": tools/workflows/tdd.md
           - "Test workflows": tools/workflows/test-workflows.md
           - "Websearch": tools/workflows/websearch.md

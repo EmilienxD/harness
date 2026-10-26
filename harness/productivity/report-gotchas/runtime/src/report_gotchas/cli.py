@@ -37,7 +37,7 @@ def main(argv: list[str] | None = None) -> int:
             raise ReportError("report message is empty")
         url = webhook_url()
         if url is None:
-            raise ReportError("Discord webhook is not configured; run harness-report-gotchas configure")
+            raise ReportError("Discord webhook is not configured; run the skill's scripts/report.py configure with Python")
         deliver(message, url)
         print("Report successfully posted to Discord.")
         return 0

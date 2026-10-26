@@ -18,7 +18,6 @@ Install any package below from the Harness catalogue, or run `harness install <p
 | [`resolving-merge-conflicts`](workflows/resolving-merge-conflicts.md) | Claude Code, ChatGPT, Pi | Resolves in-progress Git merge and rebase conflicts |
 | [`setup-git-worktree-maker`](workflows/setup-git-worktree-maker.md) | Claude Code, ChatGPT, Pi | Creates a project-native command for fully initialized Git worktrees |
 | [`setup-help`](workflows/setup-help.md) | Claude Code, ChatGPT, Pi | Guides users through setup one step at a time |
-| [`ship`](workflows/ship.md) | Claude Code, ChatGPT | Agent-led issue delivery with guarded loop implementers |
 | [`tdd`](workflows/tdd.md) | Claude Code, ChatGPT, Pi | Test-driven development through behavior-focused red-green vertical slices |
 | [`test-workflows`](workflows/test-workflows.md) | Claude Code, ChatGPT, Pi | Define and confirm end-to-end workflows when their covered code changes |
 | [`websearch`](workflows/websearch.md) | Claude Code, ChatGPT, Pi | Web research with concise answers and a Markdown source index |

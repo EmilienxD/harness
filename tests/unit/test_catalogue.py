@@ -1424,7 +1424,7 @@ def test_every_catalogue_manifest_loads():
             "read-all-adrs", "websearch", "writing-adrs",
         },
         "engineering": {"commit", "resolving-merge-conflicts", "setup-git-worktree-maker"},
-        "building": {"flush-out-useless-tests", "issue-readers", "issue-writers", "ship", "tdd", "test-workflows"},
+        "building": {"flush-out-useless-tests", "issue-readers", "issue-writers", "tdd", "test-workflows"},
         "shipping": {"setup-help"},
         "productivity": {
             "background-shell",

@@ -1,7 +1,8 @@
 name = "report-gotchas"
-version = "2.0.0"
+version = "2.2.0"
 description = "Send noteworthy agent handoff gotchas to Discord"
 docs = "https://github.com/EmilienxD/harness/blob/main/README.md#model-invoked-skills"
+requires = ["python"]
 
 [platforms.claude]
 status = "supported"
@@ -13,6 +14,31 @@ status = "supported"
 status = "supported"
 
 [[files]]
+src = "runtime/src/report_gotchas/__init__.py"
+dest = "report-gotchas/scripts/report_gotchas/__init__.py"
+root = "skills"
+
+[[files]]
+src = "runtime/src/report_gotchas/cli.py"
+dest = "report-gotchas/scripts/report_gotchas/cli.py"
+root = "skills"
+
+[[files]]
+src = "runtime/src/report_gotchas/config.py"
+dest = "report-gotchas/scripts/report_gotchas/config.py"
+root = "skills"
+
+[[files]]
+src = "runtime/src/report_gotchas/discord.py"
+dest = "report-gotchas/scripts/report_gotchas/discord.py"
+root = "skills"
+
+[[files]]
+src = "runtime/src/report.py"
+dest = "report-gotchas/scripts/report.py"
+root = "skills"
+
+[[files]]
 src = "SKILL.md"
 dest = "report-gotchas/SKILL.md"
 root = "skills"
@@ -22,8 +48,3 @@ src = "chatgpt/openai.yaml"
 dest = "report-gotchas/agents/openai.yaml"
 root = "skills"
 platforms = ["chatgpt"]
-
-[[actions]]
-type = "uv-tool"
-package = "harness-report-gotchas-runtime"
-source = "git+https://github.com/EmilienxD/harness@65afc165c07b7894c8adc0013e52896fbc79279d#subdirectory=harness/productivity/report-gotchas/runtime"

@@ -75,13 +75,13 @@ def test_local_install_uses_checkout_runtime(tmp_path, monkeypatch, capsys):
     monkeypatch.setattr("harness_cli.host_actions.subprocess.run", run)
     monkeypatch.setattr("harness_cli.host_actions.shutil.which", lambda name: name)
     assert main([
-        "--local", str(checkout), "install", "report-gotchas",
+        "--local", str(checkout), "install", "agent-launcher",
         "--root", str(tmp_path), "--platform", "claude", "--json",
     ]) == 0
     assert json.loads(capsys.readouterr().out)["ok"] is True
     install = next(command for command in commands if command[1:3] == ["tool", "install"])
     assert install[install.index("--from") + 1] == str(
-        checkout / "harness/productivity/report-gotchas/runtime"
+        checkout / "harness/productivity/agent-launcher/runtime"
     )
     assert "--no-cache" in install
 
@@ -762,17 +762,17 @@ def test_adopt_flag_takes_over_a_host_product_harness_does_not_own(tmp_path, mon
         lambda prepared: applied.append(prepared.action),
     )
     arguments = [
-        "install", "report-gotchas", "--root", str(tmp_path), "--platform", "claude", "--json",
+        "install", "agent-launcher", "--root", str(tmp_path), "--platform", "claude", "--json",
     ]
 
     assert main(arguments) == 1
 
     error = json.loads(capsys.readouterr().out)["results"][0]["error"]
-    assert "uv tool harness-report-gotchas-runtime (report-gotchas)" in error
+    assert "uv tool harness-agent-launcher (agent-launcher)" in error
     assert "--adopt" in error
     assert applied == []
 
     assert main([*arguments, "--adopt"]) == 0
 
     assert json.loads(capsys.readouterr().out)["ok"] is True
-    assert [action.data["package"] for action in applied] == ["harness-report-gotchas-runtime"]
+    assert [action.data["package"] for action in applied] == ["harness-agent-launcher"]

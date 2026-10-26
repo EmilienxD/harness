@@ -10,7 +10,7 @@ for (const [scope, mode] of [["project", "json"], ["user", "rpc"]] as const) {
     assert.equal(result.confirmations, 1);
     assert.equal(result.toolExecutions, 12);
     assert.equal(result.expectedNonzeroTools, 5);
-    assert.equal(result.installedCliRemoved, true);
+    assert.equal(result.noInstalledCli, true);
     assert.equal(result.failedRunUnconfirmed, true);
     assert.deepEqual(result.checkpoints, [
       "initial-stale", "read-workflow", "passing-execution", "explicit-confirmation", "confirmed-passed",

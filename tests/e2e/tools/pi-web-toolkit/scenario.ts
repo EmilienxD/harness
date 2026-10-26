@@ -50,7 +50,9 @@ export function webToolkitScenario(origin: () => string) {
         { checkpoint: "invalid-domain", tool: "web_search", input: { query: "toolkit", allowed_domains: ["https://example.test/path"] }, verifyResult(output: unknown) { assert.ok(!text(output).includes("Toolkit source snippet.")); } },
         { checkpoint: "mixed-domain-syntax", tool: "web_search", input: { query: "toolkit site:excluded.invalid", allowed_domains: ["127.0.0.1"] }, verifyResult(output: unknown) { assert.ok(text(output).includes("website restrictions")); } },
       ],
-      missing: [{ checkpoint: "missing-cli", tool: "web_fetch", input: { url: `${base}/page` }, verifyResult(output: unknown) { assert.ok(text(output).includes("CLI unavailable")); } }],
+      missing: [{ checkpoint: "missing-uvx", tool: "web_fetch", input: { url: `${base}/page` }, verifyResult(output: unknown) { assert.ok(text(output).includes("uvx unavailable")); } }],
+      unavailable: [{ checkpoint: "offline-acquisition", tool: "web_fetch", input: { url: `${base}/page` } }],
+      "after-abort": [{ checkpoint: "browser-after-abort", tool: "web_search", input: { query: "toolkit" }, verifyResult(output: unknown) { assert.ok(text(output).includes(`${base}/page`)); } }],
       abort: [{ checkpoint: "cancel-fetch", tool: "web_fetch", input: { url: `${base}/slow` } }],
     };
   }

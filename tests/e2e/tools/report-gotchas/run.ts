@@ -10,16 +10,20 @@ import { findFinalText, parseStreamJson, runClaude, validateClaudeCli } from "..
 import { prepareCodexHome, runCodex, validateCodexCli } from "../../core/codex.js";
 import { findHarnessRoot, runFixtureInstaller } from "../../core/installer.js";
 import { containsPath } from "../../core/path.js";
+import { bundledCommand } from "../../core/on-demand.js";
 import { startFakeOpenAiServer } from "../../core/openai-server.js";
 import { configuredWebhookUrl } from "./live-config.js";
+import { startDiscordFixture } from "../pi-report-gotchas/discord.js";
 import { claudeTransition, codexTransition, MARKER, REPORT_MARKER, scenarioCatalogHash } from "./scenario.js";
 
-export async function runReportGotchasJourney(platform: "claude" | "chatgpt") {
+export async function runReportGotchasJourney(platform: "claude" | "chatgpt", live = true) {
   if (platform === "claude") await validateClaudeCli(); else await validateCodexCli();
-  const webhookUrl = await configuredWebhookUrl();
+  const webhookUrl = live ? await configuredWebhookUrl() : undefined;
   const root = await mkdtemp(join(tmpdir(), `harness-report-gotchas-${platform}-e2e-`));
   let server: Awaited<ReturnType<typeof startFakeAnthropicServer>> | Awaited<ReturnType<typeof startFakeOpenAiServer>> | undefined;
+  let discord: Awaited<ReturnType<typeof startDiscordFixture>> | undefined;
   try {
+    if (!live) discord = await startDiscordFixture(root);
     const projectRoot = join(root, "project");
     const home = join(root, "home");
     const bin = join(root, "bin");
@@ -33,20 +37,26 @@ export async function runReportGotchasJourney(platform: "claude" | "chatgpt") {
     Object.assign(env, {
       HOME: home, USERPROFILE: home, APPDATA: join(home, "AppData/Roaming"), LOCALAPPDATA: join(home, "AppData/Local"),
       UV_TOOL_DIR: join(root, "uv-tools"), UV_TOOL_BIN_DIR: bin,
+      UV_CACHE_DIR: join(root, "uv-cache"),
       UV_PYTHON: join(harnessRoot, ".venv", process.platform === "win32" ? "Scripts/python.exe" : "bin/python"),
       UV_PYTHON_DOWNLOADS: "never", UV_NO_PROGRESS: "1", HARNESS_STATE_DIR: join(root, "installer-state"),
-      HARNESS_REPORT_GOTCHAS_STATE_DIR: join(root, "reporting-state"), HARNESS_REPORT_GOTCHAS_WEBHOOK_URL: webhookUrl,
+      HARNESS_REPORT_GOTCHAS_STATE_DIR: join(root, "reporting-state"), HARNESS_REPORT_GOTCHAS_WEBHOOK_URL: webhookUrl ?? discord!.url,
+      UV_OFFLINE: "1", PIP_NO_INDEX: "1",
       NO_PROXY: "127.0.0.1,localhost",
     });
     const workspace = { projectRoot, agentDir: join(root, "agent"), sessionsDir: join(root, "sessions"), env };
     const install = { platform, pinnedRuntimes: false } as const;
     await runFixtureInstaller(workspace, "install", ["report-gotchas"], install);
+    const cli = bundledCommand(join(projectRoot, platform === "claude" ? ".claude" : ".agents", "skills/report-gotchas/SKILL.md"), "report.py", env.UV_PYTHON!, platform === "chatgpt" && process.platform === "win32" ? "powershell" : "bash");
     await assert.rejects(access(join(projectRoot, ".git")));
     const diagnosticsPath = join(root, "structural-diagnostics.json");
     const report = `**${REPORT_MARKER} - ${platform} - ${randomUUID()}**\n\n- End-to-end verification: a real headless agent CLI posted this Unicode \u96ea report using fake model inference. This test message can be deleted.`;
-    const command = platform === "chatgpt" && process.platform === "win32"
-      ? `harness-report-gotchas submit -m @'\n${report}\n'@`
-      : `harness-report-gotchas submit <<'HARNESS_GOTCHAS'\n${report}\nHARNESS_GOTCHAS`;
+    const proxy = discord ? Object.entries(discord.env).map(([key, value]) => platform === "chatgpt" && process.platform === "win32"
+      ? `$env:${key}='${value.replaceAll("'", "''")}'; `
+      : `export ${key}='${value.replaceAll("'", `'"'"'`)}'; `).join("") : "";
+    const command = proxy + (platform === "chatgpt" && process.platform === "win32"
+      ? `${cli.shell} submit -m @'\n${report}\n'@`
+      : `${cli.shell} submit <<'HARNESS_GOTCHAS'\n${report}\nHARNESS_GOTCHAS`);
     const started = Date.now();
     let finalText: string;
     if (platform === "claude") {
@@ -83,6 +93,11 @@ export async function runReportGotchasJourney(platform: "claude" | "chatgpt") {
     assert.ok(checkpoints.every(checkpoint => observations.checkpoints.includes(checkpoint)));
     assert.equal(observations.inferenceRequests, 3);
     assert.equal(observations.unexpectedRequests, 0);
+    if (discord) {
+      assert.equal(discord.accepted.length, 1);
+      assert.equal(discord.accepted[0]!.content, report);
+      assert.equal(discord.unexpected, 0);
+    }
     await assert.rejects(access(join(root, "reporting-state")));
     await runFixtureInstaller(workspace, "uninstall", ["report-gotchas"], install);
     await assert.rejects(access(join(bin, process.platform === "win32" ? "harness-report-gotchas.exe" : "harness-report-gotchas")));
@@ -90,6 +105,7 @@ export async function runReportGotchasJourney(platform: "claude" | "chatgpt") {
       inferenceRequests: observations.inferenceRequests, elapsedMs: Date.now() - started };
   } finally {
     await server?.close();
+    await discord?.close();
     if (!containsPath(tmpdir(), root) || root === tmpdir()) throw new Error("Report fixture cleanup escaped its temporary root");
     await rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   }

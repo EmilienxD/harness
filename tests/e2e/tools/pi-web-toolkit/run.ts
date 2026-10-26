@@ -1,10 +1,11 @@
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
-import { access, mkdir, readFile, readdir, rename } from "node:fs/promises";
-import { delimiter, join } from "node:path";
+import { access, mkdir, readFile, readdir, realpath } from "node:fs/promises";
+import { delimiter, dirname, join } from "node:path";
 import { promisify } from "node:util";
 import { findHarnessRoot, runFixtureInstaller } from "../../core/installer.js";
 import { spawnableCommand } from "../../core/path.js";
+import { skillCommand } from "../../core/on-demand.js";
 import { createPiFixture } from "../../core/pi-fixture.js";
 import type { PiWorkspace } from "../../core/pi.js";
 import { ENGINE_QUERIES, marker, webToolkitScenario } from "./scenario.js";
@@ -25,13 +26,15 @@ export async function runPiWebToolkitJourney(scope: "project" | "user", mode: "j
     await mkdir(bin);
     Object.assign(workspace.env, {
       UV_TOOL_DIR: join(fixture.root, "uv-tools"), UV_TOOL_BIN_DIR: bin,
+      UV_CACHE_DIR: join(fixture.root, "uv-cache"),
       UV_PYTHON: join(root, ".venv", process.platform === "win32" ? "Scripts/python.exe" : "bin/python"),
       UV_PYTHON_DOWNLOADS: "never", UV_NO_PROGRESS: "1",
     });
     const pathKey = Object.keys(workspace.env).find((key) => key.toLowerCase() === "path") ?? "PATH";
     workspace.env[pathKey] = `${bin}${delimiter}${workspace.env[pathKey] ?? ""}`;
-    // Current-user CLI installations remain invisible to the missing-executable check.
     const executable = join(bin, process.platform === "win32" ? "web-toolkit.exe" : "web-toolkit");
+    const cli = await skillCommand(join(root, "harness/productivity/web-toolkit/SKILL.md"), "web-toolkit");
+    const ensure = () => command(cli.file, [...cli.args.slice(0, -1), "python", "-c", "from web_toolkit.browser import ensure; print(ensure())"], workspace);
     const resources = scope === "project" ? join(workspace.projectRoot, ".pi") : workspace.agentDir;
     const extension = join(resources, "npm/node_modules/harness-pi-web-toolkit", "extensions", ".harness-web-toolkit", "index.ts");
     const settings = join(workspace.projectRoot, ".pi", "settings.json");
@@ -39,12 +42,14 @@ export async function runPiWebToolkitJourney(scope: "project" | "user", mode: "j
     await runFixtureInstaller(workspace, "install", ["web-toolkit"], { scope, dryRun: true });
     assert.equal(await exists(extension), false); assert.equal(await exists(executable), false);
     await runFixtureInstaller(workspace, "install", ["web-toolkit"], { scope });
+    assert.equal(await exists(join(workspace.env.UV_TOOL_DIR!, "harness-web-toolkit")), false);
+    assert.equal(await exists(join(workspace.env.UV_CACHE_DIR!, "archive-v0")), false);
     assert.equal(await exists(join(resources, "skills", "web-toolkit")), false);
     assert.equal(await readFile(extension, "utf8"), await readFile(join(root, "harness/productivity/web-toolkit/pi/extension.ts"), "utf8"));
     const repeat = await runFixtureInstaller(workspace, "install", ["web-toolkit"], { scope });
     assert.equal((repeat.results as { status: string }[])[0]?.status, "unchanged");
-    const python = join(fixture.root, "uv-tools", "harness-web-toolkit", process.platform === "win32" ? "Scripts/python.exe" : "bin/python");
-    const endpoint = (await command(python, ["-c", "from web_toolkit.browser import ensure; print(ensure())"], workspace)).trim();
+    // Acquire the actual published pin into an empty isolated cache, then use its keeper.
+    const endpoint = (await ensure()).trim();
     browser = await interceptSearch(endpoint, origin);
 
     const rpc = fixture.rpc({ timeoutMs: 120_000 });
@@ -73,29 +78,32 @@ export async function runPiWebToolkitJourney(scope: "project" | "user", mode: "j
     assert.equal(await exists(join(workspace.projectRoot, "injected")), false);
     assert.equal(browser.assertions(ENGINE_QUERIES).searches, 4);
 
-    // Break the actual CLI, preserving the installed extension; a real missing executable is a tool error.
+    // Hide uvx without touching personal executables or the installed extension.
     const originalPath = workspace.env[pathKey];
     workspace.env[pathKey] = bin;
-    await rename(executable, `${executable}.disabled`);
     try {
       const missing = await fixture.runJson({ prompt: marker("missing") });
       assert.equal(missing.status, "success"); assert.equal(missing.toolExecutions[0]?.isError, true);
       const failure = missing.events.find((event) => event.type === "tool_execution_end")?.result as { content?: { type: string; text?: string }[] };
       const output = (failure.content ?? []).filter((block) => block.type === "text").map((block) => block.text ?? "").join("\n").replace(/\r\n/gu, "\n");
-      const install = /^uv tool install --force "([^"\r\n]+)"$/mu.exec(output);
-      assert.ok(install, "Missing executable result must supply a runnable installation command");
-      // Run the advertised command against an empty offline cache, outside personal uv state.
-      const recovery = spawnableCommand("uv", ["tool", "install", "--force", install[1]!]);
-      let installationFailed = false;
-      try {
-        await exec(recovery.file, [...recovery.args], { cwd: workspace.projectRoot,
-          env: { ...workspace.env, UV_OFFLINE: "1", UV_CACHE_DIR: join(fixture.root, "recovery-cache") },
-          windowsHide: true, timeout: 30_000, maxBuffer: 1024 * 1024 });
-      } catch (error) { installationFailed = typeof (error as { code?: unknown }).code === "number"; }
-      assert.ok(installationFailed, "Advertised installation must fail cleanly without network or a populated cache");
+      assert.ok(output.includes("uvx unavailable"));
       assert.equal(missing.toolExecutions.length, 1);
       assert.equal(await exists(executable), false);
-    } finally { await rename(`${executable}.disabled`, executable); workspace.env[pathKey] = originalPath; }
+    } finally { workspace.env[pathKey] = originalPath; }
+
+    // A real acquisition failure preserves uvx diagnostics as a structured tool error.
+    const originalCache = workspace.env.UV_CACHE_DIR;
+    workspace.env.UV_CACHE_DIR = join(fixture.root, "empty-offline-cache");
+    workspace.env.UV_OFFLINE = "1";
+    try {
+      const unavailable = await fixture.runJson({ prompt: marker("unavailable") });
+      assert.equal(unavailable.status, "success");
+      assert.deepEqual(unavailable.toolExecutions, [{ name: "web_fetch", isError: true }]);
+      const failure = unavailable.events.find((event) => event.type === "tool_execution_end")?.result as { structuredContent: { output: string; exitCode: number } };
+      assert.ok(failure.structuredContent.exitCode !== 0);
+      assert.ok(failure.structuredContent.output.length > 0);
+      assert.deepEqual(web.requests, ["/page", "/redirect", "/page", "/long", "/missing"]);
+    } finally { workspace.env.UV_CACHE_DIR = originalCache; delete workspace.env.UV_OFFLINE; }
 
     const cancellation = rpc.prompt(marker("abort"));
     await deadline(web.slow, "Web fetch did not reach cancellation checkpoint");
@@ -105,9 +113,19 @@ export async function runPiWebToolkitJourney(scope: "project" | "user", mode: "j
     assert.ok(cancelled.events.some((event) => event.type === "agent_settled" && event.aborted === true));
     assert.deepEqual(cancelled.toolExecutions, [{ name: "web_fetch", isError: true }]);
     await deadline(web.disconnected, "Cancelled CLI left its HTTP request alive");
+    assert.equal((await ensure()).trim(), endpoint, "Cancellation must preserve the shared browser");
+    const afterAbort = await rpc.prompt(marker("after-abort"));
+    assert.equal(afterAbort.status, "success");
+    assert.deepEqual(afterAbort.toolExecutions, [{ name: "web_search", isError: false }]);
+    assert.equal(browser.assertions([...ENGINE_QUERIES, "toolkit"]).searches, 5);
+    // Run the actual deadline callback under a controlled clock, with real uvx + HTTP effects.
+    await command(process.execPath, [join(root, "tests/e2e/tools/pi-web-toolkit/deadline-check.mjs"), await piPackageRoot(), extension], workspace);
+    assert.equal((await ensure()).trim(), endpoint, "Deadline must preserve the shared browser");
+    assert.equal(await exists(join(workspace.env.UV_TOOL_DIR!, "harness-web-toolkit")), false);
+    assert.equal(await exists(executable), false);
     await rpc.close();
     const observations = fixture.assertions();
-    assert.equal(observations.inferenceRequests, 16); assert.equal(observations.unexpectedRequests, 0);
+    assert.equal(observations.inferenceRequests, 20); assert.equal(observations.unexpectedRequests, 0);
     await browser.close(); browser = undefined;
     await runFixtureInstaller(workspace, "uninstall", ["web-toolkit"], { scope });
     assert.equal(await exists(extension), false); assert.equal(await exists(executable), false);
@@ -129,6 +147,16 @@ async function deadline(promise: Promise<void>, message: string) {
 }
 async function command(name: string, args: string[], workspace: PiWorkspace) {
   const command = spawnableCommand(name, args);
-  try { return (await exec(command.file, [...command.args], { cwd: workspace.projectRoot, env: workspace.env, windowsHide: true, timeout: 30_000, maxBuffer: 1024 * 1024 })).stdout; }
+  try { return (await exec(command.file, [...command.args], { cwd: workspace.projectRoot, env: workspace.env, windowsHide: true, timeout: 120_000, maxBuffer: 1024 * 1024 })).stdout; }
   catch { throw new Error("Web Toolkit fixture process failed"); }
+}
+async function piPackageRoot(): Promise<string> {
+  const command = spawnableCommand("pi", []);
+  let root = dirname(await realpath(command.args[0] ?? command.file));
+  while (true) {
+    try { if (JSON.parse(await readFile(join(root, "package.json"), "utf8")).name === "@earendil-works/pi-coding-agent") return root; } catch { }
+    const parent = dirname(root);
+    if (parent === root) throw new Error("Web Toolkit deadline checks require Pi's installed npm SDK");
+    root = parent;
+  }
 }
