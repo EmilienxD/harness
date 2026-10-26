@@ -9,6 +9,7 @@ would duplicate hook entries and silently run every hook twice.
 from __future__ import annotations
 
 import json
+import os
 import shlex
 from typing import Any
 
@@ -85,7 +86,10 @@ def _command_operand_tail(command) -> tuple | None:
     if not isinstance(command, str):
         return None
     try:
-        tokens = shlex.split(command, posix=True)
+        # Preserve backslashes in quoted Windows paths.
+        tokens = shlex.split(command, posix=not (os.name == "nt" and "\\" in command))
+        tokens = [token[1:-1] if token.startswith('"') and token.endswith('"') else token
+                  for token in tokens]
     except ValueError:
         return None
     for i, token in enumerate(tokens):

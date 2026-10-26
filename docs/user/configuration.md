@@ -61,6 +61,8 @@ The hosted application's server credentials are separate from these client setti
 
 Guard policies use TOML rather than JSON. Each policy starts with `version = 1`. User rules load before project rules, so a project can append more specific rules. Installing a guard places a starter file at `.harness/guards/<tool>.toml` or `~/.harness/guards/<tool>.toml`; edit that starter instead of provider hook registration in `.claude/` or `.codex/`. The [guards guide](tools/guards-and-extensions.md) gives examples and explains the order of rules.
 
+Installed Python hooks run with a persistent Python 3.11+ interpreter. Harness probes `python` then `py -3` on Windows, and `python3` then `python` on macOS/Linux. It records the probed interpreter's absolute path in Claude Code or ChatGPT hook configuration; a project or installer virtual environment is not selected. Set `HARNESS_PYTHON` to an executable path before installing or upgrading to choose a specific interpreter. An invalid override or an unavailable suitable interpreter stops installation with an error. The variable is read during installation; hooks do not need it afterward.
+
 Some tools keep separate settings. `agent-launcher` uses `.harness/agent-launcher/config.py` and related files. `report-gotchas` stores its private webhook at `~/.harness/report-gotchas/config.json`. Aboard uses `.abd/settings.json` and `aboard.*` VS Code settings. Open the relevant tool guide before changing one of these files.
 
 ## Installation roots and ownership
