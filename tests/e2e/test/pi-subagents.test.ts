@@ -68,6 +68,21 @@ test("an interactive Pi child replies without inference and wakes its live paren
   assert.equal(result.unexpectedRequests, 0);
 });
 
+test("a busy Pi parent receives its child's reply before its next inference request", { timeout: 300_000 }, async () => {
+  const result = await runPiSubagentsJourney("interactive", { pinnedRuntimes: false, busyParent: true });
+  assert.equal(result.busyDeliveryClaimed, true);
+  assert.equal(result.previousReplyInferenceRequests, 0);
+  assert.equal(result.parentStatus, "success");
+  assert.equal(result.parentFinal, parentDone("interactive"));
+  assert.deepEqual(result.request, { state: "succeeded", mode: "interactive", provider: "pi", reply: childAnswer("interactive"), acknowledged: true, boundToNativeSession: true });
+  assert.equal(result.deliveredResults, 1);
+  assert.equal(result.deliveryMatchesRequest, true);
+  assert.equal(result.childSessionSaved, true);
+  assert.equal(result.requestFilesRemaining, 0);
+  assert.equal(result.inferenceRequests, 5);
+  assert.equal(result.unexpectedRequests, 0);
+});
+
 for (const route of ["auto", "interactive"] as const) {
   test(`Pi discovers a BOM request from a ${route === "auto" ? "failed" : "successful"} shell tool in ${route} mode`, { timeout: 300_000 }, async () => {
     const result = await runPiSubagentsJourney(route, { pinnedRuntimes: false, shellWrite: true, failedWrite: route === "auto" });

@@ -1,5 +1,5 @@
 name = "pi-subagents-toolkit"
-version = "1.0.2"
+version = "1.0.3"
 description = "Shared toolkit skill read by Pi and the subagent runtime"
 selectable = false
 

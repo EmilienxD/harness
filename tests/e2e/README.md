@@ -466,6 +466,13 @@ child result, and publish a round. The model ID is registered only against the l
 child's persisted model/thinking metadata, the board payload, request cleanup and exactly five
 inference calls, with project guards and user-scope background shell, Calm and input extensions loaded.
 
+The checkout-runtime busy-parent regression holds an RPC parent in a bounded real shell tool.
+The interactive child sends `/reply-to-agent-with-previous-message` with zero inference; durable state
+must show a claimed delivery while RPC confirms the parent is still busy, with no concurrent model request.
+After releasing the tool, the very next model request must contain the child's result. Acceptance
+requires continuation of the same parent run, exactly five inference requests, one persisted and
+acknowledged delivery, the native child session, and an empty inbox.
+
 To run the combined journeys against the real local Grill app, database and storage instead of the
 transport fixture, start the local stack described in `apps/grill/README.md`, set
 `HARNESS_GRILL_URL` to its `http://127.0.0.1:<port>` origin and `HARNESS_GRILL_CODE` to its test code,

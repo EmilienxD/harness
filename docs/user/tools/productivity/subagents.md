@@ -8,7 +8,9 @@ The `subagents` package delegates bounded work to separate, persistent Claude Co
 
 ## What happens
 
-Delegation defaults to `mode: auto`, which runs the child in the background. Ask for `mode: interactive` to work with the child in a visible terminal. Prototypes require interactive mode. You can request `provider: claude`, `provider: chatgpt` (`codex` is an alias), or `provider: pi`. On Pi, invoke `/skill:work-with-agent` or another installed launcher skill. An interactive child uses `reply-to-agent` to return its result. `resume-agent` continues a child with its original provider, mode, directory, and conversation.
+General work defaults to `mode: interactive`, opening a visible terminal where you work directly with the child. Prototype and brainstorm tasks also default to interactive mode and require it; explore, websearch, address, and review default to `mode: auto`, which runs the child in the background and returns its result automatically. Explore requires auto mode. You can request `provider: claude`, `provider: chatgpt` (`codex` is an alias), or `provider: pi`. On Pi, invoke `/skill:work-with-agent` or another installed launcher skill. An interactive child uses `reply-to-agent` to return its next successful response. On Pi, `/reply-to-agent-with-previous-message` instead sends its previous successful answer without another model request. `resume-agent` continues a child with its original provider, mode, directory, and conversation.
+
+Claude/ChatGPT parents wait for pending child replies in their Stop hook. You can cancel that wait, but a later reply then needs a new user message to continue the parent. An interactive Pi parent can finish its turn and wake automatically when a reply arrives; a headless Pi parent waits before settling. While a parent is working, Claude/ChatGPT receive replies through tool or Stop hooks; Pi queues replies as steering after the current tools finish, before its next model request.
 
 Delegated launch and resume prompts preserve skill invocations while neutralizing native CLI commands such as `/resume` by removing their slash prefix. Harness and Aboard use shared provider command lists and matching rules, including for direct Aboard bridge requests. Task-selected skills are added separately after sanitization.
 
@@ -81,27 +83,33 @@ so tree navigation cannot strand a child result.
 Other boundaries: one stable `harness-subagents` system-prompt section carries the inbox, preserving
 prompt caching and surviving compaction. Delegation skills receive their instructions by input
 transformation. Successful native `write`/`edit` results inside the inbox, including nested calls,
-launch requests and append the launch status. `/reply-to-agent-with-previous-message` and its
-`/skill:` spelling send the latest successful assistant text on the active branch without inference.
+launch requests and append the launch status. `/reply-to-agent-with-previous-message`
+sends the latest successful assistant text on the active branch without inference.
 Interactive children report at `agent_settled`; a new prompt or failed turn expires an armed reply,
 and quitting cancels an unanswered request. In-process `/new` and `/fork` sessions become unrelated
 conversations. Loop implementers are rejected for Pi. Aboard accepts Pi delegations through its
 native adapter and shared durable runtime. Headless children load project extensions only in trusted projects, so nested
 delegation from automatic children needs project trust or a user-scope installation.
 
-`npm run test:pi-subagents` installs the real catalogue package with `--local` (the checkout runtime
-as a uv tool) and drives real Pi 1.2.0 on Windows against the fake Responses endpoint. A JSON parent
+`npm run test:pi-subagents` installs the real catalogue package into an isolated uv tool environment,
+with journeys for the checkout runtime (`--local`) and the shipped runtime pin, and drives real
+Pi 1.2.0 on Windows against the fake Responses endpoint. A JSON parent
 launches an automatic Pi child, waits before settlement and integrates its answer; an RPC parent
 launches an interactive child, opened as an RPC session through a visible-terminal stand-in, whose
 previous-message reply makes zero inference requests and starts the idle parent's next turn. Both
 assert exact request counts, durable request state, acknowledged session-persisted delivery, native
-session files and emptied inboxes. Unit tests cover argument construction, JSON success semantics
+session files and emptied inboxes. A checkout-runtime RPC regression also holds the parent in a real shell tool,
+sends the child's previous answer, observes a claimed delivery while the parent is busy, and requires
+the first model request after that tool to include the result. It checks zero inference for the reply
+command, five total inference requests, one persisted and acknowledged delivery, and continuation of
+the existing parent run. Unit tests cover argument construction, JSON success semantics
 through a real supervisor run, discovery roots, bridge operations, delivery replay and the Aboard
-payload. The Pi TUI itself, POSIX, Claude/Codex parents with Pi children through real CLIs, and
-busy-parent steering are outside this gate.
+payload. The Pi TUI itself, POSIX, and Claude/Codex parents with Pi children through real CLIs
+are outside this gate. Interactive behavior has also been manually verified; that does not replace
+these automated acceptance boundaries.
 
 ## Remaining integration limits
 
-Pi context-usage telemetry remains unimplemented rather than estimated. Ordinary launch/reply/resume support does not enable Pi loop implementers for the unavailable `ship` workflow. Inline `@path` text in a delegated prompt is not a universal attachment guarantee: the [file-mentions](file-mentions.md) extension handles Pi user input when installed, and required context must otherwise be read or attached explicitly.
+Pi context-usage telemetry remains unimplemented rather than estimated. Ordinary launch/reply/resume support does not enable Pi loop implementers for the unavailable `ship` workflow. On Pi, automatic loading of inline `@path` references requires the [file-mentions](file-mentions.md) extension to be installed and active in the child session. Without it, `@path` remains a valid file reference for the child to read explicitly; subagents alone does not attach its contents.
 
 Checkout-runtime acceptance and immutable remote pins are separate. The existing native npm packaging checks recorded four shipped-pin journeys requiring the runtime changes from local commit `ba136dd`; rebuilding the extension archive does not itself publish that runtime. Keep remote-install claims scoped to the pin actually tested.

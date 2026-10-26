@@ -91,7 +91,7 @@ Determine the task from the user's request and the preceding conversation. When 
 
 Each new subagent starts with a fresh conversation and knows only the project and user memory files such as `AGENTS.md`/`CLAUDE.md`. Give it a self-contained prompt that explains why, what, where, and how, including constraints and completion criteria, without repeating general project information it can read there.
 
-Reference files as `@absolute/or/relative/to/the/project/root/path`. Prefixing a path with `@` loads the file directly into the subagent's context, saving tool calls, time, and tokens. Refer to line numbers in plain text (e.g., lines 14-45). Do not append them to the file path (e.g., @src/core.py:25); that format is not supported. If relevant code is not saved in the project, include the necessary parts as small snippets.
+Reference files as `@absolute/or/relative/to/the/project/root/path`. On Pi, automatic loading requires the file-mentions extension to be installed and active in the child session. Without it, keep the reference and ask the child to read the file explicitly. Refer to line numbers in plain text (e.g., lines 14-45). Do not append them to the file path (e.g., @src/core.py:25); that format is not supported. If relevant code is not saved in the project, include the necessary parts as small snippets.
 
 Perspective change:
 - For interactive agents, "I" is the user, not you; never write: "The user wants to ...".

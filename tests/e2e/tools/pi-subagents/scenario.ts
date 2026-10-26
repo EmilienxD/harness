@@ -7,6 +7,8 @@ export const childMarker = (route: Route) => `[E2E:pi-subagents:child:${route}]`
 export const childAnswer = (route: Route) => `Child answer for ${route} 雪.`;
 export const parentDone = (route: Route) => `Parent integrated the ${route} child result.`;
 export const REQUEST_FILE = "child-request.md";
+export const BUSY_MARKER = "[E2E:pi-subagents:busy]";
+export const BUSY_COMMAND = "node busy-parent.cjs";
 const NAME = "pi-subagents";
 
 export const requestBody = (route: Route, explicitModel = false, childProvider = "pi") =>
@@ -40,7 +42,7 @@ function inbox(request: OpenAiResponsesRequest): string {
   return match[1]!;
 }
 
-export function subagentsScenario(options: { explicitModel?: boolean; grilling?: boolean; childProvider?: "pi" | "chatgpt"; shellWrite?: boolean; failedWrite?: boolean } = {}) {
+export function subagentsScenario(options: { explicitModel?: boolean; grilling?: boolean; childProvider?: "pi" | "chatgpt"; shellWrite?: boolean; failedWrite?: boolean; busyParent?: boolean } = {}) {
   return {
     scenarioCatalogHash: createHash("sha256").update(JSON.stringify({ NAME, routes: ["auto", "interactive"], options, version: 2 })).digest("hex"),
     transition(request: OpenAiResponsesRequest): OpenAiScenarioResponse {
@@ -58,7 +60,7 @@ export function subagentsScenario(options: { explicitModel?: boolean; grilling?:
       const calls = request.input.filter((item) => item.type === "function_call");
       const results = request.input.filter((item) => item.type === "function_call_output");
       const callId = `call_harness_subagents_${route}_write`;
-      if (calls.length > (options.grilling ? 2 : 1) || results.length !== calls.length) reject("$.input", "parent tool history is incomplete");
+      if (calls.length > (options.grilling || options.busyParent ? 2 : 1) || results.length !== calls.length) reject("$.input", "parent tool history is incomplete");
       const requestPath = `${inbox(request)}${inbox(request).includes("\\") ? "\\" : "/"}${REQUEST_FILE}`;
       const requestContent = requestBody(route, options.explicitModel, options.childProvider);
       const tool = options.shellWrite ? (request.tools.some((item) => item.name === "powershell") ? "powershell" : "bash") : "write";
@@ -75,6 +77,19 @@ export function subagentsScenario(options: { explicitModel?: boolean; grilling?:
       const written = JSON.parse(String(calls[0]!.arguments));
       if (JSON.stringify(written) !== JSON.stringify(input)) reject("$.input", "unexpected delegation request mutation");
       const delivered = request.input.slice(request.input.indexOf(results[0]!) + 1).some((item) => text(item).includes(childAnswer(route)));
+      if (options.busyParent && users.some((value) => value.includes(BUSY_MARKER))) {
+        const shell = request.tools.some((item) => item.name === "powershell") ? "powershell" : "bash";
+        if (calls.length === 1) {
+          if (delivered) reject("$.input", "child result arrived before the parent became busy");
+          return {
+            scenario: NAME, checkpoint: "parent-busy-tool",
+            output: { type: "function_call", id: "fc_busy", call_id: "call_busy", name: shell, arguments: JSON.stringify({ command: BUSY_COMMAND }), status: "completed" },
+          };
+        }
+        if (calls[1]!.call_id !== "call_busy" || results[1]!.call_id !== "call_busy" || calls[1]!.name !== shell
+          || JSON.parse(String(calls[1]!.arguments)).command !== BUSY_COMMAND) reject("$.input", "unknown busy parent tool");
+        if (!delivered) reject("$.input", "the first model request after the busy tool did not receive the child result");
+      }
       if (options.grilling && delivered) {
         const source = users.join("\n").split("\n").map((line) => line.trim()).find((line) => /[\\/]round-\d{3}\.json$/u.test(line));
         if (!source) reject("$.input", "cloud round path missing in combined workflow");
