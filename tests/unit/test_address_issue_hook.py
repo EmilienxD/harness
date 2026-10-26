@@ -80,6 +80,10 @@ def fake_github(monkeypatch, issues, *, repo_failure=False):
         requested.append(key)
         found = issues.get(key)
         payload = {"data": {"repository": {"issue": found}}}
+        if found is None:
+            payload["errors"] = [{"type": "NOT_FOUND", "path": ["repository", "issue"],
+                                  "message": f"Could not resolve to an Issue with the number of {key[1]}."}]
+            return subprocess.CompletedProcess(arguments, 1, json.dumps(payload), f"gh: {payload['errors'][0]['message']}")
         return subprocess.CompletedProcess(arguments, 0, json.dumps(payload), "")
 
     monkeypatch.setattr(hook.subprocess, "run", run)
@@ -206,6 +210,41 @@ def test_strict_reference_mode_accepts_only_whole_reference_arguments(argument, 
 ])
 def test_arbitrary_text_never_enters_reference_mode(argument):
     assert hook.strict_references(argument, REPOSITORY) is None
+
+
+@pytest.mark.parametrize("body, expected", [
+    ("Blocked by #9; also see (#10).", [9, 10]),
+    ("See [security fix #3186](https://github.com/ChromeDevTools/chrome-devtools-mcp/pull/3186)", []),
+    ("See [local PR #3186](https://github.com/example/project/pull/3186)", []),
+    ("See [issue #3186](https://github.com/other/repo/issues/3186)", []),
+    ("See [fix #3186](https://example.com/fix_(details) \"release #500\"); then #9", [9]),
+    ("See [fix #3186][upstream]; then #9\n\n[upstream]: https://example.com/#500", [9]),
+    ("See [#3186][]; then #9\n\n[#3186]: https://example.com/#500", [9]),
+    ("See [#3186]; then #9\n\n[#3186]: https://example.com/#500", [9]),
+    ("See https://example.com/#3186 and <https://example.com/#500>; then #9", [9]),
+    ("See other/repo#3186, @other#500, and [#9].", [9]),
+])
+def test_body_relations_only_expand_unlinked_local_references(body, expected):
+    document = {"repository": REPOSITORY, "parent": None, "sub_issues": [], "body": body}
+    assert hook.relations(document) == [
+        (REPOSITORY, number, "Referenced issue") for number in expected
+    ]
+
+
+@pytest.mark.parametrize("provider", ["claude", "chatgpt"])
+@pytest.mark.parametrize("skill", ["address-this", "review-this"])
+def test_link_label_never_fetches_an_unrelated_local_issue(
+    provider, skill, tmp_path, monkeypatch, capsys,
+):
+    root = repository(tmp_path)
+    body = "See [security fix #3186](https://github.com/ChromeDevTools/chrome-devtools-mcp/pull/3186). Related to #9."
+    issues = {(REPOSITORY, 491): issue(491, body=body), (REPOSITORY, 9): issue(9)}
+    requested = fake_github(monkeypatch, issues)
+    monkeypatch.setattr(sys, "argv", [str(HOOK), f"--{provider}"])
+    monkeypatch.setenv(hook.DEPTH_VARIABLE, "1")
+
+    assert run_hook(f"${skill} 491", root, monkeypatch, capsys)
+    assert requested == [(REPOSITORY, 491), (REPOSITORY, 9)]
 
 
 def test_supplied_issue_text_containing_a_reference_triggers_no_lookup(
@@ -398,11 +437,19 @@ def test_closed_related_issues_are_still_included(tmp_path, monkeypatch, capsys)
     assert context
 
 
-def test_dangling_relations_are_skipped(tmp_path, monkeypatch, capsys):
+@pytest.mark.parametrize("provider", ["claude", "chatgpt"])
+@pytest.mark.parametrize("skill", ["address-this", "review-this"])
+def test_dangling_relations_are_skipped(provider, skill, tmp_path, monkeypatch, capsys):
     root = repository(tmp_path)
-    fake_github(monkeypatch, {(REPOSITORY, 1): issue(1, body="see #99", sub_issues=[98])})
-    context = run_hook("/address-this 1", root, monkeypatch, capsys)
+    requested = fake_github(monkeypatch, {
+        (REPOSITORY, 1): issue(1, body="see #99, then #2", sub_issues=[98]),
+        (REPOSITORY, 2): issue(2),
+    })
+    monkeypatch.setattr(sys, "argv", [str(HOOK), f"--{provider}"])
+    monkeypatch.setenv(hook.DEPTH_VARIABLE, "1")
+    context = run_hook(f"${skill} 1", root, monkeypatch, capsys)
     assert context
+    assert requested == [(REPOSITORY, 1), (REPOSITORY, 98), (REPOSITORY, 99), (REPOSITORY, 2)]
 
 
 

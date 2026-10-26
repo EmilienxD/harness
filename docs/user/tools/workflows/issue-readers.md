@@ -14,6 +14,10 @@ Claude Code: `/address-this <request>` or `/review-this <target>`. ChatGPT: `$ad
 
 The installed hook or Pi extension prepares issue and local checkout context. Addressing checks acceptance criteria and runs relevant validation. Reviewing reads the whole pinned diff, fixes clear local material problems, validates repairs, and reports blockers that require decisions or broader work.
 
+Across all three providers, body relation traversal follows standalone `#123` mentions as issues in the containing issue's repository. Markdown links (inline or reference-style) and URLs stay in the supplied body without being traversed. For example, `[security fix #3186](https://github.com/ChromeDevTools/chrome-devtools-mcp/pull/3186)` never triggers a lookup of local issue #3186.
+
+Related references that GitHub reports as missing issues are skipped, and traversal continues with the remaining references. Explicitly requested primary issues still block when missing. Authentication, repository access, network, and other GitHub errors also block preparation.
+
 ## Files and prerequisites
 
 The package requires `git` and `gh`. Its two skill bodies are user-editable starter files. Claude Code, ChatGPT, and Pi are supported; callers such as Aboard can add a completion contract.

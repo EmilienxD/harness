@@ -7,7 +7,7 @@ from pathlib import Path
 import subprocess
 import sys
 
-from issue_readers_hook import Blocked, current_repository, graphql, ISSUE_URL
+from issue_readers_hook import Blocked, IssueNotFound, current_repository, graphql, ISSUE_URL
 
 
 IDENTITY = "id number title state url repository{nameWithOwner}"
@@ -46,9 +46,13 @@ def get_issue(repository: str, number: int, cwd: Path) -> dict:
     values = variables(repository, number)
     fields = f"{IDENTITY} body createdAt author{{login}} parent{{{IDENTITY}}} "
     fields += " ".join(connection_query(field) for field in CONNECTIONS)
-    raw = (graphql(issue_query(fields), values, cwd).get("repository") or {}).get("issue")
+    data = graphql(issue_query(fields), values, cwd)
+    try:
+        raw = data["repository"]["issue"]
+    except (KeyError, TypeError) as error:
+        raise Blocked(f"Unreadable GitHub issue response for {repository}#{number}.") from error
     if not raw:
-        raise Blocked(f"Issue {repository}#{number} was not found.")
+        raise IssueNotFound(f"Issue {repository}#{number} was not found.")
     collected = {}
     for field in CONNECTIONS:
         page = raw.get(field) or {}

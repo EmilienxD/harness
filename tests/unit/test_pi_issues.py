@@ -2,6 +2,7 @@
 import json
 from pathlib import Path
 import sys
+import subprocess
 import uuid
 
 import pytest
@@ -32,6 +33,54 @@ def test_pi_reads_paginated_graph_and_follows_relations_once(monkeypatch, tmp_pa
     documents = json.loads(readers.prepare("address-this", "1", tmp_path).split(":\n", 1)[1])
     assert len(documents[0]["comments"]) == 150
     assert calls == [("acme/demo", 1), ("acme/demo", 2)]
+
+
+@pytest.mark.parametrize("skill", ["address-this", "review-this"])
+def test_pi_link_label_never_fetches_an_unrelated_local_issue(monkeypatch, tmp_path, skill):
+    monkeypatch.setattr(readers.core, "address_checkout_context", lambda *args: "")
+    monkeypatch.setattr(readers.core, "build_review_context", lambda *args: "")
+    monkeypatch.setenv("HARNESS_ISSUE_CONTEXT_DEPTH", "1")
+    body = "See [security fix #3186](https://github.com/ChromeDevTools/chrome-devtools-mcp/pull/3186). Related to #9."
+    calls = []
+
+    def get(repo, number, cwd):
+        calls.append((repo, number))
+        assert number in {491, 9}
+        return issue(number, body=body if number == 491 else "")
+
+    monkeypatch.setattr(readers.graph, "get_issue", get)
+    readers.prepare(skill, "https://github.com/acme/demo/issues/491", tmp_path)
+    assert calls == [("acme/demo", 491), ("acme/demo", 9)]
+
+
+@pytest.mark.parametrize("skill", ["address-this", "review-this"])
+@pytest.mark.parametrize("primary", [491, 99])
+def test_pi_skips_missing_related_issues_but_blocks_missing_primary(monkeypatch, tmp_path, skill, primary):
+    monkeypatch.setattr(readers.core, "address_checkout_context", lambda *args: "")
+    monkeypatch.setattr(readers.core, "build_review_context", lambda *args: "")
+    monkeypatch.setenv("HARNESS_ISSUE_CONTEXT_DEPTH", "1")
+    calls = []
+
+    def run(command, **kwargs):
+        number = int(next(value.split("=", 1)[1] for value in command if value.startswith("number=")))
+        calls.append(number)
+        if number == 99:
+            payload = {"data": {"repository": {"issue": None}}, "errors": [
+                {"type": "NOT_FOUND", "path": ["repository", "issue"], "message": "Missing issue"},
+            ]}
+            return subprocess.CompletedProcess(command, 1, json.dumps(payload), "gh: Missing issue")
+        document = issue(number, body="See #99, then #9, and #99 again." if number == 491 else "")
+        return subprocess.CompletedProcess(command, 0, json.dumps({"data": {"repository": {"issue": document}}}), "")
+
+    monkeypatch.setattr(subprocess, "run", run)
+    if primary == 99:
+        with pytest.raises(readers.core.Blocked):
+            readers.prepare(skill, f"https://github.com/acme/demo/issues/{primary}", tmp_path)
+        assert calls == [99]
+    else:
+        documents = json.loads(readers.prepare(skill, f"https://github.com/acme/demo/issues/{primary}", tmp_path).split(":\n", 1)[1])
+        assert [document["number"] for document in documents] == [491, 9]
+        assert calls == [491, 99, 9]
 
 
 def test_closed_issue_stops_address_preparation(monkeypatch, tmp_path):

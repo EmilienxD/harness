@@ -43,6 +43,13 @@ ISSUE_URL = re.compile(
 )
 # Same-repository references harvested from included bodies.
 BODY_REFERENCE = re.compile(r"(?<![A-Za-z0-9_/&-])#([1-9][0-9]*)\b")
+BODY_LINK_LABEL = re.compile(r"\[(?:\\.|[^\[\]\\]|\[[^\[\]\\]*\])*\]")
+BODY_LINK = re.compile(
+    BODY_LINK_LABEL.pattern
+    + r"(?:\((?:\\.|[^()\\]|\([^()]*\))*\)|[ \t]*\[[^\]\r\n]*\])"
+)
+BODY_LINK_DEFINITION = re.compile(r"(?m)^ {0,3}\[([^\]\r\n]+)\]:[^\r\n]*")
+BODY_URL = re.compile(r"(?:https?://|www\.)[^\s<>]+", re.IGNORECASE)
 
 DEPTH_VARIABLE = "HARNESS_ISSUE_CONTEXT_DEPTH"
 DEFAULT_DEPTH = 1
@@ -69,6 +76,10 @@ STATUS_NAMES = {
 
 class Blocked(Exception):
     """A prerequisite failed; the prompt must not reach the model."""
+
+
+class IssueNotFound(Blocked):
+    """The repository resolved, but the requested issue did not."""
 
 
 # shared plumbing
@@ -173,6 +184,21 @@ def current_repository(cwd: Path, skill: str) -> str:
     return name
 
 
+def missing_issue_response(payload: object) -> bool:
+    """Recognize only GitHub's issue-level NOT_FOUND, including gh exit 1."""
+    if not isinstance(payload, dict):
+        return False
+    data = payload.get("data")
+    repository = data.get("repository") if isinstance(data, dict) else None
+    errors = payload.get("errors")
+    return (
+        isinstance(repository, dict) and "issue" in repository and repository["issue"] is None
+        and isinstance(errors, list) and bool(errors)
+        and all(isinstance(error, dict) and error.get("type") == "NOT_FOUND"
+                and error.get("path") == ["repository", "issue"] for error in errors)
+    )
+
+
 def fetch_issue(repository: str, number: int, cwd: Path, skill: str) -> dict | None:
     owner, _, name = repository.partition("/")
     result = subprocess.run(
@@ -183,14 +209,19 @@ def fetch_issue(repository: str, number: int, cwd: Path, skill: str) -> dict | N
         ],
         cwd=cwd, capture_output=True, text=True, encoding="utf-8", timeout=GITHUB_SECONDS,
     )
-    if result.returncode != 0:
+    try:
+        payload = json.loads(result.stdout)
+    except ValueError:
+        payload = None
+    if missing_issue_response(payload):
+        return None
+    if result.returncode != 0 or (isinstance(payload, dict) and payload.get("errors")):
         raise Blocked(
             f"{skill} could not read {repository}#{number} from GitHub. "
             "Check `gh` authentication and repository access. "
-            f"{result.stderr.strip()}"
+            f"{result.stderr.strip() or (payload.get('errors') if isinstance(payload, dict) else '')}"
         )
     try:
-        payload = json.loads(result.stdout)
         issue = payload["data"]["repository"]["issue"]
     except (ValueError, KeyError, TypeError) as error:
         raise Blocked(
@@ -235,7 +266,9 @@ def graphql(query: str, variables: dict, cwd: Path, skill: str = "issue-context"
         payload = json.loads(result.stdout)
     except ValueError as error:
         raise Blocked(f"{skill}: unreadable GitHub response. {result.stderr.strip()}") from error
-    if result.returncode or payload.get("errors"):
+    if not isinstance(payload, dict):
+        raise Blocked(f"{skill}: unreadable GitHub response. {result.stderr.strip()}")
+    if (result.returncode or payload.get("errors")) and not missing_issue_response(payload):
         raise Blocked(f"{skill}: GitHub query failed: {result.stderr.strip() or payload.get('errors')}")
     if not isinstance(payload.get("data"), dict):
         raise Blocked(f"{skill}: GitHub returned no data.")
@@ -259,6 +292,29 @@ def require_issue(
     return issue
 
 
+def body_issue_numbers(body: str) -> list[int]:
+    """Harvest unlinked local #N mentions, never numbers from link labels or URLs.
+
+    Links retain their destination's meaning in the original issue body. Their
+    labels cannot establish a same-repository issue relation, even for PR links.
+    """
+    def reference_label(label: str) -> str:
+        return " ".join(label.split()).casefold()
+
+    definitions = {
+        reference_label(match[1]) for match in BODY_LINK_DEFINITION.finditer(body)
+    }
+    text = BODY_LINK_DEFINITION.sub(" ", body)
+    text = BODY_LINK.sub(" ", text)
+    # Shortcut reference links have no explicit destination beside the label.
+    text = BODY_LINK_LABEL.sub(
+        lambda match: " " if reference_label(match[0][1:-1]) in definitions else match[0],
+        text,
+    )
+    text = BODY_URL.sub(" ", text)
+    return [int(match[1]) for match in BODY_REFERENCE.finditer(text)]
+
+
 def relations(issue: dict) -> list[tuple[str, int, str]]:
     """Parents, sub-issues, and same-repository body references, in that order."""
     repository = issue["repository"]
@@ -267,8 +323,8 @@ def relations(issue: dict) -> list[tuple[str, int, str]]:
         found.append((repository, int(issue["parent"]), "Parent issue"))
     for number in issue["sub_issues"]:
         found.append((repository, int(number), "Sub-issue"))
-    for match in BODY_REFERENCE.finditer(issue["body"]):
-        found.append((repository, int(match.group(1)), "Referenced issue"))
+    for number in body_issue_numbers(issue["body"]):
+        found.append((repository, number, "Referenced issue"))
     return found
 
 
