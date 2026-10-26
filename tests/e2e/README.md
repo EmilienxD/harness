@@ -366,33 +366,45 @@ requested Gemini service; command integration uses fake inference, never paid Pi
 
 ## Pi Web Toolkit
 
-`test:pi-web-toolkit` installs the actual `web-toolkit` package, host CLI and native extension
-in isolated uv directories. Project JSON and user RPC journeys use real Pi 1.2.0 with the
+`test:pi-web-toolkit` installs the actual `web-toolkit` native extension without a host CLI
+installation, then acquires the shipped immutable uvx source into an empty isolated cache.
+Project JSON and user RPC journeys use real Pi 1.2.0 with the
 fake OpenAI Responses API shared with Codex. They verify that no Web Toolkit skill is installed
 or discovered and invoke the native tools directly. Local HTTP pages verify fetch, redirects,
-Unicode, saved full text, HTTP error bodies, validation, missing executable handling and
+Unicode, saved full text, HTTP error bodies, validation, missing uvx, offline acquisition failure and
 RPC cancellation. Search runs the real CLI and Chrome DOM extraction/filtering; a fixture
 CDP connection fulfills search navigation with fixed engine HTML and blocks other browser
 requests. This tests the integration without depending on public engine availability.
 Domain-filter journeys verify multiple allowed hosts, case normalization, subdomains,
 blocked-host precedence, unrestricted search, invalid domain inputs and rejected mixed filter
 syntax. They inspect the exact query received by the actual browser in memory only.
-Each journey expects 16 inference requests and zero unexpected requests, checks the offered
+Each journey expects 20 inference requests and zero unexpected requests, checks the offered
 tool schemas and structured outputs, and verifies receipt-driven removal and unchanged settings.
 The CLI arguments include shell metacharacters to verify literal transport.
-For a missing executable, the journey extracts the returned installation command and runs
-the real uv invocation with an empty offline cache and isolated tool directories, verifying
-a clean failure without network access. The scripted missing-CLI session makes no further
-web calls; the once-per-session recovery policy is agent guidance, not model-behavior certification.
+Cancellation must disconnect the actual HTTP request, preserve the shared browser endpoint,
+and permit a subsequent native browser-backed search. A subprocess loads the installed extension
+with Pi's real SDK, starts a real uvx fetch, fires the unmodified 120-second deadline callback
+under a controlled clock, and requires HTTP disconnection and shared-browser survival.
+The same subprocess checks the 256 KiB output limit against an actual large CLI response.
+The journeys verify no permanent CLI package or executable is installed.
 
 Run `npm run e2e:pi-web-toolkit` for the executable journeys. Chrome, Edge or Chromium is
 required. These Windows headless checks cover native integration; public engine availability,
 POSIX and interactive Pi rendering remain separate acceptance boundaries.
 
+## On-demand ship helpers
+
+`npm run test:ship-helpers` provides a credential-free Codex journey for the on-demand
+`issue-context` and `ship-stubs` commands shipped by `ship`. It installs the real skill and
+checkout subagents runtime, runs the published helper pins in an isolated uv cache, reads
+issue context from a local `gh` fixture and verifies anchored stub rejection/completion through
+native shell calls. Five inference requests, zero unexpected requests, exact file bytes,
+no installed helper CLIs and receipt removal are checked. It does not publish to GitHub.
+
 ## Pi gotcha reports
 
-`test:pi-report-gotchas` installs the checkout `report-gotchas` skill and real uv-managed
-CLI in all four project/user and JSON/RPC combinations. It uses real headless Pi 1.2.0 and
+`test:pi-report-gotchas` installs the checkout `report-gotchas` skill and executes its published
+immutable CLI pin through uvx in all four project/user and JSON/RPC combinations. It uses real headless Pi 1.2.0 and
 the fake Responses endpoint, with no reporting extension, hooks, transport dependency or Git
 repository. A loopback HTTPS Discord fixture preserves real URL validation, TLS, urllib,
 shell execution and CLI exit status. It requires `openssl` for its temporary certificate;
@@ -415,11 +427,12 @@ These commands each post clearly labeled test reports. They read the webhook fro
 configuration (or `HARNESS_REPORT_GOTCHAS_E2E_WEBHOOK_URL`) and pass it only in child environment
 variables; diagnostics never contain the URL or message bodies. Inference always goes to the
 fake loopback API. Each live provider journey requires exactly three inference requests and
-checks the real CLI's confirmed Discord success before completing. All three journeys passed
-on Windows, and the user confirmed receipt of the three notifications.
+checks the real CLI's confirmed Discord success before completing. Before the uvx migration,
+all three live journeys passed on Windows and the user confirmed receipt of the notifications.
+The uvx path is verified against the local HTTPS fixture; live posting has not been rerun.
 
-The journeys use `--local` explicitly. The catalogue pins runtime 2.0; its commit must be
-published before remote installs can fetch it. Interactive Pi TUI and POSIX need separate checks.
+The uv cache and host-tool directories are fixture-owned; no reporting CLI is installed.
+Interactive Pi TUI and POSIX need separate checks.
 
 ## Pi persistent subagents
 
@@ -556,10 +569,10 @@ waits for named approval, rechecks live state, preserves a branch with newly arr
 removes only the approved merged branch/worktree. Unrelated input starts no inventory; unavailable
 skills/helpers stop before inference. These checks certify integration, not unscripted cleanup judgment.
 
-`test:pi-test-workflows` installs the shared skill and actual uv-managed CLI in isolated tool
-directories. Project JSON and user RPC run a passing acceptance check before explicit confirmation,
+`test:pi-test-workflows` installs the shared skill and executes its published immutable CLI pin
+through uvx in isolated caches. Project JSON and user RPC run a passing acceptance check before explicit confirmation,
 then introduce a regression and prove failed acceptance leaves verification stale. Broken/invalid
-coverage, exact hashes, request counts, and shared host-action receipt removal are checked. Status
+coverage, exact hashes, request counts, skill removal and absence of installed host CLIs are checked. Status
 and confirmation do not execute the acceptance steps themselves.
 
 These journeys use real Pi 1.2.0 on Windows, isolated configuration/session directories and fake

@@ -3,7 +3,7 @@ name: web-toolkit
 description: Use Web Toolkit to search the web and read pages, PDFs, or text files.
 ---
 
-Run `web-toolkit` through the shell whenever you need to search the web or read a web source. Use `search` to find sources and `fetch` to read their content. Tell the user if the command is not installed.
+Run every `web-toolkit` command below through `uvx --from git+https://github.com/EmilienxD/harness@617f66049cb5441d4edeaea31733c1525b98261c#subdirectory=harness/productivity/web-toolkit/runtime web-toolkit` followed by its arguments whenever you need to search the web or read a web source. Use `search` to find sources and `fetch` to read their content. Requires uv and Git; the first run downloads the pinned CLI into uv's cache.
 
 Examples:
 

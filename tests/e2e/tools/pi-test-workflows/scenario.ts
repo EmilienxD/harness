@@ -15,15 +15,15 @@ assert.equal(passed, true);
 `;
 
 /** The server supplies inference only; Pi executes the installed CLI and acceptance check. */
-export function testWorkflowsScenario(shell: "powershell" | "bash") {
-  const status = "test-workflows --directory checks --json status";
+export function testWorkflowsScenario(shell: "powershell" | "bash", command: string) {
+  const status = `${command} --directory checks --json status`;
   return createPiToolScenario({
     name: "pi-test-workflows", marker: MARKER,
     steps: [
       { checkpoint: "initial-stale", tool: shell, input: { command: status }, verifyResult: (output) => states(output, { "greeting.md": "stale" }) },
       { checkpoint: "read-workflow", tool: "read", input: { path: "checks/greeting.md" } },
       { checkpoint: "passing-execution", tool: shell, input: { command: "node accept.cjs ../passing-evidence.json" }, verifyResult: (output) => acceptance(output, true) },
-      { checkpoint: "explicit-confirmation", tool: shell, input: { command: 'test-workflows --json confirm "checks/greeting.md"' }, verifyResult: (output) => {
+      { checkpoint: "explicit-confirmation", tool: shell, input: { command: `${command} --json confirm "checks/greeting.md"` }, verifyResult: (output) => {
         const value = cliJson(output);
         if (value.state !== "passed" || value.workflow !== "checks/greeting.md") reject("confirmation did not record the passing workflow");
       } },

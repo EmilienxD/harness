@@ -18,6 +18,8 @@ repository = fixture["repository"]
 
 
 def run(*args, cwd=repo, ok=(0,)):
+    if args[0] in fixture["commands"]:
+        args = (*fixture["commands"][args[0]], *args[1:])
     result = subprocess.run(list(args), cwd=cwd, capture_output=True, text=True, encoding="utf-8")
     if result.returncode not in ok:
         raise RuntimeError(f"{' '.join(args[:3])} failed with exit {result.returncode}: {result.stderr.strip()[:500]}")
@@ -132,7 +134,7 @@ def closeout(unit, child, expected, mode):
     # One target sync per acceptance; these fixtures are built on the latest target.
     assert not sync(unit), "target moved; a confirming round would be required"
     run("test-workflows", "confirm", spec["workflow"], cwd=worktree(unit))
-    status = json.loads(run("test-workflows", "status", cwd=worktree(unit)))
+    status = json.loads(run("test-workflows", "--json", "status", cwd=worktree(unit)))
     assert all(item["state"] == "passed" for item in status["workflows"]), status
     contract = json.loads(run("ship-stubs", "check", "--base", record["base"][unit], "--anchor", record["anchor"][unit], cwd=worktree(unit)))
     assert contract["state"] == "pass", contract

@@ -50,7 +50,7 @@ export function plan(scenario: ShipScenario, root: string, python: string): Plan
   const implement = (child: string, item: Unit, tag: string): Action[] => [
     { kind: "write", id: `${tag}-module`, path: `${r}/wt-${item.key}/${item.module}`, relative: item.module, content: IMPLEMENTATION },
     { kind: "write", id: `${tag}-test`, path: `${r}/wt-${item.key}/${item.test}`, relative: item.test, content: implementedTest(testName(item), item.module), previous: stub(testName(item)) },
-    { kind: "run", id: `${tag}-status`, command: "test-workflows status" },
+    { kind: "run", id: `${tag}-status`, command: helper(`status ${r}/evidence/${child}-status.txt unused`) },
     { kind: "run", id: `${tag}-green`, command: helper(`test ${r}/evidence/${child}-green.txt ${item.test}`) },
     { kind: "run", id: `${tag}-workflow`, command: helper(`workflow ${r}/evidence/${child}-workflow.txt ${item.module}`) },
   ];

@@ -10,6 +10,7 @@ import { findFinalText, parseStreamJson, runClaude, validateClaudeCli } from "..
 import { prepareCodexHome, runCodex, validateCodexCli } from "../../core/codex.js";
 import { findHarnessRoot, runFixtureInstaller } from "../../core/installer.js";
 import { containsPath } from "../../core/path.js";
+import { skillCommand } from "../../core/on-demand.js";
 import { startFakeOpenAiServer } from "../../core/openai-server.js";
 import { configuredWebhookUrl } from "./live-config.js";
 import { claudeTransition, codexTransition, MARKER, REPORT_MARKER, scenarioCatalogHash } from "./scenario.js";
@@ -33,6 +34,7 @@ export async function runReportGotchasJourney(platform: "claude" | "chatgpt") {
     Object.assign(env, {
       HOME: home, USERPROFILE: home, APPDATA: join(home, "AppData/Roaming"), LOCALAPPDATA: join(home, "AppData/Local"),
       UV_TOOL_DIR: join(root, "uv-tools"), UV_TOOL_BIN_DIR: bin,
+      UV_CACHE_DIR: join(root, "uv-cache"),
       UV_PYTHON: join(harnessRoot, ".venv", process.platform === "win32" ? "Scripts/python.exe" : "bin/python"),
       UV_PYTHON_DOWNLOADS: "never", UV_NO_PROGRESS: "1", HARNESS_STATE_DIR: join(root, "installer-state"),
       HARNESS_REPORT_GOTCHAS_STATE_DIR: join(root, "reporting-state"), HARNESS_REPORT_GOTCHAS_WEBHOOK_URL: webhookUrl,
@@ -41,12 +43,13 @@ export async function runReportGotchasJourney(platform: "claude" | "chatgpt") {
     const workspace = { projectRoot, agentDir: join(root, "agent"), sessionsDir: join(root, "sessions"), env };
     const install = { platform, pinnedRuntimes: false } as const;
     await runFixtureInstaller(workspace, "install", ["report-gotchas"], install);
+    const cli = await skillCommand(join(projectRoot, platform === "claude" ? ".claude" : ".agents", "skills/report-gotchas/SKILL.md"), "harness-report-gotchas");
     await assert.rejects(access(join(projectRoot, ".git")));
     const diagnosticsPath = join(root, "structural-diagnostics.json");
     const report = `**${REPORT_MARKER} - ${platform} - ${randomUUID()}**\n\n- End-to-end verification: a real headless agent CLI posted this Unicode \u96ea report using fake model inference. This test message can be deleted.`;
     const command = platform === "chatgpt" && process.platform === "win32"
-      ? `harness-report-gotchas submit -m @'\n${report}\n'@`
-      : `harness-report-gotchas submit <<'HARNESS_GOTCHAS'\n${report}\nHARNESS_GOTCHAS`;
+      ? `${cli.shell} submit -m @'\n${report}\n'@`
+      : `${cli.shell} submit <<'HARNESS_GOTCHAS'\n${report}\nHARNESS_GOTCHAS`;
     const started = Date.now();
     let finalText: string;
     if (platform === "claude") {

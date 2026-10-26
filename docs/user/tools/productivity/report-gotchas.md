@@ -4,7 +4,13 @@ Platforms: **Claude Code, ChatGPT, Pi**. Install with `harness install report-go
 
 ## Use it
 
-`report-gotchas` reports consequential caveats remaining after implementation to a Discord channel: failed checks, incomplete verification, unresolved risks, or human action required. It sends nothing when there is no new caveat. Install the package for your agent platform, then configure a Discord incoming webhook with `harness-report-gotchas configure`; input is hidden. The URL is stored in `~/.harness/report-gotchas/config.json`. Keep it private because anyone holding it can post to that channel.
+`report-gotchas` reports consequential caveats remaining after implementation to a Discord channel: failed checks, incomplete verification, unresolved risks, or human action required. It sends nothing when there is no new caveat. Install the skill for your agent platform, then configure a Discord incoming webhook with uv and Git on PATH:
+
+```sh
+uvx --from git+https://github.com/EmilienxD/harness@65afc165c07b7894c8adc0013e52896fbc79279d#subdirectory=harness/productivity/report-gotchas/runtime harness-report-gotchas configure
+```
+
+Input is hidden. The URL is stored in `~/.harness/report-gotchas/config.json`. Keep it private because anyone holding it can post to that channel. Use the same uvx prefix for every CLI command below. The first run downloads and builds the pinned package; later runs reuse uv's cache. Sandboxed providers need network access for acquisition and Discord, plus write access to uv's cache.
 
 ## Manual reports and configuration
 
@@ -16,8 +22,8 @@ A useful report names the task, then lists specific caveats and their consequenc
 
 ## Implementation and verification
 
-The `report-gotchas` 2.0.0 checkout installs one provider-neutral model-invoked skill and
-`harness-report-gotchas`. Pi needs no extension, transport dependency or reporting tool.
+The `report-gotchas` 2.1.0 checkout installs one provider-neutral model-invoked skill;
+`harness-report-gotchas` runs on demand through uvx. Pi needs no extension, transport dependency or reporting tool.
 Skills install in the conventional skills directory. All providers run the same CLI.
 
 `submit` posts the supplied Markdown directly with Discord's `wait=true` and waits for a
@@ -36,6 +42,4 @@ add project/user and JSON/RPC coverage, missing configuration, empty reports, Un
 mention suppression, multipart posts, HTTP failures and rate limits. They verify real CLI
 exit status and Discord effects without prompt-text assertions or mocked runtime functions.
 
-These checks explicitly install the checkout runtime with `--local`. The catalogue pins
-the synchronous 2.0.0 runtime commit; that commit must be published before remote installs
-can fetch it. Pi TUI and POSIX remain outside the Windows headless gate.
+Local HTTPS journeys execute the skill's published immutable runtime pin through uvx with isolated caches and no installed host CLI. Pi TUI and POSIX remain outside the Windows headless gate.

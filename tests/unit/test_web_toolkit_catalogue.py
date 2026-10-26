@@ -35,7 +35,7 @@ def test_claude_installs_skill_without_changing_settings(tmp_path, installed_act
 
     assert json.loads(target.settings_path.read_text(encoding="utf-8")) == {"permissions": {"deny": ["Bash(rm *)"]}}
     assert target.destination_path("skills", "web-toolkit/SKILL.md").is_file()
-    assert [action.data["package"] for action in installed_actions] == ["harness-web-toolkit"]
+    assert installed_actions == []
 
     catalogue.reconcile(set())
 
@@ -54,6 +54,7 @@ def test_chatgpt_installs_skill_without_changing_config(tmp_path, installed_acti
 
     assert config.read_text(encoding="utf-8") == original
     assert target.destination_path("skills", "web-toolkit/agents/openai.yaml").is_file()
+    assert installed_actions == []
 
     reloaded = ReceiptStore.load(tmp_path / "receipts.json")
     CatalogueInstaller(discover(), target, reloaded).reconcile(set())
@@ -83,6 +84,7 @@ def test_pi_installs_native_extension_without_fallback_skill(tmp_path, installed
     assert (package / "package.json").is_file()
     assert not (target.install_root / "extensions").exists()
     assert not (target.install_root / "harness/packages").exists()
+    assert installed_actions == []
     catalogue.reconcile(set())
     assert not (target.install_root / "skills/web-toolkit").exists()
     assert not package.exists()

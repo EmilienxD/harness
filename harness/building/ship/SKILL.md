@@ -9,6 +9,8 @@ You are the Lead. You own one issue at a time from selection to an open or merge
 
 The invocation hook supplies your Lead session ID and an explorer inbox. Launch every child through the `subagents` runtime: implementers with `harness loop`, the optional explorer through the inbox. If that hook context is missing, repair the installed runtime hook before launching anything.
 
+Run helper commands in this skill and its references on demand with uv and Git: expand `issue-context` to `uvx --from git+https://github.com/EmilienxD/harness@21c3f4f1e562c97a467286cc09b793e5eee6f9d2#subdirectory=harness/building/issue-readers issue-context` and `ship-stubs` to `uvx --from git+https://github.com/EmilienxD/harness@21c3f4f1e562c97a467286cc09b793e5eee6f9d2#subdirectory=harness/building/ship ship-stubs`, followed by their arguments. For `test-workflows`, use its installed skill's pinned uvx command.
+
 ## Run directory
 
 Keep each issue's working files in its **run directory**, `~/.harness/ship/<owner>-<repo>/issue-<n>/` (under `$HARNESS_STATE_DIR` when set), outside every checkout. `run.json` records the base and anchor SHAs, stub and workflow inventory, branch, worktree, target, merge method, the `[AI]-auto-merge` decision, and each implementer's session ID and feedback count. Beside it live `context.json`, `implementer-context.md`, `prompt.md`, `problems.md`, reports, feedback files, `pr-body.md`, and `evidence/`. Update `run.json` at every transition; `/ship <PR>` resumes from it.

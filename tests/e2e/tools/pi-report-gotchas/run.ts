@@ -1,13 +1,15 @@
 import assert from "node:assert/strict";
-import { spawn } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
 import { access, mkdir, readFile, readdir, writeFile } from "node:fs/promises";
 import { delimiter, join } from "node:path";
+import { promisify } from "node:util";
 import { findHarnessRoot, runFixtureInstaller } from "../../core/installer.js";
 import { createPiFixture } from "../../core/pi-fixture.js";
+import { skillCommand } from "../../core/on-demand.js";
 import type { PiRun } from "../../core/pi.js";
 import { configuredWebhookUrl } from "../report-gotchas/live-config.js";
 import { startDiscordFixture } from "./discord.js";
-import { LONG_REPORT, REPORT, marker, scenario } from "./scenario.js";
+import { LONG_REPORT, REPORT, marker, gotchasScenario } from "./scenario.js";
 
 const TOOL = "report-gotchas";
 const success = (run: PiRun) => {
@@ -19,18 +21,20 @@ const success = (run: PiRun) => {
 
 export async function runPiGotchasJourney(scope: "project" | "user", mode: "json" | "rpc", live = false) {
   const url = live ? await configuredWebhookUrl() : undefined;
-  const fixture = await createPiFixture(scenario);
+  const root = await findHarnessRoot();
+  const cli = await skillCommand(join(root, "harness/productivity/report-gotchas/SKILL.md"), "harness-report-gotchas");
+  const fixture = await createPiFixture(gotchasScenario(cli.shell));
   let discord: Awaited<ReturnType<typeof startDiscordFixture>> | undefined;
   try {
     if (!live) discord = await startDiscordFixture(fixture.root);
     const project = fixture.workspace.projectRoot;
-    const root = await findHarnessRoot();
     const bin = join(fixture.root, "uv-bin");
     await mkdir(bin);
     const pathKey = Object.keys(fixture.workspace.env).find(key => key.toLowerCase() === "path") ?? "PATH";
     fixture.workspace.env[pathKey] = bin + delimiter + (fixture.workspace.env[pathKey] ?? "");
     Object.assign(fixture.workspace.env, {
       UV_TOOL_DIR: join(fixture.root, "uv-tools"), UV_TOOL_BIN_DIR: bin,
+      UV_CACHE_DIR: join(fixture.root, "uv-cache"),
       UV_PYTHON: join(root, ".venv", process.platform === "win32" ? "Scripts/python.exe" : "bin/python"),
       UV_PYTHON_DOWNLOADS: "never", UV_NO_PROGRESS: "1",
       HARNESS_REPORT_GOTCHAS_STATE_DIR: join(fixture.root, "reporting-state"),
@@ -51,6 +55,9 @@ export async function runPiGotchasJourney(scope: "project" | "user", mode: "json
     await assert.rejects(access(join(project, ".git")));
     await assert.rejects(access(join(platform, "npm/node_modules/harness-pi-pi-transport")));
     await assert.rejects(access(join(platform, "npm/node_modules/harness-pi-report-gotchas/extensions")));
+    // Fetch/build the shipped pin before enabling the Discord-only HTTPS proxy.
+    await promisify(execFile)(cli.file, [...cli.args, "--help"], { cwd: project, env: fixture.workspace.env, windowsHide: true, timeout: 90_000 });
+    await assert.rejects(access(join(bin, process.platform === "win32" ? "harness-report-gotchas.exe" : "harness-report-gotchas")));
     Object.assign(fixture.workspace.env, discord?.env);
     if (live) fixture.workspace.env.HARNESS_REPORT_GOTCHAS_WEBHOOK_URL = url!;
     const rpc = fixture.rpc();
@@ -64,9 +71,8 @@ export async function runPiGotchasJourney(scope: "project" | "user", mode: "json
       assert.equal(missing.status, "success"); assert.equal(missing.toolExecutions[0]?.isError, true);
       assert.equal(discord!.attempts, 0);
       await assert.rejects(access(state));
-      const cli = join(bin, process.platform === "win32" ? "harness-report-gotchas.exe" : "harness-report-gotchas");
       await new Promise<void>((resolve, reject) => {
-        const child = spawn(cli, ["configure"], { cwd: project, env: fixture.workspace.env, windowsHide: true, stdio: ["pipe", "ignore", "ignore"] });
+        const child = spawn(cli.file, [...cli.args, "configure"], { cwd: project, env: fixture.workspace.env, windowsHide: true, stdio: ["pipe", "ignore", "ignore"] });
         const timer = setTimeout(() => { child.kill(); reject(new Error("Discord configuration timed out")); }, 10_000);
         child.on("error", () => { clearTimeout(timer); reject(new Error("Discord configuration could not start")); });
         child.on("close", code => { clearTimeout(timer); code === 0 ? resolve() : reject(new Error("Discord configuration failed")); });
