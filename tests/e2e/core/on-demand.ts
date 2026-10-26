@@ -1,4 +1,12 @@
 import { readFile } from "node:fs/promises";
+import { dirname, join } from "node:path";
+
+/** Launch the script copied beside an installed skill without a package manager. */
+export function bundledCommand(skillPath: string, script: string, python: string, shell: "powershell" | "bash" = process.platform === "win32" ? "powershell" : "bash") {
+  const path = join(dirname(skillPath), "scripts", script);
+  const quote = (value: string) => `'${(shell === "bash" && process.platform === "win32" ? value.replaceAll("\\", "/") : value).replaceAll("'", shell === "powershell" ? "''" : `'"'"'`)}'`;
+  return { file: python, args: [path], shell: `${shell === "powershell" ? "& " : ""}${quote(python)} ${quote(path)}` };
+}
 
 /** Execute the immutable package command shipped in a skill, rather than a host CLI. */
 export async function skillCommand(skillPath: string, name: string) {

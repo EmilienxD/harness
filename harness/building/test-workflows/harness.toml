@@ -1,7 +1,7 @@
 name = "test-workflows"
-version = "1.6.0"
+version = "1.7.0"
 description = "Define and confirm end-to-end workflows when their covered code changes"
-requires = ["git", "uv"]
+requires = ["git", "python"]
 
 [platforms.claude]
 status = "supported"
@@ -11,6 +11,11 @@ status = "supported"
 
 [platforms.pi]
 status = "supported"
+
+[[files]]
+src = "test_workflows.py"
+dest = "test-workflows/scripts/test_workflows.py"
+root = "skills"
 
 [[files]]
 src = "SKILL.md"

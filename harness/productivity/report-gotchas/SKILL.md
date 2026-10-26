@@ -11,10 +11,10 @@ After completing an ambiguous task, if there are remaining gotchas, caveats, unv
 
 Never report a gotcha already reported during the session. Finish normally without submitting a report if there are no new gotchas to report.
 
-Run this command once per gotcha (requires uv and Git; the first run downloads the pinned CLI into uv's cache):
+Run this command once per gotcha (requires Python 3.11+; resolve `<skill-directory>` beside this SKILL.md):
 
 ```bash
-uvx --from git+https://github.com/EmilienxD/harness@65afc165c07b7894c8adc0013e52896fbc79279d#subdirectory=harness/productivity/report-gotchas/runtime harness-report-gotchas submit <<'HARNESS_GOTCHAS'
+python <skill-directory>/scripts/report.py submit <<'HARNESS_GOTCHAS'
 **Short task or result**
 
 ## Caveats
@@ -23,7 +23,7 @@ uvx --from git+https://github.com/EmilienxD/harness@65afc165c07b7894c8adc0013e52
 HARNESS_GOTCHAS
 ```
 
-Prefer a quoted heredoc or here-string; for `submit -m`, keep the same uvx prefix. Run multiple parallel commands if you have multiple gotchas to report.
+Prefer a quoted heredoc or here-string; for `submit -m`, keep the same Python script command. Run multiple parallel commands if you have multiple gotchas to report.
 
 Start with a short, one-line, bold title that clearly identifies the task or result. Be concise and concrete so the user can understand it quickly.
 

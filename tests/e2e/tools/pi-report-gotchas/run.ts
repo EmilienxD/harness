@@ -5,7 +5,7 @@ import { delimiter, join } from "node:path";
 import { promisify } from "node:util";
 import { findHarnessRoot, runFixtureInstaller } from "../../core/installer.js";
 import { createPiFixture } from "../../core/pi-fixture.js";
-import { skillCommand } from "../../core/on-demand.js";
+import { bundledCommand } from "../../core/on-demand.js";
 import type { PiRun } from "../../core/pi.js";
 import { configuredWebhookUrl } from "../report-gotchas/live-config.js";
 import { startDiscordFixture } from "./discord.js";
@@ -22,8 +22,8 @@ const success = (run: PiRun) => {
 export async function runPiGotchasJourney(scope: "project" | "user", mode: "json" | "rpc", live = false) {
   const url = live ? await configuredWebhookUrl() : undefined;
   const root = await findHarnessRoot();
-  const cli = await skillCommand(join(root, "harness/productivity/report-gotchas/SKILL.md"), "harness-report-gotchas");
-  const fixture = await createPiFixture(gotchasScenario(cli.shell));
+  let cli: ReturnType<typeof bundledCommand>;
+  const fixture = await createPiFixture({ ...gotchasScenario("bundled-reporter"), transition: request => gotchasScenario(cli.shell).transition(request) });
   let discord: Awaited<ReturnType<typeof startDiscordFixture>> | undefined;
   try {
     if (!live) discord = await startDiscordFixture(fixture.root);
@@ -35,6 +35,7 @@ export async function runPiGotchasJourney(scope: "project" | "user", mode: "json
     Object.assign(fixture.workspace.env, {
       UV_TOOL_DIR: join(fixture.root, "uv-tools"), UV_TOOL_BIN_DIR: bin,
       UV_CACHE_DIR: join(fixture.root, "uv-cache"),
+      UV_OFFLINE: "1", PIP_NO_INDEX: "1",
       UV_PYTHON: join(root, ".venv", process.platform === "win32" ? "Scripts/python.exe" : "bin/python"),
       UV_PYTHON_DOWNLOADS: "never", UV_NO_PROGRESS: "1",
       HARNESS_REPORT_GOTCHAS_STATE_DIR: join(fixture.root, "reporting-state"),
@@ -42,6 +43,7 @@ export async function runPiGotchasJourney(scope: "project" | "user", mode: "json
     const state = fixture.workspace.env.HARNESS_REPORT_GOTCHAS_STATE_DIR!;
     const platform = scope === "project" ? join(project, ".pi") : fixture.workspace.agentDir;
     const skill = join(platform, "skills", TOOL, "SKILL.md");
+    cli = bundledCommand(skill, "report.py", join(root, ".venv", process.platform === "win32" ? "Scripts/python.exe" : "bin/python"));
     const settingsPath = join(project, ".pi/settings.json");
     const configuration = JSON.parse(await readFile(settingsPath, "utf8"));
     configuration.defaultTools = ["read", "write", "edit", "bash", "powershell"];
@@ -55,7 +57,7 @@ export async function runPiGotchasJourney(scope: "project" | "user", mode: "json
     await assert.rejects(access(join(project, ".git")));
     await assert.rejects(access(join(platform, "npm/node_modules/harness-pi-pi-transport")));
     await assert.rejects(access(join(platform, "npm/node_modules/harness-pi-report-gotchas/extensions")));
-    // Fetch/build the shipped pin before enabling the Discord-only HTTPS proxy.
+    // Execute the installed script with an empty offline package cache.
     await promisify(execFile)(cli.file, [...cli.args, "--help"], { cwd: project, env: fixture.workspace.env, windowsHide: true, timeout: 90_000 });
     await assert.rejects(access(join(bin, process.platform === "win32" ? "harness-report-gotchas.exe" : "harness-report-gotchas")));
     Object.assign(fixture.workspace.env, discord?.env);
@@ -115,6 +117,7 @@ export async function runPiGotchasJourney(scope: "project" | "user", mode: "json
     await assert.rejects(access(skill));
     await assert.rejects(access(join(bin, process.platform === "win32" ? "harness-report-gotchas.exe" : "harness-report-gotchas")));
     assert.equal(await readFile(settingsPath, "utf8"), settings);
+    await assert.rejects(access(join(fixture.root, "uv-cache", "environments-v2")));
     assert.equal(fixture.assertions().unexpectedRequests, 0);
     assert.equal(fixture.assertions().inferenceRequests, requests);
     return { scope, mode, live, version: fixture.version, inferenceRequests: requests, elapsedMs };

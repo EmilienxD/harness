@@ -112,8 +112,6 @@ For Codex, deterministic command failures reject the prompt rather than falling 
 
 ### User-invoked skills
 
-- **`ship`**: Leads one GitHub issue from selection through a guarded implementation loop to an open or merged PR. `/ship` selects the oldest actionable triaged issue; explicit issue numbers bypass triage, parents expand to dependency-ordered leaf loops, and a PR URL resumes review work. Installs `subagents`, `test-workflows`, `issue-readers`, and `resolving-merge-conflicts`.
-
 - **`cleanup-git`**: Automatically inventories every local branch and worktree with a bundled read-only script that runs without arguments from the current directory. Supplies a titled **Git cleanup inventory** in compact TOON tables. Checks merge ancestry, protected branches, local and ignored files, locks, submodules, and ongoing Git operations; includes GitHub facts when `gh` is available. The skill contains the cleanup rules and proposes named actions for approval before deletion or worktree removal. On Pi, `/cleanup-git` and `/skill:cleanup-git` prepare the inventory before expanding the native skill.
 
 - **`resolving-merge-conflicts`**: Resolves an in-progress Git merge or rebase by tracing the intent behind each side, preserving both where possible, running the repository's checks, and finishing the operation. It never aborts the merge or invents unrelated behavior.
@@ -271,7 +269,7 @@ Custom roles use Harness's native background or visible-terminal launch path. Ab
 
 - **`writing-adrs`**: Creates architectural decision records and updates existing records in place when agreed decisions change. It records settled decisions, binding values, terse rules, accepted trade-offs, and ADR cross-references in a refactor-resistant format.
 
-- **`report-gotchas`**: Near the end of complicated implementation work, posts meaningful caveats, failed checks, unfinished work, or required human action to a configured Discord channel. It sends nothing when there is no new caveat. All providers use one shared skill and run the CLI through pinned uvx commands; see the [guide](docs/user/tools/productivity/report-gotchas.md) to configure the webhook. Submission posts the supplied Markdown directly, waits for Discord to confirm it, and prints "Report successfully posted to Discord." Failures return an error so the agent can preserve the caveat in its final response. Reports contain no automatic Git or session metadata.
+- **`report-gotchas`**: Near the end of complicated implementation work, posts meaningful caveats, failed checks, unfinished work, or required human action to a configured Discord channel. It sends nothing when there is no new caveat. All providers use one shared skill and run the bundled Python reporter directly; see the [guide](docs/user/tools/productivity/report-gotchas.md) to configure the webhook. Submission posts the supplied Markdown directly, waits for Discord to confirm it, and prints "Report successfully posted to Discord." Failures return an error so the agent can preserve the caveat in its final response. Reports contain no automatic Git or session metadata.
 
 ### Hooks
 
@@ -394,42 +392,7 @@ patterns = ['''(curl|wget).*\|\s*(ba|z)?sh''']
 
 ## Issue delivery with `/ship`
 
-Run `/ship` in Claude Code or `$ship` in ChatGPT. With no argument it selects the oldest open `[AI]-triaged` issue without open blockers or open sub-issues, skipping claimed issues and those needing a decision or help. Pass issue numbers explicitly to direct parallel sessions. A parent expands to leaf issues in dependency order, with one loop and PR per leaf. After each delivery you choose whether to continue; an explicit instruction to process the whole queue also works. Pass a PR URL to pick up review comments on its existing branch/worktree.
-
-The Lead reads full GitHub context through `issue-context`, creates a worktree only through the project's initialized-worktree script, and defines success before implementation. Missing or failing scripts stop delivery with a suggestion to run `setup-git-worktree-maker`. Project instructions supply the target branch (the Lead asks if absent), merge method (squash by default), and test locations (defaults: `tests/unit/` and `tests/workflow/`). The first branch commit contains deliberately failing unit stubs and workflow criteria only. Implementers fill exactly those stubs; `ship-stubs check` provides the structural Python contract check, while other languages need their native discovery/diff check. Each issue's run state (criteria anchor, implementer sessions, prompts, reports, and evidence) lives in `~/.harness/ship/<owner>-<repo>/issue-<n>/`, which `/ship <PR>` resumes from.
-
-Implementers run in visible terminals through initialized Aboard when available or the standalone terminal launcher. Every successful Stop delivers a report automatically, including context usage when measurable, and waits for exact-token Lead feedback or release. Feedback keeps the same conversation. The Lead accepts a report only when every required test and workflow passes with evidence, without rerunning verification. It replaces an implementer when context or feedback limits, repeated failures, or an unconvincing report warrant it. A fresh implementer receives the original prompt, diff, last report, and recorded problems. Only one implementer may be active per worktree. The optional explorer also uses the subagents runtime.
-
-The Lead owns Git/GitHub mutations and workflow confirmation. Loop-only guards deny Git/GitHub mutation, writes into the repository's other checkouts, and workflow edits. Your own sessions in the same worktree stay unrestricted. These command/path hooks are guardrails, not an operating-system sandbox. Steering is included in reports; interrupts pause delivery. A killed waiting hook invalidates its token, so stale feedback is rejected. Waiting uses `session.stopWaitHours` (up to 24 hours). A timed-out working implementer keeps its worktree reservation until it reaches Stop or its process exit is confirmed; the Lead waits for it to become inactive before publishing or replacing it. Unknown context skips the context threshold; unvalidated Claude model windows remain unknown. Aboard can resume an idle loop in its existing terminal; an idle standalone terminal must exit before runtime resume, or the Lead can launch a fresh implementer. A later `/ship <PR>` conversation on the same provider takes over a released implementer and receives its reports. On Claude, `ship` sets `CLAUDE_CODE_STOP_HOOK_BLOCK_CAP` to 100 in its installed settings scope: each implementer report continues the Lead's turn through a Stop hook, and Claude otherwise ends a turn after 8 consecutive continuations.
-
-Before opening a PR the Lead merges the latest target once, requests a confirming round when it brought changes/conflicts, stamps passing workflows, checks stale workflows affected by the diff, and enforces the stub contract. The sync confirmation is outside the feedback cap. PR descriptions explain the change and staging checks and use `Refs #n`, keeping the issue open. `[AI]-auto-merge` permits the Lead to merge; other PRs remain open. The Lead comments with the PR link. Decisions, exhausted caps, and expired waits preserve work in a draft PR with `[AI]-needs-decision` and a precise question. Unrelated blockers become linked `[AI]-help-wanted` issues; in auto-merge mode the Lead delivers the prerequisite first and resumes the original. You verify staging and close the issue yourself.
-
-| Label | Meaning |
-| --- | --- |
-| `[AI]-triaged` | User-approved eligibility for automatic selection. |
-| `[AI]-in-progress` | Claimed; `/ship` keeps it until the issue is closed. |
-| `[AI]-needs-decision` | Waiting for your decision, alongside the claim. |
-| `[AI]-help-wanted` | A tracked prerequisite needing breakdown or help. |
-| `[AI]-auto-merge` | The Lead merges the passing PR. |
-| `[AI]-*-difficulty` | Routes a `by-difficulty` implementer profile using existing difficulty mappings. |
-
-Missing labels are created on first use. Labels plus PR timeline references describe issue state from GitHub alone. `[AI]-afk` and `[AI]-hitl` remain Aboard's metadata. `address-this`, `review-this`, Aboard Auto Run, and manual ask/reply keep their existing flows.
-
-Sparse `.harness/config.json` version 1 settings:
-
-```json
-{
-  "version": 1,
-  "providers": {
-    "claude": { "delegations": { "loop": { "model": "by-difficulty" } } },
-    "chatgpt": { "delegations": { "loop": { "model": "by-difficulty" } } }
-  },
-  "loop": { "maxFeedback": 3, "maxImplementers": 2, "freshContextPercent": 65 },
-  "session": { "stopWaitHours": 24 }
-}
-```
-
-The `loop` profile accepts `model` and `effort`; omitted values inherit provider settings, and `by-difficulty` selects the existing model/effort mapping. Implementers use the Lead's provider and the worktree's configuration. Target and merge method belong in project instructions, not this configuration. Runtime commands are `harness loop launch --cwd <worktree> --prompt-file <file>`, `lookup <session>`, `feedback <session> --wait-token <token> --file <file>`, `release <session> --wait-token <token>`, and `resume <session> --file <file>`. `launch` accepts `--parent <Lead-id>` when not already inside the registered Lead environment.
+`ship` is temporarily unavailable while its unfinished implementation is revised in `harness/in-progress/ship/`.
 
 ## Test workflows
 
@@ -451,7 +414,7 @@ covers: ["src/greeting/**/*.py"]
 
 Run the workflow, then `test-workflows confirm tests/workflow/greeting.md` to automatically create or update the sibling `greeting.manifest.json` with the normalized covered-file hash and generated `verified_files` inventory. Commit both files. Agents write and read the Markdown, including its `covers` patterns; the CLI manages the manifest. A workflow without a manifest is unconfirmed (`stale`). Hashes normalize line endings, so equivalent Windows and Unix checkouts agree. `test-workflows status` reports workflow states and changed covered files in TOON format, including broken mappings whose globs match nothing and malformed workflows or manifests. Add `--json` before or after the command to output JSON instead; this also applies to confirmation and command errors. Exit codes are 0 for all passing, 1 for a stale/broken/invalid workflow, and 2 for a command error. Discovery finds tracked/non-ignored Markdown with `covers` front matter; use `--directory <folder>` or `--root <checkout>` before the subcommand to narrow it.
 
-Run `test-workflows status` explicitly when verifying changes, as you would run unit tests, then run the affected checks and confirm passing ones. Use the pinned uvx prefix in the installed skill for these commands; uv and Git are required, and the first invocation downloads the CLI into uv's cache. Loop implementers run and report; only the Lead stamps their results. Pi uses the same shared skill and on-demand CLI; invoke `/skill:test-workflows` to load it explicitly. Confirmation records verification performed by the agent; it does not execute the acceptance steps.
+Run `test-workflows status` explicitly when verifying changes, as you would run unit tests, then run the affected checks and confirm passing ones. Run these commands as `python <skill-directory>/scripts/test_workflows.py` with Python 3.11+ and Git; the script is bundled with the installed skill. Pi uses the same shared skill and script; invoke `/skill:test-workflows` to load it explicitly. Confirmation records verification performed by the agent; it does not execute the acceptance steps.
 
 ## Environment context
 
@@ -857,7 +820,7 @@ The access cookie is marked `Secure` whenever the request arrives over HTTPS, so
 
 ### Tool documentation and upstream references
 
-Maintain usage, provider support, implementation decisions and acceptance limits in the relevant [tool guide](docs/user/index.md). Shared installation roots, receipt ownership and dependency packaging belong in [Configuration](docs/user/configuration.md#installation-roots-and-ownership). A proposed port remains identified as proposed in its tool guide; `/ship` does not yet support Pi loop implementers.
+Maintain usage, provider support, implementation decisions and acceptance limits in the relevant [tool guide](docs/user/index.md). Shared installation roots, receipt ownership and dependency packaging belong in [Configuration](docs/user/configuration.md#installation-roots-and-ownership). A proposed port remains identified as proposed in its tool guide.
 
 [Pi's official reference mirror](docs/PI-REFERENCES/README.md), alongside the Claude Code and ChatGPT mirrors, supplies upstream API evidence. The mirrors track upstream and are refreshed by the daily/manual documentation workflow; a refresh does not certify another runtime version. Tool guides retain their own tested baseline and verification boundary.
 
@@ -896,15 +859,6 @@ Aboard still uses its published VSIX; see its README for extension development.
 The custom subagent registry requires `--local` until a release refreshes the
 `subagents` runtime Git pin to include this loader.
 
-The `/ship` additions require this local installation until a release updates the
-runtime Git pins and publishes the corresponding Aboard VSIX. The existing remote
-pins predate the new runtime packages; a regular remote install is not a substitute
-for `--local` when trying these unpushed changes:
-
-```powershell
-uvx --no-cache --from "$checkout" harness --local "$checkout" install ship cleanup-git --root "C:\path\to\project"
-```
-
 The shared deterministic E2E core uses the real Claude Code, ChatGPT, and Pi CLIs and replaces only model inference with an authenticated loopback endpoint. Tool journeys live under `tests/e2e/`; Aboard-specific journeys stay under `apps/aboard/test/e2e/`.
 
 Pi's headless E2E environment is ready for tool implementation. It runs the installed Pi CLI in
@@ -921,21 +875,3 @@ npm install
 npm run check
 npm test
 ```
-
-`npm run e2e:ship -- [claude|chatgpt|all] [scenario|all]` installs the actual local
-packages for both providers, then runs deterministic real Lead/implementer loops on
-Claude Code and Codex against the private `EmilienxD/harness-e2e` fixture. The Lead's
-decisions are scripted; the CLIs, hooks, guards, runtime and GitHub effects are real.
-Scenarios: `feedback` (selection/claim, initialized worktree, failing criteria commit,
-feedback on warm context, explicit workflow status, stamping, stub contract, open `Refs #n`
-PR), `leaves` (parent expansion in dependency order, one squash-merged PR per leaf),
-`decision-resume` (linked `[AI]-help-wanted` blocker, `[AI]-needs-decision` draft, then
-`/ship <PR>` resuming the same implementer from a new Lead conversation),
-`blocker-auto-merge` (prerequisite delivered and merged first, original resumed and
-merged) and `fresh-cap` (feedback cap, one active implementer per worktree, fresh
-implementer inputs, implementer cap ending in a draft). Merges land on a per-run
-target branch. Each run closes only its own issues/PRs and deletes only its own
-branches and labels. It needs GitHub authentication and no other triaged issue in
-that shared fixture. Provider CLIs use isolated configuration and an authenticated
-local inference endpoint; the terminal bridge exercises the runtime launch path
-without requiring a desktop window in test automation.

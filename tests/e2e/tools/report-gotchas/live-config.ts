@@ -11,7 +11,7 @@ export async function configuredWebhookUrl(): Promise<string> {
       if (config.version === 1) value = config.webhook_url;
     } catch { /* report a structural configuration error below */ }
   }
-  if (typeof value !== "string") throw new Error("Live Discord E2E needs a configured webhook; use the pinned uvx configure command in docs/user/tools/productivity/report-gotchas.md");
+  if (typeof value !== "string") throw new Error("Live Discord E2E needs a configured webhook; use the bundled Python configure command in docs/user/tools/productivity/report-gotchas.md");
   try {
     const url = new URL(value.trim());
     if (url.protocol === "https:" && (url.hostname === "discord.com" || url.hostname.endsWith(".discord.com")) && url.pathname.startsWith("/api/webhooks/")) return url.toString();

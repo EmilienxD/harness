@@ -392,19 +392,10 @@ Run `npm run e2e:pi-web-toolkit` for the executable journeys. Chrome, Edge or Ch
 required. These Windows headless checks cover native integration; public engine availability,
 POSIX and interactive Pi rendering remain separate acceptance boundaries.
 
-## On-demand ship helpers
-
-`npm run test:ship-helpers` provides a credential-free Codex journey for the on-demand
-`issue-context` and `ship-stubs` commands shipped by `ship`. It installs the real skill and
-checkout subagents runtime, runs the published helper pins in an isolated uv cache, reads
-issue context from a local `gh` fixture and verifies anchored stub rejection/completion through
-native shell calls. Five inference requests, zero unexpected requests, exact file bytes,
-no installed helper CLIs and receipt removal are checked. It does not publish to GitHub.
-
 ## Pi gotcha reports
 
-`test:pi-report-gotchas` installs the checkout `report-gotchas` skill and executes its published
-immutable CLI pin through uvx in all four project/user and JSON/RPC combinations. It uses real headless Pi 1.2.0 and
+`test:pi-report-gotchas` installs the checkout `report-gotchas` skill and executes its bundled
+Python scripts directly in all four project/user and JSON/RPC combinations. It uses real headless Pi 1.2.0 and
 the fake Responses endpoint, with no reporting extension, hooks, transport dependency or Git
 repository. A loopback HTTPS Discord fixture preserves real URL validation, TLS, urllib,
 shell execution and CLI exit status. It requires `openssl` for its temporary certificate;
@@ -415,6 +406,10 @@ Checks cover confirmed direct posting, missing configuration, empty reports, Uni
 mentions, multipart posts, explicit HTTP/rate-limit errors, exact inference counts, absence of
 local report storage and installer removal. The only reporting state is webhook configuration.
 No unit-test mock replaces the CLI or HTTP client.
+
+`npm run test:report-gotchas-local` additionally runs the bundled scripts through real
+Claude Code and Codex using the same local HTTPS fixture, with three inference requests
+per provider and exact report delivery. No live Discord messages are sent by these tests.
 
 Explicit live acceptance uses the configured real Discord webhook:
 
@@ -427,11 +422,11 @@ These commands each post clearly labeled test reports. They read the webhook fro
 configuration (or `HARNESS_REPORT_GOTCHAS_E2E_WEBHOOK_URL`) and pass it only in child environment
 variables; diagnostics never contain the URL or message bodies. Inference always goes to the
 fake loopback API. Each live provider journey requires exactly three inference requests and
-checks the real CLI's confirmed Discord success before completing. Before the uvx migration,
+checks the real CLI's confirmed Discord success before completing. Before the packaging changes,
 all three live journeys passed on Windows and the user confirmed receipt of the notifications.
-The uvx path is verified against the local HTTPS fixture; live posting has not been rerun.
+The bundled scripts are verified against the local HTTPS fixture; live posting has not been rerun.
 
-The uv cache and host-tool directories are fixture-owned; no reporting CLI is installed.
+Package managers are offline and no reporting CLI is installed; only Discord uses the network.
 Interactive Pi TUI and POSIX need separate checks.
 
 ## Pi persistent subagents
@@ -569,8 +564,8 @@ waits for named approval, rechecks live state, preserves a branch with newly arr
 removes only the approved merged branch/worktree. Unrelated input starts no inventory; unavailable
 skills/helpers stop before inference. These checks certify integration, not unscripted cleanup judgment.
 
-`test:pi-test-workflows` installs the shared skill and executes its published immutable CLI pin
-through uvx in isolated caches. Project JSON and user RPC run a passing acceptance check before explicit confirmation,
+`test:pi-test-workflows` installs the shared skill and executes its bundled Python script
+with package managers offline and no installed helper CLI. Project JSON and user RPC run a passing acceptance check before explicit confirmation,
 then introduce a regression and prove failed acceptance leaves verification stale. Broken/invalid
 coverage, exact hashes, request counts, skill removal and absence of installed host CLIs are checked. Status
 and confirmation do not execute the acceptance steps themselves.

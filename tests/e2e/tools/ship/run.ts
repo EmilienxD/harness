@@ -25,6 +25,11 @@ const graphql = (query: string, variables: Record<string, string>) =>
   gh("api", "graphql", "-f", `query=${query}`, ...Object.entries(variables).flatMap(([key, value]) => ["-f", `${key}=${value}`]));
 
 export async function runShipJourney(platform: ShipPlatform, scenario: ShipScenario): Promise<Json> {
+  throw new Error("ship is unavailable while its implementation is revised in harness/in-progress/ship");
+}
+
+/** Retained for the future redesign; excluded from package scripts and execution. */
+async function unfinishedShipJourney(platform: ShipPlatform, scenario: ShipScenario): Promise<Json> {
   if (platform === "claude") await validateClaudeCli(); else await validateCodexCli();
   const identity = JSON.parse(await gh("repo", "view", repository, "--json", "nameWithOwner,isPrivate")) as Json;
   assert.deepEqual(identity, { nameWithOwner: repository, isPrivate: true });

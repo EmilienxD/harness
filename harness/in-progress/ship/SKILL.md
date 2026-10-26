@@ -9,7 +9,7 @@ You are the Lead. You own one issue at a time from selection to an open or merge
 
 The invocation hook supplies your Lead session ID and an explorer inbox. Launch every child through the `subagents` runtime: implementers with `harness loop`, the optional explorer through the inbox. If that hook context is missing, repair the installed runtime hook before launching anything.
 
-Run helper commands in this skill and its references on demand with uv and Git: expand `issue-context` to `uvx --from git+https://github.com/EmilienxD/harness@21c3f4f1e562c97a467286cc09b793e5eee6f9d2#subdirectory=harness/building/issue-readers issue-context` and `ship-stubs` to `uvx --from git+https://github.com/EmilienxD/harness@21c3f4f1e562c97a467286cc09b793e5eee6f9d2#subdirectory=harness/building/ship ship-stubs`, followed by their arguments. For `test-workflows`, use its installed skill's pinned uvx command.
+This unfinished tool is unavailable from the catalogue while its delivery workflow is revised.
 
 ## Run directory
 

@@ -102,6 +102,6 @@ busy-parent steering are outside this gate.
 
 ## Remaining integration limits
 
-Pi context-usage telemetry remains unimplemented rather than estimated. Ordinary launch/reply/resume support does not enable Pi loop implementers for [ship](../workflows/ship.md#pi-status). Inline `@path` text in a delegated prompt is not a universal attachment guarantee: the [file-mentions](file-mentions.md) extension handles Pi user input when installed, and required context must otherwise be read or attached explicitly.
+Pi context-usage telemetry remains unimplemented rather than estimated. Ordinary launch/reply/resume support does not enable Pi loop implementers for the unavailable `ship` workflow. Inline `@path` text in a delegated prompt is not a universal attachment guarantee: the [file-mentions](file-mentions.md) extension handles Pi user input when installed, and required context must otherwise be read or attached explicitly.
 
 Checkout-runtime acceptance and immutable remote pins are separate. The existing native npm packaging checks recorded four shipped-pin journeys requiring the runtime changes from local commit `ba136dd`; rebuilding the extension archive does not itself publish that runtime. Keep remote-install claims scoped to the pin actually tested.
