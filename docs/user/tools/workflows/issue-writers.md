@@ -8,7 +8,7 @@ Use `draft-issue` for one agent-sized vertical slice, `draft-issues` for a conne
 
 ## Invocation
 
-Claude Code uses `/skill-name`; ChatGPT uses `$skill-name`; Pi uses `/skill:skill-name`. Pi also accepts the shorter drafting aliases and handles `/publish-issues [--dry]` as a native command with zero inference. `/skill:publish-issues [--dry]` is intercepted too. Pass a request, plan, spec path, issue number, or URL to a drafting skill. Use `publish-issues --dry` to preview before publishing.
+Claude Code uses `/skill-name`; ChatGPT uses `$skill-name`; Pi uses `/skill:skill-name`. Pi also accepts the shorter drafting aliases and handles `/publish-issues [--dry]` as a native command with zero inference. Pass a request, plan, spec path, issue number, or URL to a drafting skill. Use `publish-issues --dry` to preview before publishing.
 
 ## What happens
 
@@ -28,8 +28,8 @@ Pi namespaces native session IDs into separate draft batches, preserves identity
 
 Writers reuse `issues_core.py` without changing publishing semantics. UUIDv5 identities use
 `harness:issues:pi:<native-session-id>`; reload/resume retain that batch, while native new/fork
-sessions select another. `/publish-issues [--dry]` and `/skill:publish-issues [--dry]` are consumed
-without inference. Repository locks, draft ordering, parent links, crash recovery, stale sweeping
+sessions select another. `/publish-issues [--dry]` is a native command consumed without inference; its skill
+shim is installed only for Claude Code and ChatGPT. Repository locks, draft ordering, parent links, crash recovery, stale sweeping
 and next-prompt notices remain owned by the shared core.
 
 Input routing, cancellation, transport limits and the shared acceptance journeys are documented with [issue readers](issue-readers.md#pi-routing-and-context-preparation).

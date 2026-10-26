@@ -25,3 +25,4 @@ tmp*
 .temp*
 temp*
 scratch/
+.private/

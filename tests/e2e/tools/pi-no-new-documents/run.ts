@@ -44,7 +44,7 @@ export async function runPiDocumentsJourney(mode: "json" | "rpc", scope: "projec
     assert.equal(await readFile(join(project, "result.txt"), "utf8"), "ordinary file\n");
     assert.equal(await readFile(draft(".gitignore"), "utf8"), "*\n");
     assert.equal(fixture.assertions().inferenceRequests, 11);
-    for (const command of ["/approve-doc-draft", "/reject-doc-draft docs/reject.md", '/skill:approve-doc-draft "docs/space name.md"', "/approve-doc-draft docs/existing.md", "/approve-doc-draft docs/new.md", "/approve-doc-draft docs/nested"]) {
+    for (const command of ["/approve-doc-draft", "/reject-doc-draft docs/reject.md", '/approve-doc-draft "docs/space name.md"', "/approve-doc-draft docs/existing.md", "/approve-doc-draft docs/new.md", "/approve-doc-draft docs/nested"]) {
       assert.equal((await rpc.prompt(command)).status, "handled");
     }
     assert.equal(fixture.assertions().inferenceRequests, 11);

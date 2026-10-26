@@ -1,5 +1,5 @@
 name = "enable-desktop-notification"
-version = "1.1.5"
+version = "1.1.6"
 description = "Enable desktop notifications for final responses in the current session without a model call"
 docs = "https://github.com/EmilienxD/harness/blob/main/README.md#user-invoked-skills"
 
@@ -55,6 +55,7 @@ platforms = ["pi"]
 src = "SKILL.md"
 dest = "enable-desktop-notification/SKILL.md"
 root = "skills"
+platforms = ["claude", "chatgpt"]
 
 [[files]]
 src = "chatgpt/openai.yaml"

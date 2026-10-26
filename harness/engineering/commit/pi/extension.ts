@@ -109,10 +109,4 @@ export default function (pi: any) {
     }
   };
   pi.registerCommand("commit", { description: "Commit verified writes on the active session branch without a model turn", handler: commit });
-  pi.on("input", async (event: any, ctx: any) => {
-    const match = /^\s*\/skill:commit(?:\s+([\s\S]*))?\s*$/.exec(event.text);
-    if (!match) return;
-    await commit(match[1] ?? "", ctx);
-    return { action: "handled" };
-  });
 }

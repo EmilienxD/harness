@@ -32,7 +32,8 @@ For a new `docs/arch/plan.md`, inspect `.harness/doc-drafts/docs/arch/plan.md` a
 `no-new-documents` 3.2.1 uses the same bridge with package-local native tool and command translation.
 It denies native writes and recognized literal shell creations in protected paths, including nested
 calls, while allowing draft mirrors and existing-document edits. Malformed policy or transport failure
-blocks covered calls. Native approval/rejection and their `/skill:` forms make zero inference requests.
+blocks covered calls. Native `/approve-doc-draft` and `/reject-doc-draft` commands make zero inference requests.
+Their skill shims are installed only for Claude Code and ChatGPT.
 Publication uses exclusive hard-link creation followed by draft removal, so an existing destination
 cannot be overwritten by a concurrent approval. Unsupported hard links leave the draft for correction.
 Native custom messages persist outcomes on the active branch; current pending drafts are refreshed

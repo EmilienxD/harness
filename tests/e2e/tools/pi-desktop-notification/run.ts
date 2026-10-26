@@ -71,7 +71,7 @@ export async function runPiNotificationJourney(scope: "project" | "user") {
     assert.equal((await rpc.prompt(marker)).status, "success");
     assert.equal((await captures(backend.capture)).length, 0);
     assert.equal((await rpc.prompt("/notify-anchor")).status, "handled");
-    for (const command of ["/enable-desktop-notification invalid", "/enable-desktop-notification", "/skill:enable-desktop-notification"])
+    for (const command of ["/enable-desktop-notification invalid", "/enable-desktop-notification"])
       assert.equal((await rpc.prompt(command)).status, "handled");
     assert.equal(fixture.assertions().inferenceRequests, 1);
     assert.equal((await rpc.prompt(marker)).status, "success");

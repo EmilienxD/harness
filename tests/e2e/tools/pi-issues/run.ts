@@ -120,7 +120,7 @@ export async function runPiIssueWriters(scope: "project" | "user") {
     assert.equal((await fixture.rpc().prompt("/publish-issues")).status, "handled");
     assert.equal((JSON.parse(await readFile(gh.statePath, "utf8")) as { issues: unknown[] }).issues.length, 0);
     assert.equal((await rpc.prompt("/publish-issues --unknown")).status, "handled");
-    assert.equal((await rpc.prompt("/skill:publish-issues --dry")).status, "handled");
+    assert.equal((await rpc.prompt("/publish-issues --dry")).status, "handled");
     assert.equal(await readFile(join(fixture.workspace.projectRoot, path), "utf8"), content);
     assert.equal((JSON.parse(await readFile(gh.statePath, "utf8")) as { issues: unknown[] }).issues.length, 0);
     assert.equal((await rpc.prompt("/publish-issues")).status, "handled");

@@ -1,5 +1,5 @@
 name = "issue-writers"
-version = "2.3.6"
+version = "2.3.7"
 description = "Draft and publish GitHub issues"
 requires = ["git", "gh"]
 docs = "https://github.com/EmilienxD/harness/blob/main/README.md#user-invoked-skills"
@@ -59,6 +59,7 @@ root = "skills"
 src = "publish-issues/SKILL.md"
 dest = "publish-issues/SKILL.md"
 root = "skills"
+platforms = ["claude", "chatgpt"]
 
 [[files]]
 src = "to-spec/SKILL.md"

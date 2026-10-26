@@ -1,5 +1,5 @@
 name = "commit"
-version = "1.7.6"
+version = "1.7.7"
 description = "Zero-model-turn /commit with native Pi branch attribution and shared Git/message generation"
 requires = ["git"]
 dependencies = [{ name = "pi-transport", version = ">=1.0.0,<2.0.0", lifecycle = "coupled", platforms = ["pi"] }]
@@ -49,6 +49,7 @@ executable = true
 src = "SKILL.md"
 dest = "commit/SKILL.md"
 root = "skills"
+platforms = ["claude", "chatgpt"]
 
 [[files]]
 src = "chatgpt/openai.yaml"

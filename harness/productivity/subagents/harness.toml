@@ -1,5 +1,5 @@
 name = "subagents"
-version = "2.11.5"
+version = "2.11.6"
 description = "Persistent conversation delegation with mode-preserving resume"
 docs = "https://github.com/EmilienxD/harness/blob/main/README.md#user-invoked-skills"
 dependencies = [
@@ -135,6 +135,7 @@ platforms = ["chatgpt"]
 src = "reply-to-agent-with-previous-message/SKILL.md"
 dest = "reply-to-agent-with-previous-message/SKILL.md"
 root = "skills"
+platforms = ["claude", "chatgpt"]
 
 [[files]]
 src = "reply-to-agent-with-previous-message/chatgpt/openai.yaml"

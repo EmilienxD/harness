@@ -47,13 +47,6 @@ export default function (pi: any): void {
   pi.registerCommand("enable-desktop-notification", {
     description: "Enable desktop notifications for this Pi session (--disable turns them off)", handler: command,
   });
-  // The native skill spelling stays deterministic as well; it never expands into inference.
-  pi.on("input", async (event: any, ctx: any) => {
-    const match = /^\/skill:enable-desktop-notification(?:\s+([\s\S]*))?$/u.exec(event.text.trim());
-    if (!match) return;
-    await command(match[1] ?? "", ctx);
-    return { action: "handled" };
-  });
   pi.on("agent_settled", async (event: any, ctx: any) => {
     if (!running) return;
     running = false;

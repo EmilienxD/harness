@@ -8,7 +8,7 @@ Use `commit` after reviewing completed work from the current session. A dry run 
 
 ## Invocation
 
-Use `/commit <message>`, `/commit --dry`, or `/commit --ai [guidance]`. Hooks on Claude Code/ChatGPT and a native Pi command handle the request before an agent model call. Pi also accepts `/skill:commit` with the same options.
+Use `/commit <message>`, `/commit --dry`, or `/commit --ai [guidance]`. Hooks on Claude Code/ChatGPT and a native Pi command handle the request before an agent model call.
 
 ## What happens
 
@@ -34,8 +34,8 @@ and a resumed explicit commit adds no inference request. Separate failure journe
 check explicit commit errors and pre/post-tool failures. Inference uses the authenticated
 loopback fixture; lone-surrogate serialization is covered by Python regression tests.
 
-`commit` 1.7.1 registers `/commit` and intercepts `/skill:commit` before skill expansion.
-Both reuse the existing Python flag parsing, staging, Git commit, dry-run and explicitly
+`commit` registers `/commit` as a native Pi command. Its skill shim is installed only
+for Claude Code and ChatGPT. The command reuses the existing Python flag parsing, staging, Git commit, dry-run and explicitly
 requested Gemini message generation. Pi passes native active-branch user/assistant context
 to the shared message builder directly; it does not fabricate a Claude transcript. Ordinary
 commands, usage errors and dry runs create zero Pi inference requests. `--ai` still uses its

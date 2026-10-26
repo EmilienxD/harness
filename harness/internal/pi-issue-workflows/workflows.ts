@@ -37,10 +37,6 @@ export function registerIssueWorkflow(pi: any, packageName: string, skills: stri
   pi.on("input", async (event: any, ctx: any) => {
     const signal = controller.signal;
     const match = /^\/(?:skill:)?([a-z-]+)(?:\s+([\s\S]*))?$/.exec(event.text.trim());
-    if (publish && match?.[1] === "publish-issues") {
-      await publishIssues(match[2] ?? "", ctx);
-      return { action: "handled" };
-    }
     if (!match || !skills.includes(match[1])) {
       if (publish) {
         try {
