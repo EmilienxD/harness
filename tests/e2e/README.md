@@ -366,7 +366,7 @@ requested Gemini service; command integration uses fake inference, never paid Pi
 
 ## Pi Web Toolkit
 
-`test:pi-web-toolkit` installs the actual `web-toolkit` native extension without a host CLI
+`test:pi-web-toolkit` installs the actual `web-toolkit-native` extension without a host CLI
 installation, then acquires the shipped immutable uvx source into an empty isolated cache.
 Project JSON and user RPC journeys use real Pi 1.2.0 with the
 fake OpenAI Responses API shared with Codex. They verify that no Web Toolkit skill is installed
@@ -386,7 +386,10 @@ and permit a subsequent native browser-backed search. A subprocess loads the ins
 with Pi's real SDK, starts a real uvx fetch, fires the unmodified 120-second deadline callback
 under a controlled clock, and requires HTTP disconnection and shared-browser survival.
 The same subprocess checks the 256 KiB output limit against an actual large CLI response.
-The journeys verify no permanent CLI package or executable is installed.
+The journeys verify no permanent CLI package or executable is installed. They also install
+the separate `web-toolkit` skill, verify native skill discovery alongside the extension,
+and remove each package independently while preserving the other. Skill discovery and
+installer ownership are covered; unscripted model selection of the skill remains outside this gate.
 
 Run `npm run e2e:pi-web-toolkit` for the executable journeys. Chrome, Edge or Chromium is
 required. These Windows headless checks cover native integration; public engine availability,

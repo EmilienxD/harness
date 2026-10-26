@@ -29,7 +29,8 @@ Install a package from the Harness catalogue, or run `harness install <package>`
 | [`subagents`](productivity/subagents.md) | Claude Code, ChatGPT, Pi | Persistent conversation delegation with mode-preserving resume |
 | [`todo-hitl`](productivity/todo-hitl.md) | Claude Code, ChatGPT, Pi | Mark deferred code work for human review and address it deliberately |
 | [`tool-inspector`](productivity/tool-inspector.md) | Pi | Show Pi's installed tools at startup and inspect their contracts with /tools |
-| [`web-toolkit`](productivity/web-toolkit.md) | Claude Code, ChatGPT, Pi | Local web search and page fetching CLI, with native Pi tools |
+| [`web-toolkit-native`](productivity/web-toolkit.md) | Pi | Native web_search and web_fetch tools |
+| [`web-toolkit`](productivity/web-toolkit.md) | Claude Code, ChatGPT, Pi | Skill for local web search and page fetching through the CLI |
 | [`writing-for-agents`](productivity/writing-for-agents.md) | Claude Code, ChatGPT, Pi | Guidance for writing predictable documents consumed by agents |
 | [`zoom-out`](productivity/zoom-out.md) | Claude Code, ChatGPT, Pi | Gives a higher-level map of a codebase area |
 

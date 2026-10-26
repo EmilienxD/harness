@@ -36,17 +36,17 @@ export async function runPiWebToolkitJourney(scope: "project" | "user", mode: "j
     const cli = await skillCommand(join(root, "harness/productivity/web-toolkit/SKILL.md"), "web-toolkit");
     const ensure = () => command(cli.file, [...cli.args.slice(0, -1), "python", "-c", "from web_toolkit.browser import ensure; print(ensure())"], workspace);
     const resources = scope === "project" ? join(workspace.projectRoot, ".pi") : workspace.agentDir;
-    const extension = join(resources, "npm/node_modules/harness-pi-web-toolkit", "extensions", ".harness-web-toolkit", "index.ts");
+    const extension = join(resources, "npm/node_modules/harness-pi-web-toolkit-native", "extensions", ".harness-web-toolkit", "index.ts");
     const settings = join(workspace.projectRoot, ".pi", "settings.json");
     const settingsBefore = await readFile(settings, "utf8");
-    await runFixtureInstaller(workspace, "install", ["web-toolkit"], { scope, dryRun: true });
+    await runFixtureInstaller(workspace, "install", ["web-toolkit-native"], { scope, dryRun: true });
     assert.equal(await exists(extension), false); assert.equal(await exists(executable), false);
-    await runFixtureInstaller(workspace, "install", ["web-toolkit"], { scope });
+    await runFixtureInstaller(workspace, "install", ["web-toolkit-native"], { scope });
     assert.equal(await exists(join(workspace.env.UV_TOOL_DIR!, "harness-web-toolkit")), false);
     assert.equal(await exists(join(workspace.env.UV_CACHE_DIR!, "archive-v0")), false);
     assert.equal(await exists(join(resources, "skills", "web-toolkit")), false);
-    assert.equal(await readFile(extension, "utf8"), await readFile(join(root, "harness/productivity/web-toolkit/pi/extension.ts"), "utf8"));
-    const repeat = await runFixtureInstaller(workspace, "install", ["web-toolkit"], { scope });
+    assert.equal(await readFile(extension, "utf8"), await readFile(join(root, "harness/productivity/web-toolkit-native/pi/extension.ts"), "utf8"));
+    const repeat = await runFixtureInstaller(workspace, "install", ["web-toolkit-native"], { scope });
     assert.equal((repeat.results as { status: string }[])[0]?.status, "unchanged");
     // Acquire the actual published pin into an empty isolated cache, then use its keeper.
     const endpoint = (await ensure()).trim();
@@ -127,8 +127,28 @@ export async function runPiWebToolkitJourney(scope: "project" | "user", mode: "j
     const observations = fixture.assertions();
     assert.equal(observations.inferenceRequests, 20); assert.equal(observations.unexpectedRequests, 0);
     await browser.close(); browser = undefined;
+    // The shared skill and native tools have independent installer ownership.
+    const skill = join(resources, "skills", "web-toolkit", "SKILL.md");
+    await runFixtureInstaller(workspace, "install", ["web-toolkit"], { scope });
+    assert.equal(await exists(extension), true);
+    assert.equal(await exists(skill), true);
+    const together = fixture.rpc();
+    const togetherCommands = await together.request("get_commands");
+    assert.equal((togetherCommands.data as { commands: { name: string }[] }).commands.some((item) => item.name === "skill:web-toolkit"), true);
+    await together.close();
     await runFixtureInstaller(workspace, "uninstall", ["web-toolkit"], { scope });
+    assert.equal(await exists(extension), true);
+    assert.equal(await exists(skill), false);
+    await runFixtureInstaller(workspace, "install", ["web-toolkit"], { scope });
+    await runFixtureInstaller(workspace, "uninstall", ["web-toolkit-native"], { scope });
     assert.equal(await exists(extension), false); assert.equal(await exists(executable), false);
+    assert.equal(await exists(skill), true);
+    const skillOnly = fixture.rpc();
+    const skillCommands = await skillOnly.request("get_commands");
+    assert.equal((skillCommands.data as { commands: { name: string }[] }).commands.some((item) => item.name === "skill:web-toolkit"), true);
+    await skillOnly.close();
+    assert.equal(fixture.assertions().inferenceRequests, 20);
+    await runFixtureInstaller(workspace, "uninstall", ["web-toolkit"], { scope });
     assert.equal(await exists(join(resources, "skills", "web-toolkit")), false);
     assert.deepEqual(JSON.parse(await readFile(settings, "utf8")), JSON.parse(settingsBefore));
     return { scope, mode, version: fixture.version, inferenceRequests: observations.inferenceRequests, unexpectedRequests: observations.unexpectedRequests,

@@ -1449,6 +1449,7 @@ def test_every_catalogue_manifest_loads():
             "setup-text-replacements", "todo-hitl", "tool-inspector", "writing-for-agents", "stop-overthinking", "zoom-out",
             "polished-code-blocks",
             "web-toolkit",
+            "web-toolkit-native",
             "pi-subagents-toolkit",
         },
         "guards": {

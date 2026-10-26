@@ -1,6 +1,7 @@
 """web-toolkit installation leaves provider configuration to the user."""
 
 import json
+from dataclasses import replace
 
 import pytest
 
@@ -77,14 +78,53 @@ def test_chatgpt_does_not_create_config_when_absent(tmp_path, installed_actions)
 def test_pi_installs_native_extension_without_fallback_skill(tmp_path, installed_actions):
     target, catalogue = installer(tmp_path, Platform.PI)
 
-    catalogue.reconcile({"web-toolkit"})
+    catalogue.reconcile({"web-toolkit-native"})
 
-    package = target.install_root / "npm/node_modules/harness-pi-web-toolkit"
+    package = target.install_root / "npm/node_modules/harness-pi-web-toolkit-native"
     assert (package / "extensions/.harness-web-toolkit/index.ts").is_file()
     assert (package / "package.json").is_file()
     assert not (target.install_root / "extensions").exists()
     assert not (target.install_root / "harness/packages").exists()
     assert installed_actions == []
+    assert not (target.install_root / "skills/web-toolkit").exists()
     catalogue.reconcile(set())
     assert not (target.install_root / "skills/web-toolkit").exists()
     assert not package.exists()
+
+
+def test_pi_installs_shared_skill_without_native_package(tmp_path, installed_actions):
+    target, catalogue = installer(tmp_path, Platform.PI)
+    catalogue.reconcile({"web-toolkit"})
+    assert target.destination_path("skills", "web-toolkit/SKILL.md").is_file()
+    assert not (target.install_root / "npm").exists()
+    assert installed_actions == []
+    catalogue.reconcile(set())
+    assert not target.destination_path("skills", "web-toolkit/SKILL.md").exists()
+
+
+@pytest.mark.parametrize("remaining", ["web-toolkit", "web-toolkit-native"])
+def test_pi_packages_coexist_and_remove_independently(tmp_path, remaining):
+    target, catalogue = installer(tmp_path, Platform.PI)
+    catalogue.reconcile({"web-toolkit", "web-toolkit-native"})
+    skill = target.destination_path("skills", "web-toolkit/SKILL.md")
+    extension = target.install_root / "npm/node_modules/harness-pi-web-toolkit-native/extensions/.harness-web-toolkit/index.ts"
+    assert skill.is_file() and extension.is_file()
+    catalogue.reconcile({remaining})
+    assert skill.is_file() == (remaining == "web-toolkit")
+    assert extension.is_file() == (remaining == "web-toolkit-native")
+    catalogue.reconcile(set())
+    assert not skill.exists() and not extension.exists()
+
+
+def test_pi_upgrade_replaces_legacy_native_package_with_skill(tmp_path):
+    target, catalogue = installer(tmp_path, Platform.PI)
+    available = discover()
+    legacy = replace(available["web-toolkit-native"], name="web-toolkit", version="1.4.0")
+    CatalogueInstaller({"web-toolkit": legacy}, target, catalogue.store).reconcile({"web-toolkit"})
+    old_package = target.install_root / "npm/node_modules/harness-pi-web-toolkit"
+    assert (old_package / "extensions/.harness-web-toolkit/index.ts").is_file()
+
+    CatalogueInstaller(available, target, ReceiptStore.load(tmp_path / "receipts.json")).reconcile({"web-toolkit"})
+    assert not old_package.exists()
+    assert target.destination_path("skills", "web-toolkit/SKILL.md").is_file()
+    assert not target.read_settings().get("packages")
