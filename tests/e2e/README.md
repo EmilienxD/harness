@@ -538,7 +538,9 @@ project and user scope. Real Pi 1.2.0 JSON/RPC sessions prepare issue context, i
 fixture files, reject dirty addressing without inference, invoke the four writing skills and
 publish with no inference. A local fake `gh` records read and publish effects; no GitHub credentials
 or external tracker mutations are involved. Checks include supplied draft paths, reload identity,
-foreign-session preservation, dry-run/invalid options, exact inference counts, user-owned reader
+foreign-session preservation, dry-run/invalid options, removed writer aliases, response-only specs
+without draft setup, progress notifications, draft-to-issue notice mappings and exclusion of visible
+publication reports from model context, exact inference counts, user-owned reader
 starters and removal of the bridge after its last dependent. Python unit tests exercise complete
 context, relation deduplication, provider identity and notice isolation; the existing issue graph
 and publishing tests retain all-page retrieval and dependency/crash-recovery coverage.

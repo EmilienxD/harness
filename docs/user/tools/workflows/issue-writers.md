@@ -8,21 +8,23 @@ Use `draft-issue` for one agent-sized vertical slice, `draft-issues` for a conne
 
 ## Invocation
 
-Claude Code uses `/skill-name`; ChatGPT uses `$skill-name`; Pi uses `/skill:skill-name`. Pi also accepts the shorter drafting aliases and handles `/publish-issues [--dry]` as a native command with zero inference. Pass a request, plan, spec path, issue number, or URL to a drafting skill. Use `publish-issues --dry` to preview before publishing.
+Claude Code uses `/skill-name`; ChatGPT uses `$skill-name`; Pi uses `/skill:skill-name` for drafting and specs, with no short drafting aliases. Pi handles `/publish-issues [--dry]` as a native command with zero inference; there is no `/skill:publish-issues`. Pass a request, plan, spec path, issue number, or URL to a drafting skill. Use `publish-issues --dry` to preview before publishing.
 
 ## What happens
 
 `draft-issues` proposes titles, parent links, dependencies, and labels, then waits for your approval before writing files. `to-spec` synthesizes existing context without another interview. Drafting skills never create GitHub issues directly: the publication hook or native Pi command creates them and resolves links between drafts.
 
+Review and edit the Markdown files directly. The dry-run text lists valid drafts in publication order with their paths, labels, parents and blockers, followed by errors for skipped drafts. References such as `draft 0` identify the `.issue-0.md` filename index, not the displayed publication position. The preview stays local and does not verify GitHub access or permissions.
+
 ## Files and prerequisites
 
-Claude Code and ChatGPT are supported through hooks; Pi uses an extension and the same publishing core. `git` and `gh` are required; publication needs repository access. Drafts live in `.harness/issue-drafts/` as editable Markdown. Published drafts are deleted, and abandoned drafts are swept after a week. If `publish-issues` reaches the model, check that its hook.
+Claude Code and ChatGPT are supported through hooks; Pi uses an extension and the same publishing core. `git` and `gh` are required; publication needs repository access. Drafts live in `.harness/issue-drafts/` as editable Markdown. Published drafts are deleted, and abandoned drafts are swept after a week. If `publish-issues` reaches the model, check its hook or Pi extension installation.
 
 ## Example
 
-`/draft-issues docs/spec.md`, approve the mapping, review the draft files, and run `/publish-issues --dry` before publishing.
+In Pi: `/skill:draft-issues docs/spec.md`, approve the mapping, review the draft files, and run `/publish-issues --dry` before publishing.
 
-Pi namespaces native session IDs into separate draft batches, preserves identity across reload/resume, and supplies the next draft path for all four drafting/spec skills. Publication retains repository locks, dependency ordering, parent links, crash recovery and pending notices. A new/forked Pi session has its own batch. Notices reach the next non-publication prompt once. Finish the active turn before invoking these workflows. Reload Pi after installation and approve the extension resources; a missing skill or failed setup stops preparation. Native JSON/RPC project and user journeys were verified on Pi 1.2.0 with both local fake GitHub journeys and real authenticated `gh` against the private `harness-e2e` test repository.
+Pi namespaces native session IDs into separate draft batches, preserves identity across reload/resume, and supplies the next draft path for the three file-drafting skills. Response-only `to-spec` leaves the draft store untouched. Publication retains repository locks, dependency ordering, parent links, crash recovery and pending notices. A new/forked Pi session has its own batch. Notices reach the next non-publication prompt once. Finish the active turn before invoking these workflows. Reload Pi after installation and approve the extension resources; a missing skill or failed setup stops preparation. Native JSON/RPC project and user journeys were verified on Pi 1.2.0 with both local fake GitHub journeys and real authenticated `gh` against the private `harness-e2e` test repository.
 
 ## Pi publication and session ownership
 
@@ -31,5 +33,7 @@ Writers reuse `issues_core.py` without changing publishing semantics. UUIDv5 ide
 sessions select another. `/publish-issues [--dry]` is a native command consumed without inference; its skill
 shim is installed only for Claude Code and ChatGPT. Repository locks, draft ordering, parent links, crash recovery, stale sweeping
 and next-prompt notices remain owned by the shared core.
+
+Pi shows one activity notification during preparation or publication and a text result with created issue titles/links and failure details. The visible report stays out of model context. On the next input, the agent receives a compact notice mapping draft paths to real issue numbers plus reported failures. Publication timeouts warn that some issues may already exist and direct you to rerun for recovery.
 
 Input routing, cancellation, transport limits and the shared acceptance journeys are documented with [issue readers](issue-readers.md#pi-routing-and-context-preparation).

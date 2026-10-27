@@ -168,6 +168,9 @@ def test_interrupted_draft_whose_issue_exists_is_discarded_not_republished(
     assert created == []
     assert not stale.exists()
     assert "already published as #42" in result
+    notice = json.loads(hook.notice_path(tmp_path, SID).read_text())
+    assert notice["created"][0]["number"] == "42"
+    assert notice["created"][0]["draft"] == f".harness/issue-drafts/{SID}.issue-0.md"
 
 
 def test_interrupted_draft_that_never_reached_github_is_published(
@@ -578,6 +581,46 @@ def test_notice_stays_under_the_additional_context_cap(tmp_path):
     assert "and 450 more" in notice
 
 
+def test_publish_notice_records_draft_mapping_and_specific_failure(tmp_path, monkeypatch):
+    _capture_creates(monkeypatch, ["https://github.com/x/y/issues/42"])
+    good = _draft(tmp_path, "issue-0.md", "# Ready\n\n> mode:afk\n\nbody\n")
+    bad = _draft(tmp_path, "issue-1.md", "# Missing labels\n\nbody\n")
+
+    result = hook.publish_issues(False, SID, tmp_path)
+
+    assert 'Created: "Ready"' in result
+    assert "https://github.com/x/y/issues/42" in result
+    pending = json.loads(hook.notice_path(tmp_path, SID).read_text())
+    assert pending["created"][0]["draft"] == good.relative_to(tmp_path).as_posix()
+    assert pending["created"][0]["number"] == "42"
+    assert pending["failed"] == 1
+    assert bad.relative_to(tmp_path).as_posix() in pending["problems"][0]
+    assert "missing or malformed label line" in pending["problems"][0]
+    assert bad.exists()
+    assert not good.exists()
+
+
+def test_preview_shows_publication_order_relations_and_invalid_drafts_without_mutations(tmp_path, monkeypatch):
+    monkeypatch.setattr(hook, "run_gh", lambda *args, **kwargs: pytest.fail("Preview contacted GitHub"))
+    child = _draft(tmp_path, "issue-0.md", f"# Child\n\n> mode:afk\n\n## Parent\n\n{SID}/1\n\n## Blocked by\n\n{SID}/1\n")
+    parent = _draft(tmp_path, "issue-1.md", "# Parent\n\n> spec\n\nbody\n")
+    invalid = _draft(tmp_path, "issue-2.md", "# Invalid\n\nbody\n")
+    originals = {path: path.read_bytes() for path in (child, parent, invalid)}
+
+    result = hook.publish_issues(True, SID, tmp_path)
+
+    assert result.index('1. Parent') < result.index('2. Child')
+    for path in originals:
+        assert path.relative_to(tmp_path).as_posix() in result
+    assert "Labels: [AI]-spec" in result
+    assert "Parent: draft 1" in result
+    assert "Blocked by: draft 1" in result
+    assert "2 issue(s) ready to publish" in result
+    assert "1 would be skipped" in result
+    assert {path: path.read_bytes() for path in originals} == originals
+    assert not hook.notice_path(tmp_path, SID).exists()
+
+
 # Automatic cleanup: no command to learn
 
 
@@ -648,7 +691,8 @@ def test_dry_run_reports_each_draft_and_touches_nothing(tmp_path, monkeypatch):
 
     result = hook.run_publish_command("/publish-issues --dry", SID, tmp_path)
 
-    assert 'Would create: "T" [[AI]-basic-difficulty, [AI]-afk]' in result
+    assert '1. T' in result
+    assert 'Labels: [AI]-basic-difficulty, [AI]-afk' in result
     assert "1 issue(s) ready to publish" in result
     assert draft.exists()
     assert not hook.notice_path(tmp_path, SID).exists()

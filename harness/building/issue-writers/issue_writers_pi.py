@@ -29,7 +29,7 @@ def evaluate(request: dict) -> dict:
     elif request["operation"] == "prepare" and request["skill"] in {
         "draft-issue", "draft-issues", "to-spec", "to-spec-draft-issue",
     }:
-        context = core.prepare_drafting_context(cwd, session)
+        context = "" if request["skill"] == "to-spec" else core.prepare_drafting_context(cwd, session)
         notice = core.flush_notice(cwd, session)
         message = "\n\n".join(item for item in (notice, context) if item)
     else:

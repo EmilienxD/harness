@@ -77,8 +77,10 @@ export async function runPiIssueWriters(scope: "project" | "user") {
       { checkpoint: "draft", tool: "write", input: { path, content } },
     ] : [] }),
   }));
+  const aliasScenario = createPiToolScenario({ name: "removed-writer-alias", marker: "[E2E:removed-writer-alias]", steps: [] });
   const fixture = await createPiFixture({ scenarioCatalogHash: scenarios[0]!.scenarioCatalogHash, transition: (request) => {
     const serialized = JSON.stringify(request.input);
+    if (serialized.includes("[E2E:removed-writer-alias]")) return aliasScenario.transition(request);
     const scenario = scenarios.find((entry) => serialized.includes(`[E2E:pi-${entry.name}]`));
     if (!scenario) throw new Error("Unknown Pi issue writer fixture route");
     if (scenario.name === "draft-issue") {
@@ -110,7 +112,23 @@ export async function runPiIssueWriters(scope: "project" | "user") {
     }
     const probe = join(fixture.workspace.projectRoot, ".pi", "extensions", "issue-test-lifecycle");
     await mkdir(probe, { recursive: true });
-    await writeFile(join(probe, "index.ts"), 'export default function(pi) { pi.registerCommand("e2e-issue-reload", { handler: async (_args, ctx) => { await ctx.reload(); } }); }');
+    await writeFile(join(probe, "index.ts"), `
+      import { appendFileSync } from "node:fs";
+      import { join } from "node:path";
+      export default function(pi) {
+        pi.registerCommand("e2e-issue-reload", { handler: async (_args, ctx) => { await ctx.reload(); } });
+        pi.on("context_with_system", (event, ctx) => {
+          appendFileSync(join(ctx.cwd, "context-counts.jsonl"), JSON.stringify({
+            reports: event.messages.filter(m => m.customType === "harness-issue-writers").length,
+            notices: event.messages.filter(m => m.customType === "harness-issue-notice").length,
+          }) + "\\n");
+        });
+      }
+    `);
+    assert.equal((await fixture.runJson({ prompt: "/draft-issue [E2E:removed-writer-alias]" })).status, "success");
+    await assert.rejects(access(join(fixture.workspace.projectRoot, ".harness", "issue-drafts")));
+    assert.equal((await fixture.runJson({ prompt: "/skill:to-spec fixture" })).status, "success");
+    await assert.rejects(access(join(fixture.workspace.projectRoot, ".harness", "issue-drafts")));
     const rpc = fixture.rpc({ sessionId });
     assert.equal((await rpc.prompt("/skill:draft-issue fixture")).status, "success");
     assert.equal(await readFile(join(fixture.workspace.projectRoot, path), "utf8"), content);
@@ -120,27 +138,43 @@ export async function runPiIssueWriters(scope: "project" | "user") {
     assert.equal((await fixture.rpc().prompt("/publish-issues")).status, "handled");
     assert.equal((JSON.parse(await readFile(gh.statePath, "utf8")) as { issues: unknown[] }).issues.length, 0);
     assert.equal((await rpc.prompt("/publish-issues --unknown")).status, "handled");
-    assert.equal((await rpc.prompt("/publish-issues --dry")).status, "handled");
+    const preview = await rpc.prompt("/publish-issues --dry");
+    assert.equal(preview.status, "handled");
+    assert.ok(preview.events.some(event => event.type === "extension_ui_request" && event.method === "notify"));
     assert.equal(await readFile(join(fixture.workspace.projectRoot, path), "utf8"), content);
     assert.equal((JSON.parse(await readFile(gh.statePath, "utf8")) as { issues: unknown[] }).issues.length, 0);
     assert.equal((await rpc.prompt("/publish-issues")).status, "handled");
-    assert.equal(fixture.assertions().inferenceRequests, 2);
+    assert.equal(fixture.assertions().inferenceRequests, 4);
     assert.equal((await readPublishedIssue(gh.statePath)).title, "Pi fixture issue");
     await assert.rejects(access(join(fixture.workspace.projectRoot, path)));
     assert.deepEqual(await readdir(join(fixture.workspace.projectRoot, ".harness", "issue-drafts")), [".gitignore", foreign.split("/").at(-1)!].sort());
-    for (const scenario of scenarios.slice(1)) {
+    const stateDirectory = join(fixture.root, "harness-state", "issues");
+    const noticeFiles = (await readdir(stateDirectory)).filter(file => file.endsWith(".notice.json"));
+    assert.equal(noticeFiles.length, 1);
+    const notice = JSON.parse(await readFile(join(stateDirectory, noticeFiles[0]!), "utf8")) as { created: { draft: string; number: string }[] };
+    assert.equal(notice.created[0]!.draft, path);
+    assert.equal(notice.created[0]!.number, String((await readPublishedIssue(gh.statePath)).number));
+    // Same-session input consumes the notice; the human publication report stays out of context.
+    assert.equal((await rpc.prompt("Continue")).status, "success");
+    const counts = (await readFile(join(fixture.workspace.projectRoot, "context-counts.jsonl"), "utf8")).trim().split("\n")
+      .map(line => JSON.parse(line) as { reports: number; notices: number });
+    assert.ok(counts.every(count => count.reports === 0));
+    assert.equal(counts.at(-1)!.notices, 1);
+    const pending = (await readdir(stateDirectory)).filter(file => file.endsWith(".notice.json"));
+    assert.equal(pending.length, 0);
+    for (const scenario of scenarios.filter(entry => entry.name === "draft-issues" || entry.name === "to-spec-draft-issue")) {
       assert.equal((await fixture.runJson({ prompt: `/skill:${scenario.name} fixture` })).status, "success");
     }
-    assert.equal(fixture.assertions().inferenceRequests, 5);
+    assert.equal(fixture.assertions().inferenceRequests, 7);
     await unlink(join(platform, "npm/node_modules/harness-pi-issue-writers", "harness", "issue_writers_pi.py"));
     assert.equal((await rpc.prompt("/skill:draft-issues fixture")).status, "handled");
-    assert.equal(fixture.assertions().inferenceRequests, 5);
+    assert.equal(fixture.assertions().inferenceRequests, 7);
     for (const [skill, original] of originalSkills) await writeFile(skill, original);
     await runFixtureInstaller(fixture.workspace, "uninstall", ["issue-writers"], { scope });
     await access(join(platform, "npm/node_modules/harness-pi-pi-issue-workflows", "harness", "pi-issue-workflows", "workflows.ts"));
     await runFixtureInstaller(fixture.workspace, "uninstall", ["issue-readers"], { scope });
     await assert.rejects(access(join(platform, "npm/node_modules/harness-pi-pi-issue-workflows", "harness", "pi-issue-workflows", "workflows.ts")));
     assert.equal(fixture.assertions().unexpectedRequests, 0);
-    return { version: fixture.version, scope, inferenceRequests: 5 };
+    return { version: fixture.version, scope, inferenceRequests: 7 };
   } finally { await fixture.close(); }
 }

@@ -110,7 +110,7 @@ def test_pi_identity_is_namespaced_and_reproducible():
         writers.issues_session_id("")
 
 
-@pytest.mark.parametrize("skill", ["draft-issue", "draft-issues", "to-spec", "to-spec-draft-issue"])
+@pytest.mark.parametrize("skill", ["draft-issue", "draft-issues", "to-spec-draft-issue"])
 def test_all_drafting_skills_prepare_native_session_store(monkeypatch, tmp_path, skill):
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("HARNESS_STATE_DIR", str(tmp_path / "state"))
@@ -122,6 +122,14 @@ def test_all_drafting_skills_prepare_native_session_store(monkeypatch, tmp_path,
     (drafts / writers.core.draft_name(session, 0)).write_text("# Draft\n")
     next_path = writers.core.next_draft_path(tmp_path, session)
     assert next_path.name == writers.core.draft_name(session, 1)
+
+
+def test_response_only_spec_leaves_draft_store_untouched(monkeypatch, tmp_path):
+    monkeypatch.setenv("HARNESS_STATE_DIR", str(tmp_path / "state"))
+    request = {"version": 1, "cwd": str(tmp_path), "sessionId": "native-id",
+               "operation": "prepare", "skill": "to-spec"}
+    assert writers.evaluate(request)["ok"]
+    assert not (tmp_path / writers.core.DRAFTS_DIR).exists()
 
 
 def test_notice_consumed_by_same_pi_session_only(monkeypatch, tmp_path):
