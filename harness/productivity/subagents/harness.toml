@@ -1,5 +1,5 @@
 name = "subagents"
-version = "3.0.4"
+version = "3.0.5"
 description = "Persistent conversation delegation with mode-preserving resume"
 docs = "https://github.com/EmilienxD/harness/blob/main/README.md#user-invoked-skills"
 dependencies = [
@@ -62,4 +62,4 @@ platforms = ["chatgpt"]
 [[actions]]
 type = "uv-tool"
 package = "harness-subagents-runtime"
-source = "git+https://github.com/EmilienxD/harness@c650a6f8317646ec2ae817798d69c9d3efe5756f#subdirectory=harness/productivity/subagents/runtime"
+source = "git+https://github.com/EmilienxD/harness@814c5d7100a3dceeebfa01a2b6a7e4b96df6d08c#subdirectory=harness/productivity/subagents/runtime"
