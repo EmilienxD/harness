@@ -542,8 +542,8 @@ A local fake `gh` records read and publish effects; no GitHub credentials
 or external tracker mutations are involved. Checks include supplied draft paths, reload identity,
 foreign-session preservation, dry-run/invalid options, removed writer aliases, response-only specs
 without draft setup, progress notifications, draft-to-issue notice mappings and exclusion of visible
-publication reports from model context, exact inference counts, user-owned reader
-starters and removal of the bridge after its last dependent. Python unit tests exercise complete
+publication reports from model context, exact inference counts, reader skills installed only inside
+their npm package and removal of the bridge after its last dependent. Python unit tests exercise complete
 context, relation deduplication, provider identity and notice isolation; the existing issue graph
 and publishing tests retain all-page retrieval and dependency/crash-recovery coverage.
 

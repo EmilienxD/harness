@@ -93,7 +93,7 @@ def support_files(archive: Path, directory: Path) -> list[ExpandedFile]:
 def payloads(
     tool: Tool, files: list[ExpandedFile], directory: Path, dependencies: Sequence[ExpandedFile] = (),
 ) -> list[ExpandedFile]:
-    """Stage a self-contained package while retaining editable files outside npm storage."""
+    """Stage a self-contained package while retaining workspace files outside npm storage."""
     bundled: dict[str, ExpandedFile] = {}
     for file in [*dependencies, *files]:
         if file.root == "workspace" and file.starter and file.dest.startswith(".harness/guards/"):
@@ -129,7 +129,7 @@ def payloads(
                 tar.addfile(info, io.BytesIO(content))
     prefix = f"npm/node_modules/harness-pi-{tool.name}/"
     return [
-        *[file for file in files if file.root == "workspace" or file.starter],
+        *[file for file in files if file.root == "workspace"],
         *[ExpandedFile(file.source, prefix + name, "platform", file.executable, False)
           for name, file in sorted(bundled.items())],
     ]

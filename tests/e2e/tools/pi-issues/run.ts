@@ -40,9 +40,13 @@ export async function runPiIssueReaders(scope: "project" | "user", mode: "json" 
   try {
     const gh = await setup(fixture, ["issue-readers"], scope);
     const platform = scope === "project" ? join(fixture.workspace.projectRoot, ".pi") : fixture.workspace.agentDir;
+    const originalSkills = new Map<string, string>();
     for (const skill of ["address-this", "review-this"]) {
-      const path = join(platform, "skills", skill, "SKILL.md");
-      await writeFile(path, (await readFile(path, "utf8")) + `\n${marker}\n`);
+      await assert.rejects(access(join(platform, "skills", skill, "SKILL.md")));
+      const path = join(platform, "npm/node_modules/harness-pi-issue-readers", "skills", skill, "SKILL.md");
+      const original = await readFile(path, "utf8");
+      originalSkills.set(path, original);
+      await writeFile(path, original + `\n${marker}\n`);
     }
     const run = mode === "json" ? await fixture.runJson({ prompt: "/skill:address-this 42" }) : await fixture.rpc().prompt("/address-this 42");
     assert.equal(run.status, "success");
@@ -60,9 +64,9 @@ export async function runPiIssueReaders(scope: "project" | "user", mode: "json" 
     await writeFile(join(gh.bin, "fake-gh.cjs"), "process.exitCode = 1;\n");
     assert.equal((await fixture.rpc().prompt("/skill:review-this 42")).status, "handled");
     assert.equal(fixture.assertions().inferenceRequests, before);
+    for (const [path, original] of originalSkills) await writeFile(path, original);
     await runFixtureInstaller(fixture.workspace, "uninstall", ["issue-readers"], { scope });
-    // User-owned starter bodies survive receipt removal.
-    await access(join(platform, "skills", "address-this", "SKILL.md"));
+    await assert.rejects(access(join(platform, "npm/node_modules/harness-pi-issue-readers")));
     await assert.rejects(access(join(platform, "npm/node_modules/harness-pi-pi-issue-workflows", "harness", "pi-issue-workflows", "workflows.ts")));
     assert.equal(fixture.assertions().unexpectedRequests, 0);
     return { version: fixture.version, scope, mode, inferenceRequests: before };
