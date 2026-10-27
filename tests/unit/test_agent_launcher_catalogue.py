@@ -26,7 +26,7 @@ def installer(target, store, monkeypatch, actions=None, removals=None):
 
 def test_catalogue_declares_shared_dual_provider_runtime_and_claude_skill():
     tool = discover()["agent-launcher"]
-    assert tool.version == "1.1.9"
+    assert tool.version == "1.1.10"
     assert tool.support_for("claude").status is SupportStatus.SUPPORTED
     assert tool.support_for("chatgpt").status is SupportStatus.SUPPORTED
     assert tool.support_for("pi").status is SupportStatus.UNSUPPORTED

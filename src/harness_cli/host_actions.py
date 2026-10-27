@@ -3,16 +3,18 @@
 from __future__ import annotations
 
 import hashlib
+import importlib.metadata
 import json
 import os
 import re
 import shutil
 import subprocess
 import tempfile
+import tomllib
 import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
-from urllib.parse import quote
+from urllib.parse import parse_qs, quote, urlsplit
 
 from harness_cli.manifest import HostAction
 
@@ -253,6 +255,68 @@ def is_installed(action: HostAction) -> bool:
         except (ValueError, AttributeError) as exc:
             raise HostActionError("invalid global npm inventory") from exc
         return _required_string(action, "package") in dependencies
+    raise HostActionError(f"unsupported host action {action.type}")
+
+
+def is_current(action: HostAction) -> bool:
+    """Check the installed revision separately from presence and ownership."""
+    if action.type == "uv-tool":
+        uv = shutil.which("uv")
+        if not uv:
+            return False
+        roots = _listing([uv, "tool", "dir"])
+        if roots is None or len(roots) != 1 or not Path(roots[0]).is_absolute():
+            raise HostActionError("could not inspect the uv tool directory")
+        package = _required_string(action, "package")
+        environment = Path(roots[0]) / package
+        paths = [environment / "Lib" / "site-packages", *environment.glob("lib/python*/site-packages")]
+        normalize = lambda name: re.sub(r"[-_.]+", "-", name).lower()
+        distribution = next((
+            item for item in importlib.metadata.distributions(path=[str(path) for path in paths])
+            if normalize(item.metadata.get("Name", "")) == normalize(package)
+        ), None)
+        if distribution is None:
+            return False
+        try:
+            direct = json.loads(distribution.read_text("direct_url.json") or "null")
+            if not isinstance(direct, dict):
+                return False
+            source = _required_string(action, "source")
+            if Path(source).is_dir():
+                project = tomllib.loads((Path(source) / "pyproject.toml").read_text(encoding="utf-8"))["project"]
+                return direct.get("url") == Path(source).resolve().as_uri() and distribution.version == project["version"]
+            location, _, fragment = source.removeprefix("git+").partition("#")
+            repository, _, commit = location.rpartition("@")
+            vcs = direct.get("vcs_info", {})
+            return (
+                direct.get("url", "").removesuffix(".git").rstrip("/") == repository.removesuffix(".git").rstrip("/")
+                and vcs.get("vcs") == "git"
+                and vcs.get("commit_id", "").lower() == commit.lower()
+                and direct.get("subdirectory", "") == parse_qs(fragment).get("subdirectory", [""])[0]
+            )
+        except (OSError, ValueError, KeyError, TypeError, AttributeError):
+            return False
+    if action.type == "vscode-extension":
+        executable = _vscode_executable()
+        if not executable:
+            return False
+        version = action.data.get("version")
+        if not version:
+            filename = urlsplit(_required_string(action, "url")).path.rsplit("/", 1)[-1]
+            match = re.search(r"-(\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?)\.vsix$", filename)
+            if match is None:
+                raise HostActionError("VSIX action requires a version or a versioned artifact filename")
+            version = match[1]
+        lines = _listing([executable, "--list-extensions", "--show-versions"])
+        expected = f"{_required_string(action, 'extension_id')}@{version}".lower()
+        return lines is not None and expected in {line.strip().lower() for line in lines}
+    if action.type == "npm-tool":
+        if not is_installed(action):
+            return False
+        lines = _listing([*_npm_command(), "list", "--global", "--depth=0", "--json"])
+        inventory = json.loads("\n".join(lines or []))
+        entry = inventory["dependencies"][_required_string(action, "package")]
+        return isinstance(entry, dict) and entry.get("version") == _required_string(action, "version")
     raise HostActionError(f"unsupported host action {action.type}")
 
 

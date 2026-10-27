@@ -71,6 +71,8 @@ Some tools keep separate settings. `agent-launcher` uses `.harness/agent-launche
 
 Harness owns selected payloads, dependency reconciliation, starter preservation and receipts. Native providers own authentication and sessions. Installing a tool does not change model defaults or take ownership of unrelated extensions, `auth.json`, or `trust.json`. Existing unowned files and host products require the installer's explicit adoption flow. Removal follows recorded ownership; modified files and edited policy starters retain the installer's preservation rules.
 
+Upgrades verify installed host products against their catalogue pins: Python tools use their source repository, commit and subdirectory; npm tools and VS Code extensions use their exact versions. A product that is present at another revision is repaired even when its catalogue receipt already has the current package version. Presence checks for ownership and removal remain independent of the pinned revision.
+
 Pi's agent directory defaults to `~/.pi/agent`; `PI_CODING_AGENT_DIR` selects another directory. It changes Pi resources, while `HARNESS_STATE_DIR` changes Harness state. The resolved agent directory is part of user receipt identity: changing it selects a separate installation rather than redirecting removal of the original. A user receipt remains separate from a project rooted in the same directory.
 
 | Resource | Project scope | Pi user scope |
