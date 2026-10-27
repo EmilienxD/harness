@@ -32,7 +32,7 @@ The following `.harness/config.json` selects the default Auto Run provider and g
 }
 ```
 
-Manual delegation profiles use `providers.<provider>.delegations` with `explore`, `prototype`, `websearch`, `brainstorm`, `address`, `review`, and `general` keys. Auto Run workers use separate `explore`, `address`, and `review` keys under `providers.<provider>.autoRun`. The configured command must exist. Optional `.abd/session-setup.ps1` and `.abd/session-setup.sh` scripts prepare worktree checkouts.
+Manual delegation uses the `providers.<provider>.delegations.general` profile, with an optional explicitly requested child skill. Auto Run workers use separate `explore`, `address`, and `review` keys under `providers.<provider>.autoRun`. The configured command must exist. Optional `.abd/session-setup.ps1` and `.abd/session-setup.sh` scripts prepare worktree checkouts.
 
 ## Auto Run choices and limits
 
@@ -42,7 +42,7 @@ Set `aboard.sessions.interactiveResumeMode` to `reuse-terminal` in VS Code setti
 
 ## Pi sessions and restrictions
 
-The catalogue's Aboard 0.3.9 pin ships native Pi launch/configuration, session lookup/resume, preflight, lifecycle and skill adapters, UI/provider choices, managed extension assets and worktree setup. Use `--platform pi` when installing the Pi assets. Visible terminal sessions, leases, authenticated bridge messages and prompt receipts retain the same product contract. Fresh sessions let Pi assign their IDs and bind the observed startup identity; resume/fork validate explicit saved identity. Session replacement ends the old binding before the new one is attached.
+The catalogue's Aboard 0.3.13 pin ships native Pi launch/configuration, session lookup/resume, preflight, lifecycle and skill adapters, UI/provider choices, managed extension assets and worktree setup. Use `--platform pi` when installing the Pi assets. Visible terminal sessions, leases, authenticated bridge messages and prompt receipts retain the same product contract. Fresh sessions let Pi assign their IDs and bind the observed startup identity; resume/fork validate explicit saved identity. Session replacement ends the old binding before the new one is attached.
 
 Read-only and safety admission runs before checkout creation. Native read-tool selection alone cannot constrain MCP/custom mutators or trusted extension I/O. A required restriction extension must load through a controlled path and tool/resource coverage must be enforceable; `requireEnforceableRestrictions` refuses launches without that evidence. Pi still runs with the operating-system user's permissions. Worktrees supply an assigned working directory and per-turn guidance, not filesystem isolation.
 
