@@ -1,5 +1,5 @@
 name = "commit"
-version = "1.8.0"
+version = "1.8.1"
 description = "Zero-model-turn /commit with native Pi branch attribution and shared Git/message generation"
 requires = ["git"]
 dependencies = [{ name = "pi-transport", version = ">=1.0.0,<2.0.0", lifecycle = "coupled", platforms = ["pi"] }]
