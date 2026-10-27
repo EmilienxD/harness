@@ -13,7 +13,7 @@ uv run harness install exclude-unwanted-tools --platform pi --scope user
 
 Restart Pi or run `/reload` to activate it.
 
-**Compatibility:** verified against Pi 1.2.0. This adapter patches the private
+**Compatibility:** verified against Pi 1.2.0 and 1.4.0. This adapter patches the private
 `AgentSession._isAllowedTool` method because changing active tools alone does not remove
 them from the registry. If that method is missing, loading reports an error; the fallback
 is to launch Pi with `--exclude-tools powershell,codemode,find,grep,ls`. This is a tool

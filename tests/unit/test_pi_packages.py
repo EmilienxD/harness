@@ -87,6 +87,32 @@ def test_native_package_starter_skills_have_one_installed_copy(tmp_path, monkeyp
     assert installer.reconcile({"issue-readers"}) == []
 
 
+@pytest.mark.parametrize("name", [
+    "command-guard", "no-new-documents", "on-edit-block", "on-edit-reminder",
+    "on-read-reminder", "prefer-fewer-comments",
+])
+def test_native_user_guard_policy_stays_editable_outside_the_package(tmp_path, monkeypatch, name, fake_pi_packages):
+    available = discover()
+    monkeypatch.setenv("PI_CODING_AGENT_DIR", str(tmp_path / "agent"))
+    target = Target.for_user(Platform.PI)
+    installer = CatalogueInstaller(available, target, ReceiptStore.load(tmp_path / "receipts.json"))
+
+    installer.reconcile({name})
+
+    policy = target.install_root / "harness" / f"{name}.toml"
+    assert policy.read_bytes() == (available[name].root / f"{name}.toml").read_bytes()
+    records = installer.installation["packages"][name]["files"]
+    record = next(record for record in records if Path(record["path"]) == policy)
+    assert record["starter"] is True
+    edited = policy.read_text(encoding="utf-8") + "\n# Personal policy\n"
+    policy.write_text(edited, encoding="utf-8")
+    installer.reconcile({name})
+    assert policy.read_text(encoding="utf-8") == edited
+    installer.reconcile(set())
+    assert policy.read_text(encoding="utf-8") == edited
+    assert not pi_packages.package_root(target.install_root, name).exists()
+
+
 @pytest.mark.parametrize("newline", ["\n", "\r\n"])
 @pytest.mark.parametrize("bom", [b"", b"\xef\xbb\xbf"])
 def test_pi_install_and_removal_preserve_settings_line_endings_and_bom(tmp_path, newline, bom):

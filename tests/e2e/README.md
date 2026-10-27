@@ -7,9 +7,10 @@ prompt-text assertions. Read the repository's `harness-e2e` skill before changin
 
 ## Run Pi checks
 
-Prerequisites: Node.js >=22.19.0, npm, uv, a synced root Python environment (`uv sync`), and Pi 1.2.x on `PATH`. The current tested version is
-`@earendil-works/pi-coding-agent` 1.2.0. The adapter checks version and required CLI flags;
-an unsupported installation fails instead of silently skipping the real journey.
+Prerequisites: Node.js >=22.19.0, npm, uv, a synced root Python environment (`uv sync`), and stable Pi >=1.2.0 and <2.0.0 on `PATH`.
+CI installs `@earendil-works/pi-coding-agent` 1.4.0. The adapter accepts later stable 1.x
+minor releases and checks required CLI flags; the real journeys verify behavior. A new minor
+version alone does not fail preflight. Prereleases and new major versions require explicit review.
 
 From `tests/e2e/`:
 
@@ -53,17 +54,43 @@ default; checkout-runtime substitution is an explicit development variant, not r
 The shared CI job installs all three CLIs and uv, syncs the Python environment, and bounds test-file
 concurrency so process-heavy journeys do not all contend at once.
 
+### Pi 1.4.0 upgrade checks
+
+The Windows upgrade checks on 2026-10-27 use the installed Pi 1.4.0 CLI with the authenticated
+fake Responses API. `test/pi-resume-tools.test.ts` additionally exercises real compaction and
+continued guarded writes, plus RPC-to-JSON session resume: selected tools stay active, newly
+installed tools become active, explicitly removed tools stay inactive, and Harness exclusions
+still prevent tool registration. Both journeys assert filesystem effects and exact inference counts.
+
+Standalone real-SDK checks cover the private adapters in Statusline, Exclude Unwanted Tools,
+Polished Code Blocks and Tool Inspector:
+
+```powershell
+# Run from the repository root; substitute the installed Pi npm package directory.
+node tests/unit/statusline_host.mjs <pi-package-directory>
+node tests/unit/exclude_unwanted_tools_host.mjs <pi-package-directory>
+node tests/unit/polished_code_blocks_host.mjs <pi-package-directory>
+node tests/unit/tool_inspector_host.mjs <pi-package-directory>
+```
+
+Calm's real loader/component checks run inside `test:pi-calm`. Aboard's consuming
+`npm run e2e:pi` journey also passes with Pi 1.4.0. These checks cover headless integration
+and the exercised components; interactive terminal behavior and POSIX need their own runs.
+Earlier tool sections below retain their original 1.2.0 acceptance evidence. Accepting future
+1.x releases at preflight does not claim those untested versions have already passed these checks.
+
 `e2e:flush-out-useless-tests` installs the real local catalogue package through Harness, then
 runs project JSON/RPC and user RPC journeys. It checks a real Node test baseline, native skill
 discovery, no edits before scripted approval, exact cleanup and passing verification, dry-run,
 repeat install, agent-directory receipt separation, and cross-provider uninstall preservation.
 Run `uv sync` in the repository first; the installer helper uses that environment offline.
 
-`test:pi-shared-skills` installs the 23 shared-skill ports, including `caveman`, `setup-help`, and `websearch`, at project and user scopes,
-checks native discovery of all 24 entry points and their explicit-invocation flags, invokes
+`test:pi-shared-skills` installs the 22 local shared-skill ports, including `caveman`, `setup-help`, and `websearch`, at project and user scopes,
+checks native discovery of all 23 entry points and their explicit-invocation flags, invokes
 each skill, reads bundled references and the websearch source index with real tools, and checks exact inference counts
 and receipt-driven removal. Scripted fixture actions certify resource integration;
-they do not evaluate unscripted workflow judgment or external services.
+they do not evaluate unscripted workflow judgment or external services. Upstream skill bridges
+such as Lavish have separate acquisition and receipt tests; this journey checks local payloads.
 
 Pi extension packages install through `pi install` under
 `npm/node_modules/harness-pi-<tool>/` in the selected Pi directory. Each archive contains its

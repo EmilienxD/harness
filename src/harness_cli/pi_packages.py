@@ -129,7 +129,7 @@ def payloads(
                 tar.addfile(info, io.BytesIO(content))
     prefix = f"npm/node_modules/harness-pi-{tool.name}/"
     return [
-        *[file for file in files if file.root == "workspace"],
+        *[file for file in files if file.root == "workspace" or (file.root == "support" and file.starter)],
         *[ExpandedFile(file.source, prefix + name, "platform", file.executable, False)
           for name, file in sorted(bundled.items())],
     ]

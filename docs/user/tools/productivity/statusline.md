@@ -39,4 +39,6 @@ uv run harness install statusline --platform pi --scope user
 Restart Pi or run `/reload`. Use `--scope project` for a project-only installation.
 This is a Pi-only presentation extension; it does not change model settings or request
 inference. Install only one custom-footer extension at a time, since Pi has one footer
-slot. Verified against Pi 1.2.0's extension loader and footer component API.
+slot. Verified against Pi 1.2.0 and 1.4.0's extension loader and footer component API.
+The [upgrade checks](https://github.com/EmilienxD/harness/blob/main/tests/e2e/README.md#pi-140-upgrade-checks)
+cover live context thresholds, model/thinking changes, wrapping and reload without inference.

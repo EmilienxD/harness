@@ -32,7 +32,7 @@ including tools with custom renderers and Background Shell's shell overrides; no
 or companion-package update is needed. Disabling Calm restores each tool's original rendering.
 Separate extension widgets and notifications are unchanged.
 Session data and tool execution
-are preserved. Pi 1.2.0 is the verified host version; the display adapters use internal
+are preserved. Pi 1.2.0 and 1.4.0 are verified host versions; the display adapters use internal
 component fields and may need updates after Pi upgrades.
 
 This is a local fork of [Kun Chen's Calm extension](https://github.com/kunchenguid/dotfiles/tree/9a4a6387d0dd6f4bf9b8a5a732b406916bbbf95d/home/.pi/agent/extensions/calm),
