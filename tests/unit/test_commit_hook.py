@@ -48,7 +48,8 @@ def _git(repo, *args):
 
 
 @pytest.fixture
-def repo(tmp_path):
+def repo(tmp_path, monkeypatch):
+    monkeypatch.setenv("HARNESS_STATE_DIR", str(tmp_path / "state"))
     repo = tmp_path / "repo"
     repo.mkdir()
     _git(repo, "init", "-q")

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
-import { copyFile, mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { access, copyFile, mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
@@ -61,12 +61,11 @@ export async function runCodexCommitContextJourney(mode: ContextMode): Promise<v
     } }));
     await writeFile(join(project, "sentinel.txt"), "before\n");
     await initializeRepository(project);
-    const sessions = join(project, ".git", "harness", "commit", "v2", "chatgpt");
+    const commitState = join(root, "state", "runtime", "commit");
     if (mode === "storage-failure") {
-      await mkdir(join(project, ".git", "harness", "commit"), { recursive: true });
       // A regular file makes all per-session context directories unwritable.
-      await mkdir(join(project, ".git/harness/commit/v2"), { recursive: true });
-      await writeFile(sessions, "blocked\n");
+      await mkdir(join(root, "state", "runtime"), { recursive: true });
+      await writeFile(commitState, "blocked\n");
     }
     server = await startFakeOpenAiServer({
       scenarioCatalogHash: createHash("sha256").update("commit-context:v1").digest("hex"),
@@ -109,7 +108,11 @@ export async function runCodexCommitContextJourney(mode: ContextMode): Promise<v
     assert.equal((await readFile(join(project, "sentinel.txt"), "utf8")).trim(), mode === "verified" ? "after" : "before");
     if (mode === "lookup-failure") await readFile(join(root, "lookup-attempted"));
     if (mode === "storage-failure") await readFile(join(root, "storage-failed"));
+    await assert.rejects(access(join(project, ".git", "harness")));
     if (mode === "healthy" || mode === "verified") {
+      const checkouts = await readdir(join(commitState, "v2"));
+      assert.equal(checkouts.length, 1);
+      const sessions = join(commitState, "v2", checkouts[0]!, "chatgpt");
       const ids = await readdir(sessions);
       assert.equal(ids.length, 1);
       const prompts = await readdir(join(sessions, ids[0]!, "prompts"));

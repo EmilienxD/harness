@@ -11,7 +11,7 @@ Harness uses different files for different jobs. Begin by identifying the exact 
 | `~/.harness/guards/*.toml` | Personal guard policies | Edit; keep private |
 | `<project>/.harness/agent-launcher/` | Project launcher scripts and native provider settings | Edit; review `config.py` before running |
 | `~/.harness/receipts.json` | Installer ownership records | Let Harness manage it |
-| `~/.harness/runtime/` | Persistent requests, sessions, and logs | Let Harness manage it |
+| `~/.harness/runtime/` | Persistent requests, sessions, commit attribution, and logs | Let Harness manage it |
 
 `~/.harness` means the current user's home directory, not a folder in the project. On Windows, this is usually `C:\Users\<you>\.harness`. A project path starts at the directory where you installed or launched the tool.
 

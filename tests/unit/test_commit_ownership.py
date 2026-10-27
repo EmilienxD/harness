@@ -15,8 +15,9 @@ def git(repo, *args):
 
 
 @pytest.fixture(params=["claude", "chatgpt"])
-def session(tmp_path, request):
+def session(tmp_path, request, monkeypatch):
     hook.set_provider(request.param)
+    monkeypatch.setenv("HARNESS_STATE_DIR", str(tmp_path.parent / (tmp_path.name + "-state")))
     git(tmp_path, "init", "-q")
     git(tmp_path, "config", "user.name", "Test")
     git(tmp_path, "config", "user.email", "test@example.invalid")

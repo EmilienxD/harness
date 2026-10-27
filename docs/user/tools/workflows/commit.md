@@ -43,12 +43,16 @@ Shell ownership requires recognizable literal targets. Partial failed writes, ov
 observations and incomplete evidence stop the command. Pending calls also stop previews and
 commits; a denied call without a completion hook can leave pending evidence requiring manual
 commit. Hook processes serialize ownership updates and commit preparation with an exclusive
-session lock. A stale lock after a process crash stops automatic operation.
+OS-managed session lock. Contention waits for up to ten seconds before reporting that ownership
+is busy; process exit releases the lock automatically. Pending or incomplete ownership evidence
+still stops automatic commit.
 
-Claude/ChatGPT receipts live under Git's `harness/commit/v2/<provider>/<session-hash>` directory.
+Claude/ChatGPT receipts and optional prompt context live under
+`~/.harness/runtime/commit/v2/<checkout-hash>/<provider>/<session-hash>/`, or the same
+`runtime/commit/` tree under `HARNESS_STATE_DIR`. Checkout identity uses the resolved working-tree
+path, keeping repositories and linked worktrees separate. The hook writes no runtime files inside `.git`.
 Exact resume with the same identity retains them; a new identity starts without ownership.
-Old metadata-only ChatGPT records and Claude transcript paths cannot authorize staging after
-upgrade. Claude/ChatGPT hook history is scoped to the session ID, without Pi's active-ancestry
+Claude/ChatGPT hook history is scoped to the session ID, without Pi's active-ancestry
 filtering: rewinding a conversation under the same identity does not discard earlier receipts.
 Use a new session identity or commit manually when that distinction matters. Independent
 processes and custom tools remain outside complete attribution coverage.
