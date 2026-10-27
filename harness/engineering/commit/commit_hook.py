@@ -17,15 +17,15 @@ import json
 import os
 import re
 import shlex
-import shutil
 import subprocess
 import sys
-import tempfile
 import time
 import urllib.error
 import urllib.parse
 import urllib.request
 from collections.abc import Iterator, Sequence
+from contextlib import contextmanager
+from types import SimpleNamespace
 from pathlib import Path
 from typing import Any, Callable, NamedTuple
 
@@ -125,9 +125,8 @@ def _content_blocks(record: dict[str, Any]) -> list[dict[str, Any]]:
 # nudges Claude out of the habit, but /commit cannot assume it is installed.)
 #
 # Where a write is recognisable but its target is not -- `git apply`, a path
-# held in a variable, a glob -- the command is reported as unresolved and the
-# hook widens to staging every change in the repo. Widening is visible and
-# recoverable; dropping a file from the commit is neither.
+# held in a variable, a glob -- report unresolved evidence and stop automatic
+# commit rather than attributing unrelated changes.
 
 SHELL_TOOLS = {"Bash", "PowerShell"}
 
@@ -325,7 +324,7 @@ def shell_write_targets(command: Any) -> tuple[list[str], bool]:
 
     `resolved` is False when the command is recognisably a write but nothing
     usable came out of it -- `git apply`, a target held in a variable, a glob
-    -- which tells the caller to widen instead of committing a subset. A
+    -- which tells the caller to stop instead of committing a subset. A
     command mixing a literal target with a computed one also reads as
     unresolved: the literal alone would be a silent partial answer.
     """
@@ -507,7 +506,7 @@ def _abs(path: str, cwd: str) -> str:
 def changed_paths(scan: WriteScan | None) -> list[str] | None:
     """
     The paths a scan says to stage, or None for "no usable list" -- which
-    tells the caller to stage everything instead. None covers an unreadable
+    stops automatic staging. None covers an unreadable
     transcript, a session with no writes at all, and a shell write whose
     target could not be read: staging wide is visible in the result, staging
     a subset of what changed is not.
@@ -534,6 +533,13 @@ def _is_within(path: str, root: str) -> bool:
 
 
 def run(cmd: list[str], cwd: str, input: str | None = None) -> subprocess.CompletedProcess[str]:
+    if cmd and cmd[0] == "git":
+        if len(cmd) > 1 and cmd[1] == "check-ignore":
+            # check-ignore already treats inputs literally and rejects the
+            # literal-pathspec mode used by the other Git commands.
+            return subprocess.run(cmd, cwd=cwd, input=input, capture_output=True, text=True,
+                                  env={**os.environ, "GIT_LITERAL_PATHSPECS": "0"})
+        cmd = ["git", "--literal-pathspecs", *cmd[1:]]
     return subprocess.run(cmd, cwd=cwd, input=input, capture_output=True, text=True)
 
 
@@ -1577,71 +1583,39 @@ def build_dry_run_report(
         out.append(f"Message: {message}")
         out.append("")
 
-    # targets stays empty in the fall-back branches, which is exactly the
-    # pathspec scope a real run would use there: none, i.e. the whole repo.
     targets: list[str] = []
-    fallback = False
 
-    if scan is None:
-        out.append("Would stage all uncommitted changes in the repo:")
+    if scan is None or scan.unresolved or not scan.paths:
+        out.append("Commit stopped: no complete verified file set. Review and commit manually.")
+        if scan:
+            out.extend("  " + command for command in scan.unresolved)
+            out.extend("  Known path: " + _rel(path, repo_root) for path in scan.paths)
+        return "\n".join(out)
+    if scan.ignored:
+        out.append("Skipped -- gitignored:")
+        out.extend("  " + _rel(path, repo_root) for path in scan.ignored)
+    if scan.failed_paths:
+        out.append("Skipped -- tool call failed:")
+        out.extend("  " + _rel(path, repo_root) for path in scan.failed_paths)
+    if scan.outside:
+        out.append("Skipped -- outside this repo:")
+        out.extend("  " + path for path in scan.outside)
+    present, deletions, unmatched = resolve_stage_set(scan.paths, repo_root)
+
+    if unmatched:
         out.append("")
-        status = run(["git", "status", "--porcelain"], repo_root)
-        out.append(status.stdout.rstrip() or "  (working tree is clean)")
-        fallback = True
-    else:
-        # Surface the discards. These are the filters that otherwise make the
-        # hook look like it has silently lost a file.
-        if scan.failed_paths:
-            out.append("")
-            out.append(f"Skipped -- tool call failed ({len(scan.failed_paths)}):")
-            out += [f"  {_rel(p, repo_root)}" for p in scan.failed_paths]
-        if scan.outside:
-            out.append("")
-            out.append(f"Skipped -- outside this repo ({len(scan.outside)}):")
-            out += [f"  {p}" for p in scan.outside]
-        if scan.ignored:
-            out.append("")
-            out.append(f"Skipped -- gitignored ({len(scan.ignored)}):")
-            out += [f"  {_rel(p, repo_root)}" for p in scan.ignored]
-        if scan.unresolved:
-            out.append("")
-            out.append(
-                f"Shell writes whose target could not be read ({len(scan.unresolved)}):"
-            )
-            out += [f"  {_shorten(c)}" for c in scan.unresolved]
-            out.append("  Staging everything rather than committing a subset.")
+        out.append(
+            f"Skipped -- no longer exist ({len(unmatched)}):"
+        )
+        out += [f"  {_rel(p, repo_root)}" for p in unmatched]
 
-        if changed_paths(scan) is None:
-            out.append("")
-            out.append("Would stage all uncommitted changes in the repo.")
-            # Widening does not mean the known tool writes are lost: a real
-            # /commit will add -A over the whole tree, which covers them, and
-            # they are worth listing so the report admits the scan worked.
-            if scan.paths:
-                out.append("")
-                out.append(
-                    f"Tool writes already identified this session ({len(scan.paths)}), "
-                    "will be staged along with the rest:"
-                )
-                out += [f"  {_rel(p, repo_root)}" for p in scan.paths]
-            fallback = True
-        else:
-            present, deletions, unmatched = resolve_stage_set(scan.paths, repo_root)
-
-            if unmatched:
-                out.append("")
-                out.append(
-                    f"Skipped -- no longer exist ({len(unmatched)}):"
-                )
-                out += [f"  {_rel(p, repo_root)}" for p in unmatched]
-
-            targets = present + deletions
-            out.append("")
-            out.append(f"Would stage ({len(targets)}):")
-            for p in present:
-                out.append(f"  {_rel(p, repo_root)}")
-            for p in deletions:
-                out.append(f"  {_rel(p, repo_root)}  [deletion]")
+    targets = present + deletions
+    out.append("")
+    out.append(f"Would stage ({len(targets)}):")
+    for p in present:
+        out.append(f"  {_rel(p, repo_root)}")
+    for p in deletions:
+        out.append(f"  {_rel(p, repo_root)}  [deletion]")
 
     # Anything already in the index that isn't ours. The commit is
     # pathspec-scoped precisely so these are left alone -- an unscoped
@@ -1658,11 +1632,7 @@ def build_dry_run_report(
             out.append(f"Already staged ({len(others)}) -- would be left alone:")
             out += [f"  {p}" for p in others]
 
-    # Whether those paths actually differ from HEAD is the other half of
-    # the answer; edited-then-reverted files stage to nothing. Skip the
-    # trailing status block when scan is None: the transcript-unreadable
-    # branch above already dumped a plain `git status` for the whole repo,
-    # printing it twice reads as a bug.
+    # Edited-then-reverted files stage to nothing.
     status_args = ["git", "status", "--porcelain"]
     if targets:
         status_args += ["--", *targets]
@@ -1671,7 +1641,7 @@ def build_dry_run_report(
     pending_raw = run(status_args, repo_root).stdout
     pending = pending_raw.strip()
 
-    if targets or (fallback and scan is not None):
+    if targets:
         out.append("")
         if pending:
             out.append("Changes to commit:")
@@ -1828,15 +1798,20 @@ def commit(
     transcript: str,
     flags: "Flags",
     message: str,
-    widened_reason: str,
     cleanup: Callable[[], None] | None = None,
     session_context: str | None = None,
     before_commit: Callable[[], None] | None = None,
     after_stage: Callable[[], None] | None = None,
+    report: Callable[[str], None] | None = None,
 ) -> None:
     """Stage what the agent wrote, commit it, and report. Never returns."""
+    finish = report or globals()["finish"]
     session_id = str(payload.get("session_id") or "unknown")
     author = AUTHOR[PROVIDER]
+
+    if not scan or scan.unresolved or not scan.paths:
+        finish("Commit stopped: no complete verified file set. Review and commit manually; nothing was staged or committed.")
+        return
 
     if flags.dry:
         finish(
@@ -1846,7 +1821,6 @@ def commit(
         )
 
     changed = changed_paths(scan)
-    widened = ""
     if changed:
         add_result, targets = stage_paths(changed, repo_root)
         if add_result is None:
@@ -1855,19 +1829,15 @@ def commit(
                 "exist or are tracked -- nothing to stage."
             )
     else:
-        add_result, targets = run(["git", "add", "-A"], repo_root), []
-        if scan is not None and scan.unresolved:
-            widened = (
-                f"; staged the whole tree -- {len(scan.unresolved)} "
-                f"{widened_reason}"
-            )
+        finish("Commit stopped: no verified file set. Nothing was staged or committed.")
+        return
 
     if add_result.returncode != 0:
         finish(f"git add failed:\n{add_result.stderr}")
     if after_stage is not None:
         after_stage()
 
-    scope = ["--", *targets] if targets and not in_merge(repo_root) else []
+    scope = ["--", *targets]
     staged = run(["git", "diff", "--cached", "--name-only", *scope], repo_root)
     if not staged.stdout.strip():
         finish("Nothing to commit -- working tree matches HEAD.")
@@ -1902,7 +1872,7 @@ def commit(
     suffix = f", {held_back} left staged" if held_back else ""
     if cleanup is not None:
         cleanup()
-    finish(f"Committed {sha} ({count} file(s){suffix}){widened}: {message}")
+    finish(f"Committed {sha} ({count} file(s){suffix}): {message}")
 
 
 def parse_invocation(prompt: str) -> "tuple[Flags, str] | None":
@@ -1916,34 +1886,13 @@ def parse_invocation(prompt: str) -> "tuple[Flags, str] | None":
     return flags, message
 
 
-# Claude Code: the session transcript is the record of what was written
+# Both hook providers use verified effects; Claude's transcript is AI narrative only.
 
 def claude_main(payload: dict[str, Any]) -> None:
-    cwd = payload.get("cwd", ".")
-    transcript_path = payload.get("transcript_path", "")
-
-    invocation = parse_invocation(payload.get("prompt", ""))
-    if invocation is None:
-        allow()
-    flags, message = invocation
-
-    toplevel = run(["git", "rev-parse", "--show-toplevel"], cwd)
-    if toplevel.returncode != 0:
-        finish("Not a git repository -- nothing to commit.")
-    repo_root = os.path.normpath(toplevel.stdout.strip()) or cwd
-
-    commit(
-        payload,
-        repo_root,
-        _scan_writes(transcript_path, repo_root),
-        transcript_path,
-        flags,
-        message,
-        "shell write(s) with an unreadable target",
-    )
+    chatgpt_main(payload)
 
 
-# ChatGPT: lifecycle events record the deltas the transcript cannot
+# Hook lifecycle events record verified deltas.
 
 def _repo_root(cwd: str) -> str | None:
     result = run(["git", "rev-parse", "--show-toplevel"], cwd)
@@ -1957,58 +1906,13 @@ def _token(value: str) -> str:
 
 
 def _session_dir(repo_root: str, session_id: str) -> Path:
-    relative = f"harness/commit/sessions/{_token(session_id)}"
+    relative = f"harness/commit/v2/{PROVIDER}/{_token(session_id)}"
     result = run(["git", "rev-parse", "--git-path", relative], repo_root)
     raw = result.stdout.strip() if result.returncode == 0 else os.path.join(".git", relative)
     path = Path(raw)
     if not path.is_absolute():
         path = Path(repo_root) / path
     return path.resolve()
-
-
-def _zpaths(result: Any) -> list[str]:
-    if result.returncode != 0:
-        return []
-    return [p for p in result.stdout.split("\0") if p]
-
-
-def _dirty_paths(repo_root: str) -> set[str]:
-    paths: set[str] = set()
-    commands = (
-        ["git", "diff", "--name-only", "-z"],
-        ["git", "diff", "--cached", "--name-only", "-z"],
-        ["git", "ls-files", "--others", "--exclude-standard", "-z"],
-    )
-    for command in commands:
-        paths.update(_zpaths(run(command, repo_root)))
-    return {os.path.normpath(path) for path in paths}
-
-
-def _fingerprint(repo_root: str, relative: str) -> list[Any]:
-    path = Path(repo_root) / relative
-    try:
-        stat = path.lstat()
-    except OSError:
-        return ["missing"]
-    if path.is_symlink():
-        try:
-            return ["symlink", os.readlink(path)]
-        except OSError:
-            return ["symlink", "unreadable"]
-    if path.is_file():
-        return ["file", stat.st_size, stat.st_mtime_ns]
-    return ["other", stat.st_mode, stat.st_mtime_ns]
-
-
-def _snapshot(repo_root: str) -> dict[str, Any]:
-    head = run(["git", "rev-parse", "HEAD"], repo_root)
-    return {
-        "head": head.stdout.strip() if head.returncode == 0 else None,
-        "paths": {
-            path: _fingerprint(repo_root, path)
-            for path in sorted(_dirty_paths(repo_root))
-        },
-    }
 
 
 def _atomic_json(path: Path, data: dict[str, Any]) -> None:
@@ -2033,65 +1937,93 @@ def _event_path(root: Path, category: str, identity: str) -> Path:
     return root / category / stamp
 
 
+def _ownership():
+    from commit_ownership import Ownership
+    return Ownership(SimpleNamespace(**globals()))
+
+
+def _hook_request(payload: dict[str, Any]) -> dict[str, Any]:
+    data = payload.get("tool_input") or {}
+    name = payload.get("tool_name")
+    request = {"cwd": str(payload.get("cwd") or "."), "tool": "patch", "targets": []}
+    if name in {"Bash", "PowerShell", "powershell"}:
+        request.update(tool="powershell" if name != "Bash" else "bash", command=data.get("command", ""))
+    elif name in WRITE_TOOLS:
+        path = data.get("file_path") or data.get("notebook_path")
+        if path:
+            request.update(tool="write" if name == "Write" else "edit", path=_abs(path, request["cwd"]))
+            if name == "Write" and isinstance(data.get("content"), str):
+                request["expectedDigest"] = hashlib.sha256(data["content"].encode("utf-8")).hexdigest()
+    elif name == "apply_patch":
+        patch = data.get("command", "")
+        targets = re.findall(r"^\*\*\* (?:Add File|Update File|Delete File|Move to): ([^\r\n]+)", patch, re.M)
+        request["targets"] = [_abs(p, request["cwd"]) for p in targets]
+    return request
+
+
+def _ownership_records(root: Path) -> list[dict[str, Any]]:
+    records = []
+    for path in sorted((root / "events").glob("*.json")):
+        event = _read_json(path)
+        if not event or not isinstance(event.get("receipts"), list):
+            raise ValueError("Commit ownership evidence is unreadable")
+        records.extend(event["receipts"])
+    return records
+
+
+@contextmanager
+def _session_lock(root: Path):
+    root.mkdir(parents=True, exist_ok=True)
+    lock = root / "ownership.lock"
+    # Never guess whether a missing completion or stale lock is harmless.
+    descriptor = os.open(lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+    try:
+        yield
+    finally:
+        os.close(descriptor)
+        lock.unlink()
+
+
 def _record_pre(payload: dict[str, Any], repo_root: str, root: Path) -> None:
-    tool_id = str(payload.get("tool_use_id") or payload.get("turn_id") or time.time_ns())
-    data = {
-        "tool_use_id": tool_id,
-        "at": time.time_ns(),
-        "snapshot": _snapshot(repo_root),
-    }
-    _atomic_json(root / "pending" / f"{_token(tool_id)}.json", data)
-
-
-def _clear_events(root: Path) -> None:
-    # Other tools can be running concurrently. Their pending pre-snapshots are
-    # still valid and must survive this tool establishing a new Git baseline.
-    shutil.rmtree(root / "events", ignore_errors=True)
+    identity = payload.get("tool_use_id")
+    if not identity:
+        raise ValueError("Commit attribution requires a tool-call ID")
+    request = _hook_request({**payload, "cwd": payload.get("cwd") or repo_root})
+    pending = list((root / "pending").glob("*.json"))
+    # Conservatively reject concurrent mutations. Pending denials also stop
+    # automatic commit; no guessed completion or silently discarded evidence.
+    for path in pending:
+        data = _read_json(path)
+        if data:
+            data["overlap"] = True
+            _atomic_json(path, data)
+    _atomic_json(root / "pending" / f"{_token(str(identity))}.json", {
+        "request": {key: value for key, value in request.items() if key != "command"},
+        "snapshot": _ownership().snapshot(request, repo_root),
+        "overlap": bool(pending),
+    })
 
 
 def _record_post(payload: dict[str, Any], repo_root: str, root: Path) -> None:
-    tool_id = str(payload.get("tool_use_id") or payload.get("turn_id") or "unknown")
-    pending = root / "pending" / f"{_token(tool_id)}.json"
-    before_data = _read_json(pending)
-    try:
-        pending.unlink(missing_ok=True)
-    except OSError:
-        pass
-
-    after = _snapshot(repo_root)
-    before = before_data.get("snapshot") if before_data else None
-    unresolved: list[str] = []
-    paths: set[str] = set()
-
-    if isinstance(before, dict) and isinstance(before.get("paths"), dict):
-        before_paths = before["paths"]
-        after_paths = after["paths"]
-        paths = {
-            path
-            for path in set(before_paths) | set(after_paths)
-            if before_paths.get(path) != after_paths.get(path)
-        }
-        if before.get("head") != after.get("head"):
-            # A commit, reset, checkout, or rebase creates a new baseline.
-            _clear_events(root)
-    else:
-        unresolved.append(
-            f"{payload.get('tool_name', 'tool')} call {tool_id}: pre-tool snapshot unavailable"
-        )
-
-    if not paths and not unresolved:
-        return
-
-    tool_input = payload.get("tool_input")
-    command = tool_input.get("command") if isinstance(tool_input, dict) else None
-    event = {
-        "at": time.time_ns(),
-        "tool": str(payload.get("tool_name") or "tool"),
-        "command": command if isinstance(command, str) else "",
-        "paths": sorted(paths),
-        "unresolved": unresolved,
-    }
-    _atomic_json(_event_path(root, "events", tool_id), event)
+    identity = str(payload.get("tool_use_id") or "unknown")
+    pending = root / "pending" / f"{_token(identity)}.json"
+    before = _read_json(pending) or {}
+    request = _hook_request({**payload, "cwd": payload.get("cwd") or repo_root})
+    mismatched = bool(before) and before.get("request") != {
+        key: value for key, value in request.items() if key != "command"}
+    response = payload.get("tool_response")
+    failed = payload.get("hook_event_name") == "PostToolUseFailure"
+    if isinstance(response, dict):
+        failed = failed or bool(response.get("is_error") or response.get("isError")) or response.get("exit_code", 0) != 0
+    # Codex shell results can be model-facing text rather than structured JSON.
+    if isinstance(response, str):
+        exit_code = re.search(r"(?:Process exited with code|Exit code:)\s*(\d+)", response)
+        failed = failed or bool(exit_code and int(exit_code[1]))
+    request.update(before=before.get("snapshot"), overlap=before.get("overlap", False) or mismatched,
+                   isError=failed, receipts=_ownership_records(root))
+    result = _ownership().observe(request, repo_root)
+    _atomic_json(_event_path(root, "events", identity), {"at": time.time_ns(), **result})
+    pending.unlink(missing_ok=True)
 
 
 def _record_prompt(payload: dict[str, Any], root: Path) -> None:
@@ -2113,95 +2045,25 @@ def _records(root: Path, category: str) -> list[dict[str, Any]]:
     return sorted(out, key=lambda item: int(item.get("at") or 0))
 
 
-def _scan(root: Path, repo_root: str) -> "WriteScan | None":
-    events = _records(root, "events")
-    if not events:
-        return None
-    relative = []
-    unresolved = []
-    for event in events:
-        relative.extend(p for p in event.get("paths", []) if isinstance(p, str))
-        unresolved.extend(p for p in event.get("unresolved", []) if isinstance(p, str))
-    absolute = []
-    seen = set()
-    for path in relative:
-        value = _abs(path, repo_root)
-        if value not in seen:
-            seen.add(value)
-            absolute.append(value)
-    paths, ignored = filter_ignored(absolute, repo_root)
-    return WriteScan(
-        paths=paths,
-        outside=[],
-        failed_paths=[],
-        ignored=ignored,
-        records=len(events),
-        write_calls=len(events),
-        unresolved=list(dict.fromkeys(unresolved)),
-    )
-
-
-def _synthetic_transcript(root: Path, repo_root: str) -> str:
-    entries = []
-    for prompt in _records(root, "prompts"):
-        entries.append(
-            (
-                int(prompt.get("at") or 0),
-                {"type": "user", "message": {"content": prompt.get("prompt", "")}},
-            )
-        )
-    for event in _records(root, "events"):
-        command = event.get("command") or "changed: " + ", ".join(event.get("paths", []))
-        entries.append(
-            (
-                int(event.get("at") or 0),
-                {
-                    "type": "assistant",
-                    "cwd": repo_root,
-                    "message": {
-                        "content": [
-                            {
-                                "type": "tool_use",
-                                "id": f"chatgpt-{event.get('at', 0)}",
-                                "name": "Bash" if event.get("tool") == "Bash" else "Update",
-                                "input": {"command": command, "file_path": ""},
-                            }
-                        ]
-                    },
-                },
-            )
-        )
-    handle, path = tempfile.mkstemp(prefix="harness-commit-context-", suffix=".jsonl")
-    with os.fdopen(handle, "w", encoding="utf-8") as stream:
-        for _, record in sorted(entries, key=lambda pair: pair[0]):
-            stream.write(json.dumps(record, ensure_ascii=True) + "\n")
-    return path
-
-
-def _clear_session(root: Path) -> None:
-    shutil.rmtree(root, ignore_errors=True)
-
-
 def _handle_commit(
     payload: dict[str, Any], repo_root: str, root: Path, flags: "Flags", message: str
 ) -> None:
-    transcript = _synthetic_transcript(root, repo_root)
-    try:
-        commit(
-            payload,
-            repo_root,
-            _scan(root, repo_root),
-            transcript,
-            flags,
-            message,
-            "tool write(s) had no pre-tool snapshot",
-            cleanup=lambda: _clear_session(root),
-        )
-    finally:
-        try:
-            os.unlink(transcript)
-        except OSError:
-            pass
+    if any((root / "pending").glob("*.json")):
+        finish("Commit stopped: unfinished or unobserved tool calls. Review and commit manually.")
+        return
+    context = ""
+    if flags.use_ai:
+        if PROVIDER == CLAUDE:
+            context = collect_session_context(str(payload.get("transcript_path") or ""), repo_root)
+        else:
+            context = "\n".join("USER: " + _truncate(_clean_prompt_text(e["prompt"]), 900)
+                                for e in _records(root, "prompts")[-64:])
+    args = ("--dry " if flags.dry else "") + ("--ai " if flags.use_ai else "") + message
+    result = _ownership().perform_commit({"args": args, "sessionId": payload.get("session_id", "unknown"),
+        "receipts": _ownership_records(root), "sessionContext": context}, repo_root)
+    if result.get("receipts"):
+        _atomic_json(_event_path(root, "events", "commit"), {"at": time.time_ns(), "receipts": result["receipts"]})
+    finish(result["message"])
 
 
 def chatgpt_main(payload: dict[str, Any]) -> None:
@@ -2213,8 +2075,11 @@ def chatgpt_main(payload: dict[str, Any]) -> None:
             repo_root = _repo_root(cwd)
             if repo_root is None:
                 finish("Not a git repository -- nothing to commit.")
+            if not payload.get("session_id"):
+                finish("Commit stopped: session identity unavailable. Review and commit manually.")
             root = _session_dir(repo_root, str(payload.get("session_id") or "unknown"))
-            _handle_commit(payload, repo_root, root, *invocation)
+            with _session_lock(root):
+                _handle_commit(payload, repo_root, root, *invocation)
             return
 
         # Narrative is optional context for --ai. Its collection must never
@@ -2231,11 +2096,15 @@ def chatgpt_main(payload: dict[str, Any]) -> None:
     repo_root = _repo_root(cwd)
     if repo_root is None:
         allow()
+    if not payload.get("session_id"):
+        raise ValueError("Commit attribution requires a session identity")
     root = _session_dir(repo_root, str(payload.get("session_id") or "unknown"))
     if event == "PreToolUse":
-        _record_pre(payload, repo_root, root)
-    elif event == "PostToolUse":
-        _record_post(payload, repo_root, root)
+        with _session_lock(root):
+            _record_pre(payload, repo_root, root)
+    elif event in {"PostToolUse", "PostToolUseFailure"}:
+        with _session_lock(root):
+            _record_post(payload, repo_root, root)
     allow()
 
 

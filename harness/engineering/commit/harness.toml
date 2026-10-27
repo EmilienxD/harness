@@ -1,5 +1,5 @@
 name = "commit"
-version = "1.7.7"
+version = "1.8.0"
 description = "Zero-model-turn /commit with native Pi branch attribution and shared Git/message generation"
 requires = ["git"]
 dependencies = [{ name = "pi-transport", version = ">=1.0.0,<2.0.0", lifecycle = "coupled", platforms = ["pi"] }]
@@ -56,3 +56,15 @@ src = "chatgpt/openai.yaml"
 dest = "commit/agents/openai.yaml"
 root = "skills"
 platforms = ["chatgpt"]
+
+[[files]]
+src = "commit_ownership.py"
+dest = "commit_ownership.py"
+root = "hooks"
+platforms = ["claude", "chatgpt"]
+
+[[files]]
+src = "commit_ownership.py"
+dest = "commit_ownership.py"
+root = "support"
+platforms = ["pi"]

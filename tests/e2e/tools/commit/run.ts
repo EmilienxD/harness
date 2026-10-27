@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { execFile, spawn } from "node:child_process";
 import { copyFile, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -9,12 +10,13 @@ import { canonicalMkdtemp } from "../../core/temp.js";
 import { BEFORE, AFTER, MARKER, parseRequest, scenarioCatalogHash, transition } from "./scenario.js";
 const exec = promisify(execFile);
 
-export async function runCommitJourney(): Promise<void> {
+export async function runCommitJourney(writeTool: "Edit" | "Write" = "Edit"): Promise<void> {
   await validateClaudeCli();
   const root = await canonicalMkdtemp(join(tmpdir(), "harness-commit-e2e-"));
   const project = join(root, "project");
   const config = join(root, "config");
   const hook = join(project, ".claude", "hooks", "commit_hook.py");
+  const sessionId = randomUUID();
   let server: Awaited<ReturnType<typeof startFakeAnthropicServer>> | undefined;
   try {
     const python = await pythonCommand();
@@ -32,20 +34,24 @@ export async function runCommitJourney(): Promise<void> {
       join(harness, "harness", "engineering", "commit", "commit_hook.py"),
       hook,
     );
+    await copyFile(join(harness, "harness/engineering/commit/commit_ownership.py"), join(dirname(hook), "commit_ownership.py"));
+    const toolHooks = [{ hooks: [{ type: "command", command: python, args: [hook, "--claude"] }], matcher: "Bash|Write|Edit|MultiEdit|NotebookEdit" }];
     await writeFile(
       join(project, ".claude", "settings.json"),
       JSON.stringify({
         hooks: {
+          PreToolUse: toolHooks, PostToolUse: toolHooks, PostToolUseFailure: toolHooks,
           UserPromptSubmit: [{ hooks: [{ type: "command", command: python, args: [hook, "--claude"] }] }],
         },
       }),
     );
     await writeFile(join(config, "settings.json"), "{}\n");
 
-    server = await startFakeAnthropicServer({ repoRoot: project, scenarioCatalogHash, parseRequest, transition });
+    server = await startFakeAnthropicServer({ repoRoot: project, scenarioCatalogHash, parseRequest,
+      transition: (request, repoRoot) => transition(request, repoRoot, writeTool) });
     const result = await runClaude(
       [
-        "-p", "--output-format", "stream-json", "--verbose", "--tools", "Read,Edit",
+        "-p", "--session-id", sessionId, "--output-format", "stream-json", "--verbose", "--tools", `Read,${writeTool}`,
         "--permission-mode", "acceptEdits", `${MARKER} edit deterministic.txt`,
       ],
       project,
@@ -65,6 +71,7 @@ export async function runCommitJourney(): Promise<void> {
       hook_event_name: "UserPromptSubmit",
       prompt: "/commit deterministic fixture",
       cwd: project,
+      session_id: sessionId,
       transcript_path: "",
     });
     const hookResult = await runHook(python, hook, project, payload);

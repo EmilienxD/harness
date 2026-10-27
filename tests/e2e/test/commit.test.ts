@@ -1,10 +1,12 @@
 import test from "node:test";
 import { runCommitJourney } from "../tools/commit/run.js";
 import { runCodexCommitContextJourney, type ContextMode } from "../tools/commit/codex-run.js";
-test("commit hook commits the real CLI edit without another inference request", { timeout: 180000 }, runCommitJourney);
+for (const tool of ["Edit", "Write"] as const) {
+  test(`Claude commit verifies native ${tool} without another inference request`, { timeout: 180000 }, async () => { await runCommitJourney(tool); });
+}
 
-for (const mode of ["healthy", "storage-failure", "lookup-failure"] satisfies ContextMode[]) {
-  test(`Codex commit context allows ordinary Unicode prompts: ${mode}`, { timeout: 60_000 }, async () => {
+for (const mode of ["healthy", "storage-failure", "lookup-failure", "verified"] satisfies ContextMode[]) {
+  test(`Codex commit context and ownership: ${mode}`, { timeout: 60_000 }, async () => {
     await runCodexCommitContextJourney(mode);
   });
 }

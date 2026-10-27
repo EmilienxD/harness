@@ -12,7 +12,18 @@ Use `/commit <message>`, `/commit --dry`, or `/commit --ai [guidance]`. Hooks on
 
 ## What happens
 
-The hook identifies files written during the session, stages eligible changes, and commits them. `--dry` previews the operation. `--ai` makes a direct Gemini request to generate the message using the diff and bounded session context; the other forms work locally without an API key.
+The command verifies files written during the session, stages eligible changes, and commits them. Missing or uncertain ownership stops the command; it never falls back to `git add -A`. `--dry` previews the operation. `--ai` makes a direct Gemini request to generate the message using the diff and bounded session context; the other forms work locally without an API key.
+
+There is no confirmation dialog: use `--dry` before committing if you want a preview.
+Pi displays the report as a notification (or a displayed custom message without a UI).
+Claude Code and ChatGPT display it through hook feedback: even a successful commit stops
+the submitted prompt from reaching the agent. A hook's blocking report does not imply Git failed.
+
+Ownership applies to whole files. Editing a file that already contains someone else's
+uncommitted changes requires manual review and commit. Later changes to an owned file,
+unexpected HEAD changes, conflicting staged changes, and merges also stop automatic commit.
+Unrelated staged files are preserved. Failed AI generation leaves the command's own staged
+entries available for an explicit-message retry, provided those entries remain unchanged.
 
 ## Files and prerequisites
 
@@ -23,6 +34,31 @@ The hook identifies files written during the session, stages eligible changes, a
 Run `/commit --dry` to inspect the proposed commit, then `/commit Fix empty-cart validation`.
 
 ## Implementation and verification
+
+Version 1.8.0 shares SHA-256 file ownership, Git baseline and index checks across all three
+providers. Claude Code now observes `PreToolUse`, `PostToolUse` and `PostToolUseFailure` for
+native writes, edits, notebook edits and shell tools; the transcript supplies optional AI
+narrative only. ChatGPT observes `Bash` and `apply_patch`, including literal patch move targets.
+Shell ownership requires recognizable literal targets. Partial failed writes, overlapping
+observations and incomplete evidence stop the command. Pending calls also stop previews and
+commits; a denied call without a completion hook can leave pending evidence requiring manual
+commit. Hook processes serialize ownership updates and commit preparation with an exclusive
+session lock. A stale lock after a process crash stops automatic operation.
+
+Claude/ChatGPT receipts live under Git's `harness/commit/v2/<provider>/<session-hash>` directory.
+Exact resume with the same identity retains them; a new identity starts without ownership.
+Old metadata-only ChatGPT records and Claude transcript paths cannot authorize staging after
+upgrade. Claude/ChatGPT hook history is scoped to the session ID, without Pi's active-ancestry
+filtering: rewinding a conversation under the same identity does not discard earlier receipts.
+Use a new session identity or commit manually when that distinction matters. Independent
+processes and custom tools remain outside complete attribution coverage.
+
+Real Git regression tests cover both hook providers: missing and corrupt evidence, preexisting
+and later foreign edits, changed HEAD, partial staging, pending/overlapping/failed calls,
+new identities, dry runs, unrelated staged files, AI retry and changes during AI generation.
+The real Claude journey observes its native edit before committing; the Codex journeys check
+both a verified tool write and stopping a resumed commit without ownership. Pi's existing
+JSON/RPC, lifecycle and AI journeys exercise the shared implementation.
 
 Version 1.7.6 reads ChatGPT hook input as UTF-8 and stores context using escaped JSON, including
 provider input containing lone surrogates. Ordinary prompts are recorded as optional
