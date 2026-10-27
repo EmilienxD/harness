@@ -147,7 +147,7 @@ def test_invalid_toml_is_reported_instead_of_crashing(name, tmp_path):
         },
     ],
 )
-def test_edit_guards_recognize_prior_reads_in_nested_transcript_entries(
+def test_edit_guards_require_results_rather_than_transcript_read_attempts(
     name, tool_use, tmp_path
 ):
     configure(
@@ -168,7 +168,9 @@ def test_edit_guards_recognize_prior_reads_in_nested_transcript_entries(
         tmp_path,
     )
 
-    assert result == (0, None, "")
+    assert result[0] == 0
+    assert result[1] is not None
+    assert result[2] == ""
 
 
 @pytest.mark.parametrize("name", EDIT_GUARDS)

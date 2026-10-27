@@ -1,12 +1,16 @@
 name = "on-edit-block"
-version = "2.2.4"
-description = "PreToolUse hook that denies Write/Edit/MultiEdit on files matching gitignore-style patterns until the agent has read the required files"
+version = "2.3.0"
+description = "Blocks supported native edits and recognized shell writes on matching paths until required guidance has been read"
 docs = "https://github.com/EmilienxD/harness/blob/main/README.md#hooks"
 
-dependencies = [{ name = "pi-path-guards", version = ">=1.0.0,<2.0.0", lifecycle = "coupled", platforms = ["pi"] }]
+dependencies = [{ name = "path-guard-common", version = ">=1.0.0,<2.0.0", lifecycle = "coupled" }, { name = "pi-path-guards", version = ">=1.1.0,<2.0.0", lifecycle = "coupled", platforms = ["pi"] }]
 
 [platforms.pi]
 status = "supported"
+
+[platforms.chatgpt]
+status = "supported"
+fragment = "chatgpt/hooks.fragment.json"
 
 [platforms.claude]
 status = "supported"
@@ -16,7 +20,7 @@ fragment = "claude/settings.fragment.json"
 src = "on_edit_block_hook.py"
 dest = "on_edit_block_hook.py"
 root = "hooks"
-platforms = ["claude"]
+platforms = ["claude", "chatgpt"]
 executable = true
 
 [[files]]
@@ -31,7 +35,7 @@ executable = true
 src = "on-edit-block.toml"
 dest = ".harness/guards/on-edit-block.toml"
 root = "workspace"
-platforms = ["claude"]
+platforms = ["claude", "chatgpt"]
 starter = true
 
 [[files]]

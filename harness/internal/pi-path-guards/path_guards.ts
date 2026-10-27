@@ -27,7 +27,7 @@ export function registerPathGuard(pi: any, packageName: string): void {
 
   const handle = async (event: any, ctx: any, phase: "call" | "result") => {
     if (!["read", "write", "edit", "bash", "powershell"].includes(event.toolName)) return;
-    if (phase === "call" && (packageName !== "on-edit-block" || !["write", "edit"].includes(event.toolName))) return;
+    if (phase === "call" && (packageName !== "on-edit-block" || !["write", "edit", "bash", "powershell"].includes(event.toolName))) return;
     const text = (event.content ?? []).filter((block: any) => block.type === "text").map((block: any) => block.text).join("\n");
     const branch = ctx.sessionManager.getBranch();
     const entries = branch.filter((entry: any) => entry.type === "custom" && entry.customType === RECEIPT);

@@ -2,12 +2,30 @@
   "hooks": {
     "PreToolUse": [
       {
-        "matcher": "Write|Edit|MultiEdit",
+        "matcher": "Write|Edit|MultiEdit|Bash",
         "hooks": [
           {
             "type": "command",
             "command": "${PYTHON}",
-            "args": ["${CLAUDE_DIR}/hooks/on_edit_block_hook.py", "--claude"]
+            "args": [
+              "${HOOKS_DIR}/on_edit_block_hook.py",
+              "--claude"
+            ]
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Read|Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${PYTHON}",
+            "args": [
+              "${HOOKS_DIR}/on_edit_block_hook.py",
+              "--claude"
+            ]
           }
         ]
       }

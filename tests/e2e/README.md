@@ -22,6 +22,7 @@ npm run e2e:pi
 npm run test:pi
 npm run test:pi-package-precedence
 npm run test:pi-shared-skills
+npm run test:path-guards
 npm run test:pi-path-guards
 npm run test:pi-command-guard
 npm run test:pi-prefer-fewer-comments

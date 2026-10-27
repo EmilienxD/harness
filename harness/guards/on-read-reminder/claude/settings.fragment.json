@@ -7,7 +7,10 @@
           {
             "type": "command",
             "command": "${PYTHON}",
-            "args": ["${CLAUDE_DIR}/hooks/on_read_reminder_hook.py", "--claude"]
+            "args": [
+              "${HOOKS_DIR}/on_read_reminder_hook.py",
+              "--claude"
+            ]
           }
         ]
       }

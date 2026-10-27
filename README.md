@@ -282,9 +282,9 @@ Hooks do not need a skill invocation. Select them in the catalogue and restart t
 | `slash-command-guard` | Pi | Rejects unknown leading slash commands without sending them to the model. |
 | `exclude-unwanted-tools` | Pi | Removes `powershell`, `codemode`, `find`, `grep`, and `ls` from the session tool registry. |
 | `no-new-documents` | Claude Code, ChatGPT, Pi | Stops agents from creating files in configured documentation directories and has them write a draft for your approval instead. Edits to existing files are allowed. |
-| `on-read-reminder` | Claude Code, Pi | Reminds the agent to read required guidance when it reads paths matching configured patterns. |
-| `on-edit-reminder` | Claude Code, Pi | Lets a matching edit land, then requires the relevant guidance to be read and violations corrected. |
-| `on-edit-block` | Claude Code, Pi | Denies a matching edit until the required guidance has been read or delivered in the current session branch. |
+| `on-read-reminder` | Claude Code, ChatGPT, Pi | Reminds the agent to read required guidance when it reads paths matching configured patterns. |
+| `on-edit-reminder` | Claude Code, ChatGPT, Pi | Lets a matching edit land, then requires the relevant guidance to be read and violations corrected. |
+| `on-edit-block` | Claude Code, ChatGPT, Pi | Denies a matching edit until the required guidance has been read or delivered in the current session branch. |
 | `prefer-read-tool` | Claude Code | Nudges the agent toward the reviewable Read tool after shell-based file reads. |
 | `prefer-edit-tool` | Claude Code | Nudges the agent toward Write/Edit after shell-based file changes. |
 | `prefer-fewer-comments` | Claude Code, ChatGPT, Pi | Flags newly written comments or docstrings that exceed an editable budget. Pi wraps native writes/edits with exact mutation snapshots. |

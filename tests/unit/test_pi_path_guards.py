@@ -79,14 +79,14 @@ def test_edit_reminder_deduplicates_invalid_policy_diagnostics(guard, tmp_path):
     assert guard.evaluate({**event, "receipts": first["receipts"]})["message"] == ""
 
 
-@pytest.mark.parametrize("platform", [Platform.CLAUDE, Platform.PI])
+@pytest.mark.parametrize("platform", [Platform.CLAUDE, Platform.CHATGPT, Platform.PI])
 def test_pi_guard_dependencies_are_filtered_and_coupled(tmp_path, platform):
     installer = CatalogueInstaller(discover(), Target.for_project(tmp_path / "project", platform), ReceiptStore.load(tmp_path / "receipts.json"))
     installer.reconcile(set(PACKAGES))
-    expected = set(PACKAGES) | ({"pi-path-guards", "pi-transport"} if platform is Platform.PI else set())
+    expected = set(PACKAGES) | {"path-guard-common"} | ({"pi-path-guards", "pi-transport"} if platform is Platform.PI else set())
     assert set(installer.installation["packages"]) == expected
     installer.reconcile({"on-edit-block"})
-    assert set(installer.installation["packages"]) == {"on-edit-block"} | ({"pi-path-guards", "pi-transport"} if platform is Platform.PI else set())
+    assert set(installer.installation["packages"]) == {"on-edit-block", "path-guard-common"} | ({"pi-path-guards", "pi-transport"} if platform is Platform.PI else set())
     installer.reconcile(set())
     assert installer.installation["packages"] == {}
 

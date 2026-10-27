@@ -1,0 +1,15 @@
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "apply_patch|Bash|Read",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${PYTHON} \"${HOOKS_DIR}/on_edit_reminder_hook.py\" --chatgpt"
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Claude Code PostToolUse hook: on-read-reminder.
+Claude Code / ChatGPT PostToolUse hook: on-read-reminder.
 
 Fires after a Read call, and after Bash commands that read files through
 cat/more/less/head/tail/type. When the path being read matches a
@@ -25,15 +25,16 @@ import tomllib
 from pathlib import Path
 from typing import Any
 
+# Installed beside hooks; the source checkout keeps internal dependencies separate.
+_common_source = Path(__file__).resolve().parents[2] / "internal" / "path-guard-common"
+if Path(__file__).resolve().parent.parent.name == "guards" and _common_source.is_dir():
+    sys.path.insert(0, str(_common_source))
+import path_guard_common as common
+
+PROVIDER = "chatgpt" if "--chatgpt" in sys.argv else "claude"
+
 RULES_NAME = "on-read-reminder.toml"
 
-# Shell commands whose presence means "the agent is reading a file".
-# `type` covers Windows' cmd, the others the usual Unix suspects.
-READ_COMMANDS = re.compile(r"\b(cat|more|less|head|tail|type)\b")
-
-# Quoted or bare whitespace-delimited token. Every token is tried against the
-# rule patterns; tokens that aren't matching paths simply fire nothing.
-TOKEN = re.compile(r'"([^"]+)"|\'([^\']+)\'|(\S+)')
 
 
 class Rule:
@@ -132,34 +133,11 @@ def project_root() -> Path:
 
 
 def normalise(path_text: str, root: Path) -> str | None:
-    """Return a project-relative, forward-slash path."""
-    if Path(path_text).is_absolute():
-        try:
-            return Path(path_text).resolve().relative_to(root.resolve()).as_posix()
-        except (ValueError, OSError):
-            return None
-    raw = path_text.replace("\\", "/")
-    while raw.startswith("./"):
-        raw = raw[2:]
-    return raw or None
+    return common.relative(path_text, root)
 
 
 def candidate_paths(tool_name: str, tool_input: dict[str, Any]) -> list[str]:
-    """Paths the tool call is reading, as written by the agent."""
-    if tool_name == "Read":
-        file_path = tool_input.get("file_path")
-        return [file_path] if isinstance(file_path, str) and file_path else []
-    if tool_name == "Bash":
-        command = tool_input.get("command")
-        if not isinstance(command, str) or not READ_COMMANDS.search(command):
-            return []
-        paths: list[str] = []
-        for match in TOKEN.finditer(command):
-            token = match.group(1) or match.group(2) or match.group(3) or ""
-            if token and not token.startswith("-"):
-                paths.append(token)
-        return paths
-    return []
+    return common.read_paths(tool_name, tool_input, project_root())
 
 
 def matching_reminders(rules: list[Rule], rel_path: str) -> list[str]:
@@ -214,7 +192,15 @@ def main() -> int:
     if not isinstance(tool_input, dict):
         return 0
 
-    root = project_root()
+    root = project_root() if PROVIDER == "claude" and os.environ.get("CLAUDE_PROJECT_DIR") else Path(event.get("cwd") or project_root())
+    # Keep policy lookup at the project root while shell paths follow the call's cwd.
+    tool_input = dict(tool_input)
+    if event.get("cwd"):
+        tool_input.setdefault("cwd", event["cwd"])
+    event["tool_input"] = tool_input
+    common.observe(event, root, PROVIDER)
+    if not common.successful(event.get("tool_response", {})):
+        return 0
 
     # Bundled defaults, then shared user and project rules.
     sources: list[Path] = []
@@ -249,7 +235,7 @@ def main() -> int:
     triggers: list[str] = []
     reminders: list[str] = []
     seen_reminders: set[str] = set()
-    for raw_path in candidate_paths(tool_name, tool_input):
+    for raw_path in common.read_paths(tool_name, tool_input, root):
         rel_path = normalise(raw_path, root)
         if rel_path is None:
             continue

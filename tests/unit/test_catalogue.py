@@ -442,9 +442,9 @@ def test_catalogue_only_labels_unsupported_selected_providers():
     options = {
         tool.name: option
         for tool, option in zip(
-            (tools["aboard"], tools["on-edit-block"]),
+            (tools["aboard"], tools["on-edit-block"], tools["prefer-edit-tool"]),
             cli._tool_options(
-                [tools["aboard"], tools["on-edit-block"]],
+                [tools["aboard"], tools["on-edit-block"], tools["prefer-edit-tool"]],
                 set(),
                 (Platform.CLAUDE, Platform.CHATGPT),
             ),
@@ -452,7 +452,8 @@ def test_catalogue_only_labels_unsupported_selected_providers():
     }
 
     assert options["aboard"].badge == ""
-    assert options["on-edit-block"].badge == "ChatGPT not supported"
+    assert options["on-edit-block"].badge == ""
+    assert options["prefer-edit-tool"].badge == "ChatGPT not supported"
     claude_only = cli._tool_options(
         [tools["on-edit-block"]], set(), (Platform.CLAUDE,)
     )
@@ -1458,7 +1459,7 @@ def test_every_catalogue_manifest_loads():
             "redirect-subagents", "usage-limit-wait",
         },
         "vscode": {"aboard", "auto"},
-        "internal": {"pi-transport", "pi-path-guards", "pi-issue-workflows"},
+        "internal": {"pi-transport", "pi-path-guards", "pi-issue-workflows", "path-guard-common"},
     }
     actual_categories = {}
     catalogue_root = next(parent for parent in tools["aboard"].root.parents if parent.name == "harness")

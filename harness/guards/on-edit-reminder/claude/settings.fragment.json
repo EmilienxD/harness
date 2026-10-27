@@ -2,12 +2,15 @@
   "hooks": {
     "PostToolUse": [
       {
-        "matcher": "Write|Edit|MultiEdit",
+        "matcher": "Write|Edit|MultiEdit|Bash|Read",
         "hooks": [
           {
             "type": "command",
             "command": "${PYTHON}",
-            "args": ["${CLAUDE_DIR}/hooks/on_edit_reminder_hook.py", "--claude"]
+            "args": [
+              "${HOOKS_DIR}/on_edit_reminder_hook.py",
+              "--claude"
+            ]
           }
         ]
       }
