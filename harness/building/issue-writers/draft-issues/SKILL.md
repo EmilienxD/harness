@@ -10,7 +10,7 @@ disable-model-invocation: true
 
 Break a plan, spec, or conversation into a set of GitHub issues: tracer-bullet vertical slices, each declaring the issues that block it.
 
-This skill is part of an issue publishing system that uses a gateway for publishing issues. Your job stops at issue drafting, as markdown files. The gateway handles publishing automatically — you are not allowed to call `gh issue create`.
+Write Markdown drafts through the issues gateway provided by the system. If you didn't get access to it, stop and alert the user. Hand the drafts back for review or publish immediatly if explicitly asked using the gateway script; you are not allowed to call `gh issue create`.
 
 ## Process
 
@@ -112,6 +112,8 @@ Examples:
 
 In "Parent" and "Blocked by", reference other issues drafted in this turn by their plain-text `<issues-session-id>/{i}` token — never wrap it in backticks or braces; the system will rewrite it to a bare `#<number>` resolving to real issue numbers once the referenced issue is published. This works for references to issues from THIS TURN ONLY — a draft can't reference an issue from a different, unrelated turn. To reference an issue not drafted in this turn, use the real existing GitHub issue number. Once this turn's issues are published, you will be notified of the result and the actual GitHub numbers of the published issues, so you don't need any additional `gh` calls to get the issue numbers for the next turns in this session.
 
-### 5. Hand off to the user
+### 4. Publish or hand off
 
-List the relative file paths you created and tell the user they can review them. They can edit any file directly — title, labels, body, blockers — before publishing. Ask if they want you to make changes. Mention that they can invoke `publish-issues` with `--dry` first to preview what would be created without touching the tracker, or without `--dry` to publish for real.
+If the user explicitly requested publication, run the `<skill-directory>/scripts/publish_issues.py` gateway script. Add `--dry` to preview. The script publishes all remaining drafts in the current session. Report the returned results in one sentence.
+
+Otherwise, tell the user the relative file paths you created and that they can review them. They can edit the files directly — titles, labels, bodies, parents — before publishing. Ask if they want you to make changes. Mention that they can invoke `publish-issues` with `--dry` first to preview or without it to publish for real.

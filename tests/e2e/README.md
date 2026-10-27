@@ -536,7 +536,9 @@ user RPC and lifecycle journeys. Shell mutations and competing tool replacements
 `test:pi-issues` installs `issue-readers` and `issue-writers` with their coupled bridge at
 project and user scope. Real Pi 1.2.0 JSON/RPC sessions prepare issue context, implement and review
 fixture files, reject dirty addressing without inference, invoke the four writing skills and
-publish with no inference. A local fake `gh` records read and publish effects; no GitHub credentials
+publish through the native command with no inference. Agent journeys also preview and publish through
+the installed script with the native shell, checking automatic identity, immediate results and no deferred notice.
+A local fake `gh` records read and publish effects; no GitHub credentials
 or external tracker mutations are involved. Checks include supplied draft paths, reload identity,
 foreign-session preservation, dry-run/invalid options, removed writer aliases, response-only specs
 without draft setup, progress notifications, draft-to-issue notice mappings and exclusion of visible

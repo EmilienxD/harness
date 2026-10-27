@@ -10,7 +10,7 @@ disable-model-invocation: true
 
 Turn a plan, spec or conversation into a single GitHub issue.
 
-This skill is part of an issue publishing system that uses a gateway for publishing issues. Your job stops at issue drafting, as a markdown file. The gateway handles publishing automatically — you are not allowed to call `gh issue create`.
+Write a Markdown draft through the issues gateway provided by the system. If you didn't get access to it, stop and alert the user. Hand the draft back for review or publish immediatly if explicitly asked using the gateway script; you are not allowed to call `gh issue create`.
 
 ## Process
 
@@ -85,6 +85,8 @@ Examples:
 > mode:afk
 ```
 
-### 3. Hand off to the user
+### 4. Publish or hand off
 
-Tell the user the relative file path you created and that they can review it. They can edit the file directly — title, labels, body, blockers — before publishing. Ask if they want you to make changes. Mention that they can invoke `publish-issues` with `--dry` first to preview what would be created without touching the tracker, or without `--dry` to publish for real.
+If the user explicitly requested publication, run the `<skill-directory>/scripts/publish_issues.py` gateway script. Add `--dry` to preview. The script publishes all remaining drafts in the current session. Report the returned results in one sentence.
+
+Otherwise, tell the user the relative file path you created and that they can review it. They can edit the file directly — title, labels, body, parent — before publishing. Ask if they want you to make changes. Mention that they can invoke `publish-issues` with `--dry` first to preview or without to publish for real.

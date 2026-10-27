@@ -17,6 +17,7 @@ import os
 import subprocess
 import sys
 import time
+import uuid
 from pathlib import Path
 
 import pytest
@@ -38,6 +39,8 @@ OTHER_SID = "11111111-2222-4333-8444-555555555555"
 def isolated_store(tmp_path, monkeypatch):
     """Keep every test's lock and notice inside its own tmp_path."""
     monkeypatch.setenv(hook.STATE_DIR_VARIABLE, str(tmp_path / "state"))
+    for variable in hook.SESSION_VARIABLES.values():
+        monkeypatch.delenv(variable, raising=False)
 
 
 def _draft(root: Path, name: str, text: str, session: str = SID) -> Path:
@@ -519,6 +522,108 @@ def test_comment_body_file_uses_lf_newlines(monkeypatch):
 # The pending notice: the only way a hook-run publish reaches the agent
 
 
+@pytest.mark.parametrize("outcome", ["success", "partial", "failure"])
+def test_agent_script_returns_results_without_a_deferred_notice(
+    tmp_path, monkeypatch, capsys, outcome
+):
+    monkeypatch.chdir(tmp_path)
+    urls = [] if outcome == "failure" else ["https://github.com/x/y/issues/42"]
+    _capture_creates(monkeypatch, urls)
+    draft = _draft(tmp_path, "issue-0.md", "# Ready\n\n> mode:afk\n\nbody\n")
+    if outcome == "partial":
+        _draft(tmp_path, "issue-1.md", "# Missing labels\n\nbody\n")
+    other = _draft(tmp_path, "issue-0.md", "# Other\n\n> spec\n\nbody\n", OTHER_SID)
+
+    monkeypatch.setenv(hook.CLAUDE_SESSION_VARIABLE, SID)
+    hook.main([])
+
+    result = capsys.readouterr().out
+    if outcome != "failure":
+        assert "https://github.com/x/y/issues/42" in result
+        assert not draft.exists()
+    else:
+        assert draft.exists()
+    if outcome != "success":
+        assert "1 failed or were skipped" in result
+    assert other.exists()
+    assert hook.flush_notice(tmp_path, SID) is None
+
+
+def test_agent_script_preserves_notices_from_earlier_user_publications(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    _capture_creates(monkeypatch, ["https://github.com/x/y/issues/42"])
+    _draft(tmp_path, "issue-0.md", "# Ready\n\n> spec\n\nbody\n")
+    hook.queue_notice(tmp_path, SID, [{"number": "41", "title": "Earlier"}], 0)
+
+    monkeypatch.setenv(hook.CLAUDE_SESSION_VARIABLE, SID)
+    hook.main([])
+
+    notice = json.loads(hook.notice_path(tmp_path, SID).read_text())
+    assert [entry["number"] for entry in notice["created"]] == ["41"]
+
+
+@pytest.mark.parametrize("provider", ["claude", "chatgpt", "pi"])
+def test_agent_script_process_preview_is_local_and_session_scoped(tmp_path, provider):
+    native_id = SID if provider == "claude" else "native-session"
+    session_id = SID if provider == "claude" else str(
+        uuid.uuid5(uuid.NAMESPACE_URL, f"harness:issues:{provider}:{native_id}")
+    )
+    draft = _draft(tmp_path, "issue-0.md", "# Ready\n\n> spec\n\nbody\n", session_id)
+    _draft(tmp_path, "issue-0.md", "# Other\n\n> spec\n\nbody\n", OTHER_SID)
+    original = draft.read_bytes()
+    result = subprocess.run(
+        [sys.executable, str(CORE), "--dry"],
+        cwd=tmp_path, capture_output=True, text=True, encoding="utf-8",
+        env={**os.environ, "PATH": "", hook.SESSION_VARIABLES[provider]: native_id},
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert "1 issue(s) ready to publish" in result.stdout
+    assert "Other" not in result.stdout
+    assert draft.read_bytes() == original
+    assert hook.flush_notice(tmp_path, SID) is None
+
+
+@pytest.mark.parametrize("environment", [
+    {},
+    {"CODEX_THREAD_ID": ""},
+    {"CODEX_THREAD_ID": " "},
+    {hook.CLAUDE_SESSION_VARIABLE: "not-a-uuid"},
+    {hook.CLAUDE_SESSION_VARIABLE: SID, "CODEX_THREAD_ID": "another-session"},
+    {"PI_SESSION_ID": "pi-session", "CODEX_THREAD_ID": "codex-session"},
+])
+def test_agent_script_rejects_unresolved_identity_before_touching_drafts(
+    tmp_path, monkeypatch, environment
+):
+    monkeypatch.chdir(tmp_path)
+    for key, value in environment.items():
+        monkeypatch.setenv(key, value)
+    draft = _draft(tmp_path, "issue-0.md", "# Ready\n\n> spec\n\nbody\n")
+    monkeypatch.setattr(hook, "run_gh", lambda *a, **k: pytest.fail("Contacted GitHub"))
+
+    with pytest.raises(SystemExit) as error:
+        hook.main([])
+
+    assert error.value.code == 2
+    assert draft.exists()
+    assert not hook.lock_path(tmp_path).exists()
+    assert not hook.notice_path(tmp_path, SID).exists()
+
+
+def test_agent_cannot_select_another_session_with_an_argument(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv(hook.CLAUDE_SESSION_VARIABLE, SID)
+    calls = _capture_creates(monkeypatch, [])
+    other = _draft(tmp_path, "issue-0.md", "# Other\n\n> spec\n\nbody\n", OTHER_SID)
+
+    with pytest.raises(SystemExit) as error:
+        hook.main(["--session-id", OTHER_SID])
+
+    assert error.value.code == 2
+    assert other.exists()
+    assert calls == []
+
+
 def test_notice_is_delivered_once_then_gone(tmp_path):
     hook.queue_notice(
         tmp_path, SID, [{"number": "42", "title": "Spec", "labels": ["[AI]-spec"]}], 0
@@ -962,6 +1067,41 @@ def test_publish_result_reaches_the_user_only_and_erases_the_prompt(tmp_path):
     assert result.returncode == 2
     assert "No .harness/issue-drafts/" in result.stderr
     assert result.stdout == ""
+
+
+@pytest.mark.parametrize("session_id", [SID, OTHER_SID])
+def test_claude_session_start_exports_its_own_identity(tmp_path, monkeypatch, session_id):
+    env_file = tmp_path / "session.env"
+    env_file.write_text("export EXISTING=preserved\n", encoding="utf-8")
+    monkeypatch.setenv("CLAUDE_ENV_FILE", str(env_file))
+
+    result = _run_hook(
+        {"hook_event_name": "SessionStart", "session_id": session_id, "cwd": str(tmp_path)},
+        tmp_path,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout == ""
+    assert env_file.read_text(encoding="utf-8").splitlines() == [
+        "export EXISTING=preserved", "", f"export {hook.CLAUDE_SESSION_VARIABLE}={session_id}",
+    ]
+    assert env_file.read_bytes().endswith(
+        f"\nexport {hook.CLAUDE_SESSION_VARIABLE}={session_id}\n".encode("utf-8")
+    )
+    assert not (tmp_path / hook.DRAFTS_DIR).exists()
+
+
+def test_claude_session_start_validates_identity_before_writing_shell_code(tmp_path, monkeypatch):
+    env_file = tmp_path / "session.env"
+    monkeypatch.setenv("CLAUDE_ENV_FILE", str(env_file))
+
+    result = _run_hook(
+        {"hook_event_name": "SessionStart", "session_id": "bad; execute-something", "cwd": str(tmp_path)},
+        tmp_path,
+    )
+
+    assert result.returncode == 2
+    assert not env_file.exists()
 
 
 def test_drafting_prompt_returns_context_as_json_on_stdout(tmp_path):

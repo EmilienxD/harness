@@ -12,7 +12,13 @@ Claude Code uses `/skill-name`; ChatGPT uses `$skill-name`; Pi uses `/skill:skil
 
 ## What happens
 
-`draft-issues` proposes titles, parent links, dependencies, and labels, then waits for your approval before writing files. `to-spec` synthesizes existing context without another interview. Drafting skills never create GitHub issues directly: the publication hook or native Pi command creates them and resolves links between drafts.
+`draft-issues` proposes titles, parent links, dependencies, and labels, then waits for your approval before writing files. `to-spec` synthesizes existing context without another interview. Drafting skills leave editable files for review by default. If you explicitly ask the agent to publish, it runs its bundled publishing script using the same core as the publication hook or native Pi command. Approval of a breakdown or draft alone does not authorize publication.
+
+The agent script accepts optional `--dry` and automatically resolves the current session's batch from the provider environment; it has no session-selection argument. It returns issue links and failure details directly to the agent, without queuing a duplicate next-prompt notice. The user command keeps its existing deferred notice behavior.
+
+Deterministic journeys verify agent publication with real Claude Code, Codex and Pi CLIs against local fake model and GitHub APIs, including automatic session identity, immediate results and no deferred notice.
+
+ChatGPT uses `CODEX_THREAD_ID`; Pi uses `PI_SESSION_ID`. Claude's SessionStart hook writes `HARNESS_ISSUES_CLAUDE_SESSION_ID` through `CLAUDE_ENV_FILE` for subsequent Bash commands. Restart or resume Claude after upgrading so that hook runs. Missing, empty or conflicting provider identities stop the script before publication; it never guesses from PIDs or nearby drafts. Nested providers with inherited identities may therefore be rejected. This prevents accidental batch selection, but shell environment variables are editable and do not isolate an agent deliberately bypassing the publisher. Codex environment injection is documented in its [execution server](https://github.com/openai/codex/blob/main/codex-rs/exec-server/README.md); Claude environment persistence and Pi shell metadata are covered in the mirrored [Claude hooks](../../../CLAUDE-REFERENCES/hooks.md#persist-environment-variables) and [Pi environment](../../../PI-REFERENCES/docs/environment-variables.md#shell-tool-session-environment) references.
 
 Review and edit the Markdown files directly. The dry-run text lists valid drafts in publication order with their paths, labels, parents and blockers, followed by errors for skipped drafts. References such as `draft 0` identify the `.issue-0.md` filename index, not the displayed publication position. The preview stays local and does not verify GitHub access or permissions.
 
@@ -34,6 +40,6 @@ sessions select another. `/publish-issues [--dry]` is a native command consumed 
 shim is installed only for Claude Code and ChatGPT. Repository locks, draft ordering, parent links, crash recovery, stale sweeping
 and next-prompt notices remain owned by the shared core.
 
-Pi shows one activity notification during preparation or publication and a text result with created issue titles/links and failure details. The visible report stays out of model context. On the next input, the agent receives a compact notice mapping draft paths to real issue numbers plus reported failures. Publication timeouts warn that some issues may already exist and direct you to rerun for recovery.
+For the native user command, Pi shows one activity notification during preparation or publication and a text result with created issue titles/links and failure details. The visible report stays out of model context. On the next input, the agent receives a compact notice mapping draft paths to real issue numbers plus reported failures. Agent script publication returns its results immediately instead. Publication timeouts warn that some issues may already exist and direct you to rerun for recovery.
 
 Input routing, cancellation, transport limits and the shared acceptance journeys are documented with [issue readers](issue-readers.md#pi-routing-and-context-preparation).

@@ -1,7 +1,10 @@
 import { test } from "node:test";
-import { runPiIssueReaders, runPiIssueWriters } from "../tools/pi-issues/run.js";
+import { runPiAgentIssueWriters, runPiIssueReaders, runPiIssueWriters } from "../tools/pi-issues/run.js";
 
 for (const scope of ["project", "user"] as const) {
+  test(`Pi issue writers ${scope}: agent previews and publishes with automatic identity`, { timeout: 120_000 }, async () => {
+    await runPiAgentIssueWriters(scope);
+  });
   test(`Pi issue readers ${scope}: prepare, implement, review and stop dirty addressing`, { timeout: 120_000 }, async () => {
     await runPiIssueReaders(scope, scope === "project" ? "json" : "rpc");
   });

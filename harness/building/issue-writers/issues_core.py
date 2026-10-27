@@ -6,6 +6,10 @@ Fires before Claude ever sees the prompt. When the prompt is "/publish-issues"
 exits 2, which erases the prompt and shows stderr to the user only - zero API
 calls for this step.
 
+The bundled skill script resolves its session from the shell environment and
+accepts optional --dry. It prints results directly to the agent and skips the
+deferred notice.
+
 Design notes:
 - Every draft is one flat file in ".harness/issue-drafts/", named
   "{session-id}.issue-{i}.md". The session id in the filename is the only
@@ -94,6 +98,7 @@ import subprocess
 import sys
 import tempfile
 import time
+import uuid
 from contextvars import ContextVar
 from pathlib import Path
 
@@ -110,6 +115,12 @@ GH_DEADLINE: ContextVar[float | None] = ContextVar("issues_gh_deadline", default
 # Everything this tool remembers between runs lives here, never in the user's
 # repository. Mirrors the convention in src/harness_cli/receipts.py.
 STATE_DIR_VARIABLE = "HARNESS_STATE_DIR"
+CLAUDE_SESSION_VARIABLE = "HARNESS_ISSUES_CLAUDE_SESSION_ID"
+SESSION_VARIABLES = {
+    "claude": CLAUDE_SESSION_VARIABLE,
+    "chatgpt": "CODEX_THREAD_ID",
+    "pi": "PI_SESSION_ID",
+}
 
 # A draft mid-publish. The rename is the entire crash-recovery mechanism.
 PUBLISHING_SUFFIX = ".publishing"
@@ -1215,8 +1226,10 @@ def publish_batch(
     return published, len(failed_entries) + recovery_failures
 
 
-def publish_issues(dry: bool, session_id: str, root: Path | None = None) -> str:
-    """Publish drafts belonging to the current agent session only."""
+def publish_issues(
+    dry: bool, session_id: str, root: Path | None = None, *, defer_notice: bool = True
+) -> str:
+    """Publish this session's drafts; defer notices only for user command runs."""
     root = Path.cwd() if root is None else root
     drafts_dir = root / DRAFTS_DIR
     if not drafts_dir.is_dir():
@@ -1237,7 +1250,7 @@ def publish_issues(dry: bool, session_id: str, root: Path | None = None) -> str:
         return "No drafts found for this session. Nothing to publish."
 
     if dry:
-        return _run_publish(drafts_dir, True, root, session_id)
+        return _run_publish(drafts_dir, True, root, session_id, defer_notice=defer_notice)
 
     with file_lock(lock_path(root)) as acquired:
         if not acquired:
@@ -1248,10 +1261,12 @@ def publish_issues(dry: bool, session_id: str, root: Path | None = None) -> str:
         sweep_stale(root)
         if nothing_to_publish():
             return "No drafts found for this session. Nothing to publish."
-        return _run_publish(drafts_dir, False, root, session_id)
+        return _run_publish(drafts_dir, False, root, session_id, defer_notice=defer_notice)
 
 
-def _run_publish(drafts_dir: Path, dry: bool, root: Path, session_id: str) -> str:
+def _run_publish(
+    drafts_dir: Path, dry: bool, root: Path, session_id: str, *, defer_notice: bool = True
+) -> str:
     header = "Dry run -- nothing will be created" if dry else "Publishing drafted issues"
     report = [header, ""]
     labels_ensured = False
@@ -1269,7 +1284,7 @@ def _run_publish(drafts_dir: Path, dry: bool, root: Path, session_id: str) -> st
     )
     report.append("")
 
-    if not dry:
+    if not dry and defer_notice:
         problems = [line.strip()[:500] for line in report if line.startswith(("  FAIL", "  SKIP", "  WARN"))]
         queue_notice(root, session_id, created, failed, problems)
 
@@ -1317,3 +1332,52 @@ def run_publish_command(prompt: str, session_id: str, root: Path | None = None) 
     except (argparse.ArgumentError, ValueError) as exc:
         return f"Invalid publish command: {exc}"
     return publish_issues(options.dry, session_id, root)
+
+
+def provider_session_id(provider: str, native_id: str) -> str:
+    """Use the same draft identity for native hooks and agent shell commands."""
+    if not native_id or native_id.strip() != native_id:
+        raise ValueError("Missing or malformed native issues session identity")
+    if provider == "claude":
+        if not SESSION_ID_PATTERN.fullmatch(native_id):
+            raise ValueError("Invalid Claude issues session identity")
+        return native_id
+    if provider not in {"chatgpt", "pi"}:
+        raise ValueError("Unknown issues provider")
+    return str(uuid.uuid5(uuid.NAMESPACE_URL, f"harness:issues:{provider}:{native_id}"))
+
+
+def session_from_environment() -> str:
+    """Never select a draft batch from caller arguments, PIDs or directory scans."""
+    identities = [
+        (provider, os.environ[variable])
+        for provider, variable in SESSION_VARIABLES.items()
+        if variable in os.environ
+    ]
+    if len(identities) != 1:
+        raise ValueError(
+            "Missing or ambiguous provider session environment. "
+            "Run inside one supported agent session; for Claude, restart or resume "
+            "after installing the SessionStart hook. Nothing was published."
+        )
+    return provider_session_id(*identities[0])
+
+
+def main(argv: list[str] | None = None) -> None:
+    """Agent entry point: return results directly, without a next-prompt notice."""
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser.add_argument("--dry", action="store_true", help="Preview locally without publishing")
+    options = parser.parse_args(argv)
+    try:
+        session_id = session_from_environment()
+    except ValueError as exc:
+        parser.error(str(exc))
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if callable(reconfigure):
+            reconfigure(encoding="utf-8")
+    print(publish_issues(options.dry, session_id, defer_notice=False))
+
+
+if __name__ == "__main__":
+    main()

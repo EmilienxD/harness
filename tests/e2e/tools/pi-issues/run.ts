@@ -1,12 +1,13 @@
 import assert from "node:assert/strict";
 import { randomUUID, createHash } from "node:crypto";
+import { existsSync, readFileSync } from "node:fs";
 import { access, mkdir, readFile, readdir, unlink, writeFile } from "node:fs/promises";
 import { delimiter, join } from "node:path";
 import { createPiFixture } from "../../core/pi-fixture.js";
 import { runFixtureInstaller } from "../../core/installer.js";
 import { createPiToolScenario } from "../../core/pi-scenario.js";
 import { containsPath } from "../../core/path.js";
-import { createFakeGh, initializeRepository, readPublishedIssue } from "../issues/support.js";
+import { createFakeGh, initializeRepository, pythonCommand, readPublishedIssue } from "../issues/support.js";
 
 function draftSession(id: string): string {
   // UUIDv5, matching the public provider namespace (not the extension implementation).
@@ -176,5 +177,67 @@ export async function runPiIssueWriters(scope: "project" | "user") {
     await assert.rejects(access(join(platform, "npm/node_modules/harness-pi-pi-issue-workflows", "harness", "pi-issue-workflows", "workflows.ts")));
     assert.equal(fixture.assertions().unexpectedRequests, 0);
     return { version: fixture.version, scope, inferenceRequests: 7 };
+  } finally { await fixture.close(); }
+}
+
+export async function runPiAgentIssueWriters(scope: "project" | "user") {
+  const sessionId = randomUUID();
+  const path = `.harness/issue-drafts/${draftSession(sessionId)}.issue-0.md`;
+  const content = "# Pi agent publication\n\n> spec\n\nPublish through the installed script.\n";
+  const marker = "[E2E:pi-agent-publication]";
+  const shell = process.platform === "win32" ? "powershell" : "bash";
+  const python = await pythonCommand();
+  let command = "";
+  let ghState = "";
+  const fixture = await createPiFixture({
+    scenarioCatalogHash: createHash("sha256").update("pi-agent-publication:v1").digest("hex"),
+    transition: request => createPiToolScenario({ name: "pi-agent-publication", marker, steps: [
+      { checkpoint: "draft", tool: "write", input: { path, content } },
+      { checkpoint: "preview", tool: shell, input: { command: `${command} --dry` }, verifyResult: output => {
+        assert.ok(JSON.stringify(output).includes("1 issue(s) ready to publish"), "Agent did not receive the preview");
+        if (request.input.filter(item => item.type === "function_call_output").length === 2) {
+          assert.equal((JSON.parse(readFileSync(ghState, "utf8")) as { issues: unknown[] }).issues.length, 0);
+          assert.equal(readFileSync(join(fixture.workspace.projectRoot, path), "utf8"), content);
+        }
+      } },
+      { checkpoint: "publish", tool: shell, input: { command }, verifyResult: output => {
+        assert.ok(JSON.stringify(output).includes("Published 1 issue(s) successfully."), "Agent did not receive the publication report");
+        assert.ok(JSON.stringify(output).includes("https://github.test/fixture/issues/issues/101"), "Agent did not receive the issue URL");
+      } },
+    ] }).transition(request),
+  });
+  try {
+    const gh = await setup(fixture, ["issue-writers"], scope);
+    ghState = gh.statePath;
+    const settingsPath = join(fixture.workspace.projectRoot, ".pi/settings.json");
+    const settings = JSON.parse(await readFile(settingsPath, "utf8"));
+    settings.defaultTools = ["read", "write", shell];
+    await writeFile(settingsPath, JSON.stringify(settings));
+    const platform = scope === "project" ? join(fixture.workspace.projectRoot, ".pi") : fixture.workspace.agentDir;
+    const script = join(platform, "npm/node_modules/harness-pi-issue-writers/skills/draft-issue/scripts/publish_issues.py").replaceAll("\\", "/");
+    command = `${python} "${script}"`;
+    const foreign = `.harness/issue-drafts/${draftSession(randomUUID())}.issue-0.md`;
+    await mkdir(join(fixture.workspace.projectRoot, ".harness/issue-drafts"), { recursive: true });
+    await writeFile(join(fixture.workspace.projectRoot, foreign), content);
+    const rpc = fixture.rpc({ sessionId });
+    const run = await rpc.prompt(`/skill:draft-issue Publish the draft now ${marker}`);
+    if (run.status !== "success") {
+      const structure = fixture.assertions().observations.map(item => `${String(item.httpStatus)}:${String(item.checkpoint ?? item.diagnostic ?? "unknown")}`).join(", ");
+      throw new Error(`Pi agent publication ${run.status}; endpoint: ${structure}; tools: ${run.toolExecutions.map(tool => `${tool.name}:${tool.isError}`).join(", ")}`);
+    }
+    assert.equal(fixture.assertions().inferenceRequests, 4);
+    assert.equal((await readPublishedIssue(gh.statePath)).title, "Pi agent publication");
+    assert.equal(existsSync(join(fixture.workspace.projectRoot, path)), false);
+    assert.equal(await readFile(join(fixture.workspace.projectRoot, foreign), "utf8"), content);
+    const state = join(fixture.root, "harness-state", "issues");
+    assert.deepEqual((await readdir(state)).filter(file => file.endsWith(".notice.json")), []);
+    assert.equal((await rpc.prompt("Continue")).status, "success");
+    assert.equal(fixture.assertions().inferenceRequests, 5);
+    assert.deepEqual((await readdir(state)).filter(file => file.endsWith(".notice.json")), []);
+    const calls = (JSON.parse(await readFile(gh.statePath, "utf8")) as { calls: string[][] }).calls;
+    assert.equal(calls.filter(call => call[0] === "issue" && call[1] === "create" && !call.includes("--help")).length, 1);
+    assert.equal(fixture.assertions().unexpectedRequests, 0);
+    await runFixtureInstaller(fixture.workspace, "uninstall", ["issue-writers"], { scope });
+    return { version: fixture.version, scope, inferenceRequests: 5 };
   } finally { await fixture.close(); }
 }

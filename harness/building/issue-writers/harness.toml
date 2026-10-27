@@ -1,5 +1,5 @@
 name = "issue-writers"
-version = "2.3.8"
+version = "2.3.10"
 description = "Draft and publish GitHub issues"
 requires = ["git", "gh"]
 docs = "https://github.com/EmilienxD/harness/blob/main/README.md#user-invoked-skills"
@@ -111,3 +111,21 @@ src = "issue_writers_pi.py"
 dest = "issue_writers_pi.py"
 root = "support"
 platforms = ["pi"]
+
+[[files]]
+src = "issues_core.py"
+dest = "draft-issue/scripts/publish_issues.py"
+root = "skills"
+executable = true
+
+[[files]]
+src = "issues_core.py"
+dest = "draft-issues/scripts/publish_issues.py"
+root = "skills"
+executable = true
+
+[[files]]
+src = "issues_core.py"
+dest = "to-spec-draft-issue/scripts/publish_issues.py"
+root = "skills"
+executable = true
