@@ -357,7 +357,7 @@ def test_launch_configuration_validates_sparse_provider_and_session_shapes(tmp_p
 
     for value in (
         {"version": 2, "platform": "claude"},
-        {"version": 1, "autoRun": {"provider": "codex"}, "providers": {"claude": {}, "chatgpt": {}}},
+        {"version": 1, "providers": {"claude": []}},
         {"version": 1, "autoRun": {"provider": "claude"}, "providers": {"claude": {}, "chatgpt": {}}, "session": {"stopWaitHours": -1}},
     ):
         launch.write_text(json.dumps(value), encoding="utf-8")
@@ -371,6 +371,23 @@ def test_launch_configuration_validates_sparse_provider_and_session_shapes(tmp_p
         "session": {"stopWaitHours": 1.5},
     }), encoding="utf-8")
     assert sessions.launch_configuration(project)["session"]["stopWaitHours"] == 1.5
+
+
+@pytest.mark.parametrize("auto_run", [None, [], {"provider": "unknown"}])
+def test_launch_configuration_ignores_aboard_auto_run_settings(tmp_path, monkeypatch, auto_run):
+    launch = tmp_path / ".harness" / "config.json"
+    launch.parent.mkdir()
+    monkeypatch.setenv("HARNESS_STATE_DIR", str(tmp_path / "state"))
+    launch.write_text(json.dumps({
+        "version": 1,
+        "autoRun": auto_run,
+        "providers": {"claude": {"delegations": {"general": {"model": "claude-opus-5-5"}}}},
+    }), encoding="utf-8")
+
+    config = sessions.launch_configuration(tmp_path)
+    assert sessions.delegation_profile_arguments(config, "claude", "general") == [
+        "--model", "claude-opus-5-5",
+    ]
 
 
 def test_standalone_delegation_profiles_use_task_defaults_and_sparse_overrides():

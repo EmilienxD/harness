@@ -89,15 +89,7 @@ def launch_configuration(cwd: Path) -> dict[str, Any]:
             raise SessionError(
                 f"Harness configuration {path} must be a version-1 JSON object"
             )
-        auto_run = value.get("autoRun", {})
         providers = value.get("providers", {})
-        if not isinstance(auto_run, dict) or (
-            "provider" in auto_run
-            and auto_run.get("provider") not in {"claude", "chatgpt", "pi"}
-        ):
-            raise SessionError(
-                f"Harness configuration {path} autoRun.provider must be claude, chatgpt, or pi"
-            )
         if not isinstance(providers, dict) or any(
             name in providers and not isinstance(providers[name], dict)
             for name in PROVIDERS

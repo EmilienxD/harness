@@ -246,6 +246,8 @@ For example, Claude Auto Run can explore through Kiro while its address and revi
 }
 ```
 
+Claude profiles accept full model IDs such as `claude-opus-5-5`, alongside the native `haiku`, `sonnet`, and `opus` aliases. Full IDs select a specific model version; aliases follow Claude Code's native resolution. This requires Aboard 0.3.14 or later.
+
 Manual subagents use `delegations.general` regardless of their optional explicit `skill`. Both `auto` and `interactive` modes accept any skill; a missing skill fails before launch. Older named profiles are not selected by new Harness requests. AUTO RUN has separate `explore`, `address`, and `review` keys under each provider's `autoRun` object. The JSON schema supplies completion and documents key defaults; Aboard resolves the effective values in code.
 
 Worktree mode gives a run its own checkout. Aboard copies ignored local `.claude`, `.agents`, `.codex`, `.pi`, `.abd`, and `.harness` configuration without overwriting checkout files or copying provider session state. Optional setup commands live in `.abd/session-setup.ps1` and `.abd/session-setup.sh`.
