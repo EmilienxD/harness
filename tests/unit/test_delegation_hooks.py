@@ -51,9 +51,7 @@ def test_stop_wait_uses_the_provider_neutral_session_setting(tmp_path: Path, mon
 
 
 @pytest.mark.parametrize("launcher", [
-    "prototype-with-agent",
-    "address-with-agent",
-    "review-with-agent",
+    "subagents-toolkit",
 ])
 def test_direct_ask_skill_opens_an_unpredictable_task_bound_inbox(
     launcher: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
@@ -83,7 +81,7 @@ def test_existing_provider_session_is_registered_by_the_user_invocation_hook(tmp
     monkeypatch.setenv("HARNESS_STATE_DIR", str(tmp_path / "state"))
     output = hooks.handle({
         "session_id": "existing-codex-session", "hook_event_name": "UserPromptSubmit",
-        "prompt": "$work-with-agent", "cwd": str(tmp_path),
+        "prompt": "$subagents-toolkit", "cwd": str(tmp_path),
     }, provider="chatgpt")
 
     assert output is not None
@@ -97,8 +95,8 @@ def test_existing_provider_session_is_registered_by_the_user_invocation_hook(tmp
 @pytest.mark.parametrize(
     "provider, prompt, expected_skill",
     [
-        ("claude", "Please use /review-with-agent for this change", "review-with-agent"),
-        ("chatgpt", "Please use $address-with-agent for this change", "address-with-agent"),
+        ("claude", "Please use /subagents-toolkit for this change", "subagents-toolkit"),
+        ("chatgpt", "Please use $subagents-toolkit for this change", "subagents-toolkit"),
         ("claude", "/ship 7", "ship"),
         ("chatgpt", "$ship 7", "ship"),
         ("chatgpt", "/ship 7", "ship"),
@@ -136,11 +134,11 @@ def test_ask_skill_invocation_after_prose_opens_its_grant(
 def test_any_tool_completion_scans_only_the_sessions_inbox(tmp_path, monkeypatch, provider, event, tool, response):
     from subagents_runtime.delegation import enable_delegation
     parent = configured(tmp_path, monkeypatch, provider)
-    inbox = enable_delegation(parent, "work-with-agent").inbox
+    inbox = enable_delegation(parent, "subagents-toolkit").inbox
     other = "other-parent"
     sessions.register_observed(other, tmp_path, provider)
-    foreign = enable_delegation(other, "work-with-agent").inbox
-    body = "---\ntask: general\nmode: interactive\n---\n\nDo it.\n"
+    foreign = enable_delegation(other, "subagents-toolkit").inbox
+    body = "---\nmode: interactive\n---\n\nDo it.\n"
     (inbox / "child.md").write_text(body, encoding="utf-8-sig")
     (foreign / "child.md").write_text(body, encoding="utf-8")
     partial = inbox / "child.tmp"
@@ -166,8 +164,8 @@ def test_any_tool_completion_scans_only_the_sessions_inbox(tmp_path, monkeypatch
 def test_stop_discovers_a_shell_request_before_waiting(tmp_path, monkeypatch, provider):
     from subagents_runtime.delegation import enable_delegation, has_pending_children
     parent = configured(tmp_path, monkeypatch, provider)
-    inbox = enable_delegation(parent, "work-with-agent").inbox
-    (inbox / "child.md").write_text("---\ntask: general\nmode: interactive\n---\nDo it.", encoding="utf-8-sig")
+    inbox = enable_delegation(parent, "subagents-toolkit").inbox
+    (inbox / "child.md").write_text("---\nmode: interactive\n---\nDo it.", encoding="utf-8-sig")
     monkeypatch.setattr(sessions, "launch_delegated", lambda *_args: "child")
     waited = []
     def wait(session_id, **_kwargs):
@@ -185,8 +183,8 @@ def test_stop_discovers_a_shell_request_before_waiting(tmp_path, monkeypatch, pr
 def test_resume_discovers_queued_requests_without_a_tool_event(tmp_path, monkeypatch, provider):
     from subagents_runtime.delegation import enable_delegation
     parent = configured(tmp_path, monkeypatch, provider)
-    inbox = enable_delegation(parent, "work-with-agent").inbox
-    (inbox / "child.md").write_text("---\ntask: general\nmode: auto\n---\nDo it.", encoding="utf-8")
+    inbox = enable_delegation(parent, "subagents-toolkit").inbox
+    (inbox / "child.md").write_text("---\nmode: auto\n---\nDo it.", encoding="utf-8")
     launched = []
     monkeypatch.setattr(sessions, "launch_delegated", lambda parsed, *_args: launched.append(parsed) or "child")
 
@@ -198,13 +196,13 @@ def test_resume_discovers_queued_requests_without_a_tool_event(tmp_path, monkeyp
 def test_codex_apply_patch_alias_can_launch_multiple_exact_files(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     parent = configured(tmp_path, monkeypatch, provider="chatgpt")
     output = hooks.handle({
-        "session_id": parent, "hook_event_name": "UserPromptSubmit", "prompt": "$work-with-agent", "cwd": str(tmp_path),
+        "session_id": parent, "hook_event_name": "UserPromptSubmit", "prompt": "$subagents-toolkit", "cwd": str(tmp_path),
     }, provider="chatgpt")
     assert output is not None
-    inbox = __import__("subagents_runtime.delegation",fromlist=["enable_delegation"]).enable_delegation(parent,"work-with-agent").inbox
+    inbox = __import__("subagents_runtime.delegation",fromlist=["enable_delegation"]).enable_delegation(parent,"subagents-toolkit").inbox
     paths = [inbox / "one.md", inbox / "two.md"]
     for index, path in enumerate(paths, 1):
-        path.write_text(f"---\ntask: general\nmode: auto\n---\n\nTask {index}.\n", encoding="utf-8")
+        path.write_text(f"---\nmode: auto\n---\n\nTask {index}.\n", encoding="utf-8")
     launched: list[str] = []
     monkeypatch.setattr(sessions, "launch_delegated", lambda parsed, _request, _number, _cwd: launched.append(parsed.prompt) or f"child-{len(launched)}")
     patch = "\n".join(f"*** Add File: {path}" for path in paths)
@@ -221,12 +219,12 @@ def test_structured_request_launch_keeps_the_original_parent_cwd(tmp_path: Path,
     project = tmp_path / "project"
     parent = configured(project, monkeypatch)
     output = hooks.handle({
-        "session_id": parent, "hook_event_name": "UserPromptSubmit", "prompt": "/work-with-agent", "cwd": str(project),
+        "session_id": parent, "hook_event_name": "UserPromptSubmit", "prompt": "/subagents-toolkit", "cwd": str(project),
     })
     assert output is not None
-    inbox = __import__("subagents_runtime.delegation",fromlist=["enable_delegation"]).enable_delegation(parent,"work-with-agent").inbox
+    inbox = __import__("subagents_runtime.delegation",fromlist=["enable_delegation"]).enable_delegation(parent,"subagents-toolkit").inbox
     request = inbox / "child.md"
-    request.write_text("---\ntask: general\nmode: auto\n---\n\nDo it.\n", encoding="utf-8")
+    request.write_text("---\nmode: auto\n---\n\nDo it.\n", encoding="utf-8")
     launched_from: list[Path] = []
     monkeypatch.setattr(
         sessions,
@@ -245,12 +243,12 @@ def test_structured_request_launch_keeps_the_original_parent_cwd(tmp_path: Path,
 def test_chatgpt_stop_delivery_wakes_the_waiting_parent(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     parent = configured(tmp_path, monkeypatch)
     output = hooks.handle({
-        "session_id": parent, "hook_event_name": "UserPromptSubmit", "prompt": "/work-with-agent", "cwd": str(tmp_path),
+        "session_id": parent, "hook_event_name": "UserPromptSubmit", "prompt": "/subagents-toolkit", "cwd": str(tmp_path),
     })
     assert output is not None
-    inbox = __import__("subagents_runtime.delegation",fromlist=["enable_delegation"]).enable_delegation(parent,"work-with-agent").inbox
+    inbox = __import__("subagents_runtime.delegation",fromlist=["enable_delegation"]).enable_delegation(parent,"subagents-toolkit").inbox
     request = inbox / "child.md"
-    request.write_text("---\ntask: general\nmode: auto\n---\n\nDo it.\n", encoding="utf-8")
+    request.write_text("---\nmode: auto\n---\n\nDo it.\n", encoding="utf-8")
     monkeypatch.setattr(sessions, "launch_delegated", lambda *_args: "child")
     hooks.handle({
         "session_id": parent, "hook_event_name": "PostToolUse",
@@ -272,9 +270,9 @@ def test_chatgpt_stop_delivery_wakes_the_waiting_parent(tmp_path: Path, monkeypa
 
 def test_clarification_stop_keeps_an_unused_grant_open(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     parent = configured(tmp_path, monkeypatch)
-    output = hooks.handle({"session_id": parent, "hook_event_name": "UserPromptSubmit", "prompt": "/work-with-agent", "cwd": str(tmp_path)})
+    output = hooks.handle({"session_id": parent, "hook_event_name": "UserPromptSubmit", "prompt": "/subagents-toolkit", "cwd": str(tmp_path)})
     assert output is not None
-    inbox = __import__("subagents_runtime.delegation",fromlist=["enable_delegation"]).enable_delegation(parent,"work-with-agent").inbox
+    inbox = __import__("subagents_runtime.delegation",fromlist=["enable_delegation"]).enable_delegation(parent,"subagents-toolkit").inbox
 
     assert hooks.handle({"session_id": parent, "hook_event_name": "Stop", "cwd": str(tmp_path), "last_assistant_message": "done"}) is None
     assert inbox.is_dir()
@@ -282,9 +280,9 @@ def test_clarification_stop_keeps_an_unused_grant_open(tmp_path: Path, monkeypat
 
 def test_parent_shutdown_preserves_delegation_inbox(tmp_path,monkeypatch):
     parent = configured(tmp_path,monkeypatch)
-    hooks.handle({"session_id":parent,"cwd":str(tmp_path),"hook_event_name":"UserPromptSubmit","prompt":"/work-with-agent"})
+    hooks.handle({"session_id":parent,"cwd":str(tmp_path),"hook_event_name":"UserPromptSubmit","prompt":"/subagents-toolkit"})
     from subagents_runtime.delegation import enable_delegation
-    inbox = enable_delegation(parent,"work-with-agent").inbox
+    inbox = enable_delegation(parent,"subagents-toolkit").inbox
     hooks.handle({"session_id":parent,"cwd":str(tmp_path),"hook_event_name":"PreToolUse"})
     hooks.handle({"session_id":parent,"cwd":str(tmp_path),"hook_event_name":"SessionEnd"})
     assert inbox.is_dir()
@@ -301,10 +299,10 @@ def test_grant_uses_the_registered_session_cwd_after_parent_changes_directory(tm
     output = hooks.handle({
         "session_id": parent,
         "hook_event_name": "UserPromptSubmit",
-        "prompt": "/work-with-agent",
+        "prompt": "/subagents-toolkit",
         "cwd": str(later),
     })
 
     assert output is not None
-    inbox = __import__("subagents_runtime.delegation",fromlist=["enable_delegation"]).enable_delegation(parent,"work-with-agent").inbox
+    inbox = __import__("subagents_runtime.delegation",fromlist=["enable_delegation"]).enable_delegation(parent,"subagents-toolkit").inbox
     assert inbox.is_relative_to(original / "state")

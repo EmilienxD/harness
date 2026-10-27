@@ -1,6 +1,6 @@
 import { stat } from "node:fs/promises";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { dirname, resolve, join } from "node:path";
 
 export const REQUIRED_CHATGPT_WORKER_SKILLS = ["address-this", "review-this"] as const;
 
@@ -17,7 +17,12 @@ export async function chatGptSkillIsResolvable(
   skillName: string,
   homeDirectory: string = homedir(),
 ): Promise<boolean> {
-  const candidates = chatGptSkillDirectories(workspaceRoot, homeDirectory).map((directory) => join(directory, skillName, "SKILL.md"));
+  const projectRoots: string[] = [];
+  for (let directory = resolve(workspaceRoot); ; directory = dirname(directory)) {
+    projectRoots.push(directory);
+    if (await stat(join(directory, ".git")).then(() => true, () => false) || dirname(directory) === directory) break;
+  }
+  const candidates = [...projectRoots.map((root) => join(root, ".agents", "skills")), ...chatGptSkillDirectories(workspaceRoot, homeDirectory)].map((directory) => join(directory, skillName, "SKILL.md"));
   const results = await Promise.all(candidates.map((path) => stat(path).then((entry) => entry.isFile(), () => false)));
   return results.some(Boolean);
 }

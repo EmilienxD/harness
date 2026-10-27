@@ -109,7 +109,7 @@ def test_tools_install_only_their_required_shared_helpers(tmp_path, name):
     )
     expected = {name, "pi-transport"}
     if name in GUARDS:
-        expected.add("pi-path-guards")
+        expected.update({"pi-path-guards", "path-guard-common"})
     if name in ISSUES:
         expected.add("pi-issue-workflows")
 

@@ -6,11 +6,6 @@
   "type": "object",
   "additionalProperties": false,
   "properties": {
-    "task": {
-      "type": "string",
-      "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$",
-      "description": "A builtin task from subagents-toolkit, a custom task from subagent-tasks.yaml, or the internal loop task. The runtime validates registry membership and allowed modes."
-    },
     "provider": {
       "description": "Defaults to the parent session's provider when omitted. 'codex' is an alias of 'chatgpt' and is normalized to it.",
       "enum": [
@@ -30,7 +25,7 @@
     "model": {
       "type": "string",
       "minLength": 1,
-      "description": "Explicit model ID, supplied only when the user requests a particular model. Omit to retain the task's launch profile and native defaults."
+      "description": "Explicit model ID; omitted requests retain the general delegation profile and native defaults."
     },
     "effort": {
       "enum": [
@@ -69,12 +64,16 @@
     "prompt-file": {
       "type": "string",
       "minLength": 1
+    },
+    "skill": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$",
+      "description": "Optional explicit user-requested child skill. Missing skills fail before launch."
     }
   },
   "oneOf": [
     {
       "required": [
-        "task",
         "mode"
       ],
       "not": {
@@ -91,7 +90,7 @@
         "anyOf": [
           {
             "required": [
-              "task"
+              "skill"
             ]
           },
           {
@@ -110,7 +109,9 @@
             ]
           },
           {
-            "required": ["root"]
+            "required": [
+              "root"
+            ]
           },
           {
             "required": [
@@ -136,33 +137,16 @@
       }
     }
   ],
-  "if": {
-    "properties": {
-      "task": {
-        "const": "prototype"
-      }
-    },
-    "required": [
-      "task"
-    ]
-  },
-  "then": {
-    "properties": {
-      "mode": {
-        "const": "interactive"
-      }
-    }
-  },
   "allOf": [
     {
       "if": {
         "properties": {
-          "task": {
+          "mode": {
             "const": "loop"
           }
         },
         "required": [
-          "task"
+          "mode"
         ]
       },
       "then": {
@@ -170,12 +154,20 @@
           "cwd",
           "prompt-file"
         ],
-        "properties": {
-          "mode": {
-            "const": "loop"
-          }
-        },
-        "not": {"required": ["root"]}
+        "not": {
+          "anyOf": [
+            {
+              "required": [
+                "root"
+              ]
+            },
+            {
+              "required": [
+                "skill"
+              ]
+            }
+          ]
+        }
       },
       "else": {
         "not": {
@@ -196,25 +188,6 @@
               ]
             }
           ]
-        }
-      }
-    },
-    {
-      "if": {
-        "properties": {
-          "mode": {
-            "const": "loop"
-          }
-        },
-        "required": [
-          "mode"
-        ]
-      },
-      "then": {
-        "properties": {
-          "task": {
-            "const": "loop"
-          }
         }
       }
     }

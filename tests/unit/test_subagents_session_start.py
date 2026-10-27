@@ -23,9 +23,6 @@ def install_toolkit(root, provider):
     skill = root / directory / "skills" / "subagents-toolkit" / "SKILL.md"
     skill.parent.mkdir(parents=True)
     skill.write_text("---\nname: subagents-toolkit\n---\n", encoding="utf-8")
-    skill.with_name("builtin-tasks.yaml").write_bytes(
-        roles.builtin_toolkit().with_name("builtin-tasks.yaml").read_bytes()
-    )
     return skill
 
 
@@ -133,7 +130,7 @@ def test_natural_language_delegation_launches_without_launcher_invocation(
                   "prompt": "Run a Claude subagent to inspect the API."}, provider)
     request = inbox / "inspect.md"
     request.write_text(
-        "---\ntask: general\nmode: auto\nprovider: claude\n---\nInspect the API.",
+        "---\nmode: auto\nprovider: claude\n---\nInspect the API.",
         encoding="utf-8",
     )
     launched = []
@@ -149,7 +146,7 @@ def test_natural_language_delegation_launches_without_launcher_invocation(
     }, provider)
     assert output is not None
     assert launched == ["claude"]
-    assert enable_delegation("parent", "review-with-agent").inbox == inbox
+    assert enable_delegation("parent", "subagents-toolkit").inbox == inbox
     with sessions._connect() as connection:
         assert connection.execute("SELECT state FROM requests").fetchone() == ("pending",)
 

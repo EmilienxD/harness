@@ -455,12 +455,8 @@ def test_info_json_exposes_dependency_and_platform_contract(capsys):
         "pi": {"status": "supported"},
     }
     assert package["dependencies"] == [
-        {"name": "prototype", "constraint": ">=1.1.0,<2.0.0", "lifecycle": "shared"},
-        {"name": "websearch", "constraint": ">=1.1.0,<2.0.0", "lifecycle": "shared"},
-        {"name": "grill-me", "constraint": ">=1.0.3,<2.0.0", "lifecycle": "shared"},
-        {"name": "issue-readers", "constraint": ">=1.0.0,<2.0.0", "lifecycle": "shared"},
         {"name": "pi-transport", "constraint": ">=1.1.0,<2.0.0", "lifecycle": "coupled"},
-        {"name": "pi-subagents-toolkit", "constraint": ">=1.0.0,<2.0.0", "lifecycle": "coupled"},
+        {"name": "pi-subagents-toolkit", "constraint": ">=2.0.0,<3.0.0", "lifecycle": "coupled"},
     ]
     assert package["actions"] == ["uv-tool"]
 

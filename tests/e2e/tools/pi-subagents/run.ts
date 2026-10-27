@@ -69,6 +69,7 @@ async function runtimeState(python: string, stateDir: string, parentId: string) 
 
 export async function runPiSubagentsJourney(route: Route, options: {
   pinnedRuntimes?: boolean;
+  skill?: "none" | "found" | "missing";
   fullStack?: boolean;
   explicitModel?: boolean;
   shellWrite?: boolean;
@@ -82,7 +83,7 @@ export async function runPiSubagentsJourney(route: Route, options: {
   }
   const transport = options.fullStack && !options.localBoard ? await startGrillBoard() : undefined;
   const board = options.localBoard ?? transport;
-  const fixture = await createPiFixture(subagentsScenario({ explicitModel: options.explicitModel ?? false, grilling: !!board, shellWrite: options.shellWrite ?? false, failedWrite: options.failedWrite ?? false, busyParent: options.busyParent ?? false })).catch(async (error) => { await transport?.close(); throw error; });
+  const fixture = await createPiFixture(subagentsScenario({ ...(options.skill ? { skill: options.skill } : {}), explicitModel: options.explicitModel ?? false, grilling: !!board, shellWrite: options.shellWrite ?? false, failedWrite: options.failedWrite ?? false, busyParent: options.busyParent ?? false })).catch(async (error) => { await transport?.close(); throw error; });
   const parentId = randomUUID();
   let child: PiRpcClient | undefined;
   try {
@@ -115,6 +116,11 @@ export async function runPiSubagentsJourney(route: Route, options: {
     env[pathKey] = `${bin}${delimiter}${env[pathKey] ?? ""}`;
     const packages = ["subagents", ...(options.fullStack ? ["grill-me-in-cloud", "command-guard", "on-read-reminder", "on-edit-reminder", "no-new-documents", "prefer-fewer-comments", "mid-prompt-skills"] : [])];
     await runFixtureInstaller(fixture.workspace, "install", packages, { scope: "project", pinnedRuntimes: options.pinnedRuntimes ?? true });
+    if (options.skill) {
+      const selectedRoot = join(project, ".pi", "skills", "e2e-selected");
+      await mkdir(selectedRoot, { recursive: true });
+      await writeFile(join(selectedRoot, "SKILL.md"), "---\nname: e2e-selected\ndescription: Fixture explicit skill.\ndisable-model-invocation: true\n---\n[E2E:subagents:loaded-skill]\nWrite the selection receipt.\n");
+    }
     if (options.fullStack) {
       await runFixtureInstaller(fixture.workspace, "install", ["background-shell", "calm", "environment-context", "file-mentions", "slash-command-guard"], { scope: "user" });
       Object.assign(env, { HARNESS_GRILL_URL: board!.origin, HARNESS_GRILL_CODE: board!.code });
@@ -139,7 +145,7 @@ export async function runPiSubagentsJourney(route: Route, options: {
       terminalCommand: [process.execPath, join(root, "tests", "e2e", "tools", "pi-subagents", "capture-terminal.mjs"), captures],
     }));
 
-    const prompt = `/skill:${board ? "grill-me-in-cloud" : "work-with-agent"} ${parentMarker(route)}`;
+    const prompt = `/skill:${board ? "grill-me-in-cloud" : "subagents-toolkit"} ${parentMarker(route)}`;
     let parent: PiRun;
     let previousReplyInferenceRequests: number | undefined;
     let busyDeliveryClaimed: boolean | undefined;
@@ -224,6 +230,11 @@ export async function runPiSubagentsJourney(route: Route, options: {
     if (options.explicitModel) {
       const result = await execFileAsync(python, ["-c", "import sqlite3,json,sys; c=sqlite3.connect(sys.argv[1]); print(json.dumps(c.execute('SELECT s.model,s.effort FROM sessions s JOIN requests r ON r.child_session_id=s.id').fetchone()))", join(stateDir, "sessions.sqlite3")], { windowsHide: true, timeout: 15_000 });
       [requestedModel, requestedEffort] = JSON.parse(result.stdout);
+    }
+    if (options.skill === "found") assert.deepEqual(JSON.parse(await readFile(join(project, "selected-skill.json"), "utf8")), { skill: "e2e-selected" });
+    if (options.skill === "missing") {
+      assert.equal(requestState, "failed");
+      assert.equal(assertions.inferenceRequests, 3);
     }
     const childEntries = await sessionEntries(sessionsDir, childId);
     const childModel = childEntries?.filter(entry => entry.type === "model_change").at(-1)?.modelId;

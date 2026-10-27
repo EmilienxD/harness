@@ -93,7 +93,9 @@
     "e2e:pi-cleanup-git": "esbuild tools/pi-cleanup-git/cli.ts --bundle --platform=node --format=cjs --target=node22 --outfile=dist/tools/pi-cleanup-git/cli.js && node dist/tools/pi-cleanup-git/cli.js",
     "e2e:pi-test-workflows": "esbuild tools/pi-test-workflows/cli.ts --bundle --platform=node --format=cjs --target=node22 --outfile=dist/tools/pi-test-workflows/cli.js && node dist/tools/pi-test-workflows/cli.js",
     "test:pi-prefer-fewer-comments": "esbuild test/pi-prefer-fewer-comments.test.ts --bundle --platform=node --format=cjs --target=node22 --outfile=dist/test/pi-prefer-fewer-comments.test.js && node --test dist/test/pi-prefer-fewer-comments.test.js",
-    "e2e:pi-prefer-fewer-comments": "esbuild tools/pi-prefer-fewer-comments/cli.ts --bundle --platform=node --format=cjs --target=node22 --outfile=dist/tools/pi-prefer-fewer-comments/cli.js && node dist/tools/pi-prefer-fewer-comments/cli.js"
+    "e2e:pi-prefer-fewer-comments": "esbuild tools/pi-prefer-fewer-comments/cli.ts --bundle --platform=node --format=cjs --target=node22 --outfile=dist/tools/pi-prefer-fewer-comments/cli.js && node dist/tools/pi-prefer-fewer-comments/cli.js",
+    "e2e:subagents:skills": "npm run e2e:subagents:build && node dist/tools/subagents/cli.js --skills",
+    "e2e:pi-subagents:skills": "npm run e2e:subagents:bridge && esbuild tools/pi-subagents/skills-cli.ts --bundle --platform=node --format=cjs --target=node22 --outfile=dist/tools/pi-subagents/skills-cli.js && node dist/tools/pi-subagents/skills-cli.js"
   },
   "devDependencies": {
     "@types/node": "22.20.1",

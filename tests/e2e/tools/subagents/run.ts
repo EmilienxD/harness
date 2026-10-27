@@ -13,6 +13,9 @@ import { spawnableCommand } from "../../core/path.js";
 import { canonicalMkdtemp } from "../../core/temp.js";
 import {
   CHILD_REPLY,
+  SKILL_RESOURCE,
+  SKILL_RECEIPT,
+  type SkillSelection,
   PARENT_MARKER,
   PARENT_REPLY,
   NEXT_MARKER,
@@ -55,7 +58,7 @@ export async function runSubagentsRootJourney(platform: Platform): Promise<Subag
   return runSubagentsJourney(platform, "auto", false, true);
 }
 
-export async function runSubagentsJourney(platform: Platform, mode: "interactive" | "auto" = "interactive", recovery = false, alternateRoot = false, options: { shutdownBeforeResult?: boolean; stopFallback?: boolean; failedWrite?: boolean } = {}): Promise<SubagentsJourneyResult> {
+export async function runSubagentsJourney(platform: Platform, mode: "interactive" | "auto" = "interactive", recovery = false, alternateRoot = false, options: { shutdownBeforeResult?: boolean; stopFallback?: boolean; failedWrite?: boolean; skill?: SkillSelection } = {}): Promise<SubagentsJourneyResult> {
   const shutdownBeforeResult = options.shutdownBeforeResult ?? false;
   if (platform === "claude") await validateClaudeCli(); else await validateCodexCli();
   const root = await canonicalMkdtemp(join(tmpdir(), `harness-subagents-${platform}-e2e-`));
@@ -65,6 +68,8 @@ export async function runSubagentsJourney(platform: Platform, mode: "interactive
   const cliStatusRoot = join(root, "cli-status");
   const diagnosticsPath = join(root, "structural-diagnostics.json");
   let server: Awaited<ReturnType<typeof startFakeAnthropicServer>> | Awaited<ReturnType<typeof startFakeOpenAiServer>> | undefined;
+  let releaseParentWait: (() => void) | undefined;
+  const parentWaiting = new Promise<void>((resolve) => { releaseParentWait = resolve; });
   let interruptionReady = false;
   let cleanupExecutions: (() => Promise<void>) | undefined;
   let releaseInterruption: (() => void) | undefined;
@@ -79,6 +84,14 @@ export async function runSubagentsJourney(platform: Platform, mode: "interactive
     const python = await pythonCommand(runtimeSource);
     const binRoot = await createRuntimeShim(root, python);
     await stagePayload(platform, packageRoot, projectRoot, python);
+    const selectedRoot = join(projectRoot, platform === "claude" ? ".claude" : ".agents", "skills", "e2e-selected");
+    await mkdir(selectedRoot, { recursive: true });
+    await writeFile(join(selectedRoot, "SKILL.md"), `---\nname: e2e-selected\ndescription: Fixture explicit skill.\ndisable-model-invocation: true\n---\n${SKILL_RESOURCE}\nWrite the selection receipt.\n`);
+    if (platform === "chatgpt") {
+      await mkdir(join(selectedRoot, "agents"));
+      await writeFile(join(selectedRoot, "agents", "openai.yaml"), "policy:\n  allow_implicit_invocation: false\n");
+    }
+
     if (options.stopFallback) {
       const path = join(projectRoot, platform === "claude" ? ".claude/settings.json" : ".codex/hooks.json");
       const settings = JSON.parse(await readFile(path, "utf8")) as HookSettings;
@@ -157,7 +170,9 @@ export async function runSubagentsJourney(platform: Platform, mode: "interactive
         scenarioCatalogHash,
         parseRequest: parseAnthropicMessagesRequest,
         transition: async (request,repoRoot) => {
-          const response = claudeTransition(request,repoRoot,mode,recovery,alternateRoot,options.stopFallback);
+          const response = claudeTransition(request,repoRoot,mode,recovery,alternateRoot,options.stopFallback,options.skill);
+          if (response.checkpoint === "parent-waiting") releaseParentWait?.();
+          if (options.skill && options.skill !== "missing" && response.checkpoint.startsWith("child-")) await parentWaiting;
           if (response.checkpoint === "child-interruption-ready") {
             interruptionReady = true;
             await interruption;
@@ -185,7 +200,9 @@ export async function runSubagentsJourney(platform: Platform, mode: "interactive
         diagnosticsPath,
         scenarioCatalogHash,
         transition: async (request) => {
-          const response = codexTransition(request,projectRoot,mode,recovery,alternateRoot,options.stopFallback);
+          const response = codexTransition(request,projectRoot,mode,recovery,alternateRoot,options.stopFallback,options.skill);
+          if (response.checkpoint === "parent-waiting") releaseParentWait?.();
+          if (options.skill && options.skill !== "missing" && response.checkpoint.startsWith("child-")) await parentWaiting;
           if (response.checkpoint === "child-interruption-ready") {
             interruptionReady = true;
             await interruption;
@@ -211,7 +228,7 @@ export async function runSubagentsJourney(platform: Platform, mode: "interactive
         }
       }
     };
-    const prompt = `${platform === "claude" ? "/" : "$"}work-with-agent ${PARENT_MARKER} Delegate the deterministic inspection to one ${mode} child${alternateRoot ? " in the ../worktree worktree" : ""}.`;
+    const prompt = `${platform === "claude" ? "/" : "$"}subagents-toolkit ${PARENT_MARKER} Delegate the deterministic inspection to one ${mode} child${alternateRoot ? " in the ../worktree worktree" : ""}.`;
     const launch = await execFileAsync(python, [
       "-c", "from subagents_runtime.cli import main; raise SystemExit(main())",
       "run", "--provider", platform, prompt,
@@ -220,6 +237,17 @@ export async function runSubagentsJourney(platform: Platform, mode: "interactive
 
     const parentId = /Started visible session ([0-9a-f-]+)/u.exec(launch.stdout)?.[1];
     if (!parentId) throw new Error('Parent launch did not expose its stable identity');
+    if (options.skill === "missing") {
+      await waitForCheckpoint(async () => (await readStatus(join(cliStatusRoot, "parent.json"))) !== undefined);
+      requireCompleted((await readStatus(join(cliStatusRoot, "parent.json")))!);
+      if (await readStatus(join(cliStatusRoot, "child.json"))) throw new Error("Missing skill started a child CLI");
+      const result = await execFileAsync(python, ["-c", "import json; from subagents_runtime.storage import connect; db=connect(); print(json.dumps(db.execute('SELECT state,reason FROM requests').fetchall()))"], { cwd: projectRoot, env: environment, windowsHide: true, timeout: 10_000 });
+      const rows = JSON.parse(result.stdout) as [string, string][];
+      if (rows.length !== 1 || rows[0]![0] !== "failed" || !rows[0]![1].includes("missing-e2e")) throw new Error("Missing skill failure was not persisted");
+      const assertions = server.assertions();
+      if (assertions.inferenceRequests !== 2 || assertions.unexpectedRequests !== 0 || await countRequestFiles(join(stateRoot, "inboxes")) !== 0) throw new Error("Missing skill request count or cleanup differed");
+      return { checkpoints: ["parent-request-write", "parent-received-failure"], completedClis: ["parent"], requestFilesRemaining: 0, unexpectedRequests: 0, recoveredSessions: 0, inferenceRequests: 2 };
+    }
     if (recovery) {
       try {
         await waitForCheckpoint(async () => {
@@ -296,11 +324,17 @@ export async function runSubagentsJourney(platform: Platform, mode: "interactive
     const visible = JSON.parse(await readFile(join(cliStatusRoot,'visible.json'),'utf8')) as { parent: number; child: number };
     if (visible.parent !== 1 || visible.child !== (mode === 'interactive' ? 2 : 0)) throw new Error('Execution mode did not preserve visible-terminal behavior');
     const assertions = server.assertions();
-    const expectedCheckpoints = ["parent-request-write", "parent-waiting", ...(mode === "interactive" ? ["child-reply-armed"] : []), "child-complete", "parent-received-reply", ...(mode === "interactive" ? ["child-resume-reply-armed"] : []), "child-resume-complete"];
+    const expectedCheckpoints = ["parent-request-write", ...(options.skill === "found" ? ["child-skill-receipt"] : []), "parent-waiting", ...(mode === "interactive" ? ["child-reply-armed"] : []), "child-complete", "parent-received-reply", ...(mode === "interactive" ? ["child-resume-reply-armed"] : []), "child-resume-complete"];
     const checkpoints = assertions.observations.flatMap((item) => typeof item.checkpoint === "string" ? [item.checkpoint] : []);
     const required = expectedCheckpoints.filter((item) => item !== "parent-waiting");
     if (checkpoints.some((item) => !expectedCheckpoints.includes(item)) || required.some((item) => !checkpoints.includes(item)) || checkpoints[0] !== "parent-request-write" || checkpoints.at(-1) !== "child-resume-complete") {
       throw new Error(`subagents checkpoint contract changed: ${checkpoints.join(", ")}`);
+    }
+    if (options.skill === "none" && assertions.inferenceRequests !== 5) throw new Error("No-skill inference count differed");
+    if (options.skill === "found") {
+      const receipt = JSON.parse(await readFile(join(projectRoot, SKILL_RECEIPT), "utf8"));
+      if (receipt.skill !== "e2e-selected") throw new Error("Native child skill did not produce its receipt");
+      if (assertions.inferenceRequests !== 6) throw new Error("Explicit skill inference count differed");
     }
     let shutdownsBeforeResult: number | undefined;
     if (shutdownBeforeResult) {
@@ -332,6 +366,7 @@ export async function runSubagentsJourney(platform: Platform, mode: "interactive
     };
   } finally {
     releaseInterruption?.();
+    releaseParentWait?.();
     try { await cleanupExecutions?.(); }
     finally {
       try { await server?.close(); }
@@ -413,10 +448,6 @@ async function stagePayload(platform: Platform, packageRoot: string, projectRoot
     const toolkitRoot = join(projectRoot, ".claude", "skills", "subagents-toolkit");
     await mkdir(toolkitRoot, { recursive: true });
     await cp(join(packageRoot, "subagents-toolkit", "SKILL.md"), join(toolkitRoot, "SKILL.md"));
-    await cp(join(packageRoot, "subagents-toolkit", "builtin-tasks.yaml"), join(toolkitRoot, "builtin-tasks.yaml"));
-    const skillRoot = join(projectRoot, ".claude", "skills", "work-with-agent");
-    await mkdir(skillRoot, { recursive: true });
-    await cp(join(packageRoot, "work-with-agent", "SKILL.md"), join(skillRoot, "SKILL.md"));
     await mkdir(join(projectRoot, ".claude"), { recursive: true });
     const settings = JSON.parse(await readFile(join(packageRoot, "claude", "settings.fragment.json"), "utf8")) as HookSettings;
     for (const groups of Object.values(settings.hooks)) {
@@ -433,12 +464,7 @@ async function stagePayload(platform: Platform, packageRoot: string, projectRoot
   const toolkitRoot = join(projectRoot, ".agents", "skills", "subagents-toolkit");
   await mkdir(join(toolkitRoot, "agents"), { recursive: true });
   await cp(join(packageRoot, "subagents-toolkit", "SKILL.md"), join(toolkitRoot, "SKILL.md"));
-  await cp(join(packageRoot, "subagents-toolkit", "builtin-tasks.yaml"), join(toolkitRoot, "builtin-tasks.yaml"));
   await cp(join(packageRoot, "subagents-toolkit", "chatgpt", "openai.yaml"), join(toolkitRoot, "agents", "openai.yaml"));
-  const skillRoot = join(projectRoot, ".agents", "skills", "work-with-agent");
-  await mkdir(join(skillRoot, "agents"), { recursive: true });
-  await cp(join(packageRoot, "work-with-agent", "SKILL.md"), join(skillRoot, "SKILL.md"));
-  await cp(join(packageRoot, "work-with-agent", "chatgpt", "openai.yaml"), join(skillRoot, "agents", "openai.yaml"));
   await mkdir(join(projectRoot, ".codex"), { recursive: true });
   const settings = JSON.parse(await readFile(join(packageRoot, "chatgpt", "hooks.fragment.json"), "utf8")) as HookSettings;
   for (const groups of Object.values(settings.hooks)) {

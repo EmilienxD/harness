@@ -54,7 +54,7 @@ test("a real headless Pi parent receives its Codex child's result after SessionE
     await mkdir(join(project, ".harness"), { recursive: true });
     await writeFile(join(project, ".harness", "config.json"), JSON.stringify({ version: 1, providers: { chatgpt: { command: [process.execPath, join(root, "tests", "e2e", "dist", "tools", "subagents", "cli-bridge.js"), "--provider", "chatgpt", native.file, ...native.args] } } }));
 
-    const parent = await fixture.runJson({ prompt: `/skill:work-with-agent ${parentMarker("auto")}`, sessionId: parentId, timeoutMs: 180_000 });
+    const parent = await fixture.runJson({ prompt: `/skill:subagents-toolkit ${parentMarker("auto")}`, sessionId: parentId, timeoutMs: 180_000 });
     assert.equal(parent.status, "success");
     const final = parent.events.filter((event) => event.type === "message_end").map((event) => event.message as { role: string; content: { type: string; text?: string }[] }).filter((message) => message.role === "assistant").at(-1);
     assert.equal(final?.content.filter((block) => block.type === "text").map((block) => block.text).join(""), parentDone("auto"));

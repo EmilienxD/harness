@@ -76,15 +76,11 @@ def install_skill(root: Path, name: str) -> Path:
     skill = root / name / "SKILL.md"
     skill.parent.mkdir(parents=True, exist_ok=True)
     skill.write_text(f"---\nname: {name}\n---\n", encoding="utf-8")
-    if name == "subagents-toolkit":
-        skill.with_name("builtin-tasks.yaml").write_bytes(
-            roles.builtin_toolkit().with_name("builtin-tasks.yaml").read_bytes()
-        )
     return skill
 
 
 def request(project: Path, frontmatter: str, body: str = "Work.", parent: str = "parent"):
-    inbox = enable_delegation(parent, "work-with-agent").inbox
+    inbox = enable_delegation(parent, "subagents-toolkit").inbox
     path = inbox / f"{uuid.uuid4().hex}.md"
     path.write_text(f"---\n{frontmatter}---\n{body}", encoding="utf-8")
     [result] = process_inbox(parent, launch=sessions.launch_delegated, request_paths={path})
@@ -110,13 +106,14 @@ def bridge(operation: str, **fields):
 def test_pi_child_launch_reserves_its_native_session_identity(project, launches, mode, headless):
     sessions.register_observed("parent", project, "pi")
 
-    result = request(project, f"task: general\nmode: {mode}\n")
+    result = request(project, f"mode: {mode}\n")
 
     child = result.child_session_id
-    assert launches[-1]["argv"] == [
+    expected = [
         "pi", "--name", "agent-1", *(["--mode", "json"] if headless else []),
-        "--session-id", child, "--", "Work.",
+        "--session-id", child, "--",
     ]
+    assert launches[-1]["argv"][:-1] == expected
     assert launches[-1]["visible"] is not headless
     assert launches[-1]["env"]["HARNESS_PROVIDER"] == "pi"
     assert provider_session(child) == child
@@ -126,18 +123,17 @@ def test_pi_child_skill_uses_a_space_separated_native_command(project, launches)
     install_skill(project / ".pi" / "skills", "prototype")
     sessions.register_observed("parent", project, "pi")
 
-    request(project, "task: prototype\nmode: interactive\n", "Build it.")
+    request(project, "skill: prototype\nmode: interactive\n", "Build it.")
 
     command, argument = launches[-1]["argv"][-1].split(" ", 1)
     assert command == "/skill:prototype"
-    assert argument == "Build it."
 
 
 def test_pi_child_skill_must_be_discoverable_by_pi(project, launches):
     install_skill(project / ".claude" / "skills", "prototype")
     sessions.register_observed("parent", project, "pi")
-    inbox = enable_delegation("parent", "work-with-agent").inbox
-    (inbox / "work.md").write_text("---\ntask: prototype\nmode: interactive\n---\nBuild it.", encoding="utf-8")
+    inbox = enable_delegation("parent", "subagents-toolkit").inbox
+    (inbox / "work.md").write_text("---\nskill: prototype\nmode: interactive\n---\nBuild it.", encoding="utf-8")
 
     [result] = process_inbox("parent", launch=sessions.launch_delegated)
 
@@ -148,7 +144,7 @@ def test_pi_child_skill_must_be_discoverable_by_pi(project, launches):
 @pytest.mark.parametrize("live", [False, True])
 def test_pi_continuation_reopens_or_forks_the_exact_session(project, launches, live):
     sessions.register_observed("parent", project, "pi")
-    first = request(project, "task: general\nmode: auto\nmodel: openai/gpt-x\n")
+    first = request(project, "mode: auto\nmodel: openai/gpt-x\n")
     with sessions._connect() as connection:
         connection.execute("UPDATE requests SET state='succeeded' WHERE id=?", (first.request_id,))
         connection.execute(
@@ -209,7 +205,7 @@ def test_unusable_pi_models_fail_before_launch(project, monkeypatch, table, patt
 def test_pi_child_launches_with_the_qualified_authenticated_model(project, launches):
     sessions.register_observed("parent", project, "pi")
 
-    request(project, "task: general\nmode: auto\nmodel: haiku\n")
+    request(project, "mode: auto\nmodel: haiku\n")
 
     argv = launches[-1]["argv"]
     assert argv[argv.index("--model") + 1] == "anthropic/claude-haiku-5-5"
@@ -217,8 +213,8 @@ def test_pi_child_launches_with_the_qualified_authenticated_model(project, launc
 
 def test_pi_child_with_an_unavailable_model_never_starts(project, launches):
     sessions.register_observed("parent", project, "pi")
-    inbox = enable_delegation("parent", "work-with-agent").inbox
-    (inbox / "work.md").write_text("---\ntask: general\nmode: auto\nmodel: bedrock-only-model\n---\nWork.", encoding="utf-8")
+    inbox = enable_delegation("parent", "subagents-toolkit").inbox
+    (inbox / "work.md").write_text("---\nmode: auto\nmodel: bedrock-only-model\n---\nWork.", encoding="utf-8")
 
     [result] = process_inbox("parent", launch=sessions.launch_delegated)
 
@@ -235,9 +231,9 @@ def test_pi_profiles_reject_difficulty_routing():
 def test_pi_children_receive_plain_file_paths(project, launches):
     sessions.register_observed("parent", project, "pi")
 
-    request(project, "task: general\nmode: auto\n", "Inspect @src/core.py and /new ideas.")
+    request(project, "mode: auto\n", "Inspect @src/core.py and /new ideas.")
 
-    assert launches[-1]["argv"][-1] == f"Inspect {os.sep.join(['src', 'core.py'])} and new ideas."
+    assert os.sep.join(["src", "core.py"]) in launches[-1]["argv"][-1].split()
 
 
 def test_pi_prompt_sanitizer_keeps_skill_commands():
@@ -246,11 +242,11 @@ def test_pi_prompt_sanitizer_keeps_skill_commands():
 
 def test_pi_loop_implementers_are_rejected(project):
     sessions.register_observed("parent", project, "pi")
-    inbox = enable_delegation("parent", "work-with-agent").inbox
+    inbox = enable_delegation("parent", "subagents-toolkit").inbox
     prompt = project / "prompt.md"
     prompt.write_text("Implement.", encoding="utf-8")
     path = inbox / "loop.md"
-    path.write_text(f"---\ntask: loop\nmode: loop\ncwd: {project}\nprompt-file: {prompt}\n---\nImplement.", encoding="utf-8")
+    path.write_text(f"---\nmode: loop\ncwd: {project}\nprompt-file: {prompt}\n---\nImplement.", encoding="utf-8")
 
     with pytest.raises(RequestFileError, match="pi"):
         parse_request_file(path, inbox, parent_provider="pi", cwd=project)
@@ -305,7 +301,7 @@ def test_pi_run_keeps_only_the_final_assistant_message():
 @pytest.mark.parametrize("failed", [False, True])
 def test_supervisor_reports_a_real_pi_json_stream(project, launches, tmp_path, failed):
     sessions.register_observed("parent", project, "pi")
-    result = request(project, "task: general\nmode: auto\n")
+    result = request(project, "mode: auto\n")
     launch = launches[-1]
     events = [
         {"type": "session", "version": 3, "id": result.child_session_id, "cwd": str(project)},
@@ -354,7 +350,7 @@ def test_pi_children_route_through_aboard_when_it_is_running(project, monkeypatc
     monkeypatch.setattr(processes, "start", lambda *_args, **_kwargs: pytest.fail("native launch used"))
     sessions.register_observed("parent", project, "pi")
 
-    result = request(project, "task: general\nmode: auto\n")
+    result = request(project, "mode: auto\n")
 
     assert bodies[0]["provider"] == "pi"
     assert provider_session(result.child_session_id) == "aboard-pi-session"
@@ -377,7 +373,7 @@ class TestBridge:
 
     def test_new_and_fork_sessions_are_unrelated_conversations(self, project, launches, monkeypatch):
         sessions.register_observed("parent", project, "pi")
-        child = request(project, "task: general\nmode: interactive\n").child_session_id
+        child = request(project, "mode: interactive\n").child_session_id
         monkeypatch.setenv("HARNESS_SESSION_ID", child)
         monkeypatch.setenv("HARNESS_EXECUTION_MODE", "interactive")
 
@@ -391,7 +387,7 @@ class TestBridge:
     def test_delegation_skill_supplies_inbox_instructions(self, project):
         sessions.register_observed("parent", project, "pi")
 
-        invoked = bridge("prompt", harnessSessionId="parent", text="/skill:work-with-agent review the parser")
+        invoked = bridge("prompt", harnessSessionId="parent", text="/skill:subagents-toolkit review the parser")
         plain = bridge("prompt", harnessSessionId="parent", text="Explain /skill:unknown-with-agent")
 
         assert invoked["ok"] and invoked["context"]
@@ -400,9 +396,9 @@ class TestBridge:
     def test_inbox_scan_launches_only_published_requests_in_the_owned_inbox(self, project, launches):
         sessions.register_observed("parent", project, "pi")
         sessions.register_observed("other", project, "pi")
-        inbox = enable_delegation("parent", "work-with-agent").inbox
-        foreign = enable_delegation("other", "work-with-agent").inbox
-        body = "---\ntask: general\nmode: auto\n---\nWork."
+        inbox = enable_delegation("parent", "subagents-toolkit").inbox
+        foreign = enable_delegation("other", "subagents-toolkit").inbox
+        body = "---\nmode: auto\n---\nWork."
         outside = foreign / "work.md"
         outside.write_text(body, encoding="utf-8")
         (inbox / "work.md").write_text(body, encoding="utf-8-sig")
@@ -421,7 +417,7 @@ class TestBridge:
         install_skill(project / ".pi" / "skills", "subagents-toolkit")
         started = bridge("session_start", cwd=str(project), sessionId="parent", reason="startup")
         inbox = Path(started["inbox"])
-        (inbox / "work.md").write_text("---\ntask: general\nmode: auto\n---\nWork.", encoding="utf-8")
+        (inbox / "work.md").write_text("---\nmode: auto\n---\nWork.", encoding="utf-8")
 
         resumed = bridge("session_start", cwd=str(project), sessionId="parent", reason="reload")
 
@@ -430,7 +426,7 @@ class TestBridge:
 
     def test_results_replay_until_acknowledged(self, project, launches):
         sessions.register_observed("parent", project, "pi")
-        child = request(project, "task: general\nmode: auto\n")
+        child = request(project, "mode: auto\n")
         marker = results_marker("parent")
         assert bridge("claim_delivery", harnessSessionId="parent")["pending"] is True
 
@@ -448,7 +444,7 @@ class TestBridge:
     @pytest.fixture
     def interactive_child(self, project, launches, monkeypatch):
         sessions.register_observed("parent", project, "pi")
-        result = request(project, "task: general\nmode: interactive\n")
+        result = request(project, "mode: interactive\n")
         monkeypatch.setenv("HARNESS_SESSION_ID", result.child_session_id)
         monkeypatch.setenv("HARNESS_EXECUTION_ID", launches[-1]["execution"])
         monkeypatch.setenv("HARNESS_EXECUTION_MODE", "interactive")
@@ -522,7 +518,7 @@ def test_catalogue_installs_the_pi_extension_with_shared_skills():
     toolkit = catalogue["pi-subagents-toolkit"]
     assert not toolkit.selectable
     assert {entry.dest for entry in toolkit.expand("pi")} == {
-        "subagents-toolkit/SKILL.md", "subagents-toolkit/builtin-tasks.yaml",
+        "subagents-toolkit/SKILL.md",
     }
     assert any(dependency.name == toolkit.name and dependency.lifecycle == "coupled"
                for dependency in tool.dependencies)

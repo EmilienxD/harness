@@ -31,7 +31,7 @@ import { ClaudeAgentPlatform } from "./claude/platform.js";
 import { ChatGptAgentPlatform } from "./chatgpt/platform.js";
 import { PiAgentPlatform } from "./pi/platform.js";
 import { inspectPiSession } from "./pi/sessions.js";
-import { requirePiWorkerSkills } from "./pi/skills.js";
+import { requirePiSkill, requirePiWorkerSkills } from "./pi/skills.js";
 import { ChatGptSessionProbe } from "./chatgpt/sessions.js";
 import { claudeSessionTitle } from "./claude/sessions.js";
 import { ChatGptHookTrust } from "./chatgpt/hook-trust.js";
@@ -100,8 +100,8 @@ import { WorktreeRunWorkspaces } from "./auto/worktree.js";
 import { FileAutoRunStore } from "./runtime/persistence.js";
 import { RuntimeAdmission, RuntimeStartup } from "./runtime/admission.js";
 import { RuntimeLayout } from "./runtime/layout.js";
-import { requireHarnessWorkerSkills } from "./claude/skills.js";
-import { requireChatGptWorkerSkills } from "./chatgpt/skills.js";
+import { requireHarnessSkill, requireHarnessWorkerSkills } from "./claude/skills.js";
+import { requireChatGptSkill, requireChatGptWorkerSkills } from "./chatgpt/skills.js";
 import { FileLaunchConfigurationSource } from "./platform/launch-configuration.js";
 import { createGrillCloudRelay, type GrillCloudRelay } from "./grill/cloud-relay.js";
 import { PromptSubmissions } from "./platform/prompt-submissions.js";
@@ -820,6 +820,11 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
       createTerminalRoutes(terminals),
       createCommandRoutes(commandTerminals),
       createDelegationRoutes({ launch: async (request) => {
+        if (request.skill !== undefined) {
+          if (request.provider === "claude") await requireHarnessSkill(request.cwd, request.skill);
+          else if (request.provider === "chatgpt") await requireChatGptSkill(request.cwd, request.skill);
+          else await requirePiSkill(request.cwd, request.skill);
+        }
         const configured = await launchFile.getDelegationForWorktree(request.provider, request.task, request.cwd);
         const returnUri = request.executionMode !== "auto" && request.harnessSessionId !== undefined
           ? await parentTerminalUri(request.harnessSessionId)

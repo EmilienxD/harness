@@ -4,15 +4,31 @@ Platforms: **Claude Code, ChatGPT, Pi**. Install with `harness install subagents
 
 ## Use it
 
-The `subagents` package delegates bounded work to separate, persistent Claude Code, Codex, or Pi conversations. Install it on your agent platform, then invoke `/work-with-agent` in Claude Code or `$work-with-agent` in ChatGPT for general work. More focused skills are `explore-with-agent`, `prototype-with-agent`, `websearch-with-agent`, `brainstorm-with-agent`, `address-with-agent`, and `review-with-agent`. The package also provides `reply-to-agent` and `resume-agent`.
+The `subagents` package delegates bounded work to persistent Claude Code, Codex, or Pi conversations. Invoke `/subagents-toolkit` in Claude Code, `$subagents-toolkit` in ChatGPT, or `/skill:subagents-toolkit` in Pi. Give it a work description and optionally name a skill for the child. The toolkit handles launches and continuations; separate reply skills return child results.
 
 ## What happens
 
-General work defaults to `mode: interactive`, opening a visible terminal where you work directly with the child. Prototype and brainstorm tasks also default to interactive mode and require it; explore, websearch, address, and review default to `mode: auto`, which runs the child in the background and returns its result automatically. Explore requires auto mode. You can request `provider: claude`, `provider: chatgpt` (`codex` is an alias), or `provider: pi`. On Pi, invoke `/skill:work-with-agent` or another installed launcher skill. An interactive child uses `reply-to-agent` to return its next successful response. On Pi, `/reply-to-agent-with-previous-message` instead sends its previous successful answer without another model request. This entry point is a native Pi command; its skill shim is installed only for Claude Code and ChatGPT. `resume-agent` continues a child with its original provider, mode, directory, and conversation.
+The launcher defaults to `mode: interactive`, opening a visible terminal. Request `mode: auto` for background work that returns its result automatically. Both modes accept any requested skill; the skill does not determine model, effort, permissions, or execution mode. Choose `provider: claude`, `provider: chatgpt` (`codex` is an alias), or `provider: pi` independently.
 
-Claude/ChatGPT parents wait for pending child replies in their Stop hook. You can cancel that wait, but a later reply then needs a new user message to continue the parent. An interactive Pi parent can finish its turn and wake automatically when a reply arrives; a headless Pi parent waits before settling. While a parent is working, Claude/ChatGPT receive replies through tool or Stop hooks; Pi queues replies as steering after the current tools finish, before its next model request.
+Launch frontmatter contains `mode`, optional `skill`, and optional provider/model/effort/root overrides. For example:
 
-Delegated launch and resume prompts preserve skill invocations while neutralizing native CLI commands such as `/resume` by removing their slash prefix. Harness and Aboard use shared provider command lists and matching rules, including for direct Aboard bridge requests. Task-selected skills are added separately after sanitization.
+```markdown
+---
+mode: auto
+skill: websearch
+---
+Find primary sources for the proposed change.
+```
+
+Harness adds a native skill invocation only when `skill` is supplied. The parent includes it only when the user explicitly requests that skill by name. Otherwise the child receives the work description with an explicit-only skill instruction, subject to its project and provider rules. Missing requested skills fail before any child process or Aboard launch; the parent receives the failure. Install child workflows separately: subagents no longer installs prototype, websearch, grill-me, or issue-readers.
+
+Availability currently checks conventional project/user skill directories for the child provider and working directory. Plugin namespaces and provider-configured resource locations outside these roots are not supported by this check. Native providers resolve the actual invocation. No task registry or specialized launcher is read; old custom registry files remain user-owned and are ignored.
+
+An interactive child uses `reply-to-agent` to return its next successful response. On Pi, `/reply-to-agent-with-previous-message` sends its previous successful answer without another inference request. Its hook-backed skill shim is installed for Claude Code and ChatGPT. A toolkit request containing only `resume: agent-i` in frontmatter continues a child with its original provider, mode, model, effort, directory, and conversation; it does not re-invoke a skill or accept launch overrides. Existing stored task identities can still resume.
+
+Claude/ChatGPT parents wait for pending replies in their Stop hook. An interactive Pi parent can finish its turn and wake when a reply arrives; a headless Pi parent waits before settling. While a parent works, Claude/ChatGPT receive replies through tool or Stop hooks; Pi queues replies after the current tools finish, before its next model request.
+
+Launch and resume prompts preserve skill invocations while neutralizing native CLI commands such as `/resume` by removing their slash prefix. Explicit skills are added separately after sanitization, including through Aboard. Aboard Auto Run retains its own worker skills and exploration restrictions; manual delegation uses the general profile.
 
 ## Persistent commands
 
@@ -38,13 +54,13 @@ Configure launches in project `.harness/config.json` or user `~/.harness/config.
   "autoRun": { "provider": "chatgpt" },
   "providers": {
     "chatgpt": {
-      "delegations": { "explore": { "model": "gpt-5.6-luna", "effort": "low" } }
+      "delegations": { "general": { "model": "gpt-6.1-sol", "effort": "high" } }
     }
   }
 }
 ```
 
-`autoRun.provider` defaults to Claude and does not restrict explicit `harness run --provider` choices. Provider entries can set a `command` and separate `explore`, `prototype`, `websearch`, `brainstorm`, `address`, `review`, and `general` profiles. Profiles accept `model` and `effort`; `"inherit"` uses native settings. Claude profiles other than `explore` can also set `deniedTools`. `session.stopWaitHours` sets an optional nonnegative wait for an outstanding reply. Session requests and logs live under `~/.harness/runtime/`; set `HARNESS_STATE_DIR` to change the Harness state root. If delegation says its hook did not provide the shared inbox, check that the package's provider hook is installed and active before retrying.
+`autoRun.provider` defaults to Claude and does not restrict explicit `harness run --provider` choices. Provider entries can set a `command` and a `delegations.general` profile. This profile accepts `model` and `effort`; `"inherit"` uses native settings. Claude can also set `deniedTools`. Explicit launch overrides take precedence. Skills do not select profiles. `session.stopWaitHours` sets an optional nonnegative wait for an outstanding reply. Session requests and logs live under `~/.harness/runtime/`; set `HARNESS_STATE_DIR` to change the Harness state root. If delegation says its hook did not provide the shared inbox, check that the package's provider hook is installed and active before retrying.
 
 ## Implementation and verification
 
@@ -65,8 +81,7 @@ assistant message must end without `error`, `aborted` or `length` and contain te
 `--model` searches its whole catalogue, including unauthenticated providers, so a bare `haiku`
 selected a Bedrock alias in manual testing. The runtime lists authenticated models with
 `--list-models`, applies Pi's exact-then-alias matching, and launches the qualified
-`provider/model`; unavailable or ambiguous models fail before launch. Effort maps to `--thinking`. Pi has no universal exploration model, so
-`explore` keeps the native model at low thinking. RPC, run pools and the SDK were rejected:
+`provider/model`; unavailable or ambiguous models fail before launch. Effort maps to `--thinking`. RPC, run pools and the SDK were rejected:
 a JSON run already matches the one-request child lifecycle, and live steering is not required.
 
 Parent wake-up replaces the Claude/Codex Stop-hook wait. The runtime touches a per-parent
@@ -107,6 +122,8 @@ through a real supervisor run, discovery roots, bridge operations, delivery repl
 payload. The Pi TUI itself, POSIX, and Claude/Codex parents with Pi children through real CLIs
 are outside this gate. Interactive behavior has also been manually verified; that does not replace
 these automated acceptance boundaries.
+
+The task-free 3.0.0 checkout is verified by `e2e:subagents:skills` and `e2e:pi-subagents:skills` in `tests/e2e/`: real headless Claude/Codex/Pi CLIs use fake APIs to cover omitted/found/missing skills, native skill expansion, receipt writes, failure delivery, request counts, cleanup, and Claude/Codex resume. This does not certify the unchanged remote runtime pin or the visible Aboard/TUI paths.
 
 ## Remaining integration limits
 

@@ -560,3 +560,8 @@ export function describeResolvedPrompt(prompt: ResolvedPrompt | undefined): stri
   return `prompt=${prompt.text.length} chars${sources.length === 0 ? "" : ` sources=${sources}`}`;
 }
 
+
+/** New delegated conversations use only explicitly requested skills. */
+export function delegationChildPrompt(prompt: string): string {
+  return `Use skills only when explicitly requested by the user, subject to project and provider instructions.\n\n${prompt}`;
+}

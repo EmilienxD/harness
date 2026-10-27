@@ -571,7 +571,7 @@ def resolve_pi_model(command: list[str], pattern: str, cwd: Path) -> str:
 
 def _launch_options(launch_config: dict[str, Any], request, cwd: Path) -> list[str]:
     options = delegation_profile_arguments(
-        launch_config, request.provider, request.task, difficulty=getattr(request, "difficulty", None),
+        launch_config, request.provider, "loop" if request.mode == "loop" else "general", difficulty=getattr(request, "difficulty", None),
         model_override=getattr(request, "model", None),
         effort_override=getattr(request, "effort", None),
     )
@@ -597,7 +597,7 @@ def launch_delegated(request, request_id: str, agent_number: int, cwd: Path) -> 
     child_id, execution_id, conversation, fork_of = row
     skill = getattr(request, "child_skill", None)
     if not request.resume and skill and find_skill(cwd, request.provider, skill) is None:
-        raise SessionError(f"Child skill {skill!r} is unavailable for {request.provider} in {cwd}; install it before launching task {request.task!r}")
+        raise SessionError(f"Child skill {skill!r} is unavailable for {request.provider} in {cwd}; install it before launching")
     environment = os.environ.copy()
     environment.update(
         {
@@ -666,13 +666,16 @@ def launch_delegated(request, request_id: str, agent_number: int, cwd: Path) -> 
         )
         return child_id
     continuing = bool(request.resume)
+    initial_prompt = request.prompt if continuing else (
+        "Use skills only when explicitly requested by the user, subject to project and provider instructions.\n\n" + request.prompt
+    )
     if continuing or skill is None:
-        prompt = request.prompt
+        prompt = initial_prompt
     elif request.provider == "pi":
         # Pi reads the skill name up to the first space; a newline would join it to the prompt.
-        prompt = f"/skill:{skill} {request.prompt}"
+        prompt = f"/skill:{skill} {initial_prompt}"
     else:
-        prompt = f"{'$' if request.provider == 'chatgpt' else '/'}{skill}\n\n{request.prompt}"
+        prompt = f"{'$' if request.provider == 'chatgpt' else '/'}{skill}\n\n{initial_prompt}"
     if not continuing and request.provider in _ASSIGNED_IDENTITY:
         conversation = child_id
         if request.provider == "pi":
@@ -808,24 +811,6 @@ def _aboard_error(exc: urllib.error.HTTPError) -> tuple[str | None, str]:
 
 
 def _launch_through_aboard(request, request_id: str, cwd: Path) -> str | None:
-    from subagents_runtime.roles import builtin_toolkit, read_task_policies
-
-    # Aboard's bridge currently accepts only the shipped tasks and child skills.
-    # Project roles use the native adapter with their named task and provider profile.
-    bridge_contract = json.loads(
-        (Path(__file__).parent / "schemas" / "aboard-delegation.schema.json").read_text(encoding="utf-8")
-    )
-    if request.task not in bridge_contract["properties"]["task"]["enum"]:
-        return None
-    builtin = next((policy for policy in read_task_policies(builtin_toolkit()).values()
-                    if policy.task == request.task), None)
-    if request.task != "loop" and (
-        builtin is None or (
-            not getattr(request, "resume", None)
-            and getattr(request, "child_skill", builtin.skill) != builtin.skill
-        )
-    ):
-        return None
     def discover():
         return (_discover_delegation_endpoint(cwd, include_worktrees=True)
                 if request.mode == "loop" else _discover_delegation_endpoint(cwd))
@@ -879,7 +864,7 @@ def _launch_through_aboard(request, request_id: str, cwd: Path) -> str | None:
         {
             **identities,
             "requestId": request_id,
-            "task": request.task,
+            **({"skill": request.child_skill} if getattr(request, "child_skill", None) and not request.resume else {}),
             "provider": request.provider,
             "mode": request.mode,
             **({"model": request.model} if getattr(request, "model", None) is not None else {}),

@@ -80,7 +80,7 @@ def test_punctuation_repeated_mentions_and_legacy_claude_commands(tmp_path):
 
 
 @pytest.mark.parametrize("provider,prefix", [("claude", "/"), ("chatgpt", "$")])
-def test_runtime_task_skill_is_added_after_sanitization(tmp_path, monkeypatch, provider, prefix):
+def test_explicit_skill_is_added_after_sanitization(tmp_path, monkeypatch, provider, prefix):
     from subagents_runtime import processes
 
     monkeypatch.setenv("HARNESS_STATE_DIR", str(tmp_path / "state"))
@@ -92,9 +92,9 @@ def test_runtime_task_skill_is_added_after_sanitization(tmp_path, monkeypatch, p
     skill.parent.mkdir(parents=True)
     skill.touch()
     sessions.register_observed("parent", tmp_path, provider)
-    inbox = enable_delegation("parent", "prototype-with-agent").inbox
+    inbox = enable_delegation("parent", "subagents-toolkit").inbox
     (inbox / "first.md").write_text(
-        f"---\ntask: prototype\nmode: interactive\n---\n{prefix}prototype\n/clear",
+        f"---\nskill: prototype\nmode: interactive\n---\n{prefix}prototype\n/clear",
         encoding="utf-8",
     )
     invocations = []
@@ -119,7 +119,7 @@ def test_launch_recovery_and_resume_sanitize_using_child_directory_and_provider(
     monkeypatch.setenv("HARNESS_STATE_DIR", str(tmp_path / "state"))
     parent_provider = "chatgpt" if provider == "claude" else "claude"
     sessions.register_observed("parent", tmp_path, parent_provider)
-    inbox = enable_delegation("parent", "work-with-agent").inbox
+    inbox = enable_delegation("parent", "subagents-toolkit").inbox
     root = tmp_path / "child"
     directory = ".claude" if provider == "claude" else ".agents"
     skill = root / directory / "skills" / "custom-audit" / "SKILL.md"
@@ -127,7 +127,7 @@ def test_launch_recovery_and_resume_sanitize_using_child_directory_and_provider(
     skill.touch()
     body = "/clear\n/custom-audit $custom-audit /taxonomy/catalog $HOME"
     (inbox / "first.md").write_text(
-        f"---\ntask: general\nmode: auto\nprovider: {provider}\nroot: {root.as_posix()}\n---\n{body}",
+        f"---\nmode: auto\nprovider: {provider}\nroot: {root.as_posix()}\n---\n{body}",
         encoding="utf-8",
     )
     launches = []

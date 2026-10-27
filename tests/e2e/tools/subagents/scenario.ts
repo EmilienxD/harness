@@ -14,6 +14,9 @@ export const NEXT_REPLY = "HARNESS_SUBAGENTS_NEXT_COMPLETE_640C: continued the s
 export const PARENT_REPLY = "HARNESS_SUBAGENTS_PARENT_COMPLETE_33A1: received the child reply.";
 export const RECOVERY_MARKER = "HARNESS_SUBAGENTS_RECOVERY_E2E_762B";
 export const RECOVERY_PARENT_REPLY = "HARNESS_SUBAGENTS_RECOVERY_COMPLETE_639A: received the resumed child reply.";
+export type SkillSelection = "none" | "found" | "missing";
+export const SKILL_RESOURCE = "[E2E:subagents:loaded-skill]";
+export const SKILL_RECEIPT = "selected-skill.json";
 export const CHILD_PROGRESS = "child checkpoint before interruption\n";
 export const scenarioCatalogHash = createHash("sha256").update("subagents:v4:shell-inbox-bom").digest("hex");
 
@@ -26,7 +29,7 @@ const CODEX_PROGRESS_ID = "call_e2e_subagents_progress";
 const CLAUDE_RESUME_ID = "toolu_e2e_subagents_resume";
 const CODEX_RESUME_ID = "call_e2e_subagents_resume";
 
-export function claudeTransition(request: AnthropicMessagesRequest, repoRoot: string, mode: "interactive" | "auto" = "interactive", recovery = false, alternateRoot = false, stopFallback = false): AnthropicScenarioResponse {
+export function claudeTransition(request: AnthropicMessagesRequest, repoRoot: string, mode: "interactive" | "auto" = "interactive", recovery = false, alternateRoot = false, stopFallback = false, selection: SkillSelection = "none"): AnthropicScenarioResponse {
   const text = deepText(request.messages);
   if (recovery && text.includes(PARENT_MARKER) && text.includes(RECOVERY_MARKER)) {
     if (claudeResult(request, CLAUDE_WRITE_ID) === undefined) throw new E2eProtocolError("$.messages", "parent history was not restored", "subagents");
@@ -58,12 +61,12 @@ export function claudeTransition(request: AnthropicMessagesRequest, repoRoot: st
     }
     return claudeResponse("child-interruption-ready", "end_turn", [{ type: "text", text: "Interrupted fixture response." }]);
   }
-  if (text.includes(PARENT_MARKER)) return claudeParent(request, repoRoot, text, mode, alternateRoot, stopFallback);
-  if (text.includes(CHILD_MARKER)) return claudeChild(request,mode,text.includes(NEXT_MARKER));
+  if (text.includes(PARENT_MARKER)) return claudeParent(request, repoRoot, text, mode, alternateRoot, stopFallback, selection);
+  if (text.includes(CHILD_MARKER)) return selectedClaudeChild(request, mode, text.includes(NEXT_MARKER), repoRoot, selection);
   throw new E2eProtocolError("$.messages", "does not select the subagents scenario", "subagents");
 }
 
-export function codexTransition(request: OpenAiResponsesRequest, repoRoot: string, mode: "interactive" | "auto" = "interactive", recovery = false, alternateRoot = false, stopFallback = false): OpenAiScenarioResponse {
+export function codexTransition(request: OpenAiResponsesRequest, repoRoot: string, mode: "interactive" | "auto" = "interactive", recovery = false, alternateRoot = false, stopFallback = false, selection: SkillSelection = "none"): OpenAiScenarioResponse {
   const text = deepText([request.instructions, request.input]);
   const hasOutput = (id: string) => request.input.some((item) => (item.type === "custom_tool_call_output" || item.type === "function_call_output") && item.call_id === id);
   if (recovery && text.includes(PARENT_MARKER) && text.includes(RECOVERY_MARKER)) {
@@ -89,8 +92,8 @@ export function codexTransition(request: OpenAiResponsesRequest, repoRoot: strin
     }
     return { scenario: "subagents", checkpoint: "child-interruption-ready", output: finalOutput("child-interruption-ready", "Interrupted fixture response.") };
   }
-  if (text.includes(PARENT_MARKER)) return codexParent(request, repoRoot, text, mode, alternateRoot, stopFallback);
-  if (text.includes(CHILD_MARKER)) return codexChild(request,mode,text.includes(NEXT_MARKER));
+  if (text.includes(PARENT_MARKER)) return codexParent(request, repoRoot, text, mode, alternateRoot, stopFallback, selection);
+  if (text.includes(CHILD_MARKER)) return selectedCodexChild(request, mode, text.includes(NEXT_MARKER), repoRoot, selection);
   throw new OpenAiProtocolError("$.input", "does not select the subagents scenario", "subagents");
 }
 
@@ -105,7 +108,7 @@ function codexCommand(request: OpenAiResponsesRequest, id: string, checkpoint: s
     : { type: "function_call", id: `fc_${id}`, call_id: id, name: "exec_command", status: "completed", arguments: JSON.stringify(input) } };
 }
 
-function claudeParent(request: AnthropicMessagesRequest, repoRoot: string, text: string, mode: "interactive" | "auto", alternateRoot: boolean, stopFallback: boolean): AnthropicScenarioResponse {
+function claudeParent(request: AnthropicMessagesRequest, repoRoot: string, text: string, mode: "interactive" | "auto", alternateRoot: boolean, stopFallback: boolean, selection: SkillSelection): AnthropicScenarioResponse {
   const result = claudeResult(request, CLAUDE_WRITE_ID);
   if (result === undefined) {
     const inbox = requireInbox(text, repoRoot, "claude");
@@ -116,8 +119,11 @@ function claudeParent(request: AnthropicMessagesRequest, repoRoot: string, text:
       type: "tool_use",
       id: CLAUDE_WRITE_ID,
       name: "Bash",
-      input: { command: `harness-e2e-request ${Buffer.from(resolve(inbox, "child.md")).toString("base64")} ${Buffer.from(requestBody(mode, alternateRoot)).toString("base64")}` },
+      input: { command: `harness-e2e-request ${Buffer.from(resolve(inbox, "child.md")).toString("base64")} ${Buffer.from(requestBody(mode, alternateRoot, selection)).toString("base64")}` },
     }]);
+  }
+  if (selection === "missing" && text.includes("missing-e2e") && text.includes("unavailable")) {
+    return claudeResponse("parent-received-failure", "end_turn", [{ type: "text", text: PARENT_REPLY }]);
   }
   if (text.includes(CHILD_REPLY)) {
     return claudeResponse("parent-received-reply", "end_turn", [{ type: "text", text: PARENT_REPLY }]);
@@ -146,7 +152,7 @@ function claudeChild(request: AnthropicMessagesRequest, mode: "interactive" | "a
   return claudeResponse(checkpoint, "end_turn", [{ type: "text", text: reply }]);
 }
 
-function codexParent(request: OpenAiResponsesRequest, repoRoot: string, text: string, mode: "interactive" | "auto", alternateRoot: boolean, stopFallback: boolean): OpenAiScenarioResponse {
+function codexParent(request: OpenAiResponsesRequest, repoRoot: string, text: string, mode: "interactive" | "auto", alternateRoot: boolean, stopFallback: boolean, selection: SkillSelection): OpenAiScenarioResponse {
   const outputs = request.input.filter((item) => item.type === "custom_tool_call_output" || item.type === "function_call_output");
   if (!outputs.some((item) => item.call_id === CODEX_WRITE_ID)) {
     const inbox = requireInbox(text, repoRoot, "codex");
@@ -155,7 +161,7 @@ function codexParent(request: OpenAiResponsesRequest, repoRoot: string, text: st
       throw new OpenAiProtocolError("$.tools", `exec_command is unavailable; offered: ${offered.join(", ")}`, "subagents");
     }
     const requestPath = resolve(inbox, "child.md");
-    const command = `harness-e2e-request ${Buffer.from(requestPath).toString("base64")} ${Buffer.from(requestBody(mode, alternateRoot)).toString("base64")}`;
+    const command = `harness-e2e-request ${Buffer.from(requestPath).toString("base64")} ${Buffer.from(requestBody(mode, alternateRoot, selection)).toString("base64")}`;
     const output: OpenAiResponseOutput = request.codeMode
       ? {
           type: "custom_tool_call",
@@ -174,6 +180,9 @@ function codexParent(request: OpenAiResponsesRequest, repoRoot: string, text: st
           arguments: JSON.stringify({ cmd: command, yield_time_ms: 10_000, max_output_tokens: 1_000 }),
         };
     return { scenario: "subagents", checkpoint: "parent-request-write", output };
+  }
+  if (selection === "missing" && text.includes("missing-e2e") && text.includes("unavailable")) {
+    return { scenario: "subagents", checkpoint: "parent-received-failure", output: finalOutput("parent-received-failure", PARENT_REPLY) };
   }
   if (text.includes(CHILD_REPLY)) {
     return { scenario: "subagents", checkpoint: "parent-received-reply", output: finalOutput("parent-received-reply", PARENT_REPLY) };
@@ -228,8 +237,8 @@ function requireRequestFile(text: string, repoRoot: string, provider: "claude" |
   throw new OpenAiProtocolError("$.input", "request was not deleted after startup", "subagents");
 }
 
-function requestBody(mode: "interactive" | "auto", alternateRoot: boolean): string {
-  return `---\ntask: general\nmode: ${mode}\n${alternateRoot ? "root: ../worktree\n" : ""}---\n\n${CHILD_MARKER}\nInspect the deterministic delegated task and explicitly reply to the parent.\n`;
+function requestBody(mode: "interactive" | "auto", alternateRoot: boolean, selection: SkillSelection): string {
+  return `---\nmode: ${mode}\n${selection === "none" ? "" : `skill: ${selection === "found" ? "e2e-selected" : "missing-e2e"}\n`}${alternateRoot ? "root: ../worktree\n" : ""}---\n\n${CHILD_MARKER}\nInspect the deterministic delegated task and explicitly reply to the parent.\n`;
 }
 
 function claudeResult(request: AnthropicMessagesRequest, id: string): Record<string, unknown> | undefined {
@@ -263,4 +272,26 @@ function deepText(value: unknown): string {
 
 function stableId(value: string): string {
   return `msg_e2e_${createHash("sha256").update(`subagents:${value}`).digest("hex").slice(0, 20)}`;
+}
+
+function selectedClaudeChild(request: AnthropicMessagesRequest, mode: "interactive" | "auto", continuing: boolean, root: string, selection: SkillSelection): AnthropicScenarioResponse {
+  if (!continuing) {
+    const loaded = deepText(request.messages).includes(SKILL_RESOURCE);
+    if (loaded !== (selection === "found")) throw new E2eProtocolError("$.messages", "native child skill resource selection differs", "subagents");
+    if (selection === "found" && !claudeResult(request, "toolu_skill_receipt")) {
+      return claudeResponse("child-skill-receipt", "tool_use", [{ type: "tool_use", id: "toolu_skill_receipt", name: "Write", input: { file_path: resolve(root, SKILL_RECEIPT), content: JSON.stringify({ skill: "e2e-selected" }) } }]);
+    }
+  }
+  return claudeChild(request, mode, continuing);
+}
+
+function selectedCodexChild(request: OpenAiResponsesRequest, mode: "interactive" | "auto", continuing: boolean, root: string, selection: SkillSelection): OpenAiScenarioResponse {
+  if (!continuing) {
+    const loaded = deepText(request.input).includes(SKILL_RESOURCE);
+    if (loaded !== (selection === "found")) throw new OpenAiProtocolError("$.input", "native child skill resource selection differs", "subagents");
+    if (selection === "found" && !request.input.some((item) => item.call_id === "call_skill_receipt" && (item.type === "custom_tool_call_output" || item.type === "function_call_output"))) {
+      return codexCommand(request, "call_skill_receipt", "child-skill-receipt", `node -e "require('fs').writeFileSync('${SKILL_RECEIPT}',JSON.stringify({skill:'e2e-selected'}))"`);
+    }
+  }
+  return codexChild(request, mode, continuing);
 }

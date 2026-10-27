@@ -74,7 +74,7 @@ with npm networking disabled, reinstalls the archive directly through Pi, and ch
 removal preserves another package and its npm metadata. Archives and settings stay in the fixture.
 Editable user policies remain under `<agent-dir>/harness/`; project policies use `.harness/guards/`.
 The coupled subagent toolkit skill stays in conventional `skills/`, where both Pi and its
-independent Python runtime read the same task registry.
+independent Python runtime read the same delegation instructions.
 Command-guard journeys check fresh project and user installations create no `hooks/` directory. They also run
 the installed Pi startup warning detector in an isolated subprocess and require zero warnings.
 JSON/RPC suppress interactive deprecation warnings, so silence alone is not evidence. A positive
@@ -624,3 +624,9 @@ Each verified the uploaded SVG bytes, queued-only answer effects, one persisted 
 user message, confirmed server delivery, reload/fork/tree isolation and owned test cleanup.
 These headless checks do not certify browser rendering, Pi TUI behavior or unscripted model
 interview quality.
+
+## Explicit subagent skills
+
+`npm run e2e:subagents:skills` runs Claude Code and Codex headless CLI parents and children against the fake Anthropic/Responses APIs. `npm run e2e:pi-subagents:skills` installs the checkout runtime with the real catalogue installer and runs Pi JSON parents and children against the fake Responses API. All fixtures are external and upstream inference is forbidden.
+
+Each provider covers omitted, available, and missing `skill` parameters. Available skills carry a fixture resource identity and cause a real tool to write a receipt; omitted skills have no loaded body. Missing skills persist a failed request, notify the parent, and start no child CLI. Claude/Codex successful launches also resume the saved child without re-invoking its skill. Pi expects 4/5/3 inference requests for omitted/found/missing respectively; the failure reaches its parent through both the write outcome and durable result delivery. These are checkout-runtime checks, independent of the shipped remote pin and VS Code/TUI acceptance.

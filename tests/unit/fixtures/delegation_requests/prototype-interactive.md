@@ -1,5 +1,5 @@
 ---
-task: prototype
+skill: prototype
 provider: chatgpt
 mode: interactive
 ---

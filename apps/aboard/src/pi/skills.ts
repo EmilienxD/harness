@@ -3,7 +3,7 @@ import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { piAgentDirectory } from "./sessions.js";
 
-export async function requirePiWorkerSkills(workspaceRoot: string): Promise<void> {
+export async function requirePiSkill(workspaceRoot: string, name: string): Promise<void> {
   const roots = [join(workspaceRoot, ".pi", "skills"), join(piAgentDirectory(), "skills"), join(homedir(), ".agents", "skills")];
   for (let directory = resolve(workspaceRoot); ; directory = dirname(directory)) {
     roots.push(join(directory, ".agents", "skills"));
@@ -17,8 +17,10 @@ export async function requirePiWorkerSkills(workspaceRoot: string): Promise<void
       }
     } catch { /* Native launch reports malformed settings. */ }
   }
-  for (const name of ["address-this", "review-this"]) {
-    const found = await Promise.all(roots.flatMap((root) => [join(root, name, "SKILL.md"), ...(root.endsWith(name) ? [join(root, "SKILL.md")] : [])]).map((path) => stat(path).then((s) => s.isFile(), () => false)));
-    if (!found.some(Boolean)) throw new Error(`Required Harness skill /skill:${name} is not installed for Pi. Install issue-readers for Pi before launching Auto Run.`);
-  }
+  const found = await Promise.all(roots.flatMap((root) => [join(root, name, "SKILL.md"), ...(root.endsWith(name) ? [join(root, "SKILL.md")] : [])]).map((path) => stat(path).then((s) => s.isFile(), () => false)));
+  if (!found.some(Boolean)) throw new Error(`Required skill /skill:${name} is not installed for Pi.`);
+}
+
+export async function requirePiWorkerSkills(workspaceRoot: string): Promise<void> {
+  for (const name of ["address-this", "review-this"]) await requirePiSkill(workspaceRoot, name);
 }

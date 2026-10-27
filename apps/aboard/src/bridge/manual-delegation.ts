@@ -2,6 +2,7 @@ import { isRequestedEffort, type RequestedEffort } from "../platform/effort.js";
 import type { AgentPlatformId } from "../platform/agent-platform.js";
 import { AGENT_PLATFORM_IDS, type AgentType, type AgentSession, type ExecutionMode, type TerminalId } from "../domain/contracts.js";
 import { validateResumeMessage, type TerminalController } from "../platform/terminals.js";
+import { delegationChildPrompt } from "../platform/prompts.js";
 import { sanitizePromptCommands } from "../platform/prompt-commands.js";
 import type { DelegationTask } from "../platform/launch-configuration.js";
 import { isAbsolute, relative, resolve, sep } from "node:path";
@@ -13,29 +14,6 @@ import { ISSUE_DIFFICULTIES, type IssueDifficulty } from "../shared/labels.js";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { realpath } from "node:fs/promises";
-
-const TASKS = {
-  explore: { type: "explore", modes: ["auto"] },
-  prototype: { type: "prototype", modes: ["interactive"] },
-  websearch: { type: "websearch", modes: ["interactive", "auto"] },
-  brainstorm: { type: "brainstorm", modes: ["interactive"] },
-  address: { type: "general", modes: ["interactive", "auto"] },
-  review: { type: "general", modes: ["interactive", "auto"] },
-  general: { type: "general", modes: ["interactive", "auto"] },
-  loop: { type: "general", modes: ["loop"] },
-} as const;
-const SKILLS: Readonly<Record<string, string>> = {
-  prototype: "prototype",
-  websearch: "websearch",
-  brainstorm: "grill-me",
-  address: "address-this",
-  review: "review-this",
-};
-const DESCRIPTIONS: Readonly<Record<string, string>> = {
-  address: "Address",
-  review: "Review",
-  loop: "Implementer",
-};
 
 /** A claim whose launch never reported an outcome: callers must verify, not retry. */
 class StartupUncertain extends Error {}
@@ -58,7 +36,7 @@ export interface ManualDelegationLaunch {
   readonly provider: AgentPlatformId;
   readonly executionMode: Exclude<ExecutionMode, "auto-run">;
   readonly prompt: string;
-  /** Trusted skill selected by the work-with-agent workflow, separate from user text. */
+  /** Trusted skill selected by the delegation workflow, separate from user text. */
   readonly skill?: string;
   readonly cwd: string;
   readonly description: string;
@@ -149,34 +127,31 @@ export async function continueHarnessDelegation(
 }
 
 function parse(body: unknown): ManualDelegationLaunch | undefined {
-  // The published subagents JSON schema describes the wire shape. TASKS adds
-  // Aboard's authorization policy, especially task-specific execution modes,
-  // so this boundary check intentionally remains local to the bridge.
+  // Validate the published subagents wire shape before claiming a launch.
   if (typeof body !== "object" || body === null || Array.isArray(body)) return undefined;
   const value = body as Record<string, unknown>;
   const identities = ["harnessSessionId", "executionId", "parentSessionId", "resumeAgentId", "resumeSessionId", "forkSessionId", "harnessStateDirectory", "harnessRuntimePath", "harnessPython"] as const;
   if (identities.some((key) => value[key] !== undefined && (typeof value[key] !== "string" || (value[key] as string).trim().length === 0))) return undefined;
   if ((value.resumeAgentId === undefined) !== (value.resumeSessionId === undefined)) return undefined;
   if (value.forkSessionId !== undefined && value.forkSessionId !== value.resumeSessionId) return undefined;
-  if (Object.keys(value).some((key) => !["requestId", "task", "provider", "mode", "model", "effort", "prompt", "cwd", "difficulty", ...identities].includes(key))) return undefined;
+  if (Object.keys(value).some((key) => !["requestId", "skill", "provider", "mode", "model", "effort", "prompt", "cwd", "difficulty", ...identities].includes(key))) return undefined;
   if (value.effort !== undefined && !isRequestedEffort(value.effort)) return undefined;
   if (value.model !== undefined && (typeof value.model !== "string" || value.model.trim().length === 0)) return undefined;
   if (value.difficulty !== undefined && !ISSUE_DIFFICULTIES.includes(value.difficulty as IssueDifficulty)) return undefined;
   if (typeof value.requestId !== "string" || value.requestId.trim().length === 0) return undefined;
-  if (typeof value.task !== "string" || !(value.task in TASKS)) return undefined;
-  const task = TASKS[value.task as keyof typeof TASKS];
+  if (value.skill !== undefined && (typeof value.skill !== "string" || !/^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/u.test(value.skill))) return undefined;
   if (typeof value.provider !== "string" || !AGENT_PLATFORM_IDS.includes(value.provider as AgentPlatformId)) return undefined;
   if (value.mode !== "interactive" && value.mode !== "auto" && value.mode !== "loop") return undefined;
   if (value.provider === "pi" && value.mode === "loop") return undefined;
-  if (!(task.modes as readonly string[]).includes(value.mode)) return undefined;
+  if (value.mode === "loop" && value.skill !== undefined) return undefined;
   if (typeof value.prompt !== "string" || value.prompt.trim().length === 0) return undefined;
   if (typeof value.cwd !== "string" || value.cwd.trim().length === 0) return undefined;
-  const skill = SKILLS[value.task];
+  const skill = value.skill as string | undefined;
   return {
     ...Object.fromEntries(identities.filter((key) => value[key] !== undefined).map((key) => [key, value[key]])),
     requestId: value.requestId,
-    type: task.type,
-    task: value.task as DelegationTask,
+    type: "general",
+    task: value.mode === "loop" ? "loop" : "general",
     provider: value.provider as AgentPlatformId,
     executionMode: value.mode,
     ...(value.effort === undefined ? {} : { effort: value.effort as RequestedEffort }),
@@ -185,7 +160,7 @@ function parse(body: unknown): ManualDelegationLaunch | undefined {
     prompt: value.prompt,
     ...(skill === undefined ? {} : { skill }),
     cwd: value.cwd,
-    description: DESCRIPTIONS[value.task] ?? task.type,
+    description: value.mode === "loop" ? "Implementer" : "general",
   };
 }
 
@@ -261,7 +236,11 @@ export function createDelegationRoutes(
             throw new StartupUncertain("Delegation startup is uncertain; verify the existing execution before retrying");
           }
         }
-        const launchRequest = { ...parsed, prompt: sanitizePromptCommands(parsed.prompt, parsed.provider) };
+        const cleanPrompt = sanitizePromptCommands(parsed.prompt, parsed.provider);
+        const prompt = parsed.resumeAgentId === undefined
+          ? delegationChildPrompt(cleanPrompt)
+          : cleanPrompt;
+        const launchRequest = { ...parsed, prompt };
         const launched = await (parsed.resumeAgentId === undefined ? launcher.launch(launchRequest)
           : launcher.resume?.(launchRequest) ?? Promise.reject(new Error("Delegation resume is unavailable")));
         if (recordPath !== undefined) {

@@ -18,7 +18,7 @@ import yaml
 from subagents_runtime.storage import new_inbox, state_dir
 from subagents_runtime.effort import EFFORT_LEVELS
 from subagents_runtime.messages import runtime_message
-from subagents_runtime.roles import RoleError, load_task_policies, task_policy
+from subagents_runtime.roles import NAME
 
 PROVIDERS = frozenset({"claude", "chatgpt", "pi"})
 # Providers without Claude's inline @file expansion receive plain paths.
@@ -149,7 +149,7 @@ def parse_request_file(
     if not isinstance(metadata, dict):
         raise RequestFileError("frontmatter must be a mapping")
     keys = set(metadata)
-    accepted = {"task", "provider", "mode", "model", "effort", "root", "resume", "cwd", "difficulty", "prompt-file"}
+    accepted = {"skill", "provider", "mode", "model", "effort", "root", "resume", "cwd", "difficulty", "prompt-file"}
     if extras := keys - accepted:
         raise RequestFileError(
             "unsupported frontmatter keys: " + ", ".join(sorted(map(str, extras)))
@@ -165,7 +165,7 @@ def parse_request_file(
         ):
             raise RequestFileError("resume requires only an agent-i identifier")
         return DelegationRequest(canonical_path, "", "", "", prompt, metadata["resume"])
-    for key in ("task", "mode"):
+    for key in ("mode",):
         if key not in metadata:
             raise RequestFileError(f"frontmatter requires {key}")
     for key, value in metadata.items():
@@ -173,20 +173,19 @@ def parse_request_file(
             raise RequestFileError(
                 f"frontmatter {key!s} must be a nonempty scalar string"
             )
-    task = metadata["task"].strip()
     mode = metadata["mode"].strip()
+    task = "loop" if mode == "loop" else "general"
+    skill = metadata.get("skill")
+    if skill is not None and not NAME.fullmatch(skill):
+        raise RequestFileError("skill must be a lowercase skill name using letters, digits and single hyphens")
+    if task == "loop" and skill is not None:
+        raise RequestFileError("loop requests do not accept skill")
     provider = normalize_provider(metadata.get("provider", parent_provider).strip())
     effort = metadata["effort"].strip() if "effort" in metadata else None
     if effort is not None and effort not in EFFORT_LEVELS:
         raise RequestFileError(f"unsupported effort {effort!r}")
-    try:
-        policy = task_policy(task, cwd or Path.cwd(), parent_provider)
-    except RoleError as exc:
-        raise RequestFileError(str(exc)) from exc
-    if policy is None:
-        raise RequestFileError(f"unsupported task {task!r}")
-    if mode not in policy.modes:
-        raise RequestFileError(f"unsupported mode {mode!r} for task {task!r}")
+    if mode not in {"auto", "interactive", "loop"}:
+        raise RequestFileError(f"unsupported mode {mode!r}")
     if provider not in PROVIDERS:
         raise RequestFileError(f"unsupported provider {provider!r}")
     if task != "loop" and keys & {"cwd", "difficulty", "prompt-file"}:
@@ -222,7 +221,7 @@ def parse_request_file(
         cwd=Path(metadata["cwd"]).resolve() if task == "loop" else None,
         difficulty=metadata.get("difficulty"),
         prompt_path=Path(metadata["prompt-file"]).resolve() if task == "loop" else None,
-        child_skill=policy.skill,
+        child_skill=skill,
         model=metadata["model"].strip() if "model" in metadata else None,
         effort=effort,
         root=root,
@@ -250,18 +249,13 @@ def enable_delegation(
             raise sessions.SessionError(
                 "the current Harness parent session is not registered"
             )
-        if skill not in {"resume-agent", "ship"}:
-            try:
-                policies = load_task_policies(original_cwd or Path(row[1]), row[0])
-            except RoleError as exc:
-                raise sessions.SessionError(str(exc)) from exc
-            if skill not in policies:
-                raise sessions.SessionError(f"unknown delegation skill {skill!r}")
+        if skill not in {"subagents-toolkit", "ship"}:
+            raise sessions.SessionError(f"unknown delegation skill {skill!r}")
     return ensure_inbox(parent_session_id)
 
 
 def ensure_inbox(parent_session_id: str) -> DelegationInbox:
-    """Assign a persistent inbox without loading or validating task registries."""
+    """Assign a persistent conversation inbox."""
     sessions = _sessions_module()
     with sessions._connect() as connection:
         connection.execute("BEGIN IMMEDIATE")
@@ -488,7 +482,7 @@ def reconcile_inbox(session_id: str, *, launch: Callable | None = None) -> list[
                     connection.execute("UPDATE executions SET reservation_pid=?,reservation_birth=? WHERE id=?",
                                        (os.getpid(), processes.birth_identity(os.getpid()), execution[3]))
                     persisted = connection.execute(
-                        "SELECT r.task,r.provider,r.mode,r.prompt_hash,s.cwd,s.agent_index,r.kind,s.model,s.effort FROM requests r JOIN sessions s ON s.id=r.child_session_id WHERE r.id=?", (row[0],)
+                        "SELECT r.task,r.provider,r.mode,r.prompt_hash,s.cwd,s.agent_index,r.kind,s.model,s.effort,r.skill FROM requests r JOIN sessions s ON s.id=r.child_session_id WHERE r.id=?", (row[0],)
                     ).fetchone()
                     retries.append((path, row[0], execution[3], row[2], persisted))
                     continue
@@ -516,14 +510,14 @@ def reconcile_inbox(session_id: str, *, launch: Callable | None = None) -> list[
         path = claimed_path.with_name(claimed_path.name[:-8])
         try:
             request = parse_request_file(claimed_path, delegation.inbox, parent_provider=delegation.provider, claimed=True, cwd=delegation.original_cwd)
-            task, provider, mode, prompt_hash, cwd, number, kind, model, effort = persisted
+            task, provider, mode, prompt_hash, cwd, number, kind, model, effort, skill = persisted
             if hashlib.sha256(request.prompt.encode()).hexdigest() != prompt_hash or bool(request.resume) != (kind == "resume"):
                 raise RequestFileError("Claimed request content changed after reservation")
-            if kind == "launch" and (request.task, request.provider, request.mode, request.model, request.effort, request.root or delegation.original_cwd) != (task, provider, mode, model, effort, Path(cwd)):
+            if kind == "launch" and (request.task, request.provider, request.mode, request.model, request.effort, request.child_skill, request.root or delegation.original_cwd) != (task, provider, mode, model, effort, skill, Path(cwd)):
                 raise RequestFileError("Claimed request metadata changed after reservation")
             if kind == "resume" and sessions.resolve_session(request.resume, session_id) != child_id:
                 raise RequestFileError("Claimed request child changed after reservation")
-            request = replace(request, path=path, task=task, provider=provider, mode=mode, model=model, effort=effort)
+            request = replace(request, path=path, task=task, provider=provider, mode=mode, model=model, effort=effort, child_skill=skill)
             results.append(_finish_launch(request, request_id, execution_id, child_id, number, Path(cwd), path, launch))
         except Exception as exc:
             results.append(_fail_request(path, request_id, execution_id, child_id, exc, session_id))
@@ -706,7 +700,7 @@ def _process_inbox(
                         (child_id,),
                     ).fetchone()
                     # Continuations keep the workflow already in the transcript,
-                    # even if its project registry has since changed or been removed.
+                    # without re-invoking a skill on each continuation.
                     if fork:
                         fork_of = row[4] if row[1] != "loop" else None
                         _supersede_child(connection, child_id)
@@ -744,7 +738,7 @@ def _process_inbox(
                             (child_id, worktree_key(cwd), str(request.prompt_path), request.difficulty),
                         )
                 connection.execute(
-                    "INSERT INTO requests(id,kind,parent_session_id,child_session_id,agent_number,source_name,task,provider,mode,prompt_hash,state) VALUES (?,?,?,?,?,?,?,?,?,?,'launching')",
+                    "INSERT INTO requests(id,kind,parent_session_id,child_session_id,agent_number,source_name,task,provider,mode,prompt_hash,skill,state) VALUES (?,?,?,?,?,?,?,?,?,?,?,'launching')",
                     (
                         request_id,
                         "resume" if request.resume else "launch",
@@ -756,6 +750,7 @@ def _process_inbox(
                         request.provider,
                         request.mode,
                         hashlib.sha256(request.prompt.encode()).hexdigest(),
+                        request.child_skill,
                     ),
                 )
                 connection.execute(
@@ -1039,17 +1034,13 @@ def session_start_instructions(inbox: str | Path) -> str:
 
 
 def delegation_instructions(inbox: str | Path, cwd: Path, provider: str) -> str:
-    from subagents_runtime.roles import custom_registry_paths
-
-    personal_registry, project_registry = custom_registry_paths(cwd)
     return (
         f"Conversation inbox: {inbox}\n"
         "Publish each complete request as a .md file in this inbox using any file-writing tool. "
         "For multi-step writes, write a temporary file and rename it to .md when complete. "
         "The runtime scans after tools and before stopping; confirm its launch acknowledgement before reporting a child as started.\n"
-        f"Custom task registries: project {project_registry}; personal {personal_registry}. "
-        "Project entries replace personal definitions by task name. "
-        "Missing files mean no custom tasks; report malformed registries instead of falling back.\n"
+        "Set skill only when the user explicitly requests that skill by name; otherwise omit it. "
+        "A missing requested skill fails the launch.\n"
         "Invoke the subagents-toolkit skill before launching or continuing a subagent "
         "if its instructions are not already in the current context.\n"
     )

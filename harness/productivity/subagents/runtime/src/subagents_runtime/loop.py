@@ -74,7 +74,7 @@ def launch(parent_id: str, cwd: Path, prompt_path: Path, *, difficulty: str | No
     with connect() as db:
         provider = db.execute("SELECT provider FROM sessions WHERE id=?", (parent_id,)).fetchone()[0]
     sessions.delegation_profile_arguments(config, provider, "loop", difficulty=difficulty)
-    metadata = {"task": "loop", "mode": "loop", "cwd": str(cwd), "prompt-file": str(prompt_path)}
+    metadata = {"mode": "loop", "cwd": str(cwd), "prompt-file": str(prompt_path)}
     if difficulty is not None:
         metadata["difficulty"] = difficulty
     source = inbox / (uuid.uuid4().hex + ".md")

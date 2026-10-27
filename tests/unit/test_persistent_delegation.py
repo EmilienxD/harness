@@ -11,11 +11,11 @@ from subagents_runtime.hooks import handle
 def test_fresh_conversation_does_not_bind_inherited_unbound_session(tmp_path, monkeypatch, source):
     monkeypatch.setenv("HARNESS_STATE_DIR", str(tmp_path / "state"))
     sessions._register("original", tmp_path, "chatgpt")
-    original = enable_delegation("original", "work-with-agent")
+    original = enable_delegation("original", "subagents-toolkit")
     monkeypatch.setenv("HARNESS_SESSION_ID", "original")
     assert handle({"session_id": "fresh", "cwd": str(tmp_path),
                    "hook_event_name": "SessionStart", "source": source}, "chatgpt") is None
-    fresh = enable_delegation("fresh", "work-with-agent")
+    fresh = enable_delegation("fresh", "subagents-toolkit")
     assert fresh.parent_session_id == "fresh" and fresh.inbox != original.inbox
     with sessions._connect() as connection:
         assert connection.execute("SELECT provider_session_id FROM sessions WHERE id='original'").fetchone() == (None,)
@@ -24,9 +24,9 @@ def test_fresh_conversation_does_not_bind_inherited_unbound_session(tmp_path, mo
 def test_conversation_inbox_is_short_and_reused_across_invocations(tmp_path, monkeypatch):
     monkeypatch.setenv("HARNESS_STATE_DIR", str(tmp_path / "state"))
     sessions._register("parent", tmp_path, "claude")
-    inbox = enable_delegation("parent", "work-with-agent").inbox
+    inbox = enable_delegation("parent", "subagents-toolkit").inbox
     assert inbox.is_dir() and len(inbox.name) <= 8
-    assert enable_delegation("parent", "review-with-agent").inbox == inbox
+    assert enable_delegation("parent", "subagents-toolkit").inbox == inbox
     assert list(inbox.parent.iterdir()) == [inbox]
 
 
@@ -48,10 +48,10 @@ def test_resume_refuses_live_provider_without_birth_identity_even_if_supervisor_
 def test_recovery_retries_a_definitively_unspawned_reservation_with_original_identities(tmp_path, monkeypatch, model, effort, changed):
     monkeypatch.setenv("HARNESS_STATE_DIR", str(tmp_path / "state"))
     sessions.register_observed("parent", tmp_path, "claude")
-    inbox = enable_delegation("parent", "work-with-agent").inbox
+    inbox = enable_delegation("parent", "subagents-toolkit").inbox
     model_field = f"model: {model}\n" if model is not None else ""
     effort_field = f"effort: {effort}\n" if effort is not None else ""
-    (inbox / "task.md").write_text(f"---\ntask: general\nmode: auto\n{model_field}{effort_field}---\nTask.", encoding="utf-8")
+    (inbox / "task.md").write_text(f"---\nmode: auto\n{model_field}{effort_field}---\nTask.", encoding="utf-8")
     def crash_before_spawn(*_):
         raise KeyboardInterrupt()
     with pytest.raises(KeyboardInterrupt):
@@ -63,7 +63,7 @@ def test_recovery_retries_a_definitively_unspawned_reservation_with_original_ide
     if changed:
         changed_model = "model: claude-sonnet-5-5\n" if changed == "model" else model_field
         changed_effort = "effort: low\n" if changed == "effort" else effort_field
-        (inbox / "task.md.running").write_text(f"---\ntask: general\nmode: auto\n{changed_model}{changed_effort}---\nTask.", encoding="utf-8")
+        (inbox / "task.md.running").write_text(f"---\nmode: auto\n{changed_model}{changed_effort}---\nTask.", encoding="utf-8")
     def adapter(request, identity, number, cwd):
         started.append((identity, number, cwd, request.model, request.effort))
         return child_id
@@ -84,8 +84,8 @@ def test_execution_reservation_cannot_reference_another_requests_child(tmp_path,
     monkeypatch.setenv("HARNESS_STATE_DIR", str(tmp_path / "state"))
     sessions.register_observed("parent", tmp_path, "claude")
     sessions.register_observed("unrelated", tmp_path, "claude")
-    inbox = enable_delegation("parent", "work-with-agent").inbox
-    (inbox / "task.md").write_text("---\ntask: general\nmode: auto\n---\nTask.", encoding="utf-8")
+    inbox = enable_delegation("parent", "subagents-toolkit").inbox
+    (inbox / "task.md").write_text("---\nmode: auto\n---\nTask.", encoding="utf-8")
     [started] = process_inbox("parent", launch=lambda *_: "conversation")
     with connect() as connection:
         with pytest.raises(sqlite3.IntegrityError):
@@ -96,8 +96,8 @@ def test_recovery_delivers_definite_startup_failure_and_removes_claimed_file(tmp
     from subagents_runtime.delegation import claim_parent_delivery
     monkeypatch.setenv("HARNESS_STATE_DIR", str(tmp_path / "state"))
     sessions.register_observed("parent", tmp_path, "claude")
-    inbox = enable_delegation("parent", "work-with-agent").inbox
-    (inbox / "task.md").write_text("---\ntask: general\nmode: auto\n---\nTask.", encoding="utf-8")
+    inbox = enable_delegation("parent", "subagents-toolkit").inbox
+    (inbox / "task.md").write_text("---\nmode: auto\n---\nTask.", encoding="utf-8")
     def crash(*_):
         raise KeyboardInterrupt()
     with pytest.raises(KeyboardInterrupt):
@@ -115,16 +115,16 @@ def test_saved_conversation_has_one_persistent_inbox_for_all_tasks(
 ):
     monkeypatch.setenv("HARNESS_STATE_DIR", str(tmp_path / "state"))
     sessions.register_observed("parent", tmp_path, "claude", "auto")
-    first = enable_delegation("parent", "explore-with-agent")
+    first = enable_delegation("parent", "subagents-toolkit")
     handle(
         {"session_id": "parent", "cwd": str(tmp_path), "hook_event_name": "SessionEnd"}
     )
-    second = enable_delegation("parent", "work-with-agent")
+    second = enable_delegation("parent", "subagents-toolkit")
     assert first.inbox == second.inbox
     assert first.inbox.is_relative_to(tmp_path / "state")
     path = first.inbox / "work.md"
     path.write_text(
-        "---\ntask: general\nmode: auto\n---\nDo the work.", encoding="utf-8"
+        "---\nmode: auto\n---\nDo the work.", encoding="utf-8"
     )
     results = process_inbox("parent", launch=lambda *_: "child")
     assert results[0].status == "launched"
@@ -143,14 +143,11 @@ def test_runtime_context_is_replayed_then_acknowledged_and_compaction_starts_epo
     toolkit.parent.mkdir(parents=True)
     from subagents_runtime.roles import builtin_toolkit
     toolkit.write_bytes(builtin_toolkit().read_bytes())
-    toolkit.with_name("builtin-tasks.yaml").write_bytes(
-        builtin_toolkit().with_name("builtin-tasks.yaml").read_bytes()
-    )
     payload = {
         "session_id": "parent",
         "cwd": str(tmp_path),
         "hook_event_name": "UserPromptSubmit",
-        "prompt": ("/" if provider == "claude" else "$") + "work-with-agent do work",
+        "prompt": ("/" if provider == "claude" else "$") + "subagents-toolkit do work",
     }
     assert handle(payload, provider) is not None
     assert handle({**payload, "prompt": "Continue the work."}, provider) is not None
@@ -179,7 +176,7 @@ def test_runtime_context_delivery_does_not_load_instruction_documents(tmp_path, 
 
     monkeypatch.setenv("HARNESS_STATE_DIR", str(tmp_path / "state"))
     sessions.register_observed("parent", tmp_path, "claude")
-    inbox = enable_delegation("parent", "work-with-agent").inbox
+    inbox = enable_delegation("parent", "subagents-toolkit").inbox
 
     def unexpected_read(*_args, **_kwargs):
         pytest.fail("Runtime context delivery must not load instruction documents")
@@ -189,16 +186,16 @@ def test_runtime_context_delivery_does_not_load_instruction_documents(tmp_path, 
     assert inbox.is_dir()
 
 
-def test_loading_shared_skill_does_not_enable_delegation(tmp_path, monkeypatch):
+def test_loading_toolkit_prepares_inbox_without_launching_a_child(tmp_path, monkeypatch):
     monkeypatch.setenv("HARNESS_STATE_DIR", str(tmp_path / "state"))
     monkeypatch.delenv("HARNESS_SESSION_ID", raising=False)
     assert handle({
         "session_id": "parent", "cwd": str(tmp_path),
         "hook_event_name": "PostToolUse", "tool_name": "Skill",
         "tool_input": {"skill": "subagents-toolkit"}, "tool_response": {"success": True},
-    }, "claude") is None
+    }, "claude") is not None
     with sessions._connect() as connection:
-        assert connection.execute("SELECT count(*) FROM session_delegation").fetchone()[0] == 0
+        assert connection.execute("SELECT count(*) FROM session_delegation").fetchone()[0] == 1
         assert connection.execute("SELECT count(*) FROM requests").fetchone()[0] == 0
 
 
@@ -209,10 +206,10 @@ def test_continuation_of_a_settled_child_keeps_its_identity_and_mode(
 ):
     monkeypatch.setenv("HARNESS_STATE_DIR", str(tmp_path / "state"))
     sessions.register_observed("parent", tmp_path, provider)
-    inbox = enable_delegation("parent", "work-with-agent").inbox
+    inbox = enable_delegation("parent", "subagents-toolkit").inbox
     source = inbox / "first.md"
     source.write_text(
-        f"---\ntask: general\nmode: {mode}\n---\nInitial task.", encoding="utf-8"
+        f"---\nmode: {mode}\n---\nInitial task.", encoding="utf-8"
     )
     [first] = process_inbox("parent", launch=lambda *_: "conversation")
     from subagents_runtime.delegation import arm_reply, report_child_stop
@@ -277,7 +274,7 @@ def _standalone_provider(tmp_path, monkeypatch, provider):
 
     monkeypatch.setattr(processes, "start", start)
     sessions.register_observed("parent", tmp_path, provider)
-    return started, enable_delegation("parent", "work-with-agent").inbox
+    return started, enable_delegation("parent", "subagents-toolkit").inbox
 
 
 @pytest.mark.parametrize("provider", ["claude", "chatgpt"])
@@ -288,7 +285,7 @@ def test_live_child_is_continued_in_a_fork_under_the_same_identity(tmp_path, mon
 
     started, inbox = _standalone_provider(tmp_path, monkeypatch, provider)
     (inbox / "first.md").write_text(
-        "---\ntask: general\nmode: interactive\n---\nInitial task.", encoding="utf-8"
+        "---\nmode: interactive\n---\nInitial task.", encoding="utf-8"
     )
     [first] = process_inbox("parent", launch=sessions.launch_delegated)
     with sessions._connect() as connection:
@@ -334,7 +331,7 @@ def _live_delegated_child(tmp_path, monkeypatch, provider="claude"):
 
     started, inbox = _standalone_provider(tmp_path, monkeypatch, provider)
     (inbox / "first.md").write_text(
-        "---\ntask: general\nmode: interactive\n---\nInitial task.", encoding="utf-8"
+        "---\nmode: interactive\n---\nInitial task.", encoding="utf-8"
     )
     [first] = process_inbox("parent", launch=sessions.launch_delegated)
     with sessions._connect() as connection:
@@ -439,7 +436,7 @@ def test_forked_conversation_starts_up_as_the_same_delegated_child(tmp_path, mon
 
     started, inbox = _standalone_provider(tmp_path, monkeypatch, "claude")
     (inbox / "first.md").write_text(
-        "---\ntask: general\nmode: interactive\n---\nInitial task.", encoding="utf-8"
+        "---\nmode: interactive\n---\nInitial task.", encoding="utf-8"
     )
     [first] = process_inbox("parent", launch=sessions.launch_delegated)
     with sessions._connect() as connection:
@@ -636,9 +633,9 @@ def test_detached_supervisor_binds_conversation_and_delivers_after_process_exit(
         encoding="utf-8",
     )
     sessions.register_observed("parent", tmp_path, "chatgpt")
-    inbox = enable_delegation("parent", "work-with-agent").inbox
+    inbox = enable_delegation("parent", "subagents-toolkit").inbox
     request = inbox / "work.md"
-    request.write_text("---\ntask: general\nmode: auto\n---\nWork.", encoding="utf-8")
+    request.write_text("---\nmode: auto\n---\nWork.", encoding="utf-8")
     [result] = process_inbox("parent", launch=sessions.launch_delegated)
     assert result.status == "launched"
     deadline = time.monotonic() + 5
@@ -659,9 +656,9 @@ def test_resume_replays_unacknowledged_delivery_instead_of_acknowledging_it(
 
     monkeypatch.setenv("HARNESS_STATE_DIR", str(tmp_path / "state"))
     sessions.register_observed("parent", tmp_path, "claude")
-    inbox = enable_delegation("parent", "work-with-agent").inbox
+    inbox = enable_delegation("parent", "subagents-toolkit").inbox
     (inbox / "task.md").write_text(
-        "---\ntask: general\nmode: auto\n---\nTask.", encoding="utf-8"
+        "---\nmode: auto\n---\nTask.", encoding="utf-8"
     )
     [started] = process_inbox("parent", launch=lambda *_: "child")
     report_child_stop(started.child_session_id, "Result", success=True)
@@ -687,12 +684,12 @@ def test_concurrent_requests_allocate_stable_distinct_parent_scoped_identifiers(
 
     monkeypatch.setenv("HARNESS_STATE_DIR", str(tmp_path / "state"))
     sessions.register_observed("parent", tmp_path, "claude")
-    inbox = enable_delegation("parent", "work-with-agent").inbox
+    inbox = enable_delegation("parent", "subagents-toolkit").inbox
     sources = []
     for i in range(8):
         source = inbox / f"{i}.md"
         source.write_text(
-            "---\ntask: general\nmode: auto\n---\nTask.", encoding="utf-8"
+            "---\nmode: auto\n---\nTask.", encoding="utf-8"
         )
         sources.append(source)
 
@@ -717,9 +714,9 @@ def test_overlapping_whole_inbox_scans_launch_each_request_once(tmp_path, monkey
 
     monkeypatch.setenv("HARNESS_STATE_DIR", str(tmp_path / "state"))
     sessions.register_observed("parent", tmp_path, "claude")
-    inbox = enable_delegation("parent", "work-with-agent").inbox
+    inbox = enable_delegation("parent", "subagents-toolkit").inbox
     for i in range(4):
-        (inbox / f"{i}.md").write_text("---\ntask: general\nmode: auto\n---\nWork.", encoding="utf-8")
+        (inbox / f"{i}.md").write_text("---\nmode: auto\n---\nWork.", encoding="utf-8")
     (inbox / "invalid.md").write_text("---\ntask: unknown\nmode: auto\n---\nWork.", encoding="utf-8")
     gate = Barrier(4)
     launched = []
@@ -744,9 +741,9 @@ def test_crash_after_spawn_intent_retains_uncertainty_and_never_relaunches(
 ):
     monkeypatch.setenv("HARNESS_STATE_DIR", str(tmp_path / "state"))
     sessions.register_observed("parent", tmp_path, "claude")
-    inbox = enable_delegation("parent", "work-with-agent").inbox
+    inbox = enable_delegation("parent", "subagents-toolkit").inbox
     source = inbox / "work.md"
-    source.write_text("---\ntask: general\nmode: auto\n---\nTask.", encoding="utf-8")
+    source.write_text("---\nmode: auto\n---\nTask.", encoding="utf-8")
 
     class Crash(BaseException):
         pass
@@ -775,9 +772,9 @@ def test_crash_after_spawn_intent_retains_uncertainty_and_never_relaunches(
 def test_claim_without_committed_reservation_can_be_retried(tmp_path, monkeypatch):
     monkeypatch.setenv("HARNESS_STATE_DIR", str(tmp_path / "state"))
     sessions.register_observed("parent", tmp_path, "claude")
-    inbox = enable_delegation("parent", "work-with-agent").inbox
+    inbox = enable_delegation("parent", "subagents-toolkit").inbox
     source = inbox / "claimed.md"
-    source.write_text("---\ntask: general\nmode: auto\n---\nTask.", encoding="utf-8")
+    source.write_text("---\nmode: auto\n---\nTask.", encoding="utf-8")
     source.rename(source.with_name(source.name + ".running"))
     calls = []
     [result] = process_inbox(
@@ -794,9 +791,9 @@ def test_confirmed_startup_survives_interrupted_caller_without_relaunch(
 
     monkeypatch.setenv("HARNESS_STATE_DIR", str(tmp_path / "state"))
     sessions.register_observed("parent", tmp_path, "claude")
-    inbox = enable_delegation("parent", "work-with-agent").inbox
+    inbox = enable_delegation("parent", "subagents-toolkit").inbox
     source = inbox / "confirmed.md"
-    source.write_text("---\ntask: general\nmode: auto\n---\nTask.", encoding="utf-8")
+    source.write_text("---\nmode: auto\n---\nTask.", encoding="utf-8")
 
     def interrupted_launch(request, request_id, number, cwd):
         with sessions._connect() as connection:
@@ -830,9 +827,9 @@ def test_verified_dead_process_completes_abandoned_request_and_allows_resume(
 
     monkeypatch.setenv("HARNESS_STATE_DIR", str(tmp_path / "state"))
     sessions.register_observed("parent", tmp_path, "claude")
-    inbox = enable_delegation("parent", "work-with-agent").inbox
+    inbox = enable_delegation("parent", "subagents-toolkit").inbox
     (inbox / "original.md").write_text(
-        "---\ntask: general\nmode: auto\n---\nTask.", encoding="utf-8"
+        "---\nmode: auto\n---\nTask.", encoding="utf-8"
     )
     [first] = process_inbox("parent", launch=lambda *_: "saved-conversation")
     with sessions._connect() as connection:
@@ -863,9 +860,9 @@ def test_parent_resume_delivers_dead_child_interruption_without_restarting_it(
     monkeypatch.setenv("HARNESS_STATE_DIR", str(tmp_path / "state"))
     monkeypatch.delenv("HARNESS_SESSION_ID", raising=False)
     sessions.register_observed("parent", tmp_path, provider)
-    inbox = enable_delegation("parent", "work-with-agent").inbox
+    inbox = enable_delegation("parent", "subagents-toolkit").inbox
     (inbox / "task.md").write_text(
-        f"---\ntask: general\nmode: {mode}\n---\nTask.", encoding="utf-8"
+        f"---\nmode: {mode}\n---\nTask.", encoding="utf-8"
     )
     [child] = process_inbox("parent", launch=lambda *_: "saved-conversation")
     with sessions._connect() as connection:
@@ -892,9 +889,9 @@ def test_inbox_resume_refuses_child_without_saved_conversation(tmp_path, monkeyp
 
     monkeypatch.setenv("HARNESS_STATE_DIR", str(tmp_path / "state"))
     sessions.register_observed("parent", tmp_path, provider)
-    inbox = enable_delegation("parent", "work-with-agent").inbox
+    inbox = enable_delegation("parent", "subagents-toolkit").inbox
     (inbox / "task.md").write_text(
-        "---\ntask: general\nmode: auto\n---\nTask.", encoding="utf-8"
+        "---\nmode: auto\n---\nTask.", encoding="utf-8"
     )
     [child] = process_inbox("parent", launch=lambda *_: "conversation")
     report_child_stop(child.child_session_id, "", success=False, cancelled=True)
@@ -1001,7 +998,7 @@ def test_successful_skill_tool_enables_saved_conversation_without_slash_prompt(
             "cwd": str(tmp_path),
             "hook_event_name": "PostToolUse",
             "tool_name": "Skill",
-            "tool_input": {"skill": "resume-agent"},
+            "tool_input": {"skill": "subagents-toolkit"},
             "tool_response": {"success": True},
         }
     )
@@ -1037,9 +1034,9 @@ def test_aboard_receives_runtime_location_and_execution_identity(tmp_path, monke
 
     monkeypatch.setenv("HARNESS_STATE_DIR", str(tmp_path / "isolated-state"))
     sessions.register_observed("parent", tmp_path, "claude")
-    inbox = enable_delegation("parent", "work-with-agent").inbox
+    inbox = enable_delegation("parent", "subagents-toolkit").inbox
     (inbox / "task.md").write_text(
-        "---\ntask: general\nmode: auto\n---\nTask.", encoding="utf-8"
+        "---\nmode: auto\n---\nTask.", encoding="utf-8"
     )
     monkeypatch.setattr(
         sessions,
@@ -1089,9 +1086,9 @@ def test_aboard_refusal_fails_definitively_and_reports_its_reason(tmp_path, monk
 
     monkeypatch.setenv("HARNESS_STATE_DIR", str(tmp_path / "state"))
     sessions.register_observed("parent", tmp_path, "claude")
-    inbox = enable_delegation("parent", "work-with-agent").inbox
+    inbox = enable_delegation("parent", "subagents-toolkit").inbox
     (inbox / "task.md").write_text(
-        "---\ntask: general\nmode: auto\n---\nTask.", encoding="utf-8"
+        "---\nmode: auto\n---\nTask.", encoding="utf-8"
     )
     monkeypatch.setattr(
         sessions, "_discover_delegation_endpoint", lambda cwd: ("127.0.0.1", 4823, "t")
@@ -1129,9 +1126,9 @@ def test_aboard_uncertain_startup_keeps_its_reservation_for_recovery(
 
     monkeypatch.setenv("HARNESS_STATE_DIR", str(tmp_path / "state"))
     sessions.register_observed("parent", tmp_path, "claude")
-    inbox = enable_delegation("parent", "work-with-agent").inbox
+    inbox = enable_delegation("parent", "subagents-toolkit").inbox
     (inbox / "task.md").write_text(
-        "---\ntask: general\nmode: auto\n---\nTask.", encoding="utf-8"
+        "---\nmode: auto\n---\nTask.", encoding="utf-8"
     )
     monkeypatch.setattr(
         sessions, "_discover_delegation_endpoint", lambda cwd: ("127.0.0.1", 4823, "t")
@@ -1169,9 +1166,9 @@ def test_aboard_wrapper_error_preserves_live_provider_identity_and_marker(
 
     monkeypatch.setenv("HARNESS_STATE_DIR", str(tmp_path / "state"))
     sessions.register_observed("parent", tmp_path, "claude")
-    inbox = enable_delegation("parent", "work-with-agent").inbox
+    inbox = enable_delegation("parent", "subagents-toolkit").inbox
     (inbox / "task.md").write_text(
-        "---\ntask: general\nmode: auto\n---\nTask.", encoding="utf-8"
+        "---\nmode: auto\n---\nTask.", encoding="utf-8"
     )
 
     def interrupted(*_):
@@ -1216,9 +1213,9 @@ def test_supervisor_error_keeps_live_provider_uncertain(tmp_path, monkeypatch):
 
     monkeypatch.setenv("HARNESS_STATE_DIR", str(tmp_path / "state"))
     sessions.register_observed("parent", tmp_path, "claude")
-    inbox = enable_delegation("parent", "work-with-agent").inbox
+    inbox = enable_delegation("parent", "subagents-toolkit").inbox
     (inbox / "task.md").write_text(
-        "---\ntask: general\nmode: auto\n---\nTask.", encoding="utf-8"
+        "---\nmode: auto\n---\nTask.", encoding="utf-8"
     )
 
     def interrupted(*_):
@@ -1265,9 +1262,9 @@ def test_headless_provider_does_not_open_a_windows_console(tmp_path, monkeypatch
 
     monkeypatch.setenv("HARNESS_STATE_DIR", str(tmp_path / "state"))
     sessions.register_observed("parent", tmp_path, "claude")
-    inbox = enable_delegation("parent", "work-with-agent").inbox
+    inbox = enable_delegation("parent", "subagents-toolkit").inbox
     (inbox / "task.md").write_text(
-        "---\ntask: general\nmode: auto\n---\nTask.", encoding="utf-8"
+        "---\nmode: auto\n---\nTask.", encoding="utf-8"
     )
 
     with pytest.raises(KeyboardInterrupt):
@@ -1312,8 +1309,8 @@ def test_continuation_recovers_requested_effort(tmp_path, monkeypatch, live):
 
     monkeypatch.setenv("HARNESS_STATE_DIR", str(tmp_path / "state"))
     sessions.register_observed("parent", tmp_path, "chatgpt")
-    inbox = enable_delegation("parent", "work-with-agent").inbox
-    (inbox / "work.md").write_text("---\ntask: general\nmode: auto\neffort: ultra\n---\nWork.", encoding="utf-8")
+    inbox = enable_delegation("parent", "subagents-toolkit").inbox
+    (inbox / "work.md").write_text("---\nmode: auto\neffort: ultra\n---\nWork.", encoding="utf-8")
     [first] = process_inbox("parent", launch=lambda *_: "provider-child")
     assert first.status == "launched", first.reason
     with sessions._connect() as connection:
@@ -1333,8 +1330,8 @@ def test_continuation_recovers_requested_effort(tmp_path, monkeypatch, live):
 def test_effort_migration_preserves_existing_children(tmp_path, monkeypatch, schema_version):
     monkeypatch.setenv("HARNESS_STATE_DIR", str(tmp_path / "state"))
     sessions.register_observed("parent", tmp_path, "claude")
-    inbox = enable_delegation("parent", "work-with-agent").inbox
-    (inbox / "old.md").write_text("---\ntask: general\nmode: auto\n---\nWork.", encoding="utf-8")
+    inbox = enable_delegation("parent", "subagents-toolkit").inbox
+    (inbox / "old.md").write_text("---\nmode: auto\n---\nWork.", encoding="utf-8")
     [first] = process_inbox("parent", launch=lambda *_: "provider-child")
     assert first.status == "launched", first.reason
     with sessions._connect() as connection:
@@ -1342,7 +1339,7 @@ def test_effort_migration_preserves_existing_children(tmp_path, monkeypatch, sch
         if schema_version == 6:
             connection.execute("ALTER TABLE sessions DROP COLUMN model")
         connection.execute(f"PRAGMA user_version={schema_version}")
-    (inbox / "new.md").write_text("---\ntask: general\nmode: auto\neffort: high\n---\nWork.", encoding="utf-8")
+    (inbox / "new.md").write_text("---\nmode: auto\neffort: high\n---\nWork.", encoding="utf-8")
     efforts = []
     [second] = process_inbox("parent", launch=lambda request, *_: efforts.append(request.effort) or "provider-new")
     assert second.status == "launched", second.reason

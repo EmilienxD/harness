@@ -8,7 +8,7 @@ import sqlite3
 import uuid
 from pathlib import Path
 
-SCHEMA_VERSION = 9
+SCHEMA_VERSION = 10
 # Lowercase letters and digits without the look-alikes 0/o and 1/i/l.
 INBOX_ALPHABET = "abcdefghjkmnpqrstuvwxyz23456789"
 
@@ -79,7 +79,11 @@ def _migrate(connection):
                 ended_at TEXT
             )
         """)
-        if version == 8:
+        if version in range(1, 10) and "skill" not in {
+            column[1] for column in connection.execute("PRAGMA table_info(requests)")
+        }:
+            connection.execute("ALTER TABLE requests ADD COLUMN skill TEXT")
+        if version in (8, 9):
             connection.execute(f"PRAGMA user_version={SCHEMA_VERSION}")
             connection.commit()
             return
