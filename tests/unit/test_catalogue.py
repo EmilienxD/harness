@@ -1598,6 +1598,7 @@ def test_reconcile_repairs_a_host_product_that_vanished_at_the_same_version(monk
         lambda action: PreparedAction(action),
     )
     monkeypatch.setattr("harness_cli.installer.host_action_is_installed", lambda action: host["present"])
+    monkeypatch.setattr("harness_cli.installer.host_action_is_current", lambda action: host["present"])
     monkeypatch.setattr("harness_cli.installer.apply_host_action", apply)
     monkeypatch.setattr("harness_cli.installer.uninstall_host_action", lambda action: None)
     selected.reconcile({tool.name})
@@ -1610,9 +1611,61 @@ def test_reconcile_repairs_a_host_product_that_vanished_at_the_same_version(monk
     _resolved, changes = selected.plan({tool.name})
     selected.reconcile({tool.name})
 
-    assert changes == [Change("update", tool.name, "missing host product")]
+    assert changes == [Change("update", tool.name, "missing or outdated host product")]
     assert applied == [tool.actions[0]]
     assert host["present"] is True
+
+
+def test_reconcile_repairs_a_present_host_product_with_a_different_revision(monkeypatch, tmp_path):
+    tool = transactional_package(tmp_path, "hosted-revision", action=True)
+    selected = manager({tool.name: tool}, Target.for_project(tmp_path / "project"), tmp_path)
+    host = {"present": False, "current": False}
+    applied = []
+
+    def apply(prepared):
+        applied.append(prepared.action)
+        host.update(present=True, current=True)
+
+    monkeypatch.setattr("harness_cli.installer.prepare_host_action", lambda action: PreparedAction(action))
+    monkeypatch.setattr("harness_cli.installer.host_action_is_installed", lambda action: host["present"])
+    monkeypatch.setattr("harness_cli.installer.host_action_is_current", lambda action: host["current"])
+    monkeypatch.setattr("harness_cli.installer.apply_host_action", apply)
+    selected.reconcile({tool.name})
+    applied.clear()
+    host["current"] = False
+
+    assert selected.plan({tool.name})[1] == [Change("update", tool.name, "missing or outdated host product")]
+    selected.reconcile({tool.name})
+
+    assert applied == [tool.actions[0]]
+    assert selected.installation["packages"][tool.name]["version"] == tool.version
+    assert selected.plan({tool.name})[1] == []
+
+
+def test_catalogue_payload_upgrade_keeps_a_host_product_at_the_matching_pin(monkeypatch, tmp_path):
+    from dataclasses import replace
+
+    tool = transactional_package(tmp_path, "matching-host", action=True)
+    selected = manager({tool.name: tool}, Target.for_project(tmp_path / "project"), tmp_path)
+    host = {"present": False}
+    applied = []
+
+    def apply(prepared):
+        applied.append(prepared.action)
+        host["present"] = True
+
+    monkeypatch.setattr("harness_cli.installer.prepare_host_action", lambda action: PreparedAction(action))
+    monkeypatch.setattr("harness_cli.installer.host_action_is_installed", lambda action: host["present"])
+    monkeypatch.setattr("harness_cli.installer.host_action_is_current", lambda action: host["present"])
+    monkeypatch.setattr("harness_cli.installer.apply_host_action", apply)
+    selected.reconcile({tool.name})
+    applied.clear()
+    selected.available = {tool.name: replace(tool, version="2.0.0")}
+
+    selected.reconcile({tool.name})
+
+    assert applied == []
+    assert selected.installation["packages"][tool.name]["version"] == "2.0.0"
 
 
 def test_repeated_host_product_checks_reuse_one_listing(monkeypatch):

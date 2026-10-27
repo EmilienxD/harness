@@ -22,6 +22,7 @@ from harness_cli.host_actions import HostActionError, PreparedAction, apply as a
 from harness_cli.host_actions import prepare as prepare_host_action
 from harness_cli.host_actions import describe as describe_host_action
 from harness_cli.host_actions import is_installed as host_action_is_installed
+from harness_cli.host_actions import is_current as host_action_is_current
 from harness_cli.host_actions import uninstall as uninstall_host_action
 from harness_cli.manifest import ExpandedFile, HostAction, PackageDependency, PlatformSupport, SupportStatus, Tool
 from harness_cli.platforms import Platform, PlatformAdapter, get_adapter
@@ -853,13 +854,16 @@ class CatalogueInstaller:
             ):
                 changes.append(Change("update", item.tool.name, "missing skill links"))
             elif self._missing_host_actions(item.tool):
-                changes.append(Change("update", item.tool.name, "missing host product"))
+                changes.append(Change("update", item.tool.name, "missing or outdated host product"))
         return resolved, changes
 
     @staticmethod
     def _missing_host_actions(tool: Tool) -> list[HostAction]:
-        """List host products a receipt claims but the machine no longer has."""
-        return [action for action in tool.actions if not host_action_is_installed(action)]
+        """List host products that are absent or differ from their catalogue pin."""
+        return [
+            action for action in tool.actions
+            if not host_action_is_installed(action) or not host_action_is_current(action)
+        ]
 
     def _local_paths(self, resolved: list[ResolvedPackage]) -> set[Path]:
         packages = self.installation["packages"]
@@ -1099,8 +1103,12 @@ class CatalogueInstaller:
                         prepared[item.tool.name] = _prepare_actions(missing_actions)
                 if current is None or current.get("version") != item.tool.version:
                     shared_host_owner = current is None and self._owned_in_another_installation(item.tool.name)
+                    actions = [
+                        action for action in item.tool.actions
+                        if current is None or not host_action_is_current(action)
+                    ]
                     prepared[item.tool.name] = (
-                        [] if shared_host_owner else _prepare_actions(list(item.tool.actions))
+                        [] if shared_host_owner else _prepare_actions(actions)
                     )
                     if current is not None and current.get("version") != item.tool.version:
                         rollback_prepared[item.tool.name] = _prepare_rollback_actions(
