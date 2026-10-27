@@ -5,10 +5,13 @@ import hashlib
 import importlib.util
 import json
 import os
-import re
 import sys
 import time
 from pathlib import Path
+
+_common_source = Path(__file__).resolve().parents[1] / "path-guard-common"
+sys.path.insert(0, str(_common_source if _common_source.is_dir() else Path(__file__).resolve().parents[1]))
+import path_guard_common as common
 
 
 def core(package: str):
@@ -27,17 +30,7 @@ def relative(path: str, root: Path) -> str | None:
 
 
 def reads(request: dict, root: Path) -> list[str]:
-    """Recognized shell reads trigger reminders; only observed complete output grants access."""
-    name, args = request["tool"], request["input"]
-    if name == "read":
-        return [args["path"]] if isinstance(args.get("path"), str) else []
-    if name not in {"bash", "powershell"}:
-        return []
-    command = args.get("command", "")
-    if not re.search(r"\b(cat|more|less|head|tail|type|Get-Content)\b", command, re.I):
-        return []
-    tokens = re.findall(r'"([^"]+)"|\'([^\']+)\'|(\S+)', command)
-    return [a or b or c for a, b, c in tokens if (root / (a or b or c)).is_file()]
+    return common.read_paths(request["tool"], request["input"], root)
 
 
 def observed_reads(request: dict, root: Path) -> list[dict]:
@@ -68,9 +61,7 @@ def observed_reads(request: dict, root: Path) -> list[dict]:
         else:
             # Full-file grants require a simple complete read and exact observed bytes.
             command = request["input"].get("command", "")
-            if not re.fullmatch(r"\s*(?:cat|type|Get-Content)\s+(?:-Raw\s+)?(?:\"[^\"]+\"|'[^']+'|[^\s|;&<>]+)\s*(?:-Raw)?\s*", command, re.I):
-                continue
-            if request.get("text", "").replace("\r\n", "\n").rstrip("\n") != content.replace("\r\n", "\n").rstrip("\n"):
+            if not common.shell_read_matches(command, request.get("text", ""), content):
                 continue
             start, count = 0, len(lines)
         records.append({"kind": "read", "path": path, "digest": hashlib.sha256(content.encode()).hexdigest(),
@@ -105,7 +96,8 @@ def evaluate(request: dict) -> dict:
     receipts = request.get("receipts", [])
     records = observed_reads(request, root)
     response = {"version": 1, "block": False, "message": "", "receipts": records}
-    editing = request["tool"] in {"write", "edit"}
+    edit_paths = common.edit_paths(request["tool"], request["input"], root)
+    editing = bool(edit_paths)
     if package == "on-read-reminder":
         if request["phase"] != "result" or request.get("isError"):
             return response
@@ -113,7 +105,7 @@ def evaluate(request: dict) -> dict:
     else:
         if not editing or (package == "on-edit-block") != (request["phase"] == "call") or request.get("isError"):
             return response
-        paths = [request["input"]["path"]]
+        paths = edit_paths
     rules, notes = [], []
     personal = Path(os.environ.get("HARNESS_PI_SUPPORT_DIR", Path(module.__file__).parent)) / module.RULES_NAME
     sources = [personal if personal.is_file() else Path(module.__file__).with_name(module.RULES_NAME),

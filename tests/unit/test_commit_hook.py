@@ -293,12 +293,12 @@ def test_read_only_commands_contribute_nothing(repo):
     'echo hi > "$OUT"',
     "cd sub && sed -i 's/a/b/' f.txt",
 ])
-def test_unreadable_shell_write_widens_to_staging_everything(repo, command):
+def test_unreadable_shell_write_has_no_usable_stage_set(repo, command):
     """A write we can see but can't name must not quietly commit a subset."""
     scan = _scan(_mixed_transcript(repo, commands=[command]), repo)
     assert scan.unresolved, command
     # Even with a perfectly good path list from other writes, the answer is
-    # None -- which is what makes the caller run a plain `git add -A`.
+    # None -- which stops automatic staging.
     assert hook.changed_paths(scan) is None
 
 
@@ -328,22 +328,18 @@ def test_heredoc_body_is_not_parsed_as_commands(repo):
     assert scan.paths == [os.path.normpath(str(repo / "script.sh"))]
 
 
-def test_dry_run_reports_the_widening(repo):
+def test_dry_run_stops_on_unresolved_targets(repo):
     (repo / "TEST.md").write_text("x\n")
     scan = _scan(_mixed_transcript(repo, commands=["git apply fix.patch"]), repo)
     report = hook.build_dry_run_report(
         "msg", "sid", "", str(repo), scan, hook.Flags(dry=True, use_ai=False)
     )
-    assert "could not be read" in report
-    assert "Would stage all uncommitted changes in the repo." in report
+    assert "Commit stopped:" in report
+    assert "Would stage all" not in report
 
 
-def test_dry_run_widening_still_lists_known_tool_writes(repo):
-    """The false-positive for-loop case: an unparseable shell write in the
-    session is reported as the widen reason, but the Edit/Write paths the
-    session *did* identify must still appear in the report -- otherwise the
-    user sees 'would stage everything' and concludes their edits were lost.
-    """
+def test_stopped_preview_still_lists_known_paths(repo):
+    """An unresolved shell write stops the preview but keeps known paths visible."""
     tool_written = repo / "tool.md"
     tool_written.write_text("x\n")
 
@@ -364,25 +360,22 @@ def test_dry_run_widening_still_lists_known_tool_writes(repo):
     report = hook.build_dry_run_report(
         "msg", "sid", "", str(repo), scan, hook.Flags(dry=True, use_ai=False)
     )
-    assert "could not be read" in report
-    assert "Would stage all uncommitted changes in the repo." in report
+    assert "Commit stopped:" in report
+    assert "Would stage all" not in report
     # But the known write is *named*, not silently dropped from the report.
     assert "tool.md" in report
-    assert "Tool writes already identified" in report
-    # And the trailing status block runs (widened case shows the whole tree).
-    assert "Changes to commit:" in report
+    assert "Known path:" in report
+    # Stopped previews must not present the whole tree as a proposed commit.
+    assert "Changes to commit:" not in report
 
 
-def test_dry_run_transcript_unreadable_does_not_duplicate_status(repo):
-    """When the transcript can't be read at all the fall-back branch already
-    prints the whole-repo status inline; a second 'Changes to commit' block
-    below repeats it verbatim and reads as a bug."""
+def test_dry_run_stops_on_unreadable_transcript(repo):
+    """Unreadable transcript diagnostics must not propose repository-wide staging."""
     (repo / "TEST.md").write_text("x\n")
     report = hook.build_dry_run_report(
         "msg", "sid", "", str(repo), None, hook.Flags(dry=True, use_ai=False)
     )
-    assert "Would stage all uncommitted changes in the repo:" in report
-    # The inline status block, not the trailing one.
+    assert "Commit stopped:" in report
     assert "Changes to commit:" not in report
 
 

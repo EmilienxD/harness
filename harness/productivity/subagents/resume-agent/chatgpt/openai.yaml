@@ -1,6 +1,0 @@
-interface:
-  display_name: "Resume Agent"
-  short_description: "Continue a delegated conversation"
-  default_prompt: "Use $resume-agent to continue the selected child with my next message."
-policy:
-  allow_implicit_invocation: false

@@ -28,7 +28,7 @@ SCHEMA_VERSION = 1
 MAX_IMAGE_BYTES = 6 * 1024 * 1024
 MAX_VIDEO_BYTES = 20 * 1024 * 1024
 MAX_ROUND_BYTES = 50 * 1024 * 1024
-MAX_ASSETS = 20
+MAX_ASSETS = 30
 # Lowercase letters and digits without the look-alikes 0/o and 1/i/l.
 INBOX_ALPHABET = "abcdefghjkmnpqrstuvwxyz23456789"
 MEDIA_TYPES = {
@@ -238,6 +238,10 @@ class _MediaReferences(HTMLParser):
             self.references.append(values["poster"])
         if lowered in {"img", "source"} and values.get("srcset"):
             self.references.extend(_srcset_urls(values["srcset"]))
+        # Interactive previews keep URLs in option values, links, or data-* attributes.
+        # The reserved assets/ prefix declares these files even before an img displays them.
+        self.references.extend(value for name, value in values.items()
+                               if name != "srcset" and value.startswith("assets/"))
 
 
 def discover_references(payload: dict) -> list[str]:
@@ -312,7 +316,7 @@ def validate_assets(payload: dict, assets_dir: Path, assets_prefix: str) -> list
         if total > MAX_ROUND_BYTES:
             raise RoundError("Round assets exceed 50 MiB")
         if len(manifest) >= MAX_ASSETS:
-            raise RoundError("Round contains more than 20 local assets")
+            raise RoundError(f"Round contains more than {MAX_ASSETS} local assets")
         with candidate.open("rb") as file:
             digest = hashlib.file_digest(file, "sha256").hexdigest()
         manifest.append({

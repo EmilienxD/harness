@@ -112,8 +112,6 @@ For Codex, deterministic command failures reject the prompt rather than falling 
 
 ### User-invoked skills
 
-- **`ship`**: Leads one GitHub issue from selection through a guarded implementation loop to an open or merged PR. `/ship` selects the oldest actionable triaged issue; explicit issue numbers bypass triage, parents expand to dependency-ordered leaf loops, and a PR URL resumes review work. Installs `subagents`, `test-workflows`, `issue-readers`, and `resolving-merge-conflicts`.
-
 - **`cleanup-git`**: Automatically inventories every local branch and worktree with a bundled read-only script that runs without arguments from the current directory. Supplies a titled **Git cleanup inventory** in compact TOON tables. Checks merge ancestry, protected branches, local and ignored files, locks, submodules, and ongoing Git operations; includes GitHub facts when `gh` is available. The skill contains the cleanup rules and proposes named actions for approval before deletion or worktree removal. On Pi, `/cleanup-git` and `/skill:cleanup-git` prepare the inventory before expanding the native skill.
 
 - **`resolving-merge-conflicts`**: Resolves an in-progress Git merge or rebase by tracing the intent behind each side, preserving both where possible, running the repository's checks, and finishing the operation. It never aborts the merge or invents unrelated behavior.
@@ -140,9 +138,9 @@ For Codex, deterministic command failures reject the prompt rather than falling 
 
 - **`commit`**: `/commit <message>` stages the files changed by the current session and commits them without another model call. Add `--dry` to preview or `--ai` to generate a message through a direct Gemini request. Everything except `--ai` is local and needs no API key. For `--ai`, set `GEMINI_API_KEY` (or `GOOGLE_API_KEY`), or put `{"version": 1, "commit": {"geminiApiKey": "your-key"}}` in the gitignored `.harness/config.local.json`. The user-level `~/.harness/config.json` (or `$HARNESS_STATE_DIR/config.json`) can hold the same section for every repository. Do not put the key in committed `.harness/config.json`.
 
-  Install for Pi with `uv run harness install commit --platform pi`, then `/reload` and approve the resources. `/commit` and `/skill:commit` run the same native command. Pi records successful native `write`/`edit` and observed shell changes on the active session branch, verifies file contents again before staging, and adds a `Pi-session` trailer. Reload and exact session resume retain attribution; tree navigation uses only active ancestry, and a new or forked session starts with no ownership. It refuses uncertain attribution, preexisting changes in an edited file, conflicting staging on an owned file, and merges. Unrelated staged files stay staged. Failed AI generation preserves the command's staged files; retry with `/commit <message>` while that index remains unchanged. It never falls back to staging every dirty file. Custom tools and arbitrary extension I/O need explicit attribution support; use ordinary Git for changes the extension cannot safely own.
+  Install for Pi with `uv run harness install commit --platform pi`, then `/reload` and approve the resources. `/commit` runs as a native command; the skill shim is installed only for Claude Code and ChatGPT. Pi records successful native `write`/`edit` and observed shell changes on the active session branch, verifies file contents again before staging, and adds a `Pi-session` trailer. Reload and exact session resume retain attribution; tree navigation uses only active ancestry, and a new or forked session starts with no ownership. It refuses uncertain attribution, preexisting changes in an edited file, conflicting staging on an owned file, and merges. Unrelated staged files stay staged. Failed AI generation preserves the command's staged files; retry with `/commit <message>` while that index remains unchanged. It never falls back to staging every dirty file. Custom tools and arbitrary extension I/O need explicit attribution support; use ordinary Git for changes the extension cannot safely own.
 
-- **`enable-desktop-notification`**: `/enable-desktop-notification` enables desktop notifications for the current Claude Code, Codex, or Pi session without a model call. Each completed turn displays the beginning of the session title (Claude's `aiTitle`, Codex's saved thread name, or Pi's native session name, with the session ID as fallback) and a preview of the final response. The setting survives session resume; other sessions stay off. Add `--disable` to turn it off. Codex also accepts `$enable-desktop-notification`; Pi also accepts `/skill:enable-desktop-notification`. Uses native Windows PowerShell toasts, macOS `osascript`, or Linux `notify-send` (install it if missing); a local desktop notification service and enabled OS notifications are required. Claude/Codex state lives under `~/.harness/desktop-notification/` or `$HARNESS_STATE_DIR/desktop-notification/`. Pi stores its preference in the native session, across tree navigation and reload, and starts new/forked sessions disabled. Pi notifies once at final settlement, after automatic continuations; errors and aborts get explicit status text. Delivery failures leave the turn complete and display a diagnostic. Install with `uv run harness install enable-desktop-notification --platform pi`, then `/reload` and approve the resources.
+- **`enable-desktop-notification`**: `/enable-desktop-notification` enables desktop notifications for the current Claude Code, Codex, or Pi session without a model call. Each completed turn displays the beginning of the session title (Claude's `aiTitle`, Codex's saved thread name, or Pi's native session name, with the session ID as fallback) and a preview of the final response. The setting survives session resume; other sessions stay off. Add `--disable` to turn it off. Codex also accepts `$enable-desktop-notification`. Uses native Windows PowerShell toasts, macOS `osascript`, or Linux `notify-send` (install it if missing); a local desktop notification service and enabled OS notifications are required. Claude/Codex state lives under `~/.harness/desktop-notification/` or `$HARNESS_STATE_DIR/desktop-notification/`. Pi stores its preference in the native session, across tree navigation and reload, and starts new/forked sessions disabled. Pi notifies once at final settlement, after automatic continuations; errors and aborts get explicit status text. Delivery failures leave the turn complete and display a diagnostic. Install with `uv run harness install enable-desktop-notification --platform pi`, then `/reload` and approve the resources.
 
 - **`todo-hitl`**: `mark-as-todo-hitl` leaves a focused `TODO(HITL)` for work that needs a human decision; `address-todo-hitl` investigates the highest-priority marker, agrees on a resolution with you, and then implements it.
 
@@ -160,7 +158,7 @@ For Codex, deterministic command failures reject the prompt rather than falling 
 
 - **`setup-help`**: Guides any installation or configuration one verified step at a time. Every response gives the current action and a short view of what remains, keeping the complete setup checklist synchronized as new prerequisites appear.
 
-- **`subagents`**: Launches separate Claude Code, ChatGPT, or Pi conversations, using background processes for automatic work and visible terminals for interactive work through `work-with-agent` and the explore, prototype, websearch, brainstorm, address, and review variants. Prototype delegation supports only `interactive` mode; `auto` is rejected. `reply-to-agent` explicitly returns an interactive child's result. `reply-to-agent-with-previous-message` sends its previous assistant response unchanged through the hook, without another model turn. Invoke `/reply-to-agent-with-previous-message` in Claude or Pi, `/skill:reply-to-agent-with-previous-message` in Pi, or `$reply-to-agent-with-previous-message` in Codex. The hook blocks the invocation, shows a delivery status to the user, and reports an error if no previous message or pending parent request exists. The package includes its persistent runtime and hooks; those internal pieces are not separate catalogue choices.
+- **`subagents`**: Launches separate Claude Code, ChatGPT, or Pi conversations, using background processes for automatic work and visible terminals for interactive work through `subagents-toolkit`. An optional `skill` names a user-requested child workflow; missing skills fail before launch. Both execution modes accept any skill. `reply-to-agent` explicitly returns an interactive child's result. `reply-to-agent-with-previous-message` sends its previous assistant response unchanged without another model turn. Invoke `/reply-to-agent-with-previous-message` in Claude or Pi, or `$reply-to-agent-with-previous-message` in Codex. Pi uses a native command; Claude and Codex use a hook that blocks the skill invocation. Each shows a delivery status to the user and reports an error if no previous message or pending parent request exists. The package includes its persistent runtime and hooks; those internal pieces are not separate catalogue choices.
 
 The `subagents` package also installs persistent session commands. These are separate from the ephemeral installer commands above:
 
@@ -177,91 +175,34 @@ Delegation requests can be written with any file-writing tool. The runtime check
 assigned inbox after tool completions, before stopping, and on resume. Publish complete `.md`
 requests; for multi-step writes, write a temporary file and rename it to `.md` when ready.
 
-`run` opens an independent visible terminal. When `subagents-toolkit` is installed for the current provider, the session-start hook assigns one persistent inbox to the saved conversation and supplies its path in context. Natural-language requests such as "run a Claude subagent" can use the toolkit without an explicit launcher skill invocation. Without the toolkit installed, session start adds no inbox instructions. Request files and execution logs live under `~/.harness/runtime/` (`HARNESS_STATE_DIR` overrides `~/.harness`), never in the project. Automatic children run headlessly with native provider permissions; interactive children open visible sessions. `harness watch` follows structured Claude or Codex progress for the one active background session in the current directory; pass a child session ID to select a particular agent from another terminal, or use `agent-i` inside its parent. `--once` prints the progress recorded so far. The `ask` command prints each launched child's watch command. Progress reports observed searches, tool activity, messages, errors, elapsed time, and provider-reported usage; it does not judge research quality. Children receive stable `agent-i` identifiers scoped to the parent. After an Aboard-launched interactive child sends its reply, its hook shows a VS Code link that returns to the exact parent terminal without switching focus automatically. Use `resume-agent` or `harness resume agent-i "next message"` inside the parent to continue a child, preserving its provider, mode, directory, and conversation. A child whose session is still live, such as an idle terminal, normally continues in a fork of its transcript that keeps the same `agent-i` identifier and leaves the original session open. Aboard's `aboard.sessions.interactiveResumeMode` setting can instead use `reuse-terminal` to send the next message into a matching live interactive terminal; the default remains `fork`. Results survive parent shutdown and replay after interrupted delivery. A child that fails to start or exits early reports the provider's last diagnostic line, such as Codex refusing to run outside a Git repository; an unconfirmed interactive start names the provider and directory whose subagents installation or trust prompt to check. Launch and resume skills load the shared `subagents-toolkit` instruction skill when needed. The session-start hook supplies the assigned inbox again on resume and after compaction.
+`run` opens an independent visible terminal. When `subagents-toolkit` is installed for the current provider, the session-start hook assigns one persistent inbox to the saved conversation and supplies its path in context. Natural-language requests such as "run a Claude subagent" can use the toolkit without an explicit launcher skill invocation. Without the toolkit installed, session start adds no inbox instructions. Request files and execution logs live under `~/.harness/runtime/` (`HARNESS_STATE_DIR` overrides `~/.harness`), never in the project. Automatic children run headlessly with native provider permissions; interactive children open visible sessions. `harness watch` follows structured Claude or Codex progress for the one active background session in the current directory; pass a child session ID to select a particular agent from another terminal, or use `agent-i` inside its parent. `--once` prints the progress recorded so far. The `ask` command prints each launched child's watch command. Progress reports observed searches, tool activity, messages, errors, elapsed time, and provider-reported usage; it does not judge research quality. Children receive stable `agent-i` identifiers scoped to the parent. After an Aboard-launched interactive child sends its reply, its hook shows a VS Code link that returns to the exact parent terminal without switching focus automatically. Use the toolkit's `resume: agent-i` request or `harness resume agent-i "next message"` inside the parent to continue a child, preserving its provider, mode, directory, and conversation. A child whose session is still live, such as an idle terminal, normally continues in a fork of its transcript that keeps the same `agent-i` identifier and leaves the original session open. Aboard's `aboard.sessions.interactiveResumeMode` setting can instead use `reuse-terminal` to send the next message into a matching live interactive terminal; the default remains `fork`. Results survive parent shutdown and replay after interrupted delivery. A child that fails to start or exits early reports the provider's last diagnostic line, such as Codex refusing to run outside a Git repository; an unconfirmed interactive start names the provider and directory whose subagents installation or trust prompt to check. The `subagents-toolkit` skill supplies both launch and continuation instructions. The session-start hook supplies the assigned inbox again on resume and after compaction.
 
 Empty inbox directories are pruned best-effort when their session ends, provided no active or uncertain executions, outstanding requests, or active loop work remain in the session or its descendants. The directory's persistent assignment and all request history are retained; resume, reconciliation, and request processing recreate the same path when needed. Nonempty directories, symlinks, and Windows junctions are never removed.
 
 `harness inbox cleanup` previews a sweep; add `--apply` to remove eligible empty directories. By default, the sweep requires an observed session end and at least one week (168 hours) since the last observed activity (`--grace-hours` changes this). Old inboxes created before lifecycle tracking, crashed sessions without an end event, and unreferenced directories are skipped because inactivity cannot be established safely from folder age. **Only after closing all provider sessions using the state directory**, use `harness inbox cleanup --offline --dry-run`, then `harness inbox cleanup --offline --apply`. `--offline` is your explicit assertion that those sessions are stopped; it bypasses lifecycle and age checks but still skips outstanding work recorded in the database. Cleanup does not reconcile or cancel stale execution/request records, and never deletes inbox contents or database assignments.
 
-When the user explicitly requests a particular model for a subagent, its launch request can include `model: <model-id>`. The hardcoded provider-specific model list lives in `subagents-toolkit` and is updated as models are released. Omit `model` otherwise to retain the current task profile and native provider defaults. An explicit model overrides only the profile's model and is preserved when the child resumes, including through Aboard. Requests also accept an independent `effort: none|minimal|low|medium|high|xhigh|max|ultra` override. The runtime silently selects the closest supported effort for the selected model (preferring the lower level on a tie), or omits the flag for models without effort support. The requested effort is preserved on resume, including through Aboard.
+When the user explicitly requests a particular model for a subagent, its launch request can include `model: <model-id>`. The hardcoded provider-specific model list lives in `subagents-toolkit` and is updated as models are released. Omit `model` otherwise to retain the general delegation profile and native provider defaults. An explicit model overrides only the profile's model and is preserved when the child resumes, including through Aboard. Requests also accept an independent `effort: none|minimal|low|medium|high|xhigh|max|ultra` override. The runtime silently selects the closest supported effort for the selected model (preferring the lower level on a tie), or omits the flag for models without effort support. The requested effort is preserved on resume, including through Aboard.
 
 When the user explicitly assigns a subagent to another directory or worktree, its launch request can include `root: <directory-path>`. Relative roots resolve from the parent's saved directory; the directory must already exist. Omit `root` to inherit the parent's directory. Resuming the child preserves its root.
 
-When a parent conversation resumes, Harness checks unfinished child executions and reports any whose processes are verifiably dead. The parent can then explicitly continue an interrupted child with `resume-agent` or `harness resume agent-i "next message"`; reopening the parent alone does not restart its children. Continuation requires a recorded provider conversation ID and its saved transcript. If the ID is missing, Harness refuses the continuation.
+When a parent conversation resumes, Harness checks unfinished child executions and reports any whose processes are verifiably dead. The parent can then explicitly continue an interrupted child with the toolkit's `resume: agent-i` request or `harness resume agent-i "next message"`; reopening the parent alone does not restart its children. Continuation requires a recorded provider conversation ID and its saved transcript. If the ID is missing, Harness refuses the continuation.
 
-Launch settings come from `.harness/config.json`, then the user-level file, then built-in defaults. A file containing only `{ "version": 1 }` is valid; add provider sections only for project-specific overrides. Manual delegation profiles live under `providers.<provider>.delegations`, keyed by the registered task name, including project roles. Exploration defaults to Haiku/low for Claude and GPT-5.6 Luna/low for ChatGPT; the other manual profiles inherit native provider settings. `autoRun.provider` defaults to Claude and does not limit explicit `harness run --provider ...` launches. The optional provider-neutral `session.stopWaitHours` controls how long a parent Stop hook waits for an outstanding reply.
+Launch settings come from `.harness/config.json`, then the user-level file, then built-in defaults. A file containing only `{ "version": 1 }` is valid; add provider sections only for project-specific overrides. Manual launches use `providers.<provider>.delegations.general` and otherwise inherit native provider settings. `autoRun.provider` defaults to Claude and does not limit explicit `harness run --provider ...` launches. The optional provider-neutral `session.stopWaitHours` controls how long a parent Stop hook waits for an outstanding reply.
 
-On Pi, the `harness-subagents` extension takes the place of the hooks and calls the installed `harness-subagents-hook` runtime. It supplies the assigned inbox as a stable system-prompt section and launches requests written with the native `write` tool. Results arrive as session messages. A terminal-UI or RPC parent keeps working while children run: an idle parent starts a turn for the result, and a busy one receives it before its next model call. A JSON or print parent waits before settling, as the Stop hook does. A result is acknowledged once it is saved in the parent session and replays after reload or restart. Pi children get a Harness-assigned `--session-id`, resume that exact session, and continue a live session through `--fork`. Automatic children run `pi --mode json` and succeed only when the run settles with a final answer; error, aborted, and output-limit responses are reported as failures. `model` resolves like Pi's `/model` picker, using Pi's own matching rules over authenticated models only, and launches as the qualified `provider/model`; an unavailable or ambiguous model fails the launch instead of reaching an unconfigured provider. `effort` becomes `--thinking` (`none` is `off`, `ultra` is `max`, and Pi clamps the rest per model). Pi exploration keeps the native model with low thinking. The default command is `pi`; `providers.pi.command` overrides it. `/ship` loop implementers are not available on Pi. When Aboard is running for the project, Pi launches go to Aboard and need an Aboard release that accepts the `pi` provider. Headless Pi children load project extensions only in trusted projects (`/trust`, `defaultProjectTrust`, or an `--approve` command override), so nested delegation from automatic Pi children needs a trusted project or a user-scope installation.
+On Pi, the `harness-subagents` extension takes the place of the hooks and calls the installed `harness-subagents-hook` runtime. It supplies the assigned inbox as a stable system-prompt section and launches requests written with the native `write` tool. Results arrive as session messages. A terminal-UI or RPC parent keeps working while children run: an idle parent starts a turn for the result, and a busy one receives it before its next model call. A JSON or print parent waits before settling, as the Stop hook does. A result is acknowledged once it is saved in the parent session and replays after reload or restart. Pi children get a Harness-assigned `--session-id`, resume that exact session, and continue a live session through `--fork`. Automatic children run `pi --mode json` and succeed only when the run settles with a final answer; error, aborted, and output-limit responses are reported as failures. `model` resolves like Pi's `/model` picker, using Pi's own matching rules over authenticated models only, and launches as the qualified `provider/model`; an unavailable or ambiguous model fails the launch instead of reaching an unconfigured provider. `effort` becomes `--thinking` (`none` is `off`, `ultra` is `max`, and Pi clamps the rest per model). The default command is `pi`; `providers.pi.command` overrides it. `/ship` loop implementers are not available on Pi. When Aboard is running for the project, Pi launches go to Aboard and need an Aboard release that accepts the `pi` provider. Headless Pi children load project extensions only in trusted projects (`/trust`, `defaultProjectTrust`, or an `--approve` command override), so nested delegation from automatic Pi children needs a trusted project or a user-scope installation.
 
-#### Adding project subagent roles
+#### Explicit child skills
 
-A role is a named task with two skills: a user-invoked `<role>-with-agent` launcher and a child skill containing the actual workflow. For example, `security-with-agent` launches task `security`, which invokes `security-audit` in the child conversation. The parent supplies the audit scope; the child skill supplies how to perform it.
+Invoke `subagents-toolkit` with a work description and name a skill only when you want the child to use it: "Run a background agent using the websearch skill to find primary sources." The parent writes `mode: auto` and `skill: websearch`; Harness checks the child provider's conventional skill directories and adds its native invocation. A missing requested skill fails before launch. With no requested skill, Harness adds no invocation and gives the child an explicit-only instruction, subject to project/provider rules.
 
-1. Install `subagents` in the project. For Claude, skills live under `.claude/skills/`; for ChatGPT/Codex, use `.agents/skills/`; for Pi, use `.pi/skills/`. The examples below use `<skills>` for that directory. If you delegate across providers, install the child skill for the selected provider too.
-2. Create `.harness/subagent-tasks.yaml` in the project and add the custom task below. For personal roles, use `~/.harness/subagent-tasks.yaml` (`HARNESS_STATE_DIR` overrides `~/.harness`). These optional files contain only custom roles; the installed toolkit supplies the shipped defaults.
-
-   ```yaml
-   security:
-     launcher: security-with-agent
-     skill: security-audit
-     modes: [auto, interactive]
-     default-mode: auto
-   ```
-
-   Task and skill names use lowercase letters, digits, and hyphens. Each launcher is unique and ends with `-with-agent`; each new task requires a child skill. `default-mode` must appear in `modes`. Builtin task names and launchers are reserved; `loop` and `ship` remain internal to the implementation loop. An empty custom registry is `{}`.
-
-3. Create `<skills>/security-with-agent/SKILL.md`:
-
-   ```markdown
-   ---
-   name: security-with-agent
-   description: Launch a separate agent to audit security within a specified scope.
-   argument-hint: "[audit scope]"
-   disable-model-invocation: true
-   ---
-
-   Invoke the `subagents-toolkit` skill if its instructions are not already in
-   the current context. Follow its workflow using the conversation inbox
-   supplied by the hook and the registered `security` task.
-
-   Give the child the audit scope, relevant project context, constraints,
-   and expected output. Its `security-audit` skill supplies the audit workflow.
-   ```
-
-   For ChatGPT/Codex, also create `<skills>/security-with-agent/agents/openai.yaml` to keep the launcher user-invoked:
-
-   ```yaml
-   policy:
-     allow_implicit_invocation: false
-   ```
-
-4. Create `<skills>/security-audit/SKILL.md` with the child's workflow:
-
-   ```markdown
-   ---
-   name: security-audit
-   description: Audit a specified scope for security flaws and report evidence.
-   ---
-
-   Inspect the requested scope, its trust boundaries, and relevant callers.
-   Trace suspected flaws to reachable execution paths before reporting them.
-   For each finding, provide severity, file-and-line evidence, the conditions
-   needed to exploit it, and a concrete remediation. Keep the audit read-only.
-   Finish after accounting for every requested area; report coverage gaps
-   and distinguish confirmed findings from unresolved hypotheses.
-   ```
-
-5. Invoke `/security-with-agent <scope>` in Claude or `$security-with-agent <scope>` in ChatGPT/Codex. The hook reads the registry, enables the inbox, and accepts `task: security`; the runtime invokes `/security-audit` or `$security-audit` in the child. A missing child skill fails before launch. If your provider has not picked up newly added skills, restart its session.
-
-The toolkit shows the builtin tasks and modes; its managed `builtin-tasks.yaml` companion supplies the full runtime definitions, including child skills. Before falling back to `general`, or when the user names a custom task, the agent reads the custom registries. The hook and runtime combine the same custom definitions with the builtin tasks. They use the nearest `.harness/subagent-tasks.yaml` from the conversation's saved directory upward through the repository root, plus the personal registry. The hook supplies their resolved paths and the structured-write requirement for inbox requests. A project entry replaces the complete personal definition for that custom task; other personal roles remain available. Custom registries are shared across providers. Missing files mean no custom roles; malformed files fail with an error. Registry edits take effect on the next invocation. Resuming a child preserves its existing task, mode, provider, and workflow even if the registry subsequently changes.
-
-Custom roles use Harness's native background or visible-terminal launch path. Aboard continues to handle its shipped tasks; its bridge currently accepts a fixed task list. Keep the project registry and skill pairs in version control. The installer manages the toolkit and leaves custom registries and user-created skill pairs untouched during upgrades and removal. If you previously added roles to the installed toolkit, move those entries into the custom registry and restore the original installed toolkit before upgrading; existing edits still trigger the installer's modified-file protection.
+Install child skills separately. Named tasks, specialized launchers, and built-in/custom task registries have been removed. Existing user registries are ignored and left untouched; installed skill metadata remains necessary. See the [subagents guide](docs/user/tools/productivity/subagents.md) for request examples and discovery limits.
 
 ### Model-invoked skills
 
 - **`test-workflows`**: Defines Markdown end-to-end checks, with covered-file hashes that tell agents when a capability needs verification again. Its CLI is described below.
 
-- **`web-toolkit`**: Gives Claude Code, ChatGPT, and Pi local web search and page fetching through the `web-toolkit` CLI. Free, keyless, and safe for many concurrent agents. Described below.
+- **`web-toolkit`**: Skill for Claude Code, ChatGPT, and Pi providing local web search and page fetching through the CLI. Free, keyless, and safe for many concurrent agents. Described below.
+- **`web-toolkit-native`**: Independently selectable native Pi `web_search` and `web_fetch` tools using the same CLI. Install with `harness install web-toolkit-native --platform pi`; the skill uses `harness install web-toolkit --platform pi`.
 
 - **`chrome-devtools`**: Installs the upstream Chrome DevTools CLI and its model-invoked `chrome-devtools-cli` skill for browser interaction, screenshots, network inspection, and performance debugging. Supports Claude Code, ChatGPT, and Pi. Described below.
 
@@ -271,7 +212,7 @@ Custom roles use Harness's native background or visible-terminal launch path. Ab
 
 - **`writing-adrs`**: Creates architectural decision records and updates existing records in place when agreed decisions change. It records settled decisions, binding values, terse rules, accepted trade-offs, and ADR cross-references in a refactor-resistant format.
 
-- **`report-gotchas`**: Near the end of complicated implementation work, posts meaningful caveats, failed checks, unfinished work, or required human action to a configured Discord channel. It sends nothing when there is no new caveat. All providers use one shared skill and `harness-report-gotchas submit`. Configure the webhook with `harness-report-gotchas configure`. Submission posts the supplied Markdown directly, waits for Discord to confirm it, and prints "Report successfully posted to Discord." Failures return an error so the agent can preserve the caveat in its final response. Reports contain no automatic Git or session metadata.
+- **`report-gotchas`**: Near the end of complicated implementation work, posts meaningful caveats, failed checks, unfinished work, or required human action to a configured Discord channel. It sends nothing when there is no new caveat. All providers use one shared skill and run the bundled Python reporter directly; see the [guide](docs/user/tools/productivity/report-gotchas.md) to configure the webhook. Submission posts the supplied Markdown directly, waits for Discord to confirm it, and prints "Report successfully posted to Discord." Failures return an error so the agent can preserve the caveat in its final response. Reports contain no automatic Git or session metadata.
 
 ### Hooks
 
@@ -283,9 +224,9 @@ Hooks do not need a skill invocation. Select them in the catalogue and restart t
 | `slash-command-guard` | Pi | Rejects unknown leading slash commands without sending them to the model. |
 | `exclude-unwanted-tools` | Pi | Removes `powershell`, `codemode`, `find`, `grep`, and `ls` from the session tool registry. |
 | `no-new-documents` | Claude Code, ChatGPT, Pi | Stops agents from creating files in configured documentation directories and has them write a draft for your approval instead. Edits to existing files are allowed. |
-| `on-read-reminder` | Claude Code, Pi | Reminds the agent to read required guidance when it reads paths matching configured patterns. |
-| `on-edit-reminder` | Claude Code, Pi | Lets a matching edit land, then requires the relevant guidance to be read and violations corrected. |
-| `on-edit-block` | Claude Code, Pi | Denies a matching edit until the required guidance has been read or delivered in the current session branch. |
+| `on-read-reminder` | Claude Code, ChatGPT, Pi | Reminds the agent to read required guidance when it reads paths matching configured patterns. |
+| `on-edit-reminder` | Claude Code, ChatGPT, Pi | Lets a matching edit land, then requires the relevant guidance to be read and violations corrected. |
+| `on-edit-block` | Claude Code, ChatGPT, Pi | Denies a matching edit until the required guidance has been read or delivered in the current session branch. |
 | `prefer-read-tool` | Claude Code | Nudges the agent toward the reviewable Read tool after shell-based file reads. |
 | `prefer-edit-tool` | Claude Code | Nudges the agent toward Write/Edit after shell-based file changes. |
 | `prefer-fewer-comments` | Claude Code, ChatGPT, Pi | Flags newly written comments or docstrings that exceed an editable budget. Pi wraps native writes/edits with exact mutation snapshots. |
@@ -394,42 +335,7 @@ patterns = ['''(curl|wget).*\|\s*(ba|z)?sh''']
 
 ## Issue delivery with `/ship`
 
-Run `/ship` in Claude Code or `$ship` in ChatGPT. With no argument it selects the oldest open `[AI]-triaged` issue without open blockers or open sub-issues, skipping claimed issues and those needing a decision or help. Pass issue numbers explicitly to direct parallel sessions. A parent expands to leaf issues in dependency order, with one loop and PR per leaf. After each delivery you choose whether to continue; an explicit instruction to process the whole queue also works. Pass a PR URL to pick up review comments on its existing branch/worktree.
-
-The Lead reads full GitHub context through `issue-context`, creates a worktree only through the project's initialized-worktree script, and defines success before implementation. Missing or failing scripts stop delivery with a suggestion to run `setup-git-worktree-maker`. Project instructions supply the target branch (the Lead asks if absent), merge method (squash by default), and test locations (defaults: `tests/unit/` and `tests/workflow/`). The first branch commit contains deliberately failing unit stubs and workflow criteria only. Implementers fill exactly those stubs; `ship-stubs check` provides the structural Python contract check, while other languages need their native discovery/diff check. Each issue's run state (criteria anchor, implementer sessions, prompts, reports, and evidence) lives in `~/.harness/ship/<owner>-<repo>/issue-<n>/`, which `/ship <PR>` resumes from.
-
-Implementers run in visible terminals through initialized Aboard when available or the standalone terminal launcher. Every successful Stop delivers a report automatically, including context usage when measurable, and waits for exact-token Lead feedback or release. Feedback keeps the same conversation. The Lead accepts a report only when every required test and workflow passes with evidence, without rerunning verification. It replaces an implementer when context or feedback limits, repeated failures, or an unconvincing report warrant it. A fresh implementer receives the original prompt, diff, last report, and recorded problems. Only one implementer may be active per worktree. The optional explorer also uses the subagents runtime.
-
-The Lead owns Git/GitHub mutations and workflow confirmation. Loop-only guards deny Git/GitHub mutation, writes into the repository's other checkouts, and workflow edits. Your own sessions in the same worktree stay unrestricted. These command/path hooks are guardrails, not an operating-system sandbox. Steering is included in reports; interrupts pause delivery. A killed waiting hook invalidates its token, so stale feedback is rejected. Waiting uses `session.stopWaitHours` (up to 24 hours). A timed-out working implementer keeps its worktree reservation until it reaches Stop or its process exit is confirmed; the Lead waits for it to become inactive before publishing or replacing it. Unknown context skips the context threshold; unvalidated Claude model windows remain unknown. Aboard can resume an idle loop in its existing terminal; an idle standalone terminal must exit before runtime resume, or the Lead can launch a fresh implementer. A later `/ship <PR>` conversation on the same provider takes over a released implementer and receives its reports. On Claude, `ship` sets `CLAUDE_CODE_STOP_HOOK_BLOCK_CAP` to 100 in its installed settings scope: each implementer report continues the Lead's turn through a Stop hook, and Claude otherwise ends a turn after 8 consecutive continuations.
-
-Before opening a PR the Lead merges the latest target once, requests a confirming round when it brought changes/conflicts, stamps passing workflows, checks stale workflows affected by the diff, and enforces the stub contract. The sync confirmation is outside the feedback cap. PR descriptions explain the change and staging checks and use `Refs #n`, keeping the issue open. `[AI]-auto-merge` permits the Lead to merge; other PRs remain open. The Lead comments with the PR link. Decisions, exhausted caps, and expired waits preserve work in a draft PR with `[AI]-needs-decision` and a precise question. Unrelated blockers become linked `[AI]-help-wanted` issues; in auto-merge mode the Lead delivers the prerequisite first and resumes the original. You verify staging and close the issue yourself.
-
-| Label | Meaning |
-| --- | --- |
-| `[AI]-triaged` | User-approved eligibility for automatic selection. |
-| `[AI]-in-progress` | Claimed; `/ship` keeps it until the issue is closed. |
-| `[AI]-needs-decision` | Waiting for your decision, alongside the claim. |
-| `[AI]-help-wanted` | A tracked prerequisite needing breakdown or help. |
-| `[AI]-auto-merge` | The Lead merges the passing PR. |
-| `[AI]-*-difficulty` | Routes a `by-difficulty` implementer profile using existing difficulty mappings. |
-
-Missing labels are created on first use. Labels plus PR timeline references describe issue state from GitHub alone. `[AI]-afk` and `[AI]-hitl` remain Aboard's metadata. `address-this`, `review-this`, Aboard Auto Run, and manual ask/reply keep their existing flows.
-
-Sparse `.harness/config.json` version 1 settings:
-
-```json
-{
-  "version": 1,
-  "providers": {
-    "claude": { "delegations": { "loop": { "model": "by-difficulty" } } },
-    "chatgpt": { "delegations": { "loop": { "model": "by-difficulty" } } }
-  },
-  "loop": { "maxFeedback": 3, "maxImplementers": 2, "freshContextPercent": 65 },
-  "session": { "stopWaitHours": 24 }
-}
-```
-
-The `loop` profile accepts `model` and `effort`; omitted values inherit provider settings, and `by-difficulty` selects the existing model/effort mapping. Implementers use the Lead's provider and the worktree's configuration. Target and merge method belong in project instructions, not this configuration. Runtime commands are `harness loop launch --cwd <worktree> --prompt-file <file>`, `lookup <session>`, `feedback <session> --wait-token <token> --file <file>`, `release <session> --wait-token <token>`, and `resume <session> --file <file>`. `launch` accepts `--parent <Lead-id>` when not already inside the registered Lead environment.
+`ship` is temporarily unavailable while its unfinished implementation is revised in `harness/in-progress/ship/`.
 
 ## Test workflows
 
@@ -451,7 +357,7 @@ covers: ["src/greeting/**/*.py"]
 
 Run the workflow, then `test-workflows confirm tests/workflow/greeting.md` to automatically create or update the sibling `greeting.manifest.json` with the normalized covered-file hash and generated `verified_files` inventory. Commit both files. Agents write and read the Markdown, including its `covers` patterns; the CLI manages the manifest. A workflow without a manifest is unconfirmed (`stale`). Hashes normalize line endings, so equivalent Windows and Unix checkouts agree. `test-workflows status` reports workflow states and changed covered files in TOON format, including broken mappings whose globs match nothing and malformed workflows or manifests. Add `--json` before or after the command to output JSON instead; this also applies to confirmation and command errors. Exit codes are 0 for all passing, 1 for a stale/broken/invalid workflow, and 2 for a command error. Discovery finds tracked/non-ignored Markdown with `covers` front matter; use `--directory <folder>` or `--root <checkout>` before the subcommand to narrow it.
 
-Run `test-workflows status` explicitly when verifying changes, as you would run unit tests, then run the affected checks and confirm passing ones. Loop implementers run and report; only the Lead stamps their results. Pi installs the same CLI and shared skill; invoke `/skill:test-workflows` to load it explicitly. Confirmation records verification performed by the agent; it does not execute the acceptance steps.
+Run `test-workflows status` explicitly when verifying changes, as you would run unit tests, then run the affected checks and confirm passing ones. Run these commands as `python <skill-directory>/scripts/test_workflows.py` with Python 3.11+ and Git; the script is bundled with the installed skill. Pi uses the same shared skill and script; invoke `/skill:test-workflows` to load it explicitly. Confirmation records verification performed by the agent; it does not execute the acceptance steps.
 
 ## Environment context
 
@@ -807,15 +713,15 @@ Harness leaves running browser sessions alone.
 
 Fetch tries plain HTTP with a browser-like fingerprint first. Bot challenges, blocked responses, pages with little text or an empty application root, and every search use one shared headless Chrome: the first command that needs it starts it with a dedicated profile, concurrent commands each work in their own tab, and it closes after 10 idle minutes. Search reads public engine result pages, trying DuckDuckGo, Startpage, Bing, and Google in that order and answering from the first engine whose results match the query. An installed Google Chrome or Microsoft Edge is required (or Chromium; set `WEB_TOOLKIT_BROWSER` to choose an executable). The browser state lives in `~/.harness/web-toolkit/` (or `$HARNESS_STATE_DIR/web-toolkit/`). Chrome runs without its own process sandbox, which cannot start inside agent sandboxes.
 
-Installation adds the CLI. Claude Code and ChatGPT receive a skill that directs agents to use Web Toolkit for web searches and source reading. Pi receives the native `web_search` and `web_fetch` tools; restart Pi or reload extensions after installation. `web_search` takes one required string, `query`; `web_fetch` takes one required string, `url`. Both return `{ output: string, exitCode: integer }`, where `output` is the CLI text followed by any stderr. Nonzero exits are tool errors and preserve HTTP error pages. Calls have a 120-second deadline, a 256 KiB output limit, and support cancellation. The extension invokes the CLI directly with literal arguments and uses the current Pi working directory. It requires `web-toolkit` on Pi's PATH and works at project or user scope.
+Installation adds provider resources only. Commands run the pinned CLI on demand through `uvx --from <source> web-toolkit`; uv and Git are required, and the first call downloads dependencies into uv's cache. `web-toolkit` installs a skill for Claude Code, ChatGPT, or Pi that directs agents to use the CLI for web searches and source reading. The separate Pi-only `web-toolkit-native` package installs native `web_search` and `web_fetch` tools; restart Pi or reload extensions after installation. `web_search` takes one required string, `query`; `web_fetch` takes one required string, `url`. Both return `{ output: string, exitCode: integer }`, where `output` is the CLI text followed by any stderr. Nonzero exits are tool errors and preserve HTTP error pages. Calls have a 120-second deadline, a 256 KiB output limit, and support cancellation. The extension invokes uvx with literal arguments and uses the current Pi working directory. It requires `uvx` on Pi's PATH and works at project or user scope. The deadline includes package acquisition; cancellation, deadline and output-limit failures terminate the call's process tree while preserving the shared browser.
 
 Pi's `web_search` also accepts optional `allowed_domains` and `blocked_domains` arrays, for example `{ "query": "asyncio TaskGroup", "allowed_domains": ["docs.python.org"], "blocked_domains": ["legacy.docs.python.org"] }`. Use bare domain names rather than URLs. Allowed domains match as alternatives, both filters include subdomains, and exclusions win. Empty arrays apply no restriction. Put website filters in these parameters when using them; combining them with inline `site:` operators is rejected to avoid conflicting restrictions. The CLI continues to accept its existing `site:` query syntax.
 
 The native descriptions explain when to search, fetching sources before relying on excerpts, current-date queries, Markdown source citations, and treating retrieved content as untrusted data. Fetch returns document text for the calling agent to analyze, follows redirects, and supports explicit HTTP and private-network URLs. It uses a dedicated browser profile rather than the user's normal browser login; prefer an authenticated service tool or CLI for content requiring sign-in. Long-page files are saved extracted text, not a fetch-response cache.
 
-A missing CLI returns a direct, pinned `uv tool install --force` command. Both native tools instruct the agent to attempt installation at most once per session. If that command fails, cannot run, or leaves the tools unavailable, the agent must treat both tools as unusable for the rest of the session, stop tool and installation retries, and report the limitation to the user in one sentence. Installation is an explicit agent action; the web tools themselves remain read-only.
+A missing uvx executable reports the uv and Git prerequisites. Package acquisition failures return uvx diagnostics as tool errors; tools never request a permanent CLI installation.
 
-Provider configuration remains user-owned. For ChatGPT sandboxed commands, configure network access and writable roots for uv's tool and Python directories and the browser state if needed; the Windows sandbox may otherwise be unable to reach the CLI installation. Search engines throttle bursts of automated queries; a throttled engine is skipped for that search.
+Provider configuration remains user-owned. For ChatGPT sandboxed commands, configure network access and writable roots for uv's cache and Python directories and the browser state if needed. Search engines throttle bursts of automated queries; a throttled engine is skipped for that search.
 
 ## Aboard
 
@@ -857,7 +763,7 @@ The access cookie is marked `Secure` whenever the request arrives over HTTPS, so
 
 ### Tool documentation and upstream references
 
-Maintain usage, provider support, implementation decisions and acceptance limits in the relevant [tool guide](docs/user/index.md). Shared installation roots, receipt ownership and dependency packaging belong in [Configuration](docs/user/configuration.md#installation-roots-and-ownership). A proposed port remains identified as proposed in its tool guide; `/ship` does not yet support Pi loop implementers.
+Maintain usage, provider support, implementation decisions and acceptance limits in the relevant [tool guide](docs/user/index.md). Shared installation roots, receipt ownership and dependency packaging belong in [Configuration](docs/user/configuration.md#installation-roots-and-ownership). A proposed port remains identified as proposed in its tool guide.
 
 [Pi's official reference mirror](docs/PI-REFERENCES/README.md), alongside the Claude Code and ChatGPT mirrors, supplies upstream API evidence. The mirrors track upstream and are refreshed by the daily/manual documentation workflow; a refresh does not certify another runtime version. Tool guides retain their own tested baseline and verification boundary.
 
@@ -893,17 +799,8 @@ use the GitHub commits pinned in the manifests. `--no-cache` rebuilds the instal
 from the current checkout; local runtime installations also bypass the build cache.
 Host tools are installed for your user even when the selected scope is Project.
 Aboard still uses its published VSIX; see its README for extension development.
-The custom subagent registry requires `--local` until a release refreshes the
-`subagents` runtime Git pin to include this loader.
-
-The `/ship` additions require this local installation until a release updates the
-runtime Git pins and publishes the corresponding Aboard VSIX. The existing remote
-pins predate the new runtime packages; a regular remote install is not a substitute
-for `--local` when trying these unpushed changes:
-
-```powershell
-uvx --no-cache --from "$checkout" harness --local "$checkout" install ship cleanup-git --root "C:\path\to\project"
-```
+The task-free subagent requests require `--local` until a release refreshes the
+`subagents` runtime Git pin to include this runtime.
 
 The shared deterministic E2E core uses the real Claude Code, ChatGPT, and Pi CLIs and replaces only model inference with an authenticated loopback endpoint. Tool journeys live under `tests/e2e/`; Aboard-specific journeys stay under `apps/aboard/test/e2e/`.
 
@@ -921,21 +818,3 @@ npm install
 npm run check
 npm test
 ```
-
-`npm run e2e:ship -- [claude|chatgpt|all] [scenario|all]` installs the actual local
-packages for both providers, then runs deterministic real Lead/implementer loops on
-Claude Code and Codex against the private `EmilienxD/harness-e2e` fixture. The Lead's
-decisions are scripted; the CLIs, hooks, guards, runtime and GitHub effects are real.
-Scenarios: `feedback` (selection/claim, initialized worktree, failing criteria commit,
-feedback on warm context, explicit workflow status, stamping, stub contract, open `Refs #n`
-PR), `leaves` (parent expansion in dependency order, one squash-merged PR per leaf),
-`decision-resume` (linked `[AI]-help-wanted` blocker, `[AI]-needs-decision` draft, then
-`/ship <PR>` resuming the same implementer from a new Lead conversation),
-`blocker-auto-merge` (prerequisite delivered and merged first, original resumed and
-merged) and `fresh-cap` (feedback cap, one active implementer per worktree, fresh
-implementer inputs, implementer cap ending in a draft). Merges land on a per-run
-target branch. Each run closes only its own issues/PRs and deletes only its own
-branches and labels. It needs GitHub authentication and no other triaged issue in
-that shared fixture. Provider CLIs use isolated configuration and an authenticated
-local inference endpoint; the terminal bridge exercises the runtime launch path
-without requiring a desktop window in test automation.

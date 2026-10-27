@@ -110,11 +110,10 @@ Reopening an ended session preserves its provider, working directory, and conver
 interactive terminal ready for you to type. If that conversation is
 no longer available, its activity remains visible but cannot be reopened.
 
-Interactive sessions and manual delegation tasks have independent launch profiles. Their omitted model and
-effort settings inherit your native Claude Code or ChatGPT configuration, except exploration, which defaults
-to Haiku/low for Claude and GPT-5.6 Luna/low for ChatGPT. Exploration sessions are read-only, run headlessly,
-and cannot be stopped, taken over, or resumed. AUTO RUN workers use separate profiles and stricter,
-extension-owned Git and GitHub restrictions.
+Interactive sessions and manual subagents have separate launch profiles and inherit native model and
+effort defaults. New manual subagents use the general delegation profile with an optional explicit skill.
+AUTO RUN keeps its own exploration and worker profiles, including read-only headless exploration and
+extension-owned Git/GitHub restrictions.
 
 ## AUTO RUN
 
@@ -202,7 +201,7 @@ Discard follows the configured cleanup policy and never removes dirty or moved w
 
 Non-launch settings resolve from VS Code workspace settings, then `.abd/settings.json`, then user or profile settings and defaults. AUTO RUN freezes RUN-specific settings for recovery; it reads launch configuration again whenever it starts or resumes an agent.
 
-`aboard.sessions.interactiveResumeMode` controls interactive `resume-agent` continuations for Claude Code and ChatGPT. The default, `fork`, opens a new terminal with a copy of a live child's conversation. Set it to `reuse-terminal` to paste and submit the next message into the child's matching live terminal. Aboard focuses that terminal and preserves the conversation and reply tracking. If that session is no longer open or tracked, Aboard uses the existing fork/reopen flow. Reused processes retain their launch settings; auto execution is unaffected.
+`aboard.sessions.interactiveResumeMode` controls interactive subagent continuations for Claude Code and ChatGPT. The default, `fork`, opens a new terminal with a copy of a live child's conversation. Set it to `reuse-terminal` to paste and submit the next message into the child's matching live terminal. Aboard focuses that terminal and preserves the conversation and reply tracking. If that session is no longer open or tracked, Aboard uses the existing fork/reopen flow. Reused processes retain their launch settings; auto execution is unaffected.
 
 The scaffold is intentionally sparse. Omitted settings use product defaults, including Claude as the AUTO RUN provider and the native `claude` and `codex` commands:
 
@@ -212,7 +211,7 @@ The scaffold is intentionally sparse. Omitted settings use product defaults, inc
 }
 ```
 
-Add only the overrides the project needs. Delegation profiles are independent from interactive sessions and AUTO RUN workers. Every profile can override its provider's `command`; omitted task commands inherit the provider command:
+Add only the overrides the project needs. Delegation profiles are independent from interactive sessions and AUTO RUN workers. Every profile can override its provider's `command`; omitted profile commands inherit the provider command:
 
 ```json
 {
@@ -220,7 +219,7 @@ Add only the overrides the project needs. Delegation profiles are independent fr
   "providers": {
     "chatgpt": {
       "delegations": {
-        "websearch": {
+        "general": {
           "command": ["codex-wrapper", "search"],
           "model": "gpt-5.6-sol",
           "effort": "high"
@@ -247,7 +246,7 @@ For example, Claude Auto Run can explore through Kiro while its address and revi
 }
 ```
 
-The available manual delegation keys are `explore`, `prototype`, `websearch`, `brainstorm`, `address`, `review`, and `general`. Prototype delegation supports only `interactive` mode; `auto` is rejected. AUTO RUN has separate `explore`, `address`, and `review` keys under each provider's `autoRun` object. The JSON schema supplies completion and documents key defaults; Aboard resolves the effective values in code.
+Manual subagents use `delegations.general` regardless of their optional explicit `skill`. Both `auto` and `interactive` modes accept any skill; a missing skill fails before launch. Older named profiles are not selected by new Harness requests. AUTO RUN has separate `explore`, `address`, and `review` keys under each provider's `autoRun` object. The JSON schema supplies completion and documents key defaults; Aboard resolves the effective values in code.
 
 Worktree mode gives a run its own checkout. Aboard copies ignored local `.claude`, `.agents`, `.codex`, `.pi`, `.abd`, and `.harness` configuration without overwriting checkout files or copying provider session state. Optional setup commands live in `.abd/session-setup.ps1` and `.abd/session-setup.sh`.
 
@@ -271,6 +270,6 @@ Aboard keeps its npm build and `aboard-v<version>` release history independent f
 
 Harness delegation uses persistent conversation inboxes outside the workspace. Children retain their Harness identities and execution modes across continuation. A caller-driven resume requires a next message. Live children normally continue in a fork; interactive children can instead receive the message in their existing terminal through `aboard.sessions.interactiveResumeMode`. Delegation request IDs are stored in extension runtime storage so restarting Aboard cannot blindly launch a request twice; conflicting reuse of an ID is refused.
 
-Delegation launch and resume prompts preserve skill invocations. Native CLI commands such as `/resume` and `/compact` lose their slash prefix before delivery, including requests sent directly to Aboard's bridge. Harness and Aboard share the provider command lists and matching rules; the task's configured skill is added separately.
+Delegation launch and resume prompts preserve skill invocations. Native CLI commands such as `/resume` and `/compact` lose their slash prefix before delivery, including requests sent directly to Aboard's bridge. Harness and Aboard share the provider command lists and matching rules; the explicitly requested skill is added separately.
 
 Grill delivery downloads edited diagram images from the configured authenticated board into an external runtime cache before submitting answers to the exact provider session. SHA256, size and PNG validation protect immutable retries. If preparation fails, the prompt retains its reviewed image IDs. For copy/paste, native Pi delivery, or an Aboard download failure, the Grill skill supplies a bundled `scripts/download_grill_image.py` helper that accepts an image ID and resolves Harness configuration internally.

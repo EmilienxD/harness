@@ -14,6 +14,10 @@ Claude Code: `/address-this <request>` or `/review-this <target>`. ChatGPT: `$ad
 
 The installed hook or Pi extension prepares issue and local checkout context. Addressing checks acceptance criteria and runs relevant validation. Reviewing reads the whole pinned diff, fixes clear local material problems, validates repairs, and reports blockers that require decisions or broader work.
 
+Across all three providers, body relation traversal follows standalone `#123` mentions as issues in the containing issue's repository. Markdown links (inline or reference-style) and URLs stay in the supplied body without being traversed. For example, `[security fix #3186](https://github.com/ChromeDevTools/chrome-devtools-mcp/pull/3186)` never triggers a lookup of local issue #3186.
+
+Related references that GitHub reports as missing issues are skipped, and traversal continues with the remaining references. Explicitly requested primary issues still block when missing. Authentication, repository access, network, and other GitHub errors also block preparation.
+
 ## Files and prerequisites
 
 The package requires `git` and `gh`. Its two skill bodies are user-editable starter files. Claude Code, ChatGPT, and Pi are supported; callers such as Aboard can add a completion contract.
@@ -26,10 +30,10 @@ Pi prepares context before native skill expansion. Strict comma-separated issue 
 
 ## Pi routing and context preparation
 
-`issue-readers` 1.6.1 and `issue-writers` 2.3.1 depend on `pi-issue-workflows` 1.0.0
+`issue-readers` and `issue-writers` depend on `pi-issue-workflows`
 and its `pi-transport` dependency for routing and bounded, cancellable Python calls.
 Native input interception runs before `/skill:` expansion;
-short slash aliases expand through the selected native skill too. The extension checks that
+readers' short slash aliases expand through the selected native skill too; writers use only `/skill:` invocations. The extension checks that
 the skill is available, preserves images, and stops workflow preparation during another active
 turn. Context travels with the actual input rather than mutable pending state. Session replacement,
 tree navigation and shutdown cancel transport and suppress stale delivery. Issue helpers have a
@@ -46,7 +50,7 @@ are deduplicated, and every included issue retains its full paginated context.
 `npm run test:pi-issues` installs actual catalogue payloads at project and user scopes on Pi 1.2.0.
 Real JSON/RPC tools implement and review a fixture, stop dirty addressing before inference, write
 the supplied session draft path, and publish through a local fake GitHub CLI. Checks include dry-run,
-invalid options, reload, session isolation, all five native skill routes, exact request counts,
+invalid options, reload, session isolation, native skill routes, removed writer aliases, response-only specs without draft setup, exact request counts,
 starter ownership and last-dependent bridge removal. This certifies native integration and shared
 core reuse, not unscripted model judgment.
 

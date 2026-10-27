@@ -546,7 +546,7 @@
             "Continue a live delegated conversation in a fork in a new terminal.",
             "Send the next message into the matching live interactive agent terminal. Fall back to a new terminal when it is unavailable."
           ],
-          "description": "How resume-agent continues interactive Claude Code and ChatGPT delegations. Existing terminals retain their launch configuration. Auto execution is unaffected."
+          "description": "How interactive Claude Code and ChatGPT delegations continue. Existing terminals retain their launch configuration. Auto execution is unaffected."
         },
         "aboard.autoRun.review": {
           "type": "boolean",

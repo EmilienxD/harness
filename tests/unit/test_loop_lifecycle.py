@@ -25,11 +25,13 @@ def configured(tmp_path, monkeypatch, provider, difficulty=None):
     prompt = tmp_path / "prompt.md"
     prompt.write_text("Implement the criteria.", encoding="utf-8")
     (inbox / "loop.md").write_text(
-        f'---\ntask: loop\nmode: loop\ncwd: {json.dumps(str(tmp_path))}\nprompt-file: {json.dumps(str(prompt))}\n'
+        f'---\nmode: loop\ncwd: {json.dumps(str(tmp_path))}\nprompt-file: {json.dumps(str(prompt))}\n'
         + (f'difficulty: {difficulty}\n' if difficulty else '') + '---\nImplement.\n',
         encoding="utf-8",
     )
     result = process_inbox("lead", launch=lambda *_: "provider-child")[0]
+    assert result.status == "launched", result.reason
+    assert result.child_session_id is not None
     child = result.child_session_id
     return child
 
@@ -223,7 +225,7 @@ def test_wait_limit_releases_only_after_implementer_stops(tmp_path, monkeypatch,
         inbox = enable_delegation("lead", "ship").inbox
         source = inbox / "replacement.md"
         source.write_text(
-            f'---\ntask: loop\nmode: loop\ncwd: {json.dumps(str(tmp_path))}\nprompt-file: {json.dumps(str(tmp_path / "prompt.md"))}\n---\nReplace.\n',
+            f'---\nmode: loop\ncwd: {json.dumps(str(tmp_path))}\nprompt-file: {json.dumps(str(tmp_path / "prompt.md"))}\n---\nReplace.\n',
             encoding="utf-8",
         )
         launches = []
@@ -261,7 +263,7 @@ def test_expired_worktree_is_reusable_after_confirmed_process_exit(tmp_path, mon
         inbox = enable_delegation("lead", "ship").inbox
         source = inbox / "after-exit.md"
         source.write_text(
-            f'---\ntask: loop\nmode: loop\ncwd: {json.dumps(str(tmp_path))}\nprompt-file: {json.dumps(str(tmp_path / "prompt.md"))}\n---\nReplace.\n',
+            f'---\nmode: loop\ncwd: {json.dumps(str(tmp_path))}\nprompt-file: {json.dumps(str(tmp_path / "prompt.md"))}\n---\nReplace.\n',
             encoding="utf-8",
         )
         result = process_inbox("lead", launch=lambda *_: "replacement-child", request_paths={source})[0]

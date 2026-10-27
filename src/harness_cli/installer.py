@@ -131,22 +131,53 @@ class Target:
         return value
 
 
-def _python_command() -> tuple[str, list[str]] | None:
-    if shutil.which("uv"):
-        return "uv", ["run", "--no-project", "--no-managed-python"]
-    for name in ("python3", "python", "py"):
-        if executable := shutil.which(name):
-            try:
-                result = subprocess.run(
-                    [executable, "-c", "import sys; raise SystemExit(sys.version_info[0] != 3)"],
-                    capture_output=True,
-                    timeout=10,
-                )
-            except (OSError, subprocess.TimeoutExpired):
-                continue
-            if result.returncode == 0:
-                return executable, []
-    return None
+def _python_command() -> tuple[str, list[str]]:
+    override = os.environ.get("HARNESS_PYTHON")
+    if override is not None:
+        candidates = [("HARNESS_PYTHON", override, [])]
+    elif os.name == "nt":
+        candidates = [("python", "python", []), ("py -3", "py", ["-3"])]
+    else:
+        candidates = [("python3", "python3", []), ("python", "python", [])]
+
+    probe = (
+        "import json, sys; "
+        "print(json.dumps({'version': list(sys.version_info[:2]), "
+        "'executable': sys.executable, 'venv': sys.prefix != sys.base_prefix}))"
+    )
+    failures = []
+    for label, name, args in candidates:
+        # An override is one executable, not a shell command. Paths containing
+        # spaces are accepted without quoting in the environment variable.
+        executable = name if Path(name).is_file() else shutil.which(name)
+        if not executable:
+            failures.append(f"{label}: executable not found")
+            continue
+        try:
+            result = subprocess.run(
+                [executable, *args, "-I", "-c", probe],
+                capture_output=True, text=True, timeout=10,
+            )
+            data = json.loads(result.stdout) if result.returncode == 0 else None
+        except (OSError, subprocess.TimeoutExpired, ValueError):
+            data = None
+        if not isinstance(data, dict) or not isinstance(data.get("executable"), str):
+            failures.append(f"{label}: could not run Python probe")
+            continue
+        if data.get("version", [0, 0]) < [3, 11]:
+            failures.append(f"{label}: Python 3.11+ is required")
+            continue
+        if data.get("venv"):
+            failures.append(f"{label}: virtual environment interpreters are not persistent")
+            continue
+        resolved = Path(data["executable"])
+        if not resolved.is_absolute() or not resolved.is_file():
+            failures.append(f"{label}: Python reported an invalid executable path")
+            continue
+        return str(resolved.resolve()), []
+    if override is not None:
+        raise InstallError("invalid HARNESS_PYTHON: " + "; ".join(failures))
+    raise InstallError("no persistent Python 3.11+ interpreter found (" + "; ".join(failures) + ")")
 
 
 def _substitute(value: Any, target: Target, python: tuple[str, list[str]] | None = None) -> Any:
@@ -155,9 +186,18 @@ def _substitute(value: Any, target: Target, python: tuple[str, list[str]] | None
             value = value.replace(placeholder, replacement)
         if "${PYTHON}" in value:
             if python is None:
-                raise InstallError("this package requires Python 3 or uv on PATH")
+                raise InstallError("this package requires Python 3.11+")
             command = [python[0], *python[1]]
-            launcher = subprocess.list2cmdline(command) if os.name == "nt" else shlex.join(command)
+            if target.platform is Platform.CHATGPT and os.name == "nt":
+                # Codex parses the executable from the command string itself.
+                # Quoting this path prevents the hook from starting on Windows.
+                launcher = Path(python[0]).as_posix()
+                if any(char.isspace() for char in launcher):
+                    raise InstallError(
+                        f"Codex hooks require a Python path without spaces on Windows: {launcher}"
+                    )
+            else:
+                launcher = subprocess.list2cmdline(command) if os.name == "nt" else shlex.join(command)
             value = value.replace("${PYTHON}", launcher)
         return value
     if isinstance(value, list):
@@ -165,7 +205,7 @@ def _substitute(value: Any, target: Target, python: tuple[str, list[str]] | None
     if isinstance(value, dict):
         if value.get("type") == "command" and value.get("command") == "${PYTHON}":
             if python is None:
-                raise InstallError("this package requires Python 3 or uv on PATH")
+                raise InstallError("this package requires Python 3.11+")
             return {
                 **{key: _substitute(item, target, python) for key, item in value.items() if key not in {"command", "args"}},
                 "command": python[0],

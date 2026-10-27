@@ -18,7 +18,7 @@ SOURCES = {
     "subagents": "harness/productivity/subagents/runtime/src/subagents_runtime/hooks.py",
     "no-new-documents": "harness/guards/no-new-documents/no_new_documents_hook.py",
     "command-guard": "harness/guards/command-guard/command_guard_hook.py",
-    "ship": "harness/building/ship/ship_hook.py",
+    "ship": "harness/in-progress/ship/ship_hook.py",
 }
 CASES = [
     ("auto", "UserPromptSubmit", "handle_prompt"),

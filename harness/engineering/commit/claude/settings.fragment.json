@@ -6,7 +6,58 @@
           {
             "type": "command",
             "command": "${PYTHON}",
-            "args": ["${CLAUDE_DIR}/hooks/commit_hook.py", "--claude"],
+            "args": [
+              "${CLAUDE_DIR}/hooks/commit_hook.py",
+              "--claude"
+            ],
+            "timeout": 120
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Bash|PowerShell|Write|Edit|MultiEdit|NotebookEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${PYTHON}",
+            "args": [
+              "${CLAUDE_DIR}/hooks/commit_hook.py",
+              "--claude"
+            ],
+            "timeout": 120
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Bash|PowerShell|Write|Edit|MultiEdit|NotebookEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${PYTHON}",
+            "args": [
+              "${CLAUDE_DIR}/hooks/commit_hook.py",
+              "--claude"
+            ],
+            "timeout": 120
+          }
+        ]
+      }
+    ],
+    "PostToolUseFailure": [
+      {
+        "matcher": "Bash|PowerShell|Write|Edit|MultiEdit|NotebookEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${PYTHON}",
+            "args": [
+              "${CLAUDE_DIR}/hooks/commit_hook.py",
+              "--claude"
+            ],
             "timeout": 120
           }
         ]

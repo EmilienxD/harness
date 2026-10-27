@@ -1,5 +1,5 @@
 ---
-task: prototype
+skill: prototype
 mode: auto
 secret: forbidden
 ---

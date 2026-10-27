@@ -22,6 +22,7 @@ npm run e2e:pi
 npm run test:pi
 npm run test:pi-package-precedence
 npm run test:pi-shared-skills
+npm run test:path-guards
 npm run test:pi-path-guards
 npm run test:pi-command-guard
 npm run test:pi-prefer-fewer-comments
@@ -73,7 +74,7 @@ with npm networking disabled, reinstalls the archive directly through Pi, and ch
 removal preserves another package and its npm metadata. Archives and settings stay in the fixture.
 Editable user policies remain under `<agent-dir>/harness/`; project policies use `.harness/guards/`.
 The coupled subagent toolkit skill stays in conventional `skills/`, where both Pi and its
-independent Python runtime read the same task registry.
+independent Python runtime read the same delegation instructions.
 Command-guard journeys check fresh project and user installations create no `hooks/` directory. They also run
 the installed Pi startup warning detector in an isolated subprocess and require zero warnings.
 JSON/RPC suppress interactive deprecation warnings, so silence alone is not evidence. A positive
@@ -366,24 +367,30 @@ requested Gemini service; command integration uses fake inference, never paid Pi
 
 ## Pi Web Toolkit
 
-`test:pi-web-toolkit` installs the actual `web-toolkit` package, host CLI and native extension
-in isolated uv directories. Project JSON and user RPC journeys use real Pi 1.2.0 with the
+`test:pi-web-toolkit` installs the actual `web-toolkit-native` extension without a host CLI
+installation, then acquires the shipped immutable uvx source into an empty isolated cache.
+Project JSON and user RPC journeys use real Pi 1.2.0 with the
 fake OpenAI Responses API shared with Codex. They verify that no Web Toolkit skill is installed
 or discovered and invoke the native tools directly. Local HTTP pages verify fetch, redirects,
-Unicode, saved full text, HTTP error bodies, validation, missing executable handling and
+Unicode, saved full text, HTTP error bodies, validation, missing uvx, offline acquisition failure and
 RPC cancellation. Search runs the real CLI and Chrome DOM extraction/filtering; a fixture
 CDP connection fulfills search navigation with fixed engine HTML and blocks other browser
 requests. This tests the integration without depending on public engine availability.
 Domain-filter journeys verify multiple allowed hosts, case normalization, subdomains,
 blocked-host precedence, unrestricted search, invalid domain inputs and rejected mixed filter
 syntax. They inspect the exact query received by the actual browser in memory only.
-Each journey expects 16 inference requests and zero unexpected requests, checks the offered
+Each journey expects 20 inference requests and zero unexpected requests, checks the offered
 tool schemas and structured outputs, and verifies receipt-driven removal and unchanged settings.
 The CLI arguments include shell metacharacters to verify literal transport.
-For a missing executable, the journey extracts the returned installation command and runs
-the real uv invocation with an empty offline cache and isolated tool directories, verifying
-a clean failure without network access. The scripted missing-CLI session makes no further
-web calls; the once-per-session recovery policy is agent guidance, not model-behavior certification.
+Cancellation must disconnect the actual HTTP request, preserve the shared browser endpoint,
+and permit a subsequent native browser-backed search. A subprocess loads the installed extension
+with Pi's real SDK, starts a real uvx fetch, fires the unmodified 120-second deadline callback
+under a controlled clock, and requires HTTP disconnection and shared-browser survival.
+The same subprocess checks the 256 KiB output limit against an actual large CLI response.
+The journeys verify no permanent CLI package or executable is installed. They also install
+the separate `web-toolkit` skill, verify native skill discovery alongside the extension,
+and remove each package independently while preserving the other. Skill discovery and
+installer ownership are covered; unscripted model selection of the skill remains outside this gate.
 
 Run `npm run e2e:pi-web-toolkit` for the executable journeys. Chrome, Edge or Chromium is
 required. These Windows headless checks cover native integration; public engine availability,
@@ -391,8 +398,8 @@ POSIX and interactive Pi rendering remain separate acceptance boundaries.
 
 ## Pi gotcha reports
 
-`test:pi-report-gotchas` installs the checkout `report-gotchas` skill and real uv-managed
-CLI in all four project/user and JSON/RPC combinations. It uses real headless Pi 1.2.0 and
+`test:pi-report-gotchas` installs the checkout `report-gotchas` skill and executes its bundled
+Python scripts directly in all four project/user and JSON/RPC combinations. It uses real headless Pi 1.2.0 and
 the fake Responses endpoint, with no reporting extension, hooks, transport dependency or Git
 repository. A loopback HTTPS Discord fixture preserves real URL validation, TLS, urllib,
 shell execution and CLI exit status. It requires `openssl` for its temporary certificate;
@@ -403,6 +410,10 @@ Checks cover confirmed direct posting, missing configuration, empty reports, Uni
 mentions, multipart posts, explicit HTTP/rate-limit errors, exact inference counts, absence of
 local report storage and installer removal. The only reporting state is webhook configuration.
 No unit-test mock replaces the CLI or HTTP client.
+
+`npm run test:report-gotchas-local` additionally runs the bundled scripts through real
+Claude Code and Codex using the same local HTTPS fixture, with three inference requests
+per provider and exact report delivery. No live Discord messages are sent by these tests.
 
 Explicit live acceptance uses the configured real Discord webhook:
 
@@ -415,11 +426,12 @@ These commands each post clearly labeled test reports. They read the webhook fro
 configuration (or `HARNESS_REPORT_GOTCHAS_E2E_WEBHOOK_URL`) and pass it only in child environment
 variables; diagnostics never contain the URL or message bodies. Inference always goes to the
 fake loopback API. Each live provider journey requires exactly three inference requests and
-checks the real CLI's confirmed Discord success before completing. All three journeys passed
-on Windows, and the user confirmed receipt of the three notifications.
+checks the real CLI's confirmed Discord success before completing. Before the packaging changes,
+all three live journeys passed on Windows and the user confirmed receipt of the notifications.
+The bundled scripts are verified against the local HTTPS fixture; live posting has not been rerun.
 
-The journeys use `--local` explicitly. The catalogue pins runtime 2.0; its commit must be
-published before remote installs can fetch it. Interactive Pi TUI and POSIX need separate checks.
+Package managers are offline and no reporting CLI is installed; only Discord uses the network.
+Interactive Pi TUI and POSIX need separate checks.
 
 ## Pi persistent subagents
 
@@ -454,6 +466,13 @@ without invoking a delegation command first, request `gpt-6.1-sol` at medium eff
 child result, and publish a round. The model ID is registered only against the loopback fake endpoint. Both check the
 child's persisted model/thinking metadata, the board payload, request cleanup and exactly five
 inference calls, with project guards and user-scope background shell, Calm and input extensions loaded.
+
+The checkout-runtime busy-parent regression holds an RPC parent in a bounded real shell tool.
+The interactive child sends `/reply-to-agent-with-previous-message` with zero inference; durable state
+must show a claimed delivery while RPC confirms the parent is still busy, with no concurrent model request.
+After releasing the tool, the very next model request must contain the child's result. Acceptance
+requires continuation of the same parent run, exactly five inference requests, one persisted and
+acknowledged delivery, the native child session, and an empty inbox.
 
 To run the combined journeys against the real local Grill app, database and storage instead of the
 transport fixture, start the local stack described in `apps/grill/README.md`, set
@@ -517,9 +536,13 @@ user RPC and lifecycle journeys. Shell mutations and competing tool replacements
 `test:pi-issues` installs `issue-readers` and `issue-writers` with their coupled bridge at
 project and user scope. Real Pi 1.2.0 JSON/RPC sessions prepare issue context, implement and review
 fixture files, reject dirty addressing without inference, invoke the four writing skills and
-publish with no inference. A local fake `gh` records read and publish effects; no GitHub credentials
+publish through the native command with no inference. Agent journeys also preview and publish through
+the installed script with the native shell, checking automatic identity, immediate results and no deferred notice.
+A local fake `gh` records read and publish effects; no GitHub credentials
 or external tracker mutations are involved. Checks include supplied draft paths, reload identity,
-foreign-session preservation, dry-run/invalid options, exact inference counts, user-owned reader
+foreign-session preservation, dry-run/invalid options, removed writer aliases, response-only specs
+without draft setup, progress notifications, draft-to-issue notice mappings and exclusion of visible
+publication reports from model context, exact inference counts, user-owned reader
 starters and removal of the bridge after its last dependent. Python unit tests exercise complete
 context, relation deduplication, provider identity and notice isolation; the existing issue graph
 and publishing tests retain all-page retrieval and dependency/crash-recovery coverage.
@@ -556,10 +579,10 @@ waits for named approval, rechecks live state, preserves a branch with newly arr
 removes only the approved merged branch/worktree. Unrelated input starts no inventory; unavailable
 skills/helpers stop before inference. These checks certify integration, not unscripted cleanup judgment.
 
-`test:pi-test-workflows` installs the shared skill and actual uv-managed CLI in isolated tool
-directories. Project JSON and user RPC run a passing acceptance check before explicit confirmation,
+`test:pi-test-workflows` installs the shared skill and executes its bundled Python script
+with package managers offline and no installed helper CLI. Project JSON and user RPC run a passing acceptance check before explicit confirmation,
 then introduce a regression and prove failed acceptance leaves verification stale. Broken/invalid
-coverage, exact hashes, request counts, and shared host-action receipt removal are checked. Status
+coverage, exact hashes, request counts, skill removal and absence of installed host CLIs are checked. Status
 and confirmation do not execute the acceptance steps themselves.
 
 These journeys use real Pi 1.2.0 on Windows, isolated configuration/session directories and fake
@@ -601,3 +624,9 @@ Each verified the uploaded SVG bytes, queued-only answer effects, one persisted 
 user message, confirmed server delivery, reload/fork/tree isolation and owned test cleanup.
 These headless checks do not certify browser rendering, Pi TUI behavior or unscripted model
 interview quality.
+
+## Explicit subagent skills
+
+`npm run e2e:subagents:skills` runs Claude Code and Codex headless CLI parents and children against the fake Anthropic/Responses APIs. `npm run e2e:pi-subagents:skills` installs the checkout runtime with the real catalogue installer and runs Pi JSON parents and children against the fake Responses API. All fixtures are external and upstream inference is forbidden.
+
+Each provider covers omitted, available, and missing `skill` parameters. Available skills carry a fixture resource identity and cause a real tool to write a receipt; omitted skills have no loaded body. Missing skills persist a failed request, notify the parent, and start no child CLI. Claude/Codex successful launches also resume the saved child without re-invoking its skill. Pi expects 4/5/3 inference requests for omitted/found/missing respectively; the failure reaches its parent through both the write outcome and durable result delivery. These are checkout-runtime checks, independent of the shipped remote pin and VS Code/TUI acceptance.

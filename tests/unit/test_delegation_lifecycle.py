@@ -43,9 +43,9 @@ def setup_request(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, mode: str = "
     from subagents_runtime import processes
     monkeypatch.setattr(processes,"start",lambda execution_id,*args,**kwargs: processes.confirm_startup(execution_id))
     parent = sessions.launch(provider="claude", cwd=tmp_path)
-    grant = enable_delegation(parent, "work-with-agent", original_cwd=tmp_path)
+    grant = enable_delegation(parent, "subagents-toolkit", original_cwd=tmp_path)
     request_file = grant.inbox / "request.md"
-    request_file.write_text(f"---\ntask: general\nmode: {mode}\n---\n\nDo the work.\n", encoding="utf-8")
+    request_file.write_text(f"---\nmode: {mode}\n---\n\nDo the work.\n", encoding="utf-8")
     [result] = process_inbox(grant.id, launch=lambda _request, _request_id, _number, _cwd: "child")
     assert result.request_id and result.child_session_id
     return parent, result.request_id, result.child_session_id
@@ -109,9 +109,9 @@ def test_successful_interactive_reply_offers_parent_terminal_link(tmp_path: Path
 def test_delivery_counts_running_auto_owed_replies_and_idle_children(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("HARNESS_STATE_DIR", str(tmp_path / "state"))
     sessions.register_observed("parent", tmp_path, "claude")
-    inbox = enable_delegation("parent", "work-with-agent").inbox
+    inbox = enable_delegation("parent", "subagents-toolkit").inbox
     for name, mode in (("a.md", "auto"), ("b.md", "auto"), ("c.md", "interactive"), ("d.md", "interactive")):
-        (inbox / name).write_text(f"---\ntask: general\nmode: {mode}\n---\nTask.", encoding="utf-8")
+        (inbox / name).write_text(f"---\nmode: {mode}\n---\nTask.", encoding="utf-8")
     children = {
         result.request_id: result.child_session_id
         for result in process_inbox("parent", launch=lambda _request, _id, number, _cwd: f"conversation-{number}")
@@ -125,7 +125,7 @@ def test_delivery_counts_running_auto_owed_replies_and_idle_children(tmp_path: P
     def unlaunchable(*_args):
         raise RuntimeError("startup failed")
 
-    (inbox / "e.md").write_text("---\ntask: general\nmode: auto\n---\nTask.", encoding="utf-8")
+    (inbox / "e.md").write_text("---\nmode: auto\n---\nTask.", encoding="utf-8")
     [stranded] = process_inbox("parent", launch=unlaunchable)
     assert stranded.status == "failed"
 
@@ -273,14 +273,14 @@ def test_all_execution_modes_can_enable_delegation(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _parent, _request, auto_child = setup_request(tmp_path, monkeypatch, mode="auto")
-    assert enable_delegation(auto_child,"work-with-agent").inbox.is_dir()
+    assert enable_delegation(auto_child,"subagents-toolkit").inbox.is_dir()
 
     auto_run_child = "auto-run-child"
     sessions._register(auto_run_child, tmp_path, "claude", "auto-run")
-    assert enable_delegation(auto_run_child,"work-with-agent").inbox.is_dir()
+    assert enable_delegation(auto_run_child,"subagents-toolkit").inbox.is_dir()
 
     _parent, _request, interactive_child = setup_request(tmp_path / "interactive", monkeypatch, mode="interactive")
-    grant = enable_delegation(interactive_child, "work-with-agent", original_cwd=tmp_path / "interactive")
+    grant = enable_delegation(interactive_child, "subagents-toolkit", original_cwd=tmp_path / "interactive")
     assert grant.parent_session_id == interactive_child
 
 

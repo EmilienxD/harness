@@ -1,8 +1,12 @@
 import hashlib
 import io
 import json
+import os
+import shlex
 import subprocess
+import sys
 from contextlib import nullcontext
+from pathlib import Path
 
 import pytest
 
@@ -18,6 +22,8 @@ from harness_cli.installer import (
     UnownedHostProductError,
     installed_packages,
     reconcile_targets,
+    _python_command,
+    _substitute,
 )
 from harness_cli.host_actions import (
     HostActionError,
@@ -436,9 +442,9 @@ def test_catalogue_only_labels_unsupported_selected_providers():
     options = {
         tool.name: option
         for tool, option in zip(
-            (tools["aboard"], tools["on-edit-block"]),
+            (tools["aboard"], tools["on-edit-block"], tools["prefer-edit-tool"]),
             cli._tool_options(
-                [tools["aboard"], tools["on-edit-block"]],
+                [tools["aboard"], tools["on-edit-block"], tools["prefer-edit-tool"]],
                 set(),
                 (Platform.CLAUDE, Platform.CHATGPT),
             ),
@@ -446,7 +452,8 @@ def test_catalogue_only_labels_unsupported_selected_providers():
     }
 
     assert options["aboard"].badge == ""
-    assert options["on-edit-block"].badge == "ChatGPT not supported"
+    assert options["on-edit-block"].badge == ""
+    assert options["prefer-edit-tool"].badge == "ChatGPT not supported"
     claude_only = cli._tool_options(
         [tools["on-edit-block"]], set(), (Platform.CLAUDE,)
     )
@@ -782,8 +789,8 @@ def test_workspace_files_can_be_limited_to_project_installs(tmp_path):
     assert tool.expand("claude", "user") == []
 
 
-def test_installed_hook_definitions_keep_uv_as_a_path_command(tmp_path, monkeypatch):
-    root = tmp_path / "portable-uv"
+def test_installed_hooks_use_absolute_python_even_when_uv_is_available(tmp_path, monkeypatch):
+    root = tmp_path / "portable-python"
     root.mkdir()
     (root / "hook.py").write_text("pass\n")
     (root / "claude.json").write_text(json.dumps({
@@ -800,28 +807,80 @@ def test_installed_hook_definitions_keep_uv_as_a_path_command(tmp_path, monkeypa
         }]},
     }))
     (root / "harness.toml").write_text(
-        'name="portable-uv"\nversion="1.0.0"\ndescription="x"\n'
+        'name="portable-python"\nversion="1.0.0"\ndescription="x"\n'
         '[platforms.claude]\nstatus="supported"\nfragment="claude.json"\n'
         '[platforms.chatgpt]\nstatus="supported"\nfragment="chatgpt.json"\n'
         '[[files]]\nsrc="hook.py"\ndest="hook.py"\nroot="hooks"\n'
     )
     tool = load_tool(root)
-    monkeypatch.setattr(
-        "harness_cli.installer.shutil.which",
-        lambda name: "/opt/uv/bin/uv" if name == "uv" else None,
-    )
+    base_python = str(Path(sys._base_executable).resolve())
+    monkeypatch.setenv("HARNESS_PYTHON", base_python)
 
     claude = Target.for_project(tmp_path / "claude-project", Platform.CLAUDE)
     manager({tool.name: tool}, claude, tmp_path / "claude-receipts").reconcile({tool.name})
     claude_hook = claude.read_settings()["hooks"]["PostToolUse"][0]["hooks"][0]
-    assert claude_hook["command"] == "uv"
-    assert claude_hook["args"][:3] == ["run", "--no-project", "--no-managed-python"]
+    assert claude_hook["command"] == base_python
+    assert claude_hook["args"] == ["${CLAUDE_PROJECT_DIR}/.claude/hooks/hook.py"]
 
     chatgpt = Target.for_project(tmp_path / "chatgpt-project", Platform.CHATGPT)
     manager({tool.name: tool}, chatgpt, tmp_path / "chatgpt-receipts").reconcile({tool.name})
     chatgpt_hook = chatgpt.read_settings()["hooks"]["PostToolUse"][0]
-    assert chatgpt_hook["command"].startswith("uv run --no-project --no-managed-python ")
-    assert "/opt/uv/bin/uv" not in chatgpt_hook["command"]
+    command = chatgpt_hook["command"]
+    assert command.startswith(Path(base_python).as_posix() + " " if os.name == "nt"
+                              else shlex.quote(base_python) + " ")
+    assert "uv run" not in command
+
+
+def test_python_override_rejects_virtual_environment_and_missing_executable(monkeypatch):
+    monkeypatch.setenv("HARNESS_PYTHON", sys.executable)
+    if sys.prefix != sys.base_prefix:
+        with pytest.raises(InstallError, match="virtual environment"):
+            _python_command()
+    monkeypatch.setenv("HARNESS_PYTHON", "definitely-missing-harness-python")
+    with pytest.raises(InstallError, match="invalid HARNESS_PYTHON.*not found"):
+        _python_command()
+
+
+def test_python_probe_skips_old_version_and_uses_platform_fallback(monkeypatch):
+    monkeypatch.delenv("HARNESS_PYTHON", raising=False)
+    names = ("python", "py") if os.name == "nt" else ("python3", "python")
+    invoked = []
+    monkeypatch.setattr("harness_cli.installer.shutil.which", lambda name: sys._base_executable if name in names else None)
+
+    def probe(argv, **kwargs):
+        invoked.append(argv)
+        version = [3, 10] if len(invoked) == 1 else [3, 11]
+        return subprocess.CompletedProcess(argv, 0, json.dumps({
+            "version": version, "executable": sys._base_executable, "venv": False,
+        }), "")
+
+    monkeypatch.setattr("harness_cli.installer.subprocess.run", probe)
+    assert _python_command() == (str(Path(sys._base_executable).resolve()), [])
+    assert len(invoked) == 2
+    assert invoked[0][-3:-1] == ["-I", "-c"]
+    assert invoked[1][1:2] == (["-3"] if os.name == "nt" else ["-I"])
+
+
+def test_windows_codex_hook_command_uses_unquoted_forward_slashes(tmp_path):
+    if os.name != "nt":
+        pytest.skip("Windows shell command")
+    from harness_cli import settings_merge
+
+    target = Target.for_project(tmp_path, Platform.CHATGPT)
+    path = r"C:\Python313\python.exe"
+    hook = _substitute({"type": "command", "command": '${PYTHON} "${HOOKS_DIR}/hook.py"'},
+                       target, (path, []))
+    assert hook["command"].startswith("C:/Python313/python.exe ")
+    assert settings_merge.identity(hook)[-1][0].endswith(".codex/hooks/hook.py")
+
+
+def test_windows_codex_hook_rejects_python_path_with_spaces(tmp_path):
+    if os.name != "nt":
+        pytest.skip("Windows shell command")
+    target = Target.for_project(tmp_path, Platform.CHATGPT)
+    with pytest.raises(InstallError, match="Python path without spaces"):
+        _substitute('${PYTHON} ".codex/hooks/hook.py"', target,
+                    (r"C:\Program Files\Python 3.12\python.exe", []))
 
 
 @pytest.mark.parametrize("scopes", ['"project"', '["machine"]', '[]'])
@@ -1375,7 +1434,7 @@ def test_every_catalogue_manifest_loads():
             "read-all-adrs", "websearch", "writing-adrs",
         },
         "engineering": {"commit", "resolving-merge-conflicts", "setup-git-worktree-maker"},
-        "building": {"flush-out-useless-tests", "issue-readers", "issue-writers", "ship", "tdd", "test-workflows"},
+        "building": {"flush-out-useless-tests", "issue-readers", "issue-writers", "tdd", "test-workflows"},
         "shipping": {"setup-help"},
         "productivity": {
             "background-shell",
@@ -1391,6 +1450,7 @@ def test_every_catalogue_manifest_loads():
             "setup-text-replacements", "todo-hitl", "tool-inspector", "writing-for-agents", "stop-overthinking", "zoom-out",
             "polished-code-blocks",
             "web-toolkit",
+            "web-toolkit-native",
             "pi-subagents-toolkit",
         },
         "guards": {
@@ -1399,7 +1459,7 @@ def test_every_catalogue_manifest_loads():
             "redirect-subagents", "usage-limit-wait",
         },
         "vscode": {"aboard", "auto"},
-        "internal": {"pi-transport", "pi-path-guards", "pi-issue-workflows"},
+        "internal": {"pi-transport", "pi-path-guards", "pi-issue-workflows", "path-guard-common"},
     }
     actual_categories = {}
     catalogue_root = next(parent for parent in tools["aboard"].root.parents if parent.name == "harness")

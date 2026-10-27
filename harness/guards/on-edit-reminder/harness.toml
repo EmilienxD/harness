@@ -1,12 +1,16 @@
 name = "on-edit-reminder"
-version = "2.2.4"
-description = "PostToolUse hook that lets edits to files matching gitignore-style patterns land, then makes the agent read the required files and fix what doesn't follow them"
+version = "2.3.0"
+description = "Reminds the agent to read required guidance and correct violations after matching native edits or recognized shell writes"
 docs = "https://github.com/EmilienxD/harness/blob/main/README.md#hooks"
 
-dependencies = [{ name = "pi-path-guards", version = ">=1.0.0,<2.0.0", lifecycle = "coupled", platforms = ["pi"] }]
+dependencies = [{ name = "path-guard-common", version = ">=1.0.0,<2.0.0", lifecycle = "coupled" }, { name = "pi-path-guards", version = ">=1.1.0,<2.0.0", lifecycle = "coupled", platforms = ["pi"] }]
 
 [platforms.pi]
 status = "supported"
+
+[platforms.chatgpt]
+status = "supported"
+fragment = "chatgpt/hooks.fragment.json"
 
 [platforms.claude]
 status = "supported"
@@ -16,7 +20,7 @@ fragment = "claude/settings.fragment.json"
 src = "on_edit_reminder_hook.py"
 dest = "on_edit_reminder_hook.py"
 root = "hooks"
-platforms = ["claude"]
+platforms = ["claude", "chatgpt"]
 executable = true
 
 [[files]]
@@ -31,7 +35,7 @@ executable = true
 src = "on-edit-reminder.toml"
 dest = ".harness/guards/on-edit-reminder.toml"
 root = "workspace"
-platforms = ["claude"]
+platforms = ["claude", "chatgpt"]
 starter = true
 
 [[files]]

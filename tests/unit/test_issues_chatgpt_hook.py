@@ -3,6 +3,8 @@
 import importlib.util
 import io
 import json
+import os
+import subprocess
 import sys
 from pathlib import Path
 
@@ -97,6 +99,16 @@ def test_chatgpt_install_uses_native_hook_and_skill_roots(tmp_path):
         skill = tmp_path / f".agents/skills/{name}"
         assert (skill / "SKILL.md").is_file()
         assert (skill / "agents/openai.yaml").is_file()
+        if name in {"draft-issue", "draft-issues", "to-spec-draft-issue"}:
+            script = skill / "scripts/publish_issues.py"
+            assert script.read_bytes() == CORE.read_bytes()
+            result = subprocess.run(
+                [sys.executable, str(script), "--dry"],
+                cwd=tmp_path, capture_output=True, text=True, encoding="utf-8",
+                env={**{key: value for key, value in os.environ.items() if key not in core.SESSION_VARIABLES.values()}, "CODEX_THREAD_ID": "thr_install"},
+            )
+            assert result.returncode == 0, result.stderr
+            assert "No .harness/issue-drafts/ folder found" in result.stdout
     assert not (tmp_path / ".claude").exists()
 
     hooks = json.loads((tmp_path / ".codex/hooks.json").read_text(encoding="utf-8"))

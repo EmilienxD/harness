@@ -7,7 +7,6 @@ const RESULT = "harness-subagents-result";
 const NOTICE = "harness-subagents-notice";
 const SECTION = "harness-subagents";
 const PREVIOUS = "reply-to-agent-with-previous-message";
-const PREVIOUS_INVOCATION = new RegExp(`(?<!\\S)/skill:${PREVIOUS}(?=\\s|$)`, "u");
 const FAILED_STOPS = new Set(["error", "aborted", "length"]);
 const MARKER_POLL_MS = 500;
 // The marker is only a wake-up hint; the database is rechecked periodically as well.
@@ -194,10 +193,6 @@ export default function (pi: any): void {
 
   pi.on("input", async (event: any, ctx: any) => {
     if (!state) return;
-    if (PREVIOUS_INVOCATION.test(event.text)) {
-      await previousReply(ctx);
-      return { action: "handled" };
-    }
     const invoked = event.text.includes("/skill:");
     // Interactive children always report new turns so an unanswered armed reply expires.
     if (!invoked && state.delegatedMode !== "interactive") return;

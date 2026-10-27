@@ -1,0 +1,25 @@
+name = "path-guard-common"
+version = "1.0.0"
+description = "Internal shared shell path parsing and successful-read evidence"
+selectable = false
+
+[platforms.claude]
+status = "supported"
+
+[platforms.chatgpt]
+status = "supported"
+
+[platforms.pi]
+status = "supported"
+
+[[files]]
+src = "path_guard_common.py"
+dest = "path_guard_common.py"
+root = "hooks"
+platforms = ["claude", "chatgpt"]
+
+[[files]]
+src = "path_guard_common.py"
+dest = "path_guard_common.py"
+root = "support"
+platforms = ["pi"]

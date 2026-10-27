@@ -1,5 +1,5 @@
 name = "no-new-documents"
-version = "3.2.7"
+version = "3.2.9"
 description = "Cross-platform guard that routes new files in configured documentation directories through user-approved drafts"
 docs = "https://github.com/EmilienxD/harness/blob/main/README.md#hooks"
 
@@ -69,11 +69,13 @@ platforms = ["pi"]
 src = "approve-doc-draft/SKILL.md"
 dest = "approve-doc-draft/SKILL.md"
 root = "skills"
+platforms = ["claude", "chatgpt"]
 
 [[files]]
 src = "reject-doc-draft/SKILL.md"
 dest = "reject-doc-draft/SKILL.md"
 root = "skills"
+platforms = ["claude", "chatgpt"]
 
 [[files]]
 src = "approve-doc-draft/chatgpt/openai.yaml"

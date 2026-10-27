@@ -5,7 +5,6 @@
   "additionalProperties": false,
   "required": [
     "requestId",
-    "task",
     "provider",
     "mode",
     "prompt",
@@ -15,18 +14,6 @@
     "requestId": {
       "type": "string",
       "minLength": 1
-    },
-    "task": {
-      "enum": [
-        "explore",
-        "prototype",
-        "websearch",
-        "brainstorm",
-        "address",
-        "review",
-        "general",
-        "loop"
-      ]
     },
     "provider": {
       "enum": [
@@ -45,7 +32,7 @@
     "model": {
       "type": "string",
       "minLength": 1,
-      "description": "Explicit model ID for this child; omitted requests retain the task's launch profile."
+      "description": "Explicit model ID; omitted requests retain the general delegation profile and native defaults."
     },
     "effort": {
       "enum": [
@@ -111,23 +98,11 @@
         "advanced",
         "expert"
       ]
-    }
-  },
-  "if": {
-    "properties": {
-      "task": {
-        "const": "prototype"
-      }
     },
-    "required": [
-      "task"
-    ]
-  },
-  "then": {
-    "properties": {
-      "mode": {
-        "const": "interactive"
-      }
+    "skill": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$",
+      "description": "Optional explicit user-requested child skill. Missing skills fail before launch."
     }
   }
 }

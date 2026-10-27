@@ -50,7 +50,7 @@ export default function (pi: any) {
     handler: (argument: string, ctx: any) => command(verb, argument, ctx),
   });
   pi.on("input", async (event: any, ctx: any) => {
-    const match = /^\/(?:skill:)?(approve|reject)-doc-draft(?:\s+([\s\S]*))?$/.exec(event.text.trim());
+    const match = /^\/(approve|reject)-doc-draft(?:\s+([\s\S]*))?$/.exec(event.text.trim());
     if (!match) return;
     // Ordinary extension-origin input cannot impersonate a user command.
     // Trusted extensions opting into native command dispatch can invoke the

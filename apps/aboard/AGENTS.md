@@ -44,8 +44,9 @@ points.
 - `interactive`: empty, user-controlled Claude Code, Codex, or Pi TUI.
 - `explore`: read-only exploration; Claude's built-in Explore agent or a top-level Codex session enforced with
   `sandbox_mode="read-only"` and `approval_policy="never"`, or native Pi read tools enforced by its extension.
-- `prototype`, `websearch`, `brainstorm`, and `general`: manual delegation identities. Their explicit
-  `interactive` or `auto` execution mode is separate from Auto Run worker semantics.
+- `general`: manual delegation identity with an optional explicitly requested skill. Its `interactive`
+  or `auto` execution mode is independent of the skill and separate from Auto Run worker semantics.
+  Older manual identities remain readable for persisted sessions.
 - `address`: Auto Run worker invoking `/address-this` on Claude or `$address-this` on ChatGPT.
 - `review`: Auto Run worker invoking `/review-this` on Claude or `$review-this` on ChatGPT. AFK and
   HITL are orchestration modes, not separate skills.
@@ -67,9 +68,9 @@ the Run Agent webview above the fleet edits personal workspace presets, and
 `autoRun.provider` selects the Auto Run default and is scaffolded as `claude`. Reopen always uses the
 provider recorded by the session, even when the Auto Run default changes. Existing processes retain their
 configuration. Interactive, manual-delegation, and Auto Run profiles select model and effort independently.
-Manual delegation keys are `explore`, `prototype`, `websearch`, `brainstorm`, `address`, `review`, and
-`general`; their task identity must survive launch and resume instead of collapsing configuration to the
-runtime `general` identity. Profiles may use `inherit`; Auto Run workers may use `by-difficulty`.
+New manual delegations use the `general` profile and carry an optional `skill`; a skill never selects
+a launch profile. Internal loop implementers keep their own profile. Existing saved identities survive
+resume. Profiles may use `inherit`; Auto Run workers may use `by-difficulty`.
 Platform-specific values must be validated before a terminal is created.
 
 The launcher webview owns personal preset editing; preset definitions live in profile storage and describe

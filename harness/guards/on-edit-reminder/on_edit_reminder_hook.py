@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
-Claude Code PostToolUse hook: on-edit-reminder.
+Claude Code / ChatGPT PostToolUse hook: on-edit-reminder.
 
-Fires after Write/Edit/MultiEdit. When the file that was just edited matches a
+Fires after native edits and recognized shell writes. When the file that was just edited matches a
 gitignore-style pattern from an `on-edit-reminder.toml` file, the hook lets
 the edit stand and instead injects a reminder -- via additionalContext -- to
 read the file(s) the rule maps to (a style guide, conventions doc, ...) and to
@@ -17,8 +17,8 @@ already followed the guide. Letting the edit land and patching the parts that
 don't comply is the cheaper path in tokens; the reminder's job is to make sure
 the patching actually happens.
 
-Repeat behaviour: a required file is reminded about until the session
-transcript shows it was actually read, and at most once every
+Repeat behaviour: a required file is reminded about until observed successful
+reads cover its current contents, and at most once every
 REMIND_INTERVAL_SECONDS per file (a burst of edits in one turn produces one
 reminder, an ignored reminder comes back). Deliveries are recorded in a
 per-session marker file in the temp dir.
@@ -38,14 +38,22 @@ import sys
 import tomllib
 import tempfile
 import time
-from collections.abc import Iterable, Iterator
+from collections.abc import Iterable
 from pathlib import Path
 from typing import Any
+
+# Installed beside hooks; the source checkout keeps internal dependencies separate.
+_common_source = Path(__file__).resolve().parents[2] / "internal" / "path-guard-common"
+if Path(__file__).resolve().parent.parent.name == "guards" and _common_source.is_dir():
+    sys.path.insert(0, str(_common_source))
+import path_guard_common as common
+
+PROVIDER = "chatgpt" if "--chatgpt" in sys.argv else "claude"
 
 RULES_NAME = "on-edit-reminder.toml"
 
 # Hook output strings are capped by Claude Code; stay under the limit.
-MESSAGE_LIMIT = 10000
+MESSAGE_LIMIT = 1800 if PROVIDER == "chatgpt" else 10000
 
 # At most this many required files are named in one reminder; the rest are
 # summarised as "+N more" so a sprawling rules file can't bloat the message.
@@ -56,17 +64,6 @@ MAX_LISTED = 10
 # ignored reminder comes back while the work is still in flight.
 REMIND_INTERVAL_SECONDS = 120
 
-EDIT_TOOLS = {"Write", "Edit", "MultiEdit"}
-
-# Tool names that count as "reading" when scanning the transcript for prior
-# reads. `Read` is what Claude Code uses; the aliases cover SDK harnesses.
-READ_TOOLS = {"Read", "read_file", "view"}
-
-# Shell commands whose presence in a Bash call mean "the agent read a file".
-READ_COMMANDS = re.compile(r"\b(cat|more|less|head|tail|type)\b")
-
-# Quoted or bare whitespace-delimited token inside a shell command.
-TOKEN = re.compile(r'"([^"]+)"|\'([^\']+)\'|(\S+)')
 
 
 class Rule:
@@ -188,20 +185,7 @@ def project_root() -> Path:
 
 
 def normalise(path_text: str, root: Path) -> str | None:
-    """Project-relative, forward-slash form of *path_text*.
-
-    Returns None for absolute paths outside the project: rules are written
-    against project paths.
-    """
-    if Path(path_text).is_absolute():
-        try:
-            return Path(path_text).resolve().relative_to(root.resolve()).as_posix()
-        except (ValueError, OSError):
-            return None
-    raw = path_text.replace("\\", "/")
-    while raw.startswith("./"):
-        raw = raw[2:]
-    return raw or None
+    return common.relative(path_text, root)
 
 
 def display_path(path: Path, root: Path) -> str:
@@ -212,84 +196,6 @@ def display_path(path: Path, root: Path) -> str:
 
 
 
-def _iter_tool_use_blocks(obj: object) -> Iterator[dict[str, Any]]:
-    """Yield every {"type": "tool_use", "name": ...} dict nested in *obj*.
-
-    Transcript entries nest tool calls (message.content[...]), so walk
-    generically rather than assuming an exact shape.
-    """
-    if isinstance(obj, dict):
-        if obj.get("type") == "tool_use" and "name" in obj:
-            yield obj
-        for value in obj.values():
-            yield from _iter_tool_use_blocks(value)
-    elif isinstance(obj, list):
-        for item in obj:
-            yield from _iter_tool_use_blocks(item)
-
-
-def _read_candidates(tool_use: dict[str, Any]) -> list[str]:
-    """Raw path strings a tool_use block read, best-effort."""
-    name = tool_use.get("name")
-    tool_input = tool_use.get("input") or {}
-    if name in READ_TOOLS:
-        candidate = (
-            tool_input.get("file_path")
-            or tool_input.get("path")
-            or tool_input.get("filePath")
-        )
-        return [candidate] if isinstance(candidate, str) and candidate else []
-    if name == "Bash":
-        command = tool_input.get("command")
-        if not isinstance(command, str) or not READ_COMMANDS.search(command):
-            return []
-        out = []
-        for match in TOKEN.finditer(command):
-            token = match.group(1) or match.group(2) or match.group(3) or ""
-            if token and not token.startswith("-"):
-                out.append(token)
-        return out
-    return []
-
-
-def transcript_reads(transcript_path: str, needed: Iterable[str], root: Path) -> set[str]:
-    """Which of *needed* (project-relative paths) were read this session.
-
-    Scans the JSONL transcript for prior Read/Bash-cat calls. Stops early
-    once everything needed is accounted for; any parse problem just means
-    "not confirmed read", never a crash.
-    """
-    found: set[str] = set()
-    remaining = set(needed)
-    if not transcript_path or not remaining:
-        return found
-    path = Path(transcript_path)
-    if not path.is_file():
-        return found
-    try:
-        with path.open("r", encoding="utf-8") as handle:
-            for line in handle:
-                line = line.strip()
-                if not line:
-                    continue
-                try:
-                    entry = json.loads(line)
-                except json.JSONDecodeError:
-                    continue
-                for tool_use in _iter_tool_use_blocks(entry):
-                    for candidate in _read_candidates(tool_use):
-                        rel = normalise(candidate, root)
-                        if rel in remaining:
-                            found.add(rel)
-                            remaining.discard(rel)
-                if not remaining:
-                    return found
-    except OSError:
-        pass
-    return found
-
-
-
 def marker_path(payload: dict[str, Any]) -> Path | None:
     """Per-session marker in the temp dir; None when the session can't be
     identified (the hook then simply can't remember deliveries)."""
@@ -297,7 +203,7 @@ def marker_path(payload: dict[str, Any]) -> Path | None:
     safe = "".join(c for c in session_id if c.isalnum() or c in "-_")
     if not safe:
         return None
-    return Path(tempfile.gettempdir()) / f"claude_on_edit_reminder_{safe}.marker"
+    return Path(tempfile.gettempdir()) / f"{PROVIDER}_on_edit_reminder_{safe}.marker"
 
 
 def load_reminded(marker: Path | None) -> dict[str, float]:
@@ -395,19 +301,23 @@ def main() -> int:
     if not isinstance(event, dict):
         return 0
 
-    if event.get("tool_name") not in EDIT_TOOLS:
-        return 0
     tool_input = event.get("tool_input")
     if not isinstance(tool_input, dict):
         return 0
-    file_path = tool_input.get("file_path")
-    if not isinstance(file_path, str) or not file_path:
+    root = project_root() if PROVIDER == "claude" and os.environ.get("CLAUDE_PROJECT_DIR") else Path(event.get("cwd") or project_root())
+    # Keep policy lookup at the project root while shell paths follow the call's cwd.
+    tool_input = dict(tool_input)
+    if event.get("cwd"):
+        tool_input.setdefault("cwd", event["cwd"])
+    event["tool_input"] = tool_input
+    common.observe(event, root, PROVIDER)
+    if event.get("hook_event_name") == "PostToolUse" and not common.successful(event.get("tool_response", {})):
         return 0
-
-    root = project_root()
-    rel_path = normalise(file_path, root)
-    if rel_path is None:
+    paths = [common.relative(path, root) for path in common.edit_paths(event.get("tool_name"), tool_input, root)]
+    paths = list(dict.fromkeys(path for path in paths if path is not None))
+    if not paths:
         return 0
+    rel_path = ", ".join(paths)
 
     # Bundled defaults, then shared user and project rules.
     sources: list[Path] = []
@@ -442,7 +352,7 @@ def main() -> int:
                 "the TOML rule schema and were ignored.",
             ))
 
-    required = matching_files(all_rules, rel_path)
+    required = list(dict.fromkeys(f for path in paths for f in matching_files(all_rules, path)))
 
     # A required file that isn't on disk can never be read: reporting the
     # broken rule beats telling the agent to read something that isn't there.
@@ -469,7 +379,7 @@ def main() -> int:
             ),
         ))
 
-    already_read = transcript_reads(event.get("transcript_path", ""), existing, root)
+    already_read = common.confirmed_reads(event, existing, root, PROVIDER)
     missing = [f for f in existing if f not in already_read and due(reminded, f, now)]
 
     fresh_diagnostics = [

@@ -1,8 +1,8 @@
 # On Read Reminder
 
-Platforms: **Claude Code, Pi**. Install with `harness install on-read-reminder`; see [installation and scope](../../getting-started.md).
+Platforms: **Claude Code, ChatGPT (local Work/Codex), Pi**. Install with `harness install on-read-reminder`; see [installation and scope](../../getting-started.md).
 
-`on-read-reminder` is a Claude Code PostToolUse hook and a native Pi extension. After the agent reads a path matched by policy, it asks the agent to read the listed guidance files. It does not block the original read.
+`on-read-reminder` uses Claude Code/ChatGPT PostToolUse hooks and a native Pi extension. After the agent reads a path matched by policy, it asks the agent to read the listed guidance files. It does not block the original read.
 
 Install with `harness install on-read-reminder --platform claude`, restart Claude Code, and edit `.harness/guards/on-read-reminder.toml` (or `~/.harness/guards/on-read-reminder.toml` at user scope). The starter contains only commented examples, so add a rule to activate it:
 
@@ -18,7 +18,7 @@ patterns = ["vendor/**"]
 exclude = true
 ```
 
-Patterns are gitignore-style paths. Rules are ordered: a matching exclusion clears earlier requirements. User rules load before project rules. Harness preserves edited starter policies during upgrades. ChatGPT is not supported.
+Patterns are gitignore-style paths. Rules are ordered: a matching exclusion clears earlier requirements. User rules load before project rules. Harness preserves edited starter policies during upgrades. ChatGPT support uses local hooks; cloud-orchestrated Work does not load these command hooks.
 
 ## When to use it
 
@@ -35,6 +35,12 @@ Approve the project's resources when Pi requests trust. Project rules use the sa
 project rules load afterward. Pi requires uv or Python 3.11+ on `PATH`.
 
 Pi reminds after successful native `read` and recognized `bash`/`powershell` reads, including partial reads. Failed reads produce no reminder. Each successful matching read can remind again.
+
+## ChatGPT and Claude behavior
+
+Install for local ChatGPT with `harness install on-read-reminder --platform chatgpt`, then review/trust the installed hooks and restart the session. ChatGPT recognizes supported shell reads; Claude retains native `Read` coverage and also recognizes shell reads. Both return the reminder as additional model context after the read. Failed calls produce no reminder; successful partial reads can trigger it.
+
+ChatGPT shell coverage uses the session directory and explicit `cd` commands. The tested Codex CLI does not expose per-call `exec_command.workdir` overrides to hooks; relative paths under such overrides cannot be resolved reliably. Use absolute paths or an explicit `cd` for those calls.
 
 ## Implementation and verification
 

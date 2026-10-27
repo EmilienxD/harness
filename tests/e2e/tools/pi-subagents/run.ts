@@ -8,7 +8,7 @@ import { promisify } from "node:util";
 import { findHarnessRoot, runFixtureInstaller } from "../../core/installer.js";
 import { createPiFixture } from "../../core/pi-fixture.js";
 import { PiRpcClient, type PiRun } from "../../core/pi.js";
-import { childMarker, parentMarker, REQUEST_FILE, roundPayload, subagentsScenario, type Route } from "./scenario.js";
+import { BUSY_MARKER, childMarker, parentMarker, REQUEST_FILE, roundPayload, subagentsScenario, type Route } from "./scenario.js";
 import { startGrillBoard } from "../pi-grill/board.js";
 
 const execFileAsync = promisify(execFile);
@@ -30,6 +30,7 @@ export interface PiSubagentsResult {
   readonly requestedEffort?: string;
   readonly childModel?: string;
   readonly childThinkingLevel?: string;
+  readonly busyDeliveryClaimed?: boolean;
 }
 
 const finalText = (run: PiRun) => {
@@ -58,38 +59,53 @@ async function runtimeState(python: string, stateDir: string, parentId: string) 
   const script = [
     "import json, sqlite3, sys",
     "db = sqlite3.connect(sys.argv[1])",
-    "rows = db.execute(\"SELECT r.state,r.mode,r.provider,r.reply,r.delivery_id,r.acknowledged_at IS NOT NULL,s.provider_session_id=s.id,s.id FROM requests r JOIN sessions s ON s.id=r.child_session_id\").fetchall()",
+    "rows = db.execute(\"SELECT r.state,r.mode,r.provider,r.reply,r.delivery_id,r.acknowledged_at IS NOT NULL,s.provider_session_id=s.id,s.id,r.claim_sequence IS NOT NULL FROM requests r JOIN sessions s ON s.id=r.child_session_id\").fetchall()",
     "inbox = db.execute('SELECT inbox FROM session_delegation WHERE parent_session_id=?', (sys.argv[2],)).fetchone()",
     "print(json.dumps({'requests': rows, 'inbox': inbox[0] if inbox else None}))",
   ].join("\n");
   const { stdout } = await execFileAsync(python, ["-c", script, join(stateDir, "sessions.sqlite3"), parentId], { windowsHide: true, timeout: 15_000 });
-  return JSON.parse(stdout) as { requests: [string, string, string, string, string, number, number, string][]; inbox: string | null };
+  return JSON.parse(stdout) as { requests: [string, string, string, string, string, number, number, string, number][]; inbox: string | null };
 }
 
 export async function runPiSubagentsJourney(route: Route, options: {
   pinnedRuntimes?: boolean;
+  skill?: "none" | "found" | "missing";
   fullStack?: boolean;
   explicitModel?: boolean;
   shellWrite?: boolean;
   failedWrite?: boolean;
+  busyParent?: boolean;
   localBoard?: { origin: string; code: string };
 } = {}): Promise<PiSubagentsResult> {
+  if (options.busyParent && (route !== "interactive" || options.fullStack)) throw new Error("Busy-parent acceptance requires the standalone interactive journey");
   if (options.localBoard && (!options.fullStack || new URL(options.localBoard.origin).origin !== options.localBoard.origin || new URL(options.localBoard.origin).hostname !== "127.0.0.1")) {
     throw new Error("Combined live acceptance requires a loopback board and the full extension stack");
   }
   const transport = options.fullStack && !options.localBoard ? await startGrillBoard() : undefined;
   const board = options.localBoard ?? transport;
-  const fixture = await createPiFixture(subagentsScenario({ explicitModel: options.explicitModel ?? false, grilling: !!board, shellWrite: options.shellWrite ?? false, failedWrite: options.failedWrite ?? false })).catch(async (error) => { await transport?.close(); throw error; });
+  const fixture = await createPiFixture(subagentsScenario({ ...(options.skill ? { skill: options.skill } : {}), explicitModel: options.explicitModel ?? false, grilling: !!board, shellWrite: options.shellWrite ?? false, failedWrite: options.failedWrite ?? false, busyParent: options.busyParent ?? false })).catch(async (error) => { await transport?.close(); throw error; });
   const parentId = randomUUID();
   let child: PiRpcClient | undefined;
   try {
     const root = await findHarnessRoot();
     const { projectRoot: project, env, sessionsDir } = fixture.workspace;
-    if (options.shellWrite) {
+    if (options.shellWrite || options.busyParent) {
       const path = join(project, ".pi", "settings.json");
       const settings = JSON.parse(await readFile(path, "utf8"));
       settings.defaultTools.push(process.platform === "win32" ? "powershell" : "bash");
       await writeFile(path, JSON.stringify(settings));
+    }
+    if (options.busyParent) {
+      // A bounded real tool holds the parent busy until its extension claims the reply.
+      await writeFile(join(project, "busy-parent.cjs"), [
+        "const fs = require('node:fs');",
+        "fs.writeFileSync('busy-ready', 'ready');",
+        "const deadline = Date.now() + 60000;",
+        "const timer = setInterval(() => {",
+        "  if (fs.existsSync('busy-release')) { clearInterval(timer); console.log('released'); }",
+        "  else if (Date.now() >= deadline) { clearInterval(timer); process.exitCode = 1; }",
+        "}, 50);",
+      ].join("\n"));
     }
     const python = join(root, ".venv", process.platform === "win32" ? "Scripts/python.exe" : "bin/python");
     const bin = join(fixture.root, "uv-bin");
@@ -100,6 +116,11 @@ export async function runPiSubagentsJourney(route: Route, options: {
     env[pathKey] = `${bin}${delimiter}${env[pathKey] ?? ""}`;
     const packages = ["subagents", ...(options.fullStack ? ["grill-me-in-cloud", "command-guard", "on-read-reminder", "on-edit-reminder", "no-new-documents", "prefer-fewer-comments", "mid-prompt-skills"] : [])];
     await runFixtureInstaller(fixture.workspace, "install", packages, { scope: "project", pinnedRuntimes: options.pinnedRuntimes ?? true });
+    if (options.skill) {
+      const selectedRoot = join(project, ".pi", "skills", "e2e-selected");
+      await mkdir(selectedRoot, { recursive: true });
+      await writeFile(join(selectedRoot, "SKILL.md"), "---\nname: e2e-selected\ndescription: Fixture explicit skill.\ndisable-model-invocation: true\n---\n[E2E:subagents:loaded-skill]\nWrite the selection receipt.\n");
+    }
     if (options.fullStack) {
       await runFixtureInstaller(fixture.workspace, "install", ["background-shell", "calm", "environment-context", "file-mentions", "slash-command-guard"], { scope: "user" });
       Object.assign(env, { HARNESS_GRILL_URL: board!.origin, HARNESS_GRILL_CODE: board!.code });
@@ -124,9 +145,10 @@ export async function runPiSubagentsJourney(route: Route, options: {
       terminalCommand: [process.execPath, join(root, "tests", "e2e", "tools", "pi-subagents", "capture-terminal.mjs"), captures],
     }));
 
-    const prompt = `/skill:${board ? "grill-me-in-cloud" : "work-with-agent"} ${parentMarker(route)}`;
+    const prompt = `/skill:${board ? "grill-me-in-cloud" : "subagents-toolkit"} ${parentMarker(route)}`;
     let parent: PiRun;
     let previousReplyInferenceRequests: number | undefined;
+    let busyDeliveryClaimed: boolean | undefined;
     if (route === "auto") {
       // A headless parent exits after settling, so it must wait for its child before settlement.
       parent = await fixture.runJson({ prompt, sessionId: parentId, timeoutMs: 180_000 });
@@ -153,11 +175,33 @@ export async function runPiSubagentsJourney(route: Route, options: {
       assert.equal(first.status, "success", "the live parent's delegating turn failed");
       const start = rpc.eventCount;
       assert.equal((await child.prompt(`${childMarker(route)} Reply with your answer.`, 60_000)).status, "success");
+      const busyRun = options.busyParent ? rpc.prompt(BUSY_MARKER, 90_000) : undefined;
+      // Observe rejection immediately even if a later synchronization check fails.
+      void busyRun?.catch(() => {});
+      if (busyRun) await waitFor(async () => readFile(join(project, "busy-ready"), "utf8").then(() => true, () => undefined), "parent tool started");
       const before = fixture.assertions().inferenceRequests;
-      assert.equal((await child.prompt("/skill:reply-to-agent-with-previous-message", 30_000)).status, "handled");
+      assert.equal((await child.prompt("/reply-to-agent-with-previous-message", 30_000)).status, "handled");
       previousReplyInferenceRequests = fixture.assertions().inferenceRequests - before;
-      // The live parent is idle; the delivered result itself starts its next turn.
-      parent = await rpc.nextRun(start, 60_000);
+      if (busyRun) {
+        await waitFor(async () => {
+          const state = await runtimeState(python, stateDir, parentId);
+          if (state.requests[0]?.[8] !== 1) return undefined;
+          const response = await rpc.request("get_state");
+          const data = response.data as { isStreaming?: boolean } | undefined;
+          return response.success === true && data?.isStreaming === true ? true : undefined;
+        }, "child reply claimed while parent tool is running");
+        busyDeliveryClaimed = true;
+        assert.equal(fixture.assertions().inferenceRequests, before, "queued delivery must not start concurrent inference");
+        await writeFile(join(project, "busy-release"), "release");
+        parent = await busyRun;
+        assert.equal(parent.status, "success", JSON.stringify({ stops: parent.assistantStopReasons, tools: parent.toolExecutions, observations: fixture.assertions().observations }));
+        assert.equal(parent.events.filter((event) => event.type === "agent_start").length, 1, "busy delivery must continue the existing run");
+        // RPC emits settlement before all extension bookkeeping has completed.
+        await waitFor(async () => (await runtimeState(python, stateDir, parentId)).requests[0]?.[5] === 1 ? true : undefined, "persisted result acknowledged");
+      } else {
+        // The live parent is idle; the delivered result itself starts its next turn.
+        parent = await rpc.nextRun(start, 60_000);
+      }
     }
 
     const state = await runtimeState(python, stateDir, parentId);
@@ -187,6 +231,11 @@ export async function runPiSubagentsJourney(route: Route, options: {
       const result = await execFileAsync(python, ["-c", "import sqlite3,json,sys; c=sqlite3.connect(sys.argv[1]); print(json.dumps(c.execute('SELECT s.model,s.effort FROM sessions s JOIN requests r ON r.child_session_id=s.id').fetchone()))", join(stateDir, "sessions.sqlite3")], { windowsHide: true, timeout: 15_000 });
       [requestedModel, requestedEffort] = JSON.parse(result.stdout);
     }
+    if (options.skill === "found") assert.deepEqual(JSON.parse(await readFile(join(project, "selected-skill.json"), "utf8")), { skill: "e2e-selected" });
+    if (options.skill === "missing") {
+      assert.equal(requestState, "failed");
+      assert.equal(assertions.inferenceRequests, 3);
+    }
     const childEntries = await sessionEntries(sessionsDir, childId);
     const childModel = childEntries?.filter(entry => entry.type === "model_change").at(-1)?.modelId;
     const childThinkingLevel = childEntries?.filter(entry => entry.type === "thinking_level_change").at(-1)?.thinkingLevel;
@@ -206,8 +255,10 @@ export async function runPiSubagentsJourney(route: Route, options: {
       childSessionSaved: childEntries !== undefined,
       requestFilesRemaining: remaining,
       ...(previousReplyInferenceRequests === undefined ? {} : { previousReplyInferenceRequests }),
+      ...(busyDeliveryClaimed === undefined ? {} : { busyDeliveryClaimed }),
     };
   } finally {
+    if (options.busyParent) await writeFile(join(fixture.workspace.projectRoot, "busy-release"), "release");
     await child?.close();
     try { await fixture.close(); } finally {
       try {

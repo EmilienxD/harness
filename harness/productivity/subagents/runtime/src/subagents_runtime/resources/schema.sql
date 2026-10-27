@@ -20,7 +20,7 @@ CREATE TABLE session_delegation (
 CREATE TABLE requests (
  id TEXT PRIMARY KEY, kind TEXT NOT NULL DEFAULT 'launch' CHECK(kind IN ('launch','resume')),
  parent_session_id TEXT NOT NULL REFERENCES sessions(id), child_session_id TEXT REFERENCES sessions(id),
- agent_number INTEGER, source_name TEXT, task TEXT, provider TEXT, mode TEXT, prompt_hash TEXT,
+ agent_number INTEGER, source_name TEXT, task TEXT, skill TEXT, provider TEXT, mode TEXT, prompt_hash TEXT,
  state TEXT NOT NULL CHECK(state IN ('launching','pending','uncertain','succeeded','failed','cancelled')),
  reply TEXT, reason TEXT, delivery_id TEXT UNIQUE, claim_sequence INTEGER, acknowledgement_sequence INTEGER,
  claimed_at TEXT, acknowledged_at TEXT, source_deleted_at TEXT, completed_at TEXT,

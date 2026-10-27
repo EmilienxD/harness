@@ -6,6 +6,10 @@ Fires before Claude ever sees the prompt. When the prompt is "/publish-issues"
 exits 2, which erases the prompt and shows stderr to the user only - zero API
 calls for this step.
 
+The bundled skill script resolves its session from the shell environment and
+accepts optional --dry. It prints results directly to the agent and skips the
+deferred notice.
+
 Design notes:
 - Every draft is one flat file in ".harness/issue-drafts/", named
   "{session-id}.issue-{i}.md". The session id in the filename is the only
@@ -94,6 +98,7 @@ import subprocess
 import sys
 import tempfile
 import time
+import uuid
 from contextvars import ContextVar
 from pathlib import Path
 
@@ -110,6 +115,12 @@ GH_DEADLINE: ContextVar[float | None] = ContextVar("issues_gh_deadline", default
 # Everything this tool remembers between runs lives here, never in the user's
 # repository. Mirrors the convention in src/harness_cli/receipts.py.
 STATE_DIR_VARIABLE = "HARNESS_STATE_DIR"
+CLAUDE_SESSION_VARIABLE = "HARNESS_ISSUES_CLAUDE_SESSION_ID"
+SESSION_VARIABLES = {
+    "claude": CLAUDE_SESSION_VARIABLE,
+    "chatgpt": "CODEX_THREAD_ID",
+    "pi": "PI_SESSION_ID",
+}
 
 # A draft mid-publish. The rename is the entire crash-recovery mechanism.
 PUBLISHING_SUFFIX = ".publishing"
@@ -358,7 +369,7 @@ def prepare_drafting_context(root: Path, session_id: str) -> str:
 
 
 def queue_notice(
-    root: Path, session_id: str, created: list[dict], failed: int
+    root: Path, session_id: str, created: list[dict], failed: int, problems: list[str] | None = None
 ) -> None:
     """Stage what this run published for delivery on the next prompt.
 
@@ -377,6 +388,7 @@ def queue_notice(
             "number": entry.get("number"),
             "title": entry.get("title"),
             "labels": entry.get("labels") or [],
+            "draft": entry.get("draft"),
         }
         for entry in created[:available]
     )
@@ -384,6 +396,7 @@ def queue_notice(
         "created": entries,
         "failed": pending.get("failed", 0) + failed,
         "omitted": pending.get("omitted", 0) + max(0, len(created) - available),
+        "problems": (pending.get("problems", []) + (problems or []))[:10],
     }
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -407,6 +420,8 @@ def _read_notice(path: Path) -> dict:
         else [],
         "failed": data.get("failed") if isinstance(data.get("failed"), int) else 0,
         "omitted": data.get("omitted") if isinstance(data.get("omitted"), int) else 0,
+        "problems": [entry[:500] for entry in data.get("problems", []) if isinstance(entry, str)][:10]
+        if isinstance(data.get("problems"), list) else [],
     }
 
 
@@ -423,44 +438,33 @@ def flush_notice(root: Path, session_id: str) -> str | None:
     omitted = pending.get("omitted", 0)
     if not created and not failed and not omitted:
         return None
-    return format_notice(created, failed, omitted)
+    return format_notice(created, failed, omitted, pending.get("problems", []))
 
 
-def format_notice(created: list[dict], failed: int, omitted: int = 0) -> str:
+def format_notice(created: list[dict], failed: int, omitted: int = 0, problems: list[str] | None = None) -> str:
     """The text injected into the agent's context on the next prompt."""
-    lines = [
-        "/publish-issues ran just before this message. It is a hook, so it "
-        "produced no assistant turn - this is how you learn what happened."
-    ]
+    lines = ["Publication results from /publish-issues (no model turn):"]
     if created:
         lines.append("")
         lines.append("These GitHub issues now exist on the tracker:")
         for entry in created[:MAX_NOTICE_ENTRIES]:
             labels = ", ".join(entry.get("labels") or []) or "no labels"
             title = entry.get("title") or "(untitled)"
-            lines.append(f"- #{entry.get('number')} \"{title}\" [{labels}]")
+            source = f"{entry['draft']} -> " if entry.get("draft") else ""
+            lines.append(f"- {source}#{entry.get('number')} \"{title}\" [{labels}]")
         remaining = max(0, len(created) - MAX_NOTICE_ENTRIES) + omitted
         if remaining > 0:
             lines.append(f"- ... and {remaining} more")
     if failed:
         lines.append("")
         lines.append(
-            f"{failed} draft(s) failed or were skipped and are still in "
-            f"{DRAFTS_DIR.as_posix()}/ awaiting a rerun."
+            f"{failed} draft(s) failed or were skipped. Check the reported failures; "
+            f"remaining drafts are in {DRAFTS_DIR.as_posix()}/."
         )
+    lines.extend(problems or [])
     lines.append("")
     if created:
-        lines.append(
-            "Refer to these issues by their real numbers from now on. A new draft "
-            "becomes a GitHub sub-issue of one of them when a bare reference (e.g. "
-            f"#{created[0].get('number')}) is the first non-empty line under its "
-            "\"## Parent\" heading - /publish-issues turns that into a real "
-            "sub-issue link."
-        )
-        lines.append(
-            "Do not re-draft, re-publish, close, or otherwise modify issues that "
-            "already exist."
-        )
+        lines.append("Use the real issue numbers for subsequent references. These issues already exist.")
     else:
         lines.append("Rerun /publish-issues once those drafts are fixed.")
     return "\n".join(lines)
@@ -951,7 +955,8 @@ def gh_find_issues_by_title(title: str) -> tuple[bool, list[dict] | str]:
 
 
 def recover_interrupted(
-    drafts_dir: Path, session_id: str, resolved: dict[str, str], report: list[str]
+    drafts_dir: Path, session_id: str, resolved: dict[str, str], report: list[str],
+    created: list[dict] | None = None,
 ) -> int:
     """Resolve drafts a crash left mid-publish. Returns the failure count.
 
@@ -983,6 +988,10 @@ def recover_interrupted(
         if matches:
             number = str(matches[0].get("number"))
             resolved[f"{session_id}/{match['index']}"] = number
+            if created is not None:
+                created.append({"number": number, "title": title,
+                                "draft": f"{DRAFTS_DIR.as_posix()}/{original.name}",
+                                "labels": extract_labels(parse_issue_file(path)[1])[0]})
             report.append(
                 f"  Recovered: {original.name} was already published as "
                 f"#{number}; discarding the draft."
@@ -1031,6 +1040,7 @@ def publish_one(
         "labels": labels,
         "parent": parent,
         "parts": len(parts),
+        "draft": f"{DRAFTS_DIR.as_posix()}/{path.name}",
     }
     # The issue exists, so the draft has done its job either way.
     with contextlib.suppress(OSError):
@@ -1046,6 +1056,11 @@ def publish_one(
                 "draft is gone - repost them by hand or redraft the issue."
             )
     return True, record, ""
+
+
+def _preview_reference(text: str) -> str:
+    """Give simulated issue numbers a local draft identity in the preview."""
+    return re.sub(r"#?NEW-(\d+)", r"draft \1", text)
 
 
 def publish_batch(
@@ -1067,7 +1082,7 @@ def publish_batch(
     # this batch can resolve references to earlier ones.
     resolved: dict[str, str] = {}
     recovery_failures = (
-        0 if dry else recover_interrupted(drafts_dir, session_id, resolved, report)
+        0 if dry else recover_interrupted(drafts_dir, session_id, resolved, report, created)
     )
 
     files = gather_draft_files(drafts_dir, session_id)
@@ -1075,6 +1090,8 @@ def publish_batch(
         return 0, recovery_failures
 
     report.append(f"Batch: {len(files)} draft issue(s)")
+    if dry:
+        report.append("Publication order below; draft N refers to the .issue-N.md filename index.")
     report.append("")
 
     # Worklist retry: a file with an unresolved reference goes back on the
@@ -1101,7 +1118,7 @@ def publish_batch(
                 if not dry:
                     rewrite_known_references(path, resolved)
                 failed_entries.append(
-                    f"  SKIP  {path.name} - missing or malformed label line"
+                    f"  SKIP  {DRAFTS_DIR.as_posix()}/{path.name} - missing or malformed label line"
                 )
                 made_progress = True  # not retryable, don't requeue
                 continue
@@ -1132,16 +1149,18 @@ def publish_batch(
             key = f"{session_id}/{index}"
 
             if dry:
-                suffix = f" -> sub-issue of #{parent_number}" if parent_number else ""
+                report.append(f"{published + 1}. {title}")
+                report.append(f"   File: {DRAFTS_DIR.as_posix()}/{path.name}")
+                report.append(f"   Labels: {', '.join(labels)}")
+                parent_display = f"#{parent_number}" if parent_number else "none"
+                report.append(f"   Parent: {_preview_reference(parent_display)}")
+                blockers = re.search(r"^## Blocked by\s*\n(.*?)(?=^## |\Z)", body, re.MULTILINE | re.DOTALL)
+                blocked_by = " ".join(blockers[1].split()) if blockers else "none"
+                report.append(f"   Blocked by: {_preview_reference(blocked_by)}")
                 part_count = len(render_parts(body))
                 if part_count > 1:
-                    suffix += (
-                        f" -> {part_count} parts "
-                        f"({part_count - 1} continuation comment(s))"
-                    )
-                report.append(
-                    f"  Would create: \"{title}\" [{', '.join(labels)}]{suffix}"
-                )
+                    report.append(f"   Body: {part_count} parts ({part_count - 1} continuation comment(s))")
+                report.append("")
                 # Fabricate a placeholder so later dry-run references in this
                 # batch resolve too, for a fuller preview.
                 resolved[key] = f"NEW-{index}"
@@ -1163,7 +1182,7 @@ def publish_batch(
                 resolved[key] = str(record["number"])
             if ok and record is not None:
                 suffix = f" ({record['parts']} parts)" if record["parts"] > 1 else ""
-                report.append(f"  Created: {record['url']}{suffix}")
+                report.append(f"  Created: \"{title}\" — {record['url']}{suffix}")
                 if parent_number and keep_parent_in_body:
                     linked, link_error = gh_link_parent(record["number"], parent_number)
                     if not linked:
@@ -1178,7 +1197,7 @@ def publish_batch(
                     created.append(record)
                 published += 1
             else:
-                failed_entries.append(f"  FAIL  {path.name}: {error}")
+                failed_entries.append(f"  FAIL  {DRAFTS_DIR.as_posix()}/{path.name}: {error}")
                 if record is not None and created is not None:
                     # The issue exists, so the agent must still learn its number.
                     created.append(record)
@@ -1200,15 +1219,17 @@ def publish_batch(
         if parent_ref and resolve_parent(parent_ref, resolved)[0] is None:
             unresolved.append(f"parent {parent_ref}")
         failed_entries.append(
-            f"  SKIP  {path.name} - unresolved reference: {', '.join(unresolved)}"
+            f"  SKIP  {DRAFTS_DIR.as_posix()}/{path.name} - unresolved reference: {', '.join(unresolved)}"
         )
 
     report.extend(failed_entries)
     return published, len(failed_entries) + recovery_failures
 
 
-def publish_issues(dry: bool, session_id: str, root: Path | None = None) -> str:
-    """Publish drafts belonging to the current agent session only."""
+def publish_issues(
+    dry: bool, session_id: str, root: Path | None = None, *, defer_notice: bool = True
+) -> str:
+    """Publish this session's drafts; defer notices only for user command runs."""
     root = Path.cwd() if root is None else root
     drafts_dir = root / DRAFTS_DIR
     if not drafts_dir.is_dir():
@@ -1229,7 +1250,7 @@ def publish_issues(dry: bool, session_id: str, root: Path | None = None) -> str:
         return "No drafts found for this session. Nothing to publish."
 
     if dry:
-        return _run_publish(drafts_dir, True, root, session_id)
+        return _run_publish(drafts_dir, True, root, session_id, defer_notice=defer_notice)
 
     with file_lock(lock_path(root)) as acquired:
         if not acquired:
@@ -1240,10 +1261,12 @@ def publish_issues(dry: bool, session_id: str, root: Path | None = None) -> str:
         sweep_stale(root)
         if nothing_to_publish():
             return "No drafts found for this session. Nothing to publish."
-        return _run_publish(drafts_dir, False, root, session_id)
+        return _run_publish(drafts_dir, False, root, session_id, defer_notice=defer_notice)
 
 
-def _run_publish(drafts_dir: Path, dry: bool, root: Path, session_id: str) -> str:
+def _run_publish(
+    drafts_dir: Path, dry: bool, root: Path, session_id: str, *, defer_notice: bool = True
+) -> str:
     header = "Dry run -- nothing will be created" if dry else "Publishing drafted issues"
     report = [header, ""]
     labels_ensured = False
@@ -1261,19 +1284,22 @@ def _run_publish(drafts_dir: Path, dry: bool, root: Path, session_id: str) -> st
     )
     report.append("")
 
-    if not dry:
-        queue_notice(root, session_id, created, failed)
+    if not dry and defer_notice:
+        problems = [line.strip()[:500] for line in report if line.startswith(("  FAIL", "  SKIP", "  WARN"))]
+        queue_notice(root, session_id, created, failed, problems)
 
     if dry:
         report.append(f"Dry run complete: {published} issue(s) ready to publish.")
         if failed:
             report.append(f"{failed} would be skipped (see above).")
+        report.append("Nothing published. This local preview does not verify GitHub access or permissions.")
     elif failed:
         report.append(
             f"Published {published} issue(s). {failed} failed or were skipped."
         )
         report.append(
-            f"Failed drafts remain in {DRAFTS_DIR.as_posix()}/ -- fix and rerun."
+            f"Check the failures above. Fix remaining drafts in {DRAFTS_DIR.as_posix()}/ and rerun; "
+            "issues that already exist may need manual repair."
         )
     else:
         report.append(f"Published {published} issue(s) successfully.")
@@ -1306,3 +1332,52 @@ def run_publish_command(prompt: str, session_id: str, root: Path | None = None) 
     except (argparse.ArgumentError, ValueError) as exc:
         return f"Invalid publish command: {exc}"
     return publish_issues(options.dry, session_id, root)
+
+
+def provider_session_id(provider: str, native_id: str) -> str:
+    """Use the same draft identity for native hooks and agent shell commands."""
+    if not native_id or native_id.strip() != native_id:
+        raise ValueError("Missing or malformed native issues session identity")
+    if provider == "claude":
+        if not SESSION_ID_PATTERN.fullmatch(native_id):
+            raise ValueError("Invalid Claude issues session identity")
+        return native_id
+    if provider not in {"chatgpt", "pi"}:
+        raise ValueError("Unknown issues provider")
+    return str(uuid.uuid5(uuid.NAMESPACE_URL, f"harness:issues:{provider}:{native_id}"))
+
+
+def session_from_environment() -> str:
+    """Never select a draft batch from caller arguments, PIDs or directory scans."""
+    identities = [
+        (provider, os.environ[variable])
+        for provider, variable in SESSION_VARIABLES.items()
+        if variable in os.environ
+    ]
+    if len(identities) != 1:
+        raise ValueError(
+            "Missing or ambiguous provider session environment. "
+            "Run inside one supported agent session; for Claude, restart or resume "
+            "after installing the SessionStart hook. Nothing was published."
+        )
+    return provider_session_id(*identities[0])
+
+
+def main(argv: list[str] | None = None) -> None:
+    """Agent entry point: return results directly, without a next-prompt notice."""
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser.add_argument("--dry", action="store_true", help="Preview locally without publishing")
+    options = parser.parse_args(argv)
+    try:
+        session_id = session_from_environment()
+    except ValueError as exc:
+        parser.error(str(exc))
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if callable(reconfigure):
+            reconfigure(encoding="utf-8")
+    print(publish_issues(options.dry, session_id, defer_notice=False))
+
+
+if __name__ == "__main__":
+    main()

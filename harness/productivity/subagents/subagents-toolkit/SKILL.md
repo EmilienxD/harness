@@ -1,6 +1,6 @@
 ---
 name: subagents-toolkit
-description: Manage subagents when the user explicitly requests delegation. Use when the user asks to invoke, run, launch, delegate to Codex/ChatGPT/Claude/Pi agents/subagents.
+description: Manage persistent subagents when the user explicitly requests launching, delegating to, continuing, or resuming Claude Code, ChatGPT/Codex, or Pi agents.
 license: MIT
 metadata:
   author: EMB
@@ -8,19 +8,17 @@ metadata:
 
 # Subagents toolkit
 
-A subagent is an agent whose parent is you.
+Launch or continue subagents only when the user explicitly requests delegation. Use the assigned conversation inbox supplied by the runtime, including after resume. If no inbox was supplied, stop and report the missing runtime context.
 
-Use the assigned inbox supplied by the runtime for every subagent launch and continuation, including after this conversation is resumed. If the runtime has not supplied an inbox, stop and notify the user. Launch subagents only when the user explicitly requests it. This method is now the default method for running subagents; always use it when the user wants to "run subagents", "delegate the work to", or "resume subagents".
+Publish one complete `.md` request directly in that inbox per child launch or continuation. For multi-step writes, use a temporary file with another extension and rename it to `.md` when complete. Confirm the runtime's launch acknowledgement before reporting a child as started. If launch or continuation fails, report the available error details and stop without retrying or substituting another workflow.
 
-Write one `.md` file directly in the supplied inbox for each subagent. The runtime will process it as soon as it is created; so if you need to write it in multiple steps, use another file extension temporary, then replace with `.md` when it's temporary file with another extension and rename it to `.md` when it's complete. You will be acknowledged when it launches successfully; otherwise report the problem and stop. You will be notified when it completes. do not poll; never sleep, poll, proactively check progress, or run a command to do so. Do other work that doesn't depend on the subagent's result. If their is nothing else to do or the user explicitly asked you to wait, end your turn to wait for the result of whichever subagent finishes first.
-
-If a subagent launch or continuation fails, report a bug to the user with the available error details and stop without retrying or attempting a workaround.
+Results arrive automatically. Do independent work while children run; when nothing remains independent of their results, end your turn to wait. Never poll, sleep, or run progress-checking commands.
 
 Launch frontmatter schema (`|` separates enum values):
 
 ```markdown
 ---
-task: <registered task>    # Required. Selects a built-in or custom task (see below).
+skill: <skill name>       # Optional. Include only the skill explicitly named by the user.
 mode: auto|interactive    # Required. Spawn the subagent in a headless or visible terminal.
 provider: claude|chatgpt|codex|pi    # Optional. Defaults to this conversation's provider. `codex` is an alias of chatgpt.
 model: <model id>         # Optional. Include only when the user explicitly requests a particular model.
@@ -33,75 +31,43 @@ root: <directory path>    # Optional. Include only when the user explicitly requ
 
 ## Model selection
 
-Include `model` only when the user explicitly requests a particular model for the subagent. Otherwise omit the field and let the runtime apply its existing task profile and native provider defaults.
+Include `model` only when the user explicitly requests a particular model for the subagent. Otherwise omit the field and let the runtime apply its general delegation profile and native provider defaults.
 
 Use the requested model's exact ID for the selected provider from this list:
 - ChatGPT/Codex: `gpt-6.1-sol`, `gpt-6-astra`, `gpt-6-sol`, `gpt-6-luna`, `gpt-5.6-sol`, `gpt-5.6-terra`, `gpt-5.6-luna`
 - Claude: `claude-fable-5-1`, `claude-opus-5-5`, `claude-opus-5`, `claude-sonnet-5-5`, `claude-haiku-5-5`
 - Pi: Any model id from ChatGPT or Claude above, with the prefix `openai/` or `anthropic/` respectively (e.g. `anthropic/claude-opus-5-5`). Use when the user mention Pi.
 
-If the requested model is absent, tell the user the list needs updating before launching with that model. An explicit model overrides the task default.
+If the requested model is absent, tell the user the list needs updating before launching with that model. An explicit model overrides the delegation default.
 
 ## Effort selection
 
-Include `effort` when the user requests an effort level for the subagent; otherwise omit it to retain the task profile and provider defaults. Use the requested level from the launch schema independently of `model`.
+Include `effort` when the user requests an effort level for the subagent; otherwise omit it to retain the general delegation profile and provider defaults. Use the requested level from the launch schema independently of `model`.
 
 ## Root selection
 
-Omit `root` to start the child in this conversation's working directory. When the user explicitly asks the child to work in another directory or worktree, set `root` to that directory's path. Use an existing directory; relative paths resolve from this conversation's working directory. A resumed child keeps its original root, so resume requests contain only `resume`.
+Omit `root` to start the subagent in this conversation's working directory. When the user explicitly asks the subagent to work in another directory or worktree, set `root` to that directory's path. Use an existing directory; relative paths resolve from this conversation's working directory. A resumed subagent keeps its original root, so resume requests contain only `resume`.
 
-## Task selection
+## Skill and mode selection
 
-Below is the built-in list of tasks, allowed modes, and default mode:
+Set `skill` only when the user explicitly asks the subagent to use a skill by name. Use the exact skill name provided, without a prefix such as `/`, `$`, `/skill:`. The system checks availability and adds the native invocation to its prompt. An unavailable skill fails the launch; report the error to the user and stop.
 
-```yaml
-general:
-  launcher: work-with-agent
-  modes: [auto, interactive]
-  default-mode: interactive
-explore:
-  launcher: explore-with-agent
-  modes: [auto]
-  default-mode: auto
-prototype:
-  launcher: prototype-with-agent
-  modes: [interactive]
-  default-mode: interactive
-websearch:
-  launcher: websearch-with-agent
-  modes: [auto, interactive]
-  default-mode: auto
-brainstorm:
-  launcher: brainstorm-with-agent
-  modes: [interactive]
-  default-mode: interactive
-address:
-  launcher: address-with-agent
-  modes: [auto, interactive]
-  default-mode: auto
-review:
-  launcher: review-with-agent
-  modes: [auto, interactive]
-  default-mode: auto
-```
+Use `auto` when the subagent should work independently and report back. Use `interactive` when the user wants to work directly in its visible session; default to interactive when unspecified. Both modes accept skills.
 
-Use `auto` when the subagent should work independently and report back. Use `interactive` when the user wants to work with the subagent directly in its visible session. Choose a mode allowed by the registered task, using its default when the user has not selected a mode.
-
-Determine the task from the user's request and the preceding conversation. When the invocation supplies no new task, use the subject already under discussion and any description supplied as an argument. If no built-in task is suitable, read `.harness/subagent-tasks.yaml` and `~/.harness/subagent-tasks.yaml` to discover the user's custom tasks. Disregard the `skill` entry; it doesn't affect the inbox system. If these registries are empty or if nothing still fits the task, fall back to the `general` task. The general task should be used only as a fallback or if the user explicitly asks for it.
+Give the subagent only the requested skill selection. Instruct it to use skills only when explicitly requested by the user, subject to its project and provider instructions.
 
 Each new subagent starts with a fresh conversation and knows only the project and user memory files such as `AGENTS.md`/`CLAUDE.md`. Give it a self-contained prompt that explains why, what, where, and how, including constraints and completion criteria, without repeating general project information it can read there.
 
-Reference files as `@absolute/or/relative/to/the/project/root/path`. Prefixing a path with `@` loads the file directly into the subagent's context, saving tool calls, time, and tokens. Refer to line numbers in plain text (e.g., lines 14-45). Do not append them to the file path (e.g., @src/core.py:25); that format is not supported. If relevant code is not saved in the project, include the necessary parts as small snippets.
+Reference files as `@absolute/or/relative/to/the/project/root/path`. On Pi, automatic loading requires the file-mentions extension to be installed and active in the child session. Without it, keep the reference and ask the child to read the file explicitly. Refer to line numbers in plain text (e.g., lines 14-45). Do not append them to the file path (e.g., @src/core.py:25); that format is not supported. If relevant code is not saved in the project, include the necessary parts as small snippets.
 
 Perspective change:
-- For interactive agents, "I" is the user, not you; never write: "The user wants to ...".
-- For auto agents, "I" is you; the parent agent.
+- For interactive agents: "I" is the user, not you; never write "The user wants to ...".
+- For auto agent:, "I" is you; the parent agent.
 
 Interactive example:
 
 ```markdown
 ---
-task: general
 mode: interactive
 ---
 
@@ -112,7 +78,6 @@ Auto example:
 
 ```markdown
 ---
-task: general
 mode: auto
 ---
 
@@ -121,7 +86,7 @@ The user wants to understand why configuration precedence differs between the tw
 
 In real requests, include all details the subagent needs to act.
 
-Agents have stable identifiers (e.g. `agent-1`, `agent-2`). Continue any subagent at any time with exclusive resume frontmatter and a nonempty next message; it keeps its task, provider, model, effort, mode, directory, and id:
+Agents have stable identifiers (e.g. `agent-1`, `agent-2`). Continue any subagent at any time with exclusive resume frontmatter and a nonempty next message; it keeps its conversation, provider, model, effort, mode, directory, and id:
 
 ```markdown
 ---

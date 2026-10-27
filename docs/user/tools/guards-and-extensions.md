@@ -15,9 +15,9 @@ For a scripted project install, use `harness install command-guard no-new-docume
 | [`command-guard`](guards/command-guard.md) | Claude Code, ChatGPT, Pi | Cross-platform PreToolUse guard that denies configured dangerous Bash and PowerShell commands |
 | [`exclude-unwanted-tools`](guards/exclude-unwanted-tools.md) | Pi | Exclude powershell, codemode, find, grep, and ls from Pi's tool registry |
 | [`no-new-documents`](guards/no-new-documents.md) | Claude Code, ChatGPT, Pi | Cross-platform guard that routes new files in configured documentation directories through user-approved drafts |
-| [`on-edit-block`](guards/on-edit-block.md) | Claude Code, Pi | PreToolUse hook that denies Write/Edit/MultiEdit on files matching gitignore-style patterns until the agent has read the required files |
-| [`on-edit-reminder`](guards/on-edit-reminder.md) | Claude Code, Pi | PostToolUse hook that lets edits to files matching gitignore-style patterns land, then makes the agent read the required files and fix what doesn't follow them |
-| [`on-read-reminder`](guards/on-read-reminder.md) | Claude Code, Pi | PostToolUse hook that reminds the agent to read key files when it reads paths matching gitignore-style patterns |
+| [`on-edit-block`](guards/on-edit-block.md) | Claude Code, ChatGPT, Pi | PreToolUse hook that denies Write/Edit/MultiEdit on files matching gitignore-style patterns until the agent has read the required files |
+| [`on-edit-reminder`](guards/on-edit-reminder.md) | Claude Code, ChatGPT, Pi | PostToolUse hook that lets edits to files matching gitignore-style patterns land, then makes the agent read the required files and fix what doesn't follow them |
+| [`on-read-reminder`](guards/on-read-reminder.md) | Claude Code, ChatGPT, Pi | PostToolUse hook that reminds the agent to read key files when it reads paths matching gitignore-style patterns |
 | [`prefer-edit-tool`](guards/prefer-edit-tool.md) | Claude Code | PostToolUse nudge to prefer the Write/Edit tools over heredocs, redirects, sed -i and inline python for file writes |
 | [`prefer-fewer-comments`](guards/prefer-fewer-comments.md) | Claude Code, ChatGPT, Pi | Advisory comment and docstring budgets over newly written commentary, with native Pi mutation snapshots |
 | [`prefer-read-tool`](guards/prefer-read-tool.md) | Claude Code | PostToolUse nudge to prefer the Read tool over shell file-read commands |
@@ -49,13 +49,20 @@ Each tool guide owns its policy schema, invocation, examples and provider differ
 
 ## Read/edit guard implementation and verification
 
-`on-read-reminder`, `on-edit-reminder`, and `on-edit-block` 2.2.1 use `pi-path-guards` 1.0.0
-and its `pi-transport` dependency through Pi-only coupled dependencies. The guard helper imports
+The three guards at 2.3.0 share the internal `path-guard-common` 1.0.0 dependency across Claude, ChatGPT and Pi. It owns shell path extraction and complete shell-read verification. Native provider tool adapters remain separate. Claude/ChatGPT track successful guidance reads in provider/project/session-scoped receipts; Claude no longer treats transcript tool-call attempts as proof of reading.
+
+Supplemental shell coverage includes output redirection, `tee`, `sed -i`, `perl -i`, `touch`, `truncate`, copy/move/remove commands, and PowerShell `Set-Content`, `Add-Content`, `Out-File` and related file operations. Quoted literal paths, basic directory changes and common shell wrappers are recognized. Shell reads include `cat`, `more`, `less`, `head`, `tail`, `type`, `Get-Content` and simple `sed` reads. Complete-read credit requires a simple `cat`/`type`/`Get-Content` command and matching successful output. Arbitrary scripts, computed paths and custom tools remain outside this extra safety layer. The tested Codex CLI omits `exec_command.workdir` from its canonical Bash hook payload: relative paths resolve against the session directory unless the command contains an explicit `cd`. Use explicit directory changes or absolute paths when relying on ChatGPT shell coverage. Per-call working directories are honored when the provider includes them in hook input.
+
+Local ChatGPT Work/Codex uses native `PreToolUse`/`PostToolUse` command hooks and `apply_patch`; cloud-orchestrated Work needs a different, managed MCP deployment. Hook definitions must be reviewed/trusted before use.
+
+`npm run test:path-guards` runs the real headless Claude Code, Codex and Pi RPC CLIs with isolated installed catalogue packages. Authenticated fake Anthropic/OpenAI APIs script inference only. Checks cover denied shell/native mutations, partial versus complete guidance reads, native reads, shell/native reminders, multi-path patch denial, exact filesystem effects, inference counts and coupled removal.
+
+Pi additionally uses `pi-path-guards` 1.1.0 and its `pi-transport` dependency through Pi-only coupled dependencies. The guard helper imports
 each package's existing Python parser and message builders. Transport selects the same uv/Python
 preference as the installer and records
 launch argv in session receipts. Subprocess requests and responses are versioned JSON, bounded
 at 2 MiB and ten seconds, with cancellation on session replacement/shutdown. Guard transport
-errors deny native edits; reminder errors append diagnostics while preserving successful results.
+errors deny checked edits; reminder errors append diagnostics while preserving successful results.
 Original tool content and structured output are preserved.
 
 User policy starters live outside npm packages under `<PI_CODING_AGENT_DIR>/harness/`
@@ -71,7 +78,7 @@ only guidance actually inlined within the existing message budget, after an obse
 against the authenticated fake OpenAI Responses API. JSON/RPC and project/user checks cover
 reminders, cooldown, failed calls, denial/retry, partial-read coverage, shell reads, nested tools,
 reload, tree navigation, exact file effects, request counts, and coupled removal. These checks
-certify native read/write/edit integration on Windows; they do not certify arbitrary shell
+certify native read/write/edit integration and recognized shell commands on Windows; they do not certify arbitrary shell
 mutations, third-party tools, restricted-launch admission, or a security sandbox. Each tool guide states its own supported boundary.
 
 ## Guard admission and evidence

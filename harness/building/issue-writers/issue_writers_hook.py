@@ -15,7 +15,6 @@ from __future__ import annotations
 import json
 import os
 import sys
-import uuid
 from pathlib import Path
 
 import issues_core as core
@@ -81,7 +80,18 @@ def claude_prompt(payload: dict) -> None:
 
 def issues_session_id(session_id: str) -> str:
     """Map ChatGPT thread ids to the UUID form used by draft references."""
-    return str(uuid.uuid5(uuid.NAMESPACE_URL, f"harness:issues:chatgpt:{session_id}"))
+    return core.provider_session_id(CHATGPT, session_id)
+
+
+def claude_session_start(payload: dict) -> None:
+    """Persist hook-owned identity for subsequent Claude Bash commands."""
+    env_file = os.environ.get("CLAUDE_ENV_FILE")
+    if not env_file:
+        return
+    session_id = core.provider_session_id(CLAUDE, str(payload.get("session_id") or ""))
+    # A validated UUID needs no shell quoting and cannot inject shell syntax.
+    with Path(env_file).open("a", encoding="utf-8", newline="\n") as stream:
+        stream.write(f"\nexport {core.CLAUDE_SESSION_VARIABLE}={session_id}\n")
 
 
 def chatgpt_prompt(payload: dict) -> None:
@@ -129,6 +139,9 @@ def main(argv: list[str] | None = None) -> None:
     if callable(reconfigure):
         reconfigure(encoding="utf-8", errors="strict")
     payload = json.load(sys.stdin)
+    if provider == CLAUDE and payload.get("hook_event_name") == "SessionStart":
+        claude_session_start(payload)
+        return
     if provider == CHATGPT:
         chatgpt_prompt(payload)
         return

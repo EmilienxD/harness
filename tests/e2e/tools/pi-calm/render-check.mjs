@@ -148,7 +148,7 @@ for (const renderShell of ["default", "self", undefined]) {
   row.setExpanded(true);
   assert.deepEqual(row.render(100), [], `${name}: hide expanded custom or fallback result`);
   await emit(extension, "tool_execution_start", { toolName: name, toolCallId: `check-${name}`, args: { path: "custom.ts" } });
-  assert.ok(row.render(100).join("\n").includes(`${name} custom.ts`), "arbitrary tool gets a summary");
+  assertSummaryBlock(row.render(100), `${name} custom.ts`);
   await emit(extension, "session_start");
   rows.push(row);
 }
@@ -212,14 +212,24 @@ const startCall = async (toolName, args, fields = {}, allowReplacement = true) =
   return callRows.get(id);
 };
 const chatLines = (width = 100) => chatContainer.render(width);
-const assertBlock = (summary, count = 1) => {
-  const lines = chatLines().map(stripTerminalSequences);
+function assertSummaryBlock(rendered, summary, count = 1) {
+  const lines = rendered.map(stripTerminalSequences);
   assert.ok(lines.length >= 4, "a chat block is visible");
   assert.match(lines[1], /^╭/);
   assert.equal(lines.filter((line) => line.startsWith("╭")).length, count, "each visible call has its own block");
-  const body = lines.map((line) => line.slice(4, -2).trimEnd()).join("\n");
-  assert.ok(body.includes(summary), "the chat blocks contain the expected summary");
+  const separator = summary.indexOf(" ");
+  const name = separator < 0 ? summary : summary.slice(0, separator);
+  const detail = separator < 0 ? "" : summary.slice(separator + 1);
+  assert.ok(lines.some((line, index) => {
+    if (!line.startsWith("╭") || !line.includes(` ${name} `)) return false;
+    const end = lines.findIndex((candidate, next) => next > index && candidate.startsWith("╰"));
+    const body = lines.slice(index + 1, end).map((bodyLine) => bodyLine.slice(2, -2).trimEnd()).join("\n");
+    return body.includes(detail);
+  }), "the tool name is on the border and its routing arguments are inside the same block");
   assert.match(lines.at(-1), /^╰/);
+}
+const assertBlock = (summary, count = 1) => {
+  assertSummaryBlock(chatLines(), summary, count);
 };
 for (const [name, args, summary] of [
   ["web_search", { query: "Pi extension API" }, "web_search Pi extension API"],
@@ -228,7 +238,7 @@ for (const [name, args, summary] of [
   const row = await startCall(name, args);
   assertBlock(summary);
   await completeCall([...activeCallIds].at(-1), true);
-  assert.match(chatLines()[2], /\u001b\[31m•\u001b\[39m/);
+  assert.match(chatLines()[1], /\u001b\[31m•\u001b\[39m/);
   await emit(extension, "before_provider_request");
   advance(3000);
   assert.deepEqual(row.render(100), [], "completed web output leaves no row");
@@ -239,11 +249,11 @@ for (const [name, args, summary] of [
 }
 await startCall("read", { path: "src/app.ts" });
 assertBlock("read src/app.ts");
-const firstSpinner = chatLines()[2].slice(2, 3);
+const firstSpinner = chatLines()[1].slice(4, 5);
 assert.match(firstSpinner, /[⠴⠦⠧⠇⠏⠋⠙⠹⠸⠼]/);
 const beforeAnimation = redraws;
 advance(80);
-assert.notEqual(chatLines()[2].slice(2, 3), firstSpinner, "the left-hand Braille character animates");
+assert.notEqual(chatLines()[1].slice(4, 5), firstSpinner, "the border's Braille character animates");
 assert.ok(redraws > beforeAnimation, "animation requests a redraw without new tool events");
 advance(10000);
 assertBlock("read src/app.ts");
@@ -254,7 +264,7 @@ assertBlock("write src/next.ts", 2);
 advance(10000);
 assertBlock("read src/app.ts", 2);
 await completeCall(readId);
-assert.match(chatLines()[2], /\u001b\[32m•\u001b\[39m/, "success produces a green dot immediately");
+assert.match(chatLines()[1], /\u001b\[32m•\u001b\[39m/, "success produces a green dot immediately");
 const runningAnimation = redraws;
 advance(2999);
 assertBlock("read src/app.ts", 2);
@@ -302,7 +312,7 @@ assert.deepEqual(chatLines(), [], "each settled call expires after three seconds
 await startCall("powershell", { command: "Write-Output fixture" });
 assertBlock("powershell Write-Output fixture");
 await completeCall([...activeCallIds].at(-1), true);
-assert.match(chatLines()[2], /\u001b\[31m•\u001b\[39m/, "a failed tool produces a red dot");
+assert.match(chatLines()[1], /\u001b\[31m•\u001b\[39m/, "a failed tool produces a red dot");
 await startCall("grep", { pattern: "example", path: "src" });
 assertBlock("grep example src");
 await startCall("find", { pattern: "*.ts", path: "src" });
@@ -340,11 +350,11 @@ await startCall("bash", { command: 'echo first\r\n\tprintf "second"\n\u001b[31me
 assertBlock('bash echo first\n    printf "second"\necho third');
 assert.ok(!chatLines().join("").includes("\u001b"), "command escape sequences stay out of the rendered block");
 await startCall("read", { path: "x".repeat(1100) });
-const capped = chatLines(1200).map(stripTerminalSequences).slice(2, -1).map((line) => line.slice(4, -2).trimEnd()).join("\n");
+const capped = "read " + chatLines(1200).map(stripTerminalSequences).slice(2, -1).map((line) => line.slice(2, -2).trimEnd()).join("\n");
 assert.equal(Array.from(capped).length, 350);
 assert.ok(capped.endsWith("…"), "only the character limit adds an ellipsis");
 await startCall("read", { path: "🙂".repeat(1100) });
-const unicodeCapped = chatLines(3000).map(stripTerminalSequences).slice(2, -1).map((line) => line.slice(4, -2).trimEnd()).join("\n");
+const unicodeCapped = "read " + chatLines(3000).map(stripTerminalSequences).slice(2, -1).map((line) => line.slice(2, -2).trimEnd()).join("\n");
 assert.equal(Array.from(unicodeCapped).length, 350, "the cap counts Unicode characters without splitting surrogate pairs");
 
 const thinkingMessage = {

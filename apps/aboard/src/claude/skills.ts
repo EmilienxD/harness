@@ -1,5 +1,5 @@
 import { stat } from "node:fs/promises";
-import { join } from "node:path";
+import { dirname, resolve, join } from "node:path";
 
 import { claudeConfigDirectory } from "./sessions.js";
 
@@ -10,8 +10,13 @@ export async function harnessSkillIsResolvable(
   skillName: string,
   configDirectory: string = claudeConfigDirectory(),
 ): Promise<boolean> {
+  const projectRoots: string[] = [];
+  for (let directory = resolve(workspaceRoot); ; directory = dirname(directory)) {
+    projectRoots.push(directory);
+    if (await stat(join(directory, ".git")).then(() => true, () => false) || dirname(directory) === directory) break;
+  }
   const candidates = [
-    join(workspaceRoot, ".claude", "skills", skillName, "SKILL.md"),
+    ...projectRoots.map((root) => join(root, ".claude", "skills", skillName, "SKILL.md")),
     join(configDirectory, "skills", skillName, "SKILL.md"),
   ];
   const results = await Promise.all(candidates.map((path) => stat(path).then((entry) => entry.isFile(), () => false)));

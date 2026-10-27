@@ -32,6 +32,7 @@ export async function runOnReadReminderJourney(): Promise<OnReadReminderJourneyR
     await mkdir(configRoot, { recursive: true });
     const harnessRoot = await findHarnessRoot(process.cwd());
     await copyFile(join(harnessRoot, "harness", "guards", "on-read-reminder", "on_read_reminder_hook.py"), hookPath);
+    await copyFile(join(harnessRoot, "harness/internal/path-guard-common/path_guard_common.py"), join(dirname(hookPath), "path_guard_common.py"));
     await writeFile(join(projectRoot, "trigger.txt"), TRIGGER_CONTENT, "utf8");
     await writeFile(join(projectRoot, "GUIDE.md"), `${REQUIRED_MARKER}\n`, "utf8");
     await writeFile(join(projectRoot, ".harness", "guards", "on-read-reminder.toml"), 'version=1\n[[rules]]\npatterns=["trigger.txt"]\nrequire=["GUIDE.md"]\n', "utf8");

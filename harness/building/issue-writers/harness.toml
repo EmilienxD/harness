@@ -1,10 +1,10 @@
 name = "issue-writers"
-version = "2.3.6"
+version = "2.3.11"
 description = "Draft and publish GitHub issues"
 requires = ["git", "gh"]
 docs = "https://github.com/EmilienxD/harness/blob/main/README.md#user-invoked-skills"
 
-dependencies = [{ name = "pi-issue-workflows", version = ">=1.0.0,<2.0.0", lifecycle = "coupled", platforms = ["pi"] }]
+dependencies = [{ name = "pi-issue-workflows", version = ">=1.0.3,<2.0.0", lifecycle = "coupled", platforms = ["pi"] }]
 
 [platforms.pi]
 status = "supported"
@@ -59,6 +59,7 @@ root = "skills"
 src = "publish-issues/SKILL.md"
 dest = "publish-issues/SKILL.md"
 root = "skills"
+platforms = ["claude", "chatgpt"]
 
 [[files]]
 src = "to-spec/SKILL.md"
@@ -110,3 +111,21 @@ src = "issue_writers_pi.py"
 dest = "issue_writers_pi.py"
 root = "support"
 platforms = ["pi"]
+
+[[files]]
+src = "issues_core.py"
+dest = "draft-issue/scripts/publish_issues.py"
+root = "skills"
+executable = true
+
+[[files]]
+src = "issues_core.py"
+dest = "draft-issues/scripts/publish_issues.py"
+root = "skills"
+executable = true
+
+[[files]]
+src = "issues_core.py"
+dest = "to-spec-draft-issue/scripts/publish_issues.py"
+root = "skills"
+executable = true

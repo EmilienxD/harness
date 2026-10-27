@@ -56,7 +56,7 @@ documented in the `harness-e2e` skill.
 - Keep Aboard's source, npm build, VSIX, version history, and release tags independent from the
   Python package.
 - Do not fill the user-owned prompt placeholders shipped by `address-this`, `review-this`, prototype,
-  websearch, work-with-agent, or reply-to-agent workflows.
+  websearch, subagents-toolkit, or reply-to-agent workflows.
 - Consult the checked-in official product references before changing hooks, settings, CLI flags,
   sessions, sandboxing, or gateway behavior.
 

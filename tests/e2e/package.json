@@ -3,6 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
+    "test:path-guards": "esbuild test/path-guards.test.ts --bundle --platform=node --format=cjs --target=node22 --outfile=dist/test/path-guards.test.js && node --test dist/test/path-guards.test.js",
     "test:pi-environment-context": "esbuild test/pi-environment-context.test.ts --bundle --platform=node --format=cjs --target=node22 --outfile=dist/test/pi-environment-context.test.js && node --test dist/test/pi-environment-context.test.js",
     "test:pi-file-mentions": "esbuild test/pi-file-mentions.test.ts --bundle --platform=node --format=cjs --target=node22 --outfile=dist/test/pi-file-mentions.test.js && node --test dist/test/pi-file-mentions.test.js",
     "test:pi-slash-command-guard": "esbuild test/pi-slash-command-guard.test.ts --bundle --platform=node --format=cjs --target=node22 --outfile=dist/test/pi-slash-command-guard.test.js && node --test dist/test/pi-slash-command-guard.test.js",
@@ -25,8 +26,6 @@
     "e2e:pi-web-toolkit": "esbuild tools/pi-web-toolkit/cli.ts --bundle --platform=node --format=cjs --target=node22 --outfile=dist/tools/pi-web-toolkit/cli.js && node dist/tools/pi-web-toolkit/cli.js",
     "test:pi-web-toolkit": "esbuild test/pi-web-toolkit.test.ts --bundle --platform=node --format=cjs --target=node22 --outfile=dist/test/pi-web-toolkit.test.js && node --test dist/test/pi-web-toolkit.test.js",
     "test:pi-shared-skills": "esbuild test/pi-shared-skills.test.ts --bundle --platform=node --format=cjs --target=node22 --outfile=dist/test/pi-shared-skills.test.js && node --test dist/test/pi-shared-skills.test.js",
-    "e2e:ship:build": "npm run e2e:subagents:bridge && esbuild tools/ship/cli.ts --bundle --platform=node --format=cjs --target=node22 --outfile=dist/tools/ship/cli.js",
-    "e2e:ship": "npm run e2e:ship:build && node dist/tools/ship/cli.js",
     "check": "tsc --noEmit",
     "e2e:grill-images": "esbuild ../../apps/aboard/src/grill/images.ts --bundle --platform=node --format=cjs --target=node22 --outfile=../../apps/aboard/dist/grill-image-acceptance.js && esbuild tools/grill-images/run.ts --bundle --platform=node --format=cjs --target=node22 --outfile=dist/tools/grill-images/run.js && node dist/tools/grill-images/run.js",
     "test:build": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\" && esbuild test/*.test.ts --bundle --platform=node --format=cjs --target=node22 --outdir=dist/test && npm run e2e:subagents:bridge",
@@ -61,6 +60,7 @@
     "e2e:pi-subagents:live": "esbuild tools/pi-subagents/cli.ts --bundle --platform=node --format=cjs --target=node22 --outfile=dist/tools/pi-subagents/cli.js && node dist/tools/pi-subagents/cli.js",
     "test:pi-subagents": "npm run e2e:subagents:bridge && esbuild test/pi-subagents.test.ts test/pi-codex-shutdown.test.ts --bundle --platform=node --format=cjs --target=node22 --outdir=dist/test && node --test --test-concurrency=1 dist/test/pi-subagents.test.js dist/test/pi-codex-shutdown.test.js",
     "test:pi-report-gotchas": "esbuild test/pi-report-gotchas.test.ts --bundle --platform=node --format=cjs --target=node22 --outfile=dist/test/pi-report-gotchas.test.js && node --test dist/test/pi-report-gotchas.test.js",
+    "test:report-gotchas-local": "esbuild test/report-gotchas-local.test.ts --bundle --platform=node --format=cjs --target=node22 --outfile=dist/test/report-gotchas-local.test.js && node --test dist/test/report-gotchas-local.test.js",
     "e2e:pi-report-gotchas": "esbuild tools/pi-report-gotchas/cli.ts --bundle --platform=node --format=cjs --target=node22 --outfile=dist/tools/pi-report-gotchas/cli.js && node dist/tools/pi-report-gotchas/cli.js",
     "e2e:report-gotchas:build": "esbuild tools/report-gotchas/cli.ts --bundle --platform=node --format=cjs --target=node22 --outfile=dist/tools/report-gotchas/cli.js --sourcemap",
     "e2e:report-gotchas": "npm run e2e:report-gotchas:build && node dist/tools/report-gotchas/cli.js",
@@ -93,7 +93,9 @@
     "e2e:pi-cleanup-git": "esbuild tools/pi-cleanup-git/cli.ts --bundle --platform=node --format=cjs --target=node22 --outfile=dist/tools/pi-cleanup-git/cli.js && node dist/tools/pi-cleanup-git/cli.js",
     "e2e:pi-test-workflows": "esbuild tools/pi-test-workflows/cli.ts --bundle --platform=node --format=cjs --target=node22 --outfile=dist/tools/pi-test-workflows/cli.js && node dist/tools/pi-test-workflows/cli.js",
     "test:pi-prefer-fewer-comments": "esbuild test/pi-prefer-fewer-comments.test.ts --bundle --platform=node --format=cjs --target=node22 --outfile=dist/test/pi-prefer-fewer-comments.test.js && node --test dist/test/pi-prefer-fewer-comments.test.js",
-    "e2e:pi-prefer-fewer-comments": "esbuild tools/pi-prefer-fewer-comments/cli.ts --bundle --platform=node --format=cjs --target=node22 --outfile=dist/tools/pi-prefer-fewer-comments/cli.js && node dist/tools/pi-prefer-fewer-comments/cli.js"
+    "e2e:pi-prefer-fewer-comments": "esbuild tools/pi-prefer-fewer-comments/cli.ts --bundle --platform=node --format=cjs --target=node22 --outfile=dist/tools/pi-prefer-fewer-comments/cli.js && node dist/tools/pi-prefer-fewer-comments/cli.js",
+    "e2e:subagents:skills": "npm run e2e:subagents:build && node dist/tools/subagents/cli.js --skills",
+    "e2e:pi-subagents:skills": "npm run e2e:subagents:bridge && esbuild tools/pi-subagents/skills-cli.ts --bundle --platform=node --format=cjs --target=node22 --outfile=dist/tools/pi-subagents/skills-cli.js && node dist/tools/pi-subagents/skills-cli.js"
   },
   "devDependencies": {
     "@types/node": "22.20.1",

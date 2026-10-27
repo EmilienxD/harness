@@ -8,6 +8,7 @@ import pytest
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "harness/building/issue-readers"))
 import issue_graph
+import issue_readers_hook as core
 
 
 def connection(nodes, cursor=None):
@@ -99,4 +100,39 @@ def test_select_reads_paginated_blockers_before_claiming(monkeypatch, capsys):
 def test_lookup_errors_never_masquerade_as_no_eligible_work(payload, monkeypatch, capsys):
     api(monkeypatch, lambda query, fields: payload)
     assert issue_graph.main(["42", "--repo", "acme/demo"]) == 2
+    assert capsys.readouterr().err
+
+
+@pytest.mark.parametrize("reader", ["bounded", "paginated"])
+@pytest.mark.parametrize("response, stderr, returncode", [
+    ({"data": {"repository": None}, "errors": [{"type": "NOT_FOUND", "path": ["repository"]}]}, "Repository not found", 1),
+    ({"data": {"repository": {"issue": None}}, "errors": [{"type": "FORBIDDEN", "path": ["repository", "issue"]}]}, "Access denied", 1),
+    ({"data": {"repository": {"issue": None}}, "errors": [
+        {"type": "NOT_FOUND", "path": ["repository", "issue"]},
+        {"type": "RATE_LIMITED", "path": ["repository"]},
+    ]}, "Rate limited", 1),
+    ({"data": {"repository": {"issue": None}}}, "Network failure", 1),
+    (None, "Authentication required", 1),
+    (None, "", 1),
+    ({"data": {"repository": None}}, "", 0),
+    ({"data": {"repository": {}}}, "", 0),
+])
+def test_github_failures_still_block_instead_of_becoming_missing_issues(reader, response, stderr, returncode, monkeypatch, tmp_path):
+    monkeypatch.setattr(subprocess, "run", lambda command, **kwargs:
+                        subprocess.CompletedProcess(command, returncode, json.dumps(response), stderr))
+    with pytest.raises(core.Blocked) as stopped:
+        if reader == "bounded":
+            core.fetch_issue("acme/demo", 99, tmp_path, "address-this")
+        else:
+            issue_graph.get_issue("acme/demo", 99, tmp_path)
+    assert not isinstance(stopped.value, core.IssueNotFound)
+
+
+def test_missing_issue_remains_an_error_for_explicit_context_lookup(monkeypatch, capsys):
+    payload = {"data": {"repository": {"issue": None}}, "errors": [
+        {"type": "NOT_FOUND", "path": ["repository", "issue"], "message": "Missing issue"},
+    ]}
+    monkeypatch.setattr(subprocess, "run", lambda command, **kwargs:
+                        subprocess.CompletedProcess(command, 1, json.dumps(payload), "gh: Missing issue"))
+    assert issue_graph.main(["99", "--repo", "acme/demo"]) == 2
     assert capsys.readouterr().err

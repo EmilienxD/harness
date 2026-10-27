@@ -15,7 +15,6 @@ from subagents_runtime.delegation import (
     parse_request_file,
 )
 from subagents_runtime import sessions
-from subagents_runtime.roles import TaskPolicy, load_task_policies
 
 
 FIXTURES = Path(__file__).parent / "fixtures" / "delegation_requests"
@@ -38,7 +37,8 @@ def test_request_file_parses_the_public_frontmatter_contract() -> None:
         parent_provider="claude",
     )
 
-    assert parsed.task == "prototype"
+    assert parsed.task == "general"
+    assert parsed.child_skill == "prototype"
     assert parsed.provider == "chatgpt"
     assert parsed.mode == "interactive"
     assert parsed.prompt == "Build a disposable UI experiment from the supplied fresh context."
@@ -49,22 +49,12 @@ def test_published_schemas_describe_the_implemented_contracts() -> None:
     schemas = Path(sessions.__file__).parent / "schemas"
     request = json.loads((schemas / "delegation-request.schema.json").read_text(encoding="utf-8"))
     aboard = json.loads((schemas / "aboard-delegation.schema.json").read_text(encoding="utf-8"))
-    policies = load_task_policies(Path.cwd(), "claude")
-    tasks = {policy.task for policy in policies.values()}
-    modes = {mode for policy in policies.values() for mode in policy.modes}
-
-    # The prompt is the Markdown body, so it is never a frontmatter key.
-    assert set(request["properties"]) == {"task", "provider", "mode", "model", "effort", "root", "resume", "cwd", "difficulty", "prompt-file"}
-    assert request["oneOf"][0]["required"] == ["task", "mode"]
-    assert request["properties"]["task"]["type"] == "string"
-    assert set(request["properties"]["mode"]["enum"]) == modes
-    # Frontmatter accepts provider aliases; the wire schema stays canonical.
+    assert set(request["properties"]) == {"skill", "provider", "mode", "model", "effort", "root", "resume", "cwd", "difficulty", "prompt-file"}
+    assert request["oneOf"][0]["required"] == ["mode"]
+    assert "task" not in aboard["properties"]
     assert set(request["properties"]["provider"]["enum"]) == set(PROVIDERS) | set(PROVIDER_ALIASES)
-
     assert set(aboard["required"]) <= set(aboard["properties"])
-    assert set(aboard["properties"]["task"]["enum"]) == tasks
-    assert set(aboard["properties"]["mode"]["enum"]) == modes
-    assert set(aboard["properties"]["provider"]["enum"]) == set(PROVIDERS)
+    assert set(aboard["properties"]["mode"]["enum"]) == {"auto", "interactive", "loop"}
 
 
 def test_codex_is_an_alias_of_chatgpt(tmp_path: Path) -> None:
@@ -72,7 +62,7 @@ def test_codex_is_an_alias_of_chatgpt(tmp_path: Path) -> None:
     request = write_request(
         inbox,
         "research.md",
-        "---\ntask: websearch\nprovider: codex\nmode: auto\n---\n\nFind primary sources.\n",
+        "---\nskill: websearch\nprovider: codex\nmode: auto\n---\n\nFind primary sources.\n",
     )
 
     parsed = parse_request_file(
@@ -89,7 +79,7 @@ def test_codex_is_an_alias_of_chatgpt(tmp_path: Path) -> None:
 @pytest.mark.parametrize("effort", ["none", "minimal", "low", "medium", "high", "xhigh", "max", "ultra"])
 def test_request_accepts_effort_independently_of_model(tmp_path: Path, effort: str) -> None:
     inbox = tmp_path / "inbox"
-    request = write_request(inbox, "work.md", f"---\ntask: general\nmode: auto\neffort: {effort}\n---\nWork.")
+    request = write_request(inbox, "work.md", f"---\nmode: auto\neffort: {effort}\n---\nWork.")
 
     parsed = parse_request_file(request, inbox, parent_provider="claude")
 
@@ -102,7 +92,7 @@ def test_provider_defaults_to_the_parent_provider(tmp_path: Path) -> None:
     request = write_request(
         inbox,
         "research.md",
-        "---\ntask: websearch\nmode: auto\n---\n\nFind primary sources.\n",
+        "---\nskill: websearch\nmode: auto\n---\n\nFind primary sources.\n",
     )
 
     parsed = parse_request_file(
@@ -121,7 +111,7 @@ def test_provider_defaults_to_the_parent_provider(tmp_path: Path) -> None:
 ])
 def test_request_accepts_slash_paths(tmp_path: Path, body: str) -> None:
     inbox = tmp_path / "inbox"
-    request = write_request(inbox, "work.md", f"---\ntask: general\nmode: interactive\n---\n{body}")
+    request = write_request(inbox, "work.md", f"---\nmode: interactive\n---\n{body}")
 
     parsed = parse_request_file(request, inbox, parent_provider="chatgpt")
 
@@ -135,7 +125,7 @@ def test_root_resolves_from_parent_directory(tmp_path: Path) -> None:
     parent.mkdir()
     root.mkdir()
     inbox = tmp_path / "inbox"
-    request = write_request(inbox, "work.md", "---\ntask: general\nmode: auto\nroot: ../worktree\n---\nWork")
+    request = write_request(inbox, "work.md", "---\nmode: auto\nroot: ../worktree\n---\nWork")
 
     parsed = parse_request_file(request, inbox, parent_provider="claude", cwd=parent)
 
@@ -148,7 +138,7 @@ def test_request_accepts_installed_custom_slash_skill(tmp_path: Path) -> None:
     skill.parent.mkdir(parents=True)
     skill.touch()
     inbox = tmp_path / "inbox"
-    request = write_request(inbox, "work.md", "---\ntask: general\nmode: auto\n---\nUse /custom-audit for this.")
+    request = write_request(inbox, "work.md", "---\nmode: auto\n---\nUse /custom-audit for this.")
 
     parsed = parse_request_file(request, inbox, parent_provider="chatgpt", cwd=project)
 
@@ -158,31 +148,31 @@ def test_request_accepts_installed_custom_slash_skill(tmp_path: Path) -> None:
 @pytest.mark.parametrize(
     ("name", "contents", "message"),
     [
-        ("request.txt", "---\ntask: general\nmode: auto\n---\nbody", "Markdown"),
-        ("request.md", "---\ntask: general\nmode: auto\nextra: no\n---\nbody", "unsupported frontmatter"),
-        ("request.md", "---\ntask: [general]\nmode: auto\n---\nbody", "scalar string"),
-        ("request.md", "---\ntask: general\nmode: auto\nmodel: null\n---\nbody", "scalar string"),
-        ("request.md", "---\ntask: general\nmode: auto\nmodel: 123\n---\nbody", "scalar string"),
-        ("request.md", "---\ntask: general\nmode: auto\nmodel: [gpt-6.1-sol]\n---\nbody", "scalar string"),
-        ("request.md", "---\ntask: general\nmode: auto\nmodel: ' '\n---\nbody", "scalar string"),
-        ("request.md", "---\ntask: general\nmode: auto\neffort: null\n---\nbody", "scalar string"),
-        ("request.md", "---\ntask: general\nmode: auto\neffort: 123\n---\nbody", "scalar string"),
-        ("request.md", "---\ntask: general\nmode: auto\neffort: [high]\n---\nbody", "scalar string"),
-        ("request.md", "---\ntask: general\nmode: auto\neffort: ' '\n---\nbody", "scalar string"),
-        ("request.md", "---\ntask: general\nmode: auto\neffort: invalid\n---\nbody", "unsupported effort"),
+        ("request.txt", "---\nmode: auto\n---\nbody", "Markdown"),
+        ("request.md", "---\nmode: auto\nextra: no\n---\nbody", "unsupported frontmatter"),
+        ("request.md", "---\nskill: [general]\nmode: auto\n---\nbody", "scalar string"),
+        ("request.md", "---\nmode: auto\nmodel: null\n---\nbody", "scalar string"),
+        ("request.md", "---\nmode: auto\nmodel: 123\n---\nbody", "scalar string"),
+        ("request.md", "---\nmode: auto\nmodel: [gpt-6.1-sol]\n---\nbody", "scalar string"),
+        ("request.md", "---\nmode: auto\nmodel: ' '\n---\nbody", "scalar string"),
+        ("request.md", "---\nmode: auto\neffort: null\n---\nbody", "scalar string"),
+        ("request.md", "---\nmode: auto\neffort: 123\n---\nbody", "scalar string"),
+        ("request.md", "---\nmode: auto\neffort: [high]\n---\nbody", "scalar string"),
+        ("request.md", "---\nmode: auto\neffort: ' '\n---\nbody", "scalar string"),
+        ("request.md", "---\nmode: auto\neffort: invalid\n---\nbody", "unsupported effort"),
         ("request.md", "---\nresume: agent-1\neffort: high\n---\nbody", "resume requires only"),
-        ("request.md", "---\ntask: general\nmode: auto\nroot: missing\n---\nbody", "existing directory"),
-        ("request.md", "---\ntask: general\nmode: auto\nroot: null\n---\nbody", "scalar string"),
-        ("request.md", "---\ntask: general\nmode: auto\nroute: ../worktree\n---\nbody", "unsupported frontmatter"),
-        ("request.md", "---\ntask: loop\nmode: loop\ncwd: /tmp\nprompt-file: /tmp/prompt\nroot: /tmp\n---\nbody", "instead of root"),
+        ("request.md", "---\nmode: auto\nroot: missing\n---\nbody", "existing directory"),
+        ("request.md", "---\nmode: auto\nroot: null\n---\nbody", "scalar string"),
+        ("request.md", "---\nmode: auto\nroute: ../worktree\n---\nbody", "unsupported frontmatter"),
+        ("request.md", "---\nmode: loop\ncwd: /tmp\nprompt-file: /tmp/prompt\nroot: /tmp\n---\nbody", "instead of root"),
         ("request.md", "---\nresume: agent-1\nmodel: gpt-6.1-sol\n---\nbody", "resume requires only"),
         ("request.md", "---\nresume: agent-1\nroot: elsewhere\n---\nbody", "resume requires only"),
-        ("request.md", "---\ntask: general\n---\nbody", "mode"),
-        ("request.md", "---\ntask: general\nmode: auto\n---\n", "body"),
+        ("request.md", "---\n{}\n---\nbody", "mode"),
+        ("request.md", "---\nmode: auto\n---\n", "body"),
 
-        ("request.md", "---\ntask: general\nmode: invalid\n---\nbody", "unsupported mode"),
-        ("request.md", "---\ntask: prototype\nmode: auto\n---\nbody", "unsupported mode"),
-        ("request.md", "task: general\nmode: auto\nbody", "frontmatter"),
+        ("request.md", "---\nmode: invalid\n---\nbody", "unsupported mode"),
+        ("request.md", "---\nskill: ../escape\nmode: auto\n---\nbody", "skill must"),
+        ("request.md", "mode: auto\nbody", "frontmatter"),
     ],
 )
 def test_request_file_rejects_invalid_or_unauthorized_input(
@@ -202,12 +192,11 @@ def test_request_file_rejects_invalid_or_unauthorized_input(
 def test_request_file_rejects_nested_and_outside_paths(tmp_path: Path) -> None:
     inbox = tmp_path / "inbox"
     nested = write_request(
-        inbox / "nested", "request.md", "---\ntask: general\nmode: auto\n---\nbody"
+        inbox / "nested", "request.md", "---\nmode: auto\n---\nbody"
     )
     outside = write_request(
-        tmp_path / "outside", "request.md", "---\ntask: general\nmode: auto\n---\nbody"
+        tmp_path / "outside", "request.md", "---\nmode: auto\n---\nbody"
     )
-    policy = TaskPolicy("general", frozenset({"interactive", "auto"}))
 
     with pytest.raises(RequestFileError, match="direct child"):
         parse_request_file(nested, inbox, parent_provider="claude")
@@ -218,7 +207,7 @@ def test_request_file_rejects_nested_and_outside_paths(tmp_path: Path) -> None:
 def test_request_file_rejects_a_symlink(tmp_path: Path) -> None:
     inbox = tmp_path / "inbox"
     target = write_request(
-        tmp_path, "target.md", "---\ntask: general\nmode: auto\n---\nbody"
+        tmp_path, "target.md", "---\nmode: auto\n---\nbody"
     )
     link = inbox / "request.md"
     inbox.mkdir()
@@ -246,11 +235,11 @@ def configured_parent(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> str:
 
 def test_live_grant_processes_three_siblings_independently(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     parent = configured_parent(tmp_path, monkeypatch)
-    grant = enable_delegation(parent, "work-with-agent", original_cwd=tmp_path / "project")
-    write_request(grant.inbox, "one.md", "---\ntask: general\nmode: auto\n---\n\nOne")
+    grant = enable_delegation(parent, "subagents-toolkit", original_cwd=tmp_path / "project")
+    write_request(grant.inbox, "one.md", "---\nmode: auto\n---\n\nOne")
     write_request(grant.inbox, "bad.md", "---\ntask: invalid\nmode: auto\n---\n\nBad")
-    write_request(grant.inbox, "two.md", "---\ntask: general\nmode: interactive\n---\n\nTwo")
-    write_request(grant.inbox, "three.md", "---\ntask: general\nprovider: chatgpt\nmode: auto\n---\n\nThree")
+    write_request(grant.inbox, "two.md", "---\nmode: interactive\n---\n\nTwo")
+    write_request(grant.inbox, "three.md", "---\nprovider: chatgpt\nmode: auto\n---\n\nThree")
 
     launched: list[tuple[str, str, str, Path]] = []
     results = process_inbox(
@@ -269,10 +258,10 @@ def test_live_grant_processes_three_siblings_independently(tmp_path: Path, monke
 
 def test_explicit_root_is_persisted_for_resume(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     parent = configured_parent(tmp_path, monkeypatch)
-    grant = enable_delegation(parent, "work-with-agent", original_cwd=tmp_path / "project")
+    grant = enable_delegation(parent, "subagents-toolkit", original_cwd=tmp_path / "project")
     root = tmp_path / "worktree"
     root.mkdir()
-    write_request(grant.inbox, "one.md", "---\ntask: general\nmode: auto\nroot: ../worktree\n---\nWork")
+    write_request(grant.inbox, "one.md", "---\nmode: auto\nroot: ../worktree\n---\nWork")
     launched: list[Path] = []
 
     [first] = process_inbox(grant.id, launch=lambda _request, _id, _number, cwd: launched.append(cwd) or "child")
@@ -290,23 +279,10 @@ def test_ask_requires_a_live_grant(tmp_path: Path, monkeypatch: pytest.MonkeyPat
         process_inbox("not-a-grant", launch=lambda *_args: "never")
 
 
-def test_grant_policy_is_the_exact_authorization_table() -> None:
-    assert load_task_policies(Path.cwd(), "claude") == {
-        "explore-with-agent": TaskPolicy("explore", frozenset({"auto"})),
-        "prototype-with-agent": TaskPolicy("prototype", frozenset({"interactive"}), "prototype", "interactive"),
-        "websearch-with-agent": TaskPolicy("websearch", frozenset({"interactive", "auto"}), "websearch"),
-        "brainstorm-with-agent": TaskPolicy("brainstorm", frozenset({"interactive"}), "grill-me", "interactive"),
-        "address-with-agent": TaskPolicy("address", frozenset({"interactive", "auto"}), "address-this"),
-        "review-with-agent": TaskPolicy("review", frozenset({"interactive", "auto"}), "review-this"),
-        "work-with-agent": TaskPolicy("general", frozenset({"interactive", "auto"}), default_mode="interactive"),
-        "ship": TaskPolicy("loop", frozenset({"loop"}), default_mode="loop"),
-    }
-
-
 def test_uncertain_launch_is_reserved_before_the_external_call_and_never_retried(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     parent = configured_parent(tmp_path, monkeypatch)
-    grant = enable_delegation(parent, "work-with-agent", original_cwd=tmp_path / "project")
-    request = write_request(grant.inbox, "one.md", "---\ntask: general\nmode: auto\n---\n\nOne")
+    grant = enable_delegation(parent, "subagents-toolkit", original_cwd=tmp_path / "project")
+    request = write_request(grant.inbox, "one.md", "---\nmode: auto\n---\n\nOne")
 
     class SimulatedProcessDeath(BaseException):
         pass

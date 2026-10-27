@@ -82,7 +82,7 @@ export async function runPiCommit(scope: "project" | "user", mode: "json" | "rpc
       sessionFile = join(fixture.workspace.sessionsDir, (await readdir(fixture.workspace.sessionsDir)).find((e) => e.includes("commit-basic"))!);
       assert.ok(sessionFile);
       const beforeDry = await readFile(join(project, ".git", "index"));
-      const dry = await fixture.runJson({ prompt: "/skill:commit --dry preview", sessionFile });
+      const dry = await fixture.runJson({ prompt: "/commit --dry preview", sessionFile });
       assert.equal(dry.toolExecutions.length, 0);
       assert.deepEqual(await readFile(join(project, ".git", "index")), beforeDry);
       assert.equal(await git("rev-parse", "HEAD"), seed);
@@ -91,7 +91,7 @@ export async function runPiCommit(scope: "project" | "user", mode: "json" | "rpc
       assert.equal((await rpc.prompt("[E2E:pi-commit-basic]")).status, "success");
       assert.equal((await rpc.prompt("/commit-reload")).status, "handled");
       const beforeDry = await readFile(join(project, ".git", "index"));
-      assert.equal((await rpc.prompt("/skill:commit --dry preview")).status, "handled");
+      assert.equal((await rpc.prompt("/commit --dry preview")).status, "handled");
       assert.deepEqual(await readFile(join(project, ".git", "index")), beforeDry);
       assert.equal(await git("rev-parse", "HEAD"), seed);
       assert.equal((await rpc.prompt("/commit verified fixture")).status, "handled");

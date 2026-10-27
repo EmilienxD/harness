@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { extractAuthoredDiagrams } from "./grill-diagrams.ts";
+import { localAssetReferences } from "./grill-media.ts";
 
 export const SCHEMA_VERSION = 1 as const;
 // Reserved draft identity for round-wide notes; generated question IDs are always Q<number>.
@@ -58,6 +59,7 @@ export const roundPayloadSchema = z
 export const MAX_IMAGE_BYTES = 6 * 1024 * 1024;
 export const MAX_VIDEO_BYTES = 20 * 1024 * 1024;
 export const MAX_ROUND_BYTES = 50 * 1024 * 1024;
+export const MAX_ASSETS = 30;
 
 export const assetManifestSchema = z
   .object({
@@ -85,7 +87,7 @@ export const publicationSchema = z
       .optional(),
     schema_version: z.literal(SCHEMA_VERSION),
     payload: roundPayloadSchema,
-    assets: z.array(assetManifestSchema).max(20).default([]),
+    assets: z.array(assetManifestSchema).max(MAX_ASSETS).default([]),
   })
   .superRefine((publication, context) => {
     if (publication.assets.reduce((total, asset) => total + asset.byte_size, 0) > MAX_ROUND_BYTES) {
@@ -93,6 +95,17 @@ export const publicationSchema = z
     }
     if (new Set(publication.assets.map((asset) => asset.reference)).size !== publication.assets.length) {
       context.addIssue({ code: "custom", message: "Asset references must be unique" });
+    }
+    const uploaded = new Set(publication.assets.map((asset) => asset.reference));
+    for (const [index, question] of publication.payload.questions.entries()) {
+      for (const reference of localAssetReferences(question.explanation_html)) {
+        if (!uploaded.has(reference))
+          context.addIssue({
+            code: "custom",
+            path: ["payload", "questions", index, "explanation_html"],
+            message: `Missing asset manifest entry for ${reference}`,
+          });
+      }
     }
   });
 
@@ -129,7 +142,5 @@ export function compilePrompt(
   const notes = queued.get(NOTES_ID)?.note?.trim();
   if (notes) sections.push(`Additional Notes: ${notes}`);
   // Flatten before review and snapshotting so copy and delivery use the same single line.
-  return sections
-    .map((section) => section.replace(/\s*[\r\n\u0085\u2028\u2029]+\s*/gu, " "))
-    .join(" | ");
+  return sections.map((section) => section.replace(/\s*[\r\n\u0085\u2028\u2029]+\s*/gu, " ")).join(" | ");
 }

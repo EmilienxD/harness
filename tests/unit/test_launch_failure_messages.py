@@ -29,8 +29,8 @@ def provider_that_fails(tmp_path: Path, monkeypatch, *, stderr: str, code: int) 
 
 def launch(project: Path, provider: str, mode: str):
     sessions.register_observed("parent", project, provider)
-    inbox = enable_delegation("parent", "work-with-agent").inbox
-    (inbox / "work.md").write_text(f"---\ntask: general\nmode: {mode}\n---\nWork.", encoding="utf-8")
+    inbox = enable_delegation("parent", "subagents-toolkit").inbox
+    (inbox / "work.md").write_text(f"---\nmode: {mode}\n---\nWork.", encoding="utf-8")
     [result] = process_inbox("parent", launch=sessions.launch_delegated)
     return result
 

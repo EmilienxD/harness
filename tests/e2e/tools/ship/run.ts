@@ -11,6 +11,7 @@ import { prepareCodexHome, validateCodexCli } from "../../core/codex.js";
 import { startFakeOpenAiServer } from "../../core/openai-server.js";
 import { canonicalMkdtemp } from "../../core/temp.js";
 import { spawnableCommand } from "../../core/path.js";
+import { skillCommand } from "../../core/on-demand.js";
 import { findHarnessRoot } from "../issues/support.js";
 import { claudeTransition, codexTransition, COMPLETE, LEAD, plan, PR_LEAD, REPORT, scenarioCatalogHash, stub, testName, unit, workflow, type ShipScenario } from "./scenario.js";
 
@@ -24,6 +25,11 @@ const graphql = (query: string, variables: Record<string, string>) =>
   gh("api", "graphql", "-f", `query=${query}`, ...Object.entries(variables).flatMap(([key, value]) => ["-f", `${key}=${value}`]));
 
 export async function runShipJourney(platform: ShipPlatform, scenario: ShipScenario): Promise<Json> {
+  throw new Error("ship is unavailable while its implementation is revised in harness/in-progress/ship");
+}
+
+/** Retained for the future redesign; excluded from package scripts and execution. */
+async function unfinishedShipJourney(platform: ShipPlatform, scenario: ShipScenario): Promise<Json> {
   if (platform === "claude") await validateClaudeCli(); else await validateCodexCli();
   const identity = JSON.parse(await gh("repo", "view", repository, "--json", "nameWithOwner,isPrivate")) as Json;
   assert.deepEqual(identity, { nameWithOwner: repository, isPrivate: true });
@@ -82,15 +88,20 @@ export async function runShipJourney(platform: ShipPlatform, scenario: ShipScena
     await mkdir(bin, { recursive: true });
     await mkdir(status, { recursive: true });
     for (const key of Object.keys(env)) if (key.startsWith("HARNESS_") || key.startsWith("ABOARD_")) delete env[key];
-    env = { ...env, UV_TOOL_DIR: join(root, "uv-tools"), UV_TOOL_BIN_DIR: bin,
+    env = { ...env, UV_TOOL_DIR: join(root, "uv-tools"), UV_TOOL_BIN_DIR: bin, UV_CACHE_DIR: join(root, "uv-cache"),
       HARNESS_STATE_DIR: state, PATH: `${bin}${delimiter}${process.env.PATH ?? ""}`, PYTHONIOENCODING: "utf-8" };
-    // This is the real installer, real uv host-tool builds and both provider payloads.
+    // This is the real installer, persistent runtime and both provider payloads.
     // --local is the product's supported development install path, not a mock.
     await exec(python, ["-m", "harness_cli", "--local", harness, "install", "ship", "cleanup-git", "--root", project, "--json"], { cwd: harness, env, windowsHide: true, timeout: 300000, maxBuffer: 4 * 1024 * 1024 });
     for (const name of ["ship", "test-workflows", "cleanup-git"]) {
       await readFile(join(project, ".claude", "skills", name, "SKILL.md"));
       await readFile(join(project, ".agents", "skills", name, "SKILL.md"));
     }
+    const shipSkill = join(project, ".agents/skills/ship/SKILL.md");
+    const commands = Object.fromEntries(await Promise.all(["issue-context", "ship-stubs", "test-workflows"].map(async name => {
+      const cli = await skillCommand(name === "test-workflows" ? join(project, ".agents/skills/test-workflows/SKILL.md") : shipSkill, name);
+      return [name, [cli.file, ...cli.args]];
+    })));
     const bridge = join(harness, "tests", "e2e", "dist", "tools", "subagents", "cli-bridge.js");
     const provider = spawnableCommand(platform === "claude" ? "claude" : "codex", []);
     await writeFile(join(state, "config.json"), JSON.stringify({ terminalCommand: [process.execPath, bridge, "--spawn"] }));
@@ -113,7 +124,7 @@ export async function runShipJourney(platform: ShipPlatform, scenario: ShipScena
       const item = unit(key);
       return [key, { ...item, criteria: { [item.test]: stub(testName(item)), [item.workflow]: workflow(item.module) } }];
     }));
-    await writeFile(join(root, "fixture.json"), JSON.stringify({ repository, target, branch_prefix: prefix, issues, units }));
+    await writeFile(join(root, "fixture.json"), JSON.stringify({ repository, target, branch_prefix: prefix, issues, units, commands }));
     const e2e = join(harness, "tests", "e2e", "tools", "ship");
     for (const name of ["driver.py", "implementer.py"]) await cp(join(e2e, name), join(root, name));
     const r = root.replaceAll("\\", "/");
@@ -173,7 +184,7 @@ export async function runShipJourney(platform: ShipPlatform, scenario: ShipScena
     const view = async (key: string) => JSON.parse(await gh("issue", "view", String(record.issues[key]), "--repo", repository, "--json", "state,labels,comments")) as Json;
     const labelsOf = (item: Json) => (item.labels as { name: string }[]).map((label) => label.name);
     const pr = async (key: string) => JSON.parse(await gh("pr", "view", record.prs[key], "--json", "state,body,isDraft,mergedAt,mergeCommit,title")) as Json;
-    const blockedBy = async (key: string) => (JSON.parse((await exec("issue-context", [String(record.issues[key])], { cwd: project, env, windowsHide: true })).stdout) as Json).blocked_by.map((item: Json) => item.number);
+    const blockedBy = async (key: string) => (JSON.parse((await exec(commands["issue-context"]![0]!, [...commands["issue-context"]!.slice(1), String(record.issues[key])], { cwd: project, env, windowsHide: true })).stdout) as Json).blocked_by.map((item: Json) => item.number);
     const delivered = async (key: string, merged: boolean) => {
       const issue = await view(key);
       assert.equal(issue.state, "OPEN", `${key} issue must stay open`);

@@ -1,6 +1,7 @@
 name = "web-toolkit"
-version = "1.3.5"
-description = "Local web search and page fetching CLI, with native Pi tools"
+version = "1.5.0"
+description = "Skill for local web search and page fetching through the Web Toolkit CLI"
+requires = ["git", "uv"]
 docs = "https://github.com/EmilienxD/harness/blob/main/README.md#web-toolkit"
 
 [platforms.claude]
@@ -16,21 +17,10 @@ status = "supported"
 src = "SKILL.md"
 dest = "web-toolkit/SKILL.md"
 root = "skills"
-platforms = ["claude", "chatgpt"]
+platforms = ["claude", "chatgpt", "pi"]
 
 [[files]]
 src = "chatgpt/openai.yaml"
 dest = "web-toolkit/agents/openai.yaml"
 root = "skills"
 platforms = ["chatgpt"]
-
-[[files]]
-src = "pi/extension.ts"
-dest = ".harness-web-toolkit/index.ts"
-root = "extensions"
-platforms = ["pi"]
-
-[[actions]]
-type = "uv-tool"
-package = "harness-web-toolkit"
-source = "git+https://github.com/EmilienxD/harness@617f66049cb5441d4edeaea31733c1525b98261c#subdirectory=harness/productivity/web-toolkit/runtime"

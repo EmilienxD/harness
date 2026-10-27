@@ -81,16 +81,16 @@ def test_event_snapshots_commit_only_chatgpt_changes(repo, capsys):
         "turn_id": "turn-1",
         "tool_use_id": "call-1",
         "tool_name": "apply_patch",
-        "tool_input": {"command": "*** Begin Patch"},
+        "tool_input": {"command": "*** Begin Patch\n*** Update File: agent.md\n@@\n-before\n+agent edit\n*** End Patch"},
     }
 
     adapter._record_pre(payload, str(repo), root)
     (repo / "agent.md").write_text("agent edit\n", encoding="utf-8")
     adapter._record_post(payload, str(repo), root)
 
-    scan = adapter._scan(root, str(repo))
-    assert scan is not None
-    assert [Path(path).name for path in scan.paths] == ["agent.md"]
+    paths, uncertain, _ = adapter._ownership().owned(adapter._ownership_records(root))
+    assert list(paths) == ["agent.md"]
+    assert uncertain == []
 
     with pytest.raises(SystemExit) as stopped:
         adapter._handle_commit(
@@ -111,10 +111,10 @@ def test_event_snapshots_commit_only_chatgpt_changes(repo, capsys):
         "ChatGPT-session: thr-selective"
     )
     assert _git(repo, "status", "--porcelain").rstrip() == " M user.md"
-    assert not root.exists()
+    assert adapter._ownership().owned(adapter._ownership_records(root))[0] == {}
 
 
-def test_missing_pre_snapshot_forces_visible_whole_tree_fallback(repo):
+def test_missing_pre_snapshot_stops_without_staging(repo, capsys):
     session = "thr-fallback"
     root = adapter._session_dir(str(repo), session)
     payload = {
@@ -127,10 +127,12 @@ def test_missing_pre_snapshot_forces_visible_whole_tree_fallback(repo):
     (repo / "agent.md").write_text("changed\n", encoding="utf-8")
     adapter._record_post(payload, str(repo), root)
 
-    scan = adapter._scan(root, str(repo))
-    assert scan is not None
-    assert scan.unresolved == ["Bash call missing-pre: pre-tool snapshot unavailable"]
-    assert core.changed_paths(scan) is None
+    head = _git(repo, "rev-parse", "HEAD")
+    with pytest.raises(SystemExit):
+        adapter._handle_commit({"session_id": session}, str(repo), root, core.Flags(False, False), "unsafe")
+    assert "Pre-tool snapshot unavailable" in json.loads(capsys.readouterr().out)["reason"]
+    assert _git(repo, "rev-parse", "HEAD") == head
+    assert _git(repo, "diff", "--cached", "--name-only") == ""
 
 
 def test_chatgpt_unhandled_hook_exception_blocks_with_json(monkeypatch, capsys):
@@ -203,15 +205,10 @@ def test_utf8_stdin_overrides_windows_code_page(repo):
     records[0]["prompt"].encode("utf-8", errors="strict")
 
 
-def test_surrogates_survive_record_and_transcript_serialization(repo):
+def test_surrogates_survive_context_serialization(repo):
     root = adapter._session_dir(str(repo), "surrogate-context")
     adapter._record_prompt({"prompt": "Explain \udc9d"}, root)
-    transcript = Path(adapter._synthetic_transcript(root, str(repo)))
-    try:
-        assert len(adapter._records(root, "prompts")) == 1
-        assert len(list(adapter._iter_transcript(str(transcript)))) == 1
-    finally:
-        transcript.unlink()
+    assert len(adapter._records(root, "prompts")) == 1
 
 
 def test_atomic_json_round_trips_unicode_and_surrogates(tmp_path):

@@ -4,7 +4,7 @@ from pathlib import Path
 import subprocess
 
 ROOT = Path(__file__).resolve().parents[2]
-SPEC = importlib.util.spec_from_file_location("ship_stubs", ROOT / "harness/building/ship/ship_stubs.py")
+SPEC = importlib.util.spec_from_file_location("ship_stubs", ROOT / "harness/in-progress/ship/ship_stubs.py")
 ship_stubs = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(ship_stubs)
 

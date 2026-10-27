@@ -11,7 +11,7 @@ from typing import Any
 
 from subagents_runtime import sessions
 from subagents_runtime.messages import runtime_message
-from subagents_runtime.roles import find_skill, load_task_policies
+from subagents_runtime.roles import find_skill
 from subagents_runtime.previous_message import PreviousMessageError, read_previous_message
 from subagents_runtime.delegation import (
     arm_reply,
@@ -30,7 +30,7 @@ from subagents_runtime.delegation import (
 )
 
 PREVIOUS_REPLY_SKILL = "reply-to-agent-with-previous-message"
-SKILL_NAME = rf"([a-z][a-z0-9-]*-with-agent|{PREVIOUS_REPLY_SKILL}|reply-to-agent|resume-agent|ship)"
+SKILL_NAME = rf"(subagents-toolkit|{PREVIOUS_REPLY_SKILL}|reply-to-agent|ship)"
 SHIP_INVOCATION = re.compile(r"(?<!\S)(?:[/$]ship|\[\$ship\]\([^\r\n]+\))(?=\s|$)")
 INVOCATIONS = {
     "claude": re.compile(rf"(?<!\S)/{SKILL_NAME}(?=\s|$)"),
@@ -64,9 +64,9 @@ def _skill_instructions(session_id: str, skill: str) -> str | None:
 
 
 def _registered_skill(skill: str, cwd: Path, provider: str) -> bool:
-    if skill in {"ship", "reply-to-agent", PREVIOUS_REPLY_SKILL, "resume-agent"}:
+    if skill in {"ship", "reply-to-agent", PREVIOUS_REPLY_SKILL}:
         return True
-    return skill.endswith("-with-agent") and skill in load_task_policies(cwd, provider)
+    return skill == "subagents-toolkit"
 
 
 def _role_directory(session_id: str) -> Path:

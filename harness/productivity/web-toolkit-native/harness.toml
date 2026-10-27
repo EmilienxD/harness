@@ -1,0 +1,22 @@
+name = "web-toolkit-native"
+version = "1.0.0"
+description = "Native Pi web_search and web_fetch tools backed by the Web Toolkit CLI"
+requires = ["git", "uv"]
+docs = "https://github.com/EmilienxD/harness/blob/main/docs/user/tools/productivity/web-toolkit.md"
+
+[platforms.claude]
+status = "unsupported"
+reason = "Native tools require Pi; use web-toolkit for the shared skill."
+
+[platforms.chatgpt]
+status = "unsupported"
+reason = "Native tools require Pi; use web-toolkit for the shared skill."
+
+[platforms.pi]
+status = "supported"
+
+[[files]]
+src = "pi/extension.ts"
+dest = ".harness-web-toolkit/index.ts"
+root = "extensions"
+platforms = ["pi"]

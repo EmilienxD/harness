@@ -16,11 +16,13 @@ def child_request(tmp_path, monkeypatch):
     for name in ("HARNESS_SESSION_ID", "HARNESS_EXECUTION_ID"):
         monkeypatch.delenv(name, raising=False)
     sessions.register_observed("parent", tmp_path, "claude")
-    inbox = enable_delegation("parent", "work-with-agent").inbox
+    inbox = enable_delegation("parent", "subagents-toolkit").inbox
     (inbox / "work.md").write_text(
-        "---\ntask: general\nmode: interactive\n---\nWork.", encoding="utf-8",
+        "---\nmode: interactive\n---\nWork.", encoding="utf-8",
     )
     [result] = process_inbox("parent", launch=lambda *_args: "native-child")
+    assert result.status == "launched", result.reason
+    assert result.child_session_id is not None
     return result
 
 

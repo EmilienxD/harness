@@ -155,7 +155,8 @@ def test_loop_uses_initialized_aboard_window_for_a_registered_sibling_worktree(t
     result = launch("lead", worktree, prompt, difficulty="basic")
     assert result["provider_session_id"] == "provider-child"
     assert observed[0]["mode"] == "loop"
-    assert observed[0]["task"] == "loop"
+    assert "task" not in observed[0]
+    assert "skill" not in observed[0]
     assert observed[0]["difficulty"] == "basic"
     assert observed[0]["cwd"] == str(worktree.resolve())
     assert observed[0]["harnessSessionId"] == result["session_id"]

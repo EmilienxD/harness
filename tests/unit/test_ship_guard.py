@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-SCRIPT = Path(__file__).resolve().parents[2] / "harness/building/ship/ship_hook.py"
+SCRIPT = Path(__file__).resolve().parents[2] / "harness/in-progress/ship/ship_hook.py"
 
 
 def make_checkout(tmp_path, main="main", work="work"):

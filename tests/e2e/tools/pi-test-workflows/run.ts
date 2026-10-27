@@ -7,6 +7,7 @@ import { promisify } from "node:util";
 import { findHarnessRoot, runFixtureInstaller } from "../../core/installer.js";
 import { spawnableCommand } from "../../core/path.js";
 import { createPiFixture } from "../../core/pi-fixture.js";
+import { bundledCommand } from "../../core/on-demand.js";
 import { ACCEPTANCE, MARKER, REGRESSION, SOURCE, WORKFLOW, testWorkflowsScenario } from "./scenario.js";
 
 const execFileAsync = promisify(execFile);
@@ -14,15 +15,19 @@ const TOOL = "test-workflows";
 
 export async function runPiTestWorkflowsJourney(scope: "project" | "user", mode: "json" | "rpc") {
   const shell = process.platform === "win32" ? "powershell" : "bash";
-  const fixture = await createPiFixture(testWorkflowsScenario(shell));
+  const root = await findHarnessRoot();
+  let cli: ReturnType<typeof bundledCommand>;
+  const fixture = await createPiFixture({ ...testWorkflowsScenario(shell, "bundled-workflow"), transition: request => testWorkflowsScenario(shell, cli.shell).transition(request) });
   try {
     const project = fixture.workspace.projectRoot;
-    const root = await findHarnessRoot();
-    // uv host actions must never inspect, overwrite, or uninstall personal tools.
+    const skillFile = join(scope === "project" ? join(project, ".pi") : fixture.workspace.agentDir, "skills", TOOL, "SKILL.md");
+    cli = bundledCommand(skillFile, "test_workflows.py", join(root, ".venv", process.platform === "win32" ? "Scripts/python.exe" : "bin/python"));
     const bin = join(fixture.root, "uv-bin");
     await mkdir(bin);
     Object.assign(fixture.workspace.env, {
       UV_TOOL_DIR: join(fixture.root, "uv-tools"), UV_TOOL_BIN_DIR: bin,
+      UV_CACHE_DIR: join(fixture.root, "uv-cache"),
+      UV_OFFLINE: "1", PIP_NO_INDEX: "1",
       UV_PYTHON: join(root, ".venv", process.platform === "win32" ? "Scripts/python.exe" : "bin/python"),
       UV_PYTHON_DOWNLOADS: "never", UV_NO_PROGRESS: "1",
     });
@@ -40,18 +45,18 @@ export async function runPiTestWorkflowsJourney(scope: "project" | "user", mode:
     await writeFile(join(project, "accept.cjs"), ACCEPTANCE);
     await command("git", ["init", "--quiet"], fixture.workspace);
 
-    const skillFile = join(scope === "project" ? join(project, ".pi") : fixture.workspace.agentDir, "skills", TOOL, "SKILL.md");
     await runFixtureInstaller(fixture.workspace, "install", [TOOL], { scope, dryRun: true });
     assert.equal(await exists(skillFile), false);
     assert.equal(await exists(join(fixture.root, "uv-tools", "harness-test-workflows")), false);
     await runFixtureInstaller(fixture.workspace, "install", [TOOL], { scope });
     const skillSource = await readFile(join(root, "harness", "building", TOOL, "SKILL.md"), "utf8");
     assert.equal(await readFile(skillFile, "utf8"), skillSource);
-    assert.equal((await readdir(join(skillFile, ".."))).join(","), "SKILL.md");
+    assert.deepEqual((await readdir(join(skillFile, ".."))).sort(), ["SKILL.md", "scripts"]);
+    await access(cli.args[0]!);
     const repeat = await runFixtureInstaller(fixture.workspace, "install", [TOOL], { scope });
     assert.equal((repeat.results as { status: string }[])[0]?.status, "unchanged");
     const uvInventory = await command("uv", ["tool", "list"], fixture.workspace);
-    assert.match(uvInventory, /^harness-test-workflows v1\.4\.0/mu);
+    assert.doesNotMatch(uvInventory, /^harness-test-workflows /mu);
 
     const rpc = fixture.rpc({ timeoutMs: 120_000 });
     const discovery = await rpc.request("get_commands");
@@ -69,27 +74,28 @@ export async function runPiTestWorkflowsJourney(scope: "project" | "user", mode:
     assert.deepEqual(manifest.verified_files, { "src/greet.cjs": createHash("sha256").update(SOURCE).digest("hex") });
     assert.equal(await exists(join(project, "checks", "broken.manifest.json")), false);
     assert.equal(await exists(join(project, "checks", "invalid.manifest.json")), false);
-    const confirmations = run.events.filter((event) => event.type === "tool_execution_start" && typeof event.args === "object" && event.args !== null && "command" in event.args && String(event.args.command).startsWith("test-workflows --json confirm"));
+    const confirmations = run.events.filter((event) => event.type === "tool_execution_start" && typeof event.args === "object" && event.args !== null && "command" in event.args && String(event.args.command).startsWith(`${cli.shell} --json confirm`));
     assert.equal(confirmations.length, 1);
     await rpc.close();
 
-    // A second provider owns the same host CLI until its own receipt is removed.
+    // Provider skills are independent; neither provider creates a host CLI.
     await runFixtureInstaller(fixture.workspace, "install", [TOOL], { platform: "chatgpt" });
     await runFixtureInstaller(fixture.workspace, "uninstall", [TOOL], { scope });
     assert.equal(await exists(skillFile), false);
     const chatgptSkill = join(project, ".agents", "skills", TOOL, "SKILL.md");
     assert.equal(await readFile(chatgptSkill, "utf8"), skillSource);
-    assert.match(await command("uv", ["tool", "list"], fixture.workspace), /^harness-test-workflows /mu);
+    assert.doesNotMatch(await command("uv", ["tool", "list"], fixture.workspace), /^harness-test-workflows /mu);
     await runFixtureInstaller(fixture.workspace, "uninstall", [TOOL], { platform: "chatgpt" });
     assert.doesNotMatch(await command("uv", ["tool", "list"], fixture.workspace), /^harness-test-workflows /mu);
     assert.equal(await readFile(settingsFile, "utf8"), settingsBefore);
+    assert.equal(await exists(join(fixture.root, "uv-cache", "environments-v2")), false);
     const assertions = fixture.assertions();
     return {
       scope, mode, version: fixture.version, confirmations: confirmations.length,
       inferenceRequests: assertions.inferenceRequests, unexpectedRequests: assertions.unexpectedRequests,
       checkpoints: assertions.checkpoints, toolExecutions: run.toolExecutions.length,
       expectedNonzeroTools: run.toolExecutions.filter((tool) => tool.isError).length,
-      installedCliRemoved: true, failedRunUnconfirmed: true,
+      noInstalledCli: true, failedRunUnconfirmed: true,
     };
   } finally { await fixture.close(); }
 }

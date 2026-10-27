@@ -69,6 +69,22 @@ def test_fresh_pi_catalogue_installs_without_a_hooks_directory(tmp_path, monkeyp
 
     assert selected <= set(installer.installation["packages"])
     assert not (target.install_root / "hooks").exists()
+    command_skills = {
+        "auto": ("auto",),
+        "commit": ("commit",),
+        "issue-writers": ("publish-issues",),
+        "no-new-documents": ("approve-doc-draft", "reject-doc-draft"),
+        "enable-desktop-notification": ("enable-desktop-notification",),
+        "subagents": ("reply-to-agent-with-previous-message",),
+    }
+    for package, names in command_skills.items():
+        installed = package_root(target.install_root, package)
+        assert (installed / "extensions").is_dir(), package
+        for name in names:
+            assert not (installed / "skills" / name).exists(), (package, name)
+    # Agent workflows in mixed command/skill packages still load their instructions.
+    assert (package_root(target.install_root, "issue-writers") / "skills/draft-issue/SKILL.md").is_file()
+    assert (package_root(target.install_root, "subagents") / "skills/reply-to-agent/SKILL.md").is_file()
     assert (package_root(target.install_root, "pi-transport") / "harness/pi-transport/transport.ts").is_file()
     assert (package_root(target.install_root, "command-guard") / "extensions/.harness-command-guard/index.ts").is_file()
     for name in selected:
@@ -93,7 +109,7 @@ def test_tools_install_only_their_required_shared_helpers(tmp_path, name):
     )
     expected = {name, "pi-transport"}
     if name in GUARDS:
-        expected.add("pi-path-guards")
+        expected.update({"pi-path-guards", "path-guard-common"})
     if name in ISSUES:
         expected.add("pi-issue-workflows")
 

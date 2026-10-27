@@ -15,7 +15,7 @@ export default function (pi: any) {
     },
   });
   pi.registerCommand("documents-anchor", { handler: () => pi.appendEntry("documents-anchor", {}) });
-  pi.registerCommand("documents-auto-approve", { handler: () => pi.sendUserMessage("/skill:approve-doc-draft docs/auto.md") });
+  pi.registerCommand("documents-auto-approve", { handler: () => pi.sendUserMessage("/approve-doc-draft docs/auto.md") });
   pi.registerCommand("documents-dispatch-approve", { handler: () => pi.sendUserMessage("/approve-doc-draft docs/dispatch.md", { expandPromptTemplates: true }) });
   pi.registerCommand("documents-reload", { handler: async (_: string, ctx: any) => ctx.reload() });
   pi.registerCommand("documents-inspect", { handler: async (_: string, ctx: any) => {

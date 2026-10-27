@@ -73,10 +73,10 @@ def test_launch_and_resume_normalize_using_child_provider_and_preserve_request_h
     monkeypatch.setenv("HARNESS_STATE_DIR", str(tmp_path / "state"))
     # Exercise cross-provider dispatch and continuations with no provider metadata.
     sessions.register_observed("parent", tmp_path, "claude")
-    inbox = enable_delegation("parent", "work-with-agent").inbox
+    inbox = enable_delegation("parent", "subagents-toolkit").inbox
     body = r"Inspect @src\core.py."
     (inbox / "first.md").write_text(
-        f"---\ntask: general\nmode: auto\nprovider: {provider}\n---\n{body}",
+        f"---\nmode: auto\nprovider: {provider}\n---\n{body}",
         encoding="utf-8",
     )
     references = []

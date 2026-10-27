@@ -30,22 +30,20 @@ def test_catalogue_exposes_one_subagents_bundle_and_standalone_companion_skills(
         assert tools[name].support_for("chatgpt").status is SupportStatus.SUPPORTED
 
 
-def test_subagents_bundle_depends_on_the_standalone_companion_skills() -> None:
+def test_subagents_bundle_only_depends_on_orchestration_support() -> None:
     tools = discover()
     assert names(tools["subagents"]) == {
-        "prototype", "websearch", "grill-me", "issue-readers", "pi-transport", "pi-subagents-toolkit",
+        "pi-transport", "pi-subagents-toolkit",
     }
 
 
-def test_launch_resume_and_reply_skills_remain_user_only() -> None:
+def test_reply_skills_remain_user_only() -> None:
     destinations = {
         entry.dest: entry.source
         for entry in discover()["subagents"].expand("chatgpt")
     }
     for name in (
-        "work-with-agent", "explore-with-agent", "prototype-with-agent",
-        "websearch-with-agent", "brainstorm-with-agent",
-        "address-with-agent", "review-with-agent", "reply-to-agent", "resume-agent",
+        "reply-to-agent",
         "reply-to-agent-with-previous-message",
     ):
         skill = destinations[f"{name}/SKILL.md"]
@@ -69,20 +67,6 @@ def test_shared_subagents_skill_is_model_invocable(provider) -> None:
     if provider == "chatgpt":
         interface = destinations["subagents-toolkit/agents/openai.yaml"]
         assert yaml.safe_load(interface.read_text(encoding="utf-8"))["policy"]["allow_implicit_invocation"] is True
-
-
-def test_address_launcher_includes_model_instructions() -> None:
-    source = discover()["subagents"].root / "address-with-agent" / "SKILL.md"
-    _opening, _frontmatter, body = source.read_text(encoding="utf-8").split("---", 2)
-
-    assert body.strip()
-
-
-def test_review_launcher_includes_model_instructions() -> None:
-    source = discover()["subagents"].root / "review-with-agent" / "SKILL.md"
-    _opening, _frontmatter, body = source.read_text(encoding="utf-8").split("---", 2)
-
-    assert body.strip()
 
 
 def test_subagents_hooks_invoke_the_installed_runtime_for_both_provider_schemas() -> None:
@@ -124,17 +108,19 @@ def test_subagents_install_and_removal_cover_the_complete_workflow(tmp_path, mon
     assert target.destination_path("skills", "subagents-toolkit/SKILL.md").exists()
     metadata = target.destination_path("skills", "subagents-toolkit/agents/openai.yaml")
     assert metadata.exists() == (provider == "chatgpt")
-    assert target.destination_path("skills", "work-with-agent/SKILL.md").exists()
-    assert target.destination_path("skills", "prototype-with-agent/SKILL.md").exists()
-    assert target.destination_path("skills", "address-with-agent/SKILL.md").exists()
-    assert target.destination_path("skills", "review-with-agent/SKILL.md").exists()
+    assert not target.destination_path("skills", "work-with-agent/SKILL.md").exists()
+    assert not target.destination_path("skills", "resume-agent/SKILL.md").exists()
+    assert not target.destination_path("skills", "resume-agent/agents/openai.yaml").exists()
+    assert not target.destination_path("skills", "prototype-with-agent/SKILL.md").exists()
+    assert not target.destination_path("skills", "address-with-agent/SKILL.md").exists()
+    assert not target.destination_path("skills", "review-with-agent/SKILL.md").exists()
     assert target.destination_path("skills", "reply-to-agent/SKILL.md").exists()
-    assert target.destination_path("skills", "prototype/SKILL.md").exists()
-    assert target.destination_path("skills", "websearch/SKILL.md").exists()
-    assert target.destination_path("skills", "grill-me/SKILL.md").exists()
-    assert target.destination_path("skills", "address-this/SKILL.md").exists()
-    assert target.destination_path("skills", "review-this/SKILL.md").exists()
-    assert target.destination_path("hooks", "issue_readers_hook.py").exists()
+    assert not target.destination_path("skills", "prototype/SKILL.md").exists()
+    assert not target.destination_path("skills", "websearch/SKILL.md").exists()
+    assert not target.destination_path("skills", "grill-me/SKILL.md").exists()
+    assert not target.destination_path("skills", "address-this/SKILL.md").exists()
+    assert not target.destination_path("skills", "review-this/SKILL.md").exists()
+    assert not target.destination_path("hooks", "issue_readers_hook.py").exists()
     assert not target.destination_path("hooks", "delegation_hook.py").exists()
     assert not target.gitignore_path.exists() or ".harness/runtime/" not in target.gitignore_path.read_text(encoding="utf-8")
 
@@ -158,14 +144,12 @@ def test_toolkit_upgrade_preserves_custom_registry_and_skill_pairs(tmp_path, mon
     source = tmp_path / "package" / "subagents-toolkit" / "SKILL.md"
     source.parent.mkdir(parents=True)
     source.write_bytes((tool.root / "subagents-toolkit" / "SKILL.md").read_bytes())
-    builtin_registry = source.with_name("builtin-tasks.yaml")
-    builtin_registry.write_bytes((tool.root / "subagents-toolkit" / "builtin-tasks.yaml").read_bytes())
     # Exercise the real toolkit payload without installing machine-level tools.
     old_tool = replace(
         tool, version="2.5.0", root=source.parents[1],
         files=tuple(
             spec for spec in tool.files
-            if spec.src in ("subagents-toolkit/SKILL.md", "subagents-toolkit/builtin-tasks.yaml")
+            if spec.src == "subagents-toolkit/SKILL.md"
         ),
         dependencies=(), actions=(), platform_fragments={},
     )
@@ -192,9 +176,7 @@ def test_toolkit_upgrade_preserves_custom_registry_and_skill_pairs(tmp_path, mon
         user_skills.append(path)
     user_digests = {path: sha256(path) for path in (registry, *user_skills)}
 
-    tasks = yaml.safe_load(builtin_registry.read_text(encoding="utf-8"))
-    tasks["new-default"] = {**custom, "launcher": "new-default-with-agent"}
-    builtin_registry.write_text(yaml.safe_dump(tasks), encoding="utf-8")
+    source.write_bytes(source.read_bytes() + b"\n")
     installer.available = {tool.name: replace(old_tool, version=tool.version)}
     changes = installer.reconcile({tool.name})
 
@@ -202,9 +184,6 @@ def test_toolkit_upgrade_preserves_custom_registry_and_skill_pairs(tmp_path, mon
     toolkit = roles.find_skill(project, provider, "subagents-toolkit")
     assert toolkit is not None
     assert sha256(toolkit) == sha256(source)
-    assert sha256(toolkit.with_name("builtin-tasks.yaml")) == sha256(builtin_registry)
-    assert roles.task_policy("security", project, provider).skill == "security-audit"
-    assert roles.task_policy("new-default", project, provider).skill == "security-audit"
     assert {path: sha256(path) for path in user_digests} == user_digests
     managed = installer.installation["packages"][tool.name]["files"]
     assert {record["path"] for record in managed}.isdisjoint(str(path.resolve()) for path in user_digests)

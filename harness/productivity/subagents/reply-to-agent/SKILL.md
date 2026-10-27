@@ -12,7 +12,7 @@ The user wants to reply to an agent who depends on your work. Give them a self-c
 
 Restate the task or question precisely enough for the conclusion to stand alone, then lead with its answer or outcome. Explain what you did and how, including consequential decisions or assumptions; identify the resulting artifacts by exact path or URL; report the verification performed and its result; and state any incomplete work, unresolved concern, or necessary next action. Clearly distinguish completed work from recommendations.
 
-Reference files as `@absolute/or/relative/to/the/project/root/path`. Prefixing a path with `@` loads the file directly into the agent's context, saving tool calls, time, and tokens. Refer to line numbers in plain text (e.g., lines 14-45). Do not append them to the file path (e.g., @src/core.py:25); that format is not supported. If relevant code is not saved in the project, include the necessary parts as small snippets.
+Reference files as `@absolute/or/relative/to/the/project/root/path`. Treat these as file references; automatic loading depends on the receiving provider and input path. Identify any files the parent needs to read explicitly. Refer to line numbers in plain text (e.g., lines 14-45). Do not append them to the file path (e.g., @src/core.py:25); that format is not supported. If relevant code is not saved in the project, include the necessary parts as small snippets.
 
 If the user supply additional text in argument, treat as a guidance about what the conclusion should emphasize.
 

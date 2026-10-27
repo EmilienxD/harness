@@ -33,6 +33,7 @@ export async function runOnEditBlockJourney(): Promise<OnEditBlockJourneyResult>
     await mkdir(configRoot, { recursive: true });
     const harnessRoot = await findHarnessRoot(process.cwd());
     await copyFile(join(harnessRoot, "harness", "guards", "on-edit-block", "on_edit_block_hook.py"), hookPath);
+    await copyFile(join(harnessRoot, "harness/internal/path-guard-common/path_guard_common.py"), join(dirname(hookPath), "path_guard_common.py"));
     await writeFile(join(projectRoot, "target.txt"), TARGET_BEFORE, "utf8");
     await writeFile(join(projectRoot, "GUIDE.md"), `${GUIDE_MARKER}\n`, "utf8");
     await writeFile(join(projectRoot, ".harness", "guards", "on-edit-block.toml"), 'version=1\n[[rules]]\npatterns=["target.txt"]\nrequire=["GUIDE.md"]\n', "utf8");

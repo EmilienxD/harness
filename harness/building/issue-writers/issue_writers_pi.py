@@ -5,15 +5,12 @@ import json
 import os
 from pathlib import Path
 import sys
-import uuid
 
 import issues_core as core
 
 
 def issues_session_id(native_id: str) -> str:
-    if not native_id:
-        raise ValueError("Missing native Pi session identity")
-    return str(uuid.uuid5(uuid.NAMESPACE_URL, f"harness:issues:pi:{native_id}"))
+    return core.provider_session_id("pi", native_id)
 
 
 def evaluate(request: dict) -> dict:
@@ -29,7 +26,7 @@ def evaluate(request: dict) -> dict:
     elif request["operation"] == "prepare" and request["skill"] in {
         "draft-issue", "draft-issues", "to-spec", "to-spec-draft-issue",
     }:
-        context = core.prepare_drafting_context(cwd, session)
+        context = "" if request["skill"] == "to-spec" else core.prepare_drafting_context(cwd, session)
         notice = core.flush_notice(cwd, session)
         message = "\n\n".join(item for item in (notice, context) if item)
     else:
