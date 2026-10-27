@@ -4,7 +4,7 @@ Aboard is a VS Code extension for Claude Code, ChatGPT, and Pi conversations. It
 
 Install it through the [Harness catalogue](../../README.md#installation) by selecting `aboard`. Harness verifies the VSIX and installs the worker assets Aboard needs.
 
-Pi support is shipped in the catalogue's Aboard 0.3.9 release for Pi 1.2.0. Select Pi in Run Agent, or set `autoRun.provider` to `"pi"` in `.harness/config.json`. Configure `providers.pi.interactive`, `delegations`, and `autoRun` independently with `command`, `model`, and `effort`. Models inherit Pi settings unless overridden; explicit models use authenticated `provider/model` IDs. Exploration defaults to low thinking.
+Pi support is shipped in the catalogue's Aboard 0.3.13 release for Pi 1.2.0. Select Pi in Run Agent, or set `autoRun.provider` to `"pi"` in `.harness/config.json`. Configure `providers.pi.interactive`, `delegations`, and `autoRun` independently with `command`, `model`, and `effort`. Models inherit Pi settings unless overridden; explicit models use authenticated `provider/model` IDs. Exploration defaults to low thinking.
 
 Pi workers invoke `/skill:address-this` and `/skill:review-this` from the installed Harness issue-readers skills. Ordinary sessions preserve native Pi resources. Exploration and Auto Run workers load only Aboard's extension and a fixed native tool set, disable MCP, and enforce restrictions on nested tool calls through the shared Python guard. Pi Auto Run supports worktrees: workers launch in the assigned checkout and receive that checkout guidance on every turn, including after resume or compaction. Pi relies on agents following this guidance rather than filesystem sandboxing. `/auto` is supplied by Harness's native Pi extension.
 
