@@ -2,7 +2,6 @@ import { isRequestedEffort, type RequestedEffort } from "../platform/effort.js";
 import type { AgentPlatformId } from "../platform/agent-platform.js";
 import { AGENT_PLATFORM_IDS, type AgentType, type AgentSession, type ExecutionMode, type TerminalId } from "../domain/contracts.js";
 import { validateResumeMessage, type TerminalController } from "../platform/terminals.js";
-import { delegationChildPrompt } from "../platform/prompts.js";
 import { sanitizePromptCommands } from "../platform/prompt-commands.js";
 import type { DelegationTask } from "../platform/launch-configuration.js";
 import { isAbsolute, relative, resolve, sep } from "node:path";
@@ -236,10 +235,7 @@ export function createDelegationRoutes(
             throw new StartupUncertain("Delegation startup is uncertain; verify the existing execution before retrying");
           }
         }
-        const cleanPrompt = sanitizePromptCommands(parsed.prompt, parsed.provider);
-        const prompt = parsed.resumeAgentId === undefined
-          ? delegationChildPrompt(cleanPrompt)
-          : cleanPrompt;
+        const prompt = sanitizePromptCommands(parsed.prompt, parsed.provider);
         const launchRequest = { ...parsed, prompt };
         const launched = await (parsed.resumeAgentId === undefined ? launcher.launch(launchRequest)
           : launcher.resume?.(launchRequest) ?? Promise.reject(new Error("Delegation resume is unavailable")));

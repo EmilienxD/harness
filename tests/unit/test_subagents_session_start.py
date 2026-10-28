@@ -3,7 +3,7 @@ from pathlib import Path
 import pytest
 
 from subagents_runtime import hooks, roles, sessions
-from subagents_runtime.delegation import enable_delegation
+from subagents_runtime.delegation import enable_delegation, process_inbox
 
 
 @pytest.fixture
@@ -159,3 +159,30 @@ def test_removed_toolkit_suppresses_session_start_instructions(project, provider
     skill.unlink()
     assert start(project, provider, "resume") is None
     assert assigned_inbox() == inbox
+
+
+@pytest.mark.parametrize("provider", ["claude", "chatgpt"])
+@pytest.mark.parametrize("delegated", [False, True])
+def test_ordinary_turns_receive_no_delegation_instructions(project, monkeypatch, provider, delegated):
+    install_toolkit(project, provider)
+    assert start(project, provider) is not None
+    session_id = "parent"
+    if delegated:
+        (assigned_inbox() / "child.md").write_text(
+            "---\nmode: auto\n---\nExplain the configuration.", encoding="utf-8",
+        )
+        [child] = process_inbox("parent", launch=lambda *_args: "child-conversation")
+        session_id = child.child_session_id
+    monkeypatch.setattr(sessions, "launch_delegated", lambda *_args: pytest.fail("unexpected child launch"))
+
+    for source in ("startup", "resume", "compact"):
+        assert start(project, provider, source, session_id) is not None
+        for event in ("UserPromptSubmit", "PreToolUse", "PostToolUse"):
+            assert hooks.handle({
+                "session_id": session_id, "cwd": str(project), "hook_event_name": event,
+                "prompt": "Explain the configuration.", "tool_name": "Read", "tool_input": {},
+            }, provider) is None
+    with sessions._connect() as connection:
+        assert connection.execute(
+            "SELECT count(*) FROM requests WHERE parent_session_id=?", (session_id,),
+        ).fetchone() == (0,)

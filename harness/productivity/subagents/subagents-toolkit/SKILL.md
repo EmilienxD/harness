@@ -54,8 +54,6 @@ Set `skill` only when the user explicitly asks the subagent to use a skill by na
 
 Use `auto` when the subagent should work independently and report back. Use `interactive` when the user wants to work directly in its visible session; default to interactive when unspecified. Both modes accept skills.
 
-Give the subagent only the requested skill selection. Instruct it to use skills only when explicitly requested by the user, subject to its project and provider instructions.
-
 Each new subagent starts with a fresh conversation and knows only the project and user memory files such as `AGENTS.md`/`CLAUDE.md`. Give it a self-contained prompt that explains why, what, where, and how, including constraints and completion criteria, without repeating general project information it can read there.
 
 Reference files as `@absolute/or/relative/to/the/project/root/path`. On Pi, automatic loading requires the file-mentions extension to be installed and active in the child session. Without it, keep the reference and ask the child to read the file explicitly. Refer to line numbers in plain text (e.g., lines 14-45). Do not append them to the file path (e.g., @src/core.py:25); that format is not supported. If relevant code is not saved in the project, include the necessary parts as small snippets.

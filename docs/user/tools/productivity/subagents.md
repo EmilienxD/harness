@@ -20,7 +20,9 @@ skill: websearch
 Find primary sources for the proposed change.
 ```
 
-Harness adds a native skill invocation only when `skill` is supplied. The parent includes it only when the user explicitly requests that skill by name. Otherwise the child receives the work description with an explicit-only skill instruction, subject to its project and provider rules. Missing requested skills fail before any child process or Aboard launch; the parent receives the failure. Install child workflows separately: subagents no longer installs prototype, websearch, grill-me, or issue-readers.
+Harness adds a native skill invocation only when `skill` is supplied. The parent includes it only when the user explicitly requests that skill by name. The child receives the work description, and its provider and project rules govern skill use. Missing requested skills fail before any child process or Aboard launch; the parent receives the failure. Install child workflows separately: subagents no longer installs prototype, websearch, grill-me, or issue-readers.
+
+The runtime supplies the assigned inbox at session start and restores it on resume or compaction. The toolkit contains the delegation instructions; ordinary prompts and toolkit invocations receive no additional delegation instructions. Reply authorization stays internal rather than adding model context. Pi may show a user-facing reply-armed notice.
 
 Availability currently checks conventional project/user skill directories for the child provider and working directory. Plugin namespaces and provider-configured resource locations outside these roots are not supported by this check. Native providers resolve the actual invocation. No task registry or specialized launcher is read; old custom registry files remain user-owned and are ignored.
 
@@ -123,6 +125,8 @@ are outside this gate. Interactive behavior has also been manually verified; tha
 these automated acceptance boundaries.
 
 The task-free 3.0.0 checkout is verified by `e2e:subagents:skills` and `e2e:pi-subagents:skills` in `tests/e2e/`: real headless Claude/Codex/Pi CLIs use fake APIs to cover omitted/found/missing skills, native skill expansion, receipt writes, failure delivery, request counts, cleanup, and Claude/Codex resume. This does not certify the unchanged remote runtime pin or the visible Aboard/TUI paths.
+
+The 3.0.7 checkout (runtime 3.0.4) removes additional delegation instructions, the child skill-use prefix, and model-facing reply-arming notices. The same real-CLI skill journeys pass for Claude/Codex/Pi. Regression tests cover ordinary parent and child turns after startup, resume, and compaction, plus silent reply authorization with pending nested results. The catalogue's remote runtime pin remains unchanged; these runtime fixes require a newly published pin before remote installs include them.
 
 ## Remaining integration limits
 

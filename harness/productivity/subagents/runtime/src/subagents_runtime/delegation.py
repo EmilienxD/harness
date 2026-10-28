@@ -984,7 +984,7 @@ def claim_instructions(
     lead: bool | None = None,
     session_start: bool = False,
 ) -> str | None:
-    """Replay context until acknowledged; refresh it on session start or compaction."""
+    """Supply the inbox at session start; retain Lead context replay for loop sessions."""
     sessions = _sessions_module()
     with sessions._connect() as connection:
         connection.execute("BEGIN IMMEDIATE")
@@ -993,6 +993,8 @@ def claim_instructions(
                 "SELECT 1 FROM requests WHERE parent_session_id=? AND task='loop' LIMIT 1",
                 (session_id,),
             ).fetchone() is not None
+        if not session_start and not lead:
+            return None
         row = connection.execute(
             "SELECT inbox,context_epoch,injected_epoch,claim_sequence,acknowledgement_sequence FROM session_delegation WHERE parent_session_id=?",
             (session_id,),
@@ -1015,14 +1017,10 @@ def claim_instructions(
                 "UPDATE session_delegation SET injected_epoch=?,claim_sequence=?,acknowledgement_sequence=NULL WHERE parent_session_id=?",
                 (epoch, sequence, session_id),
             )
-        if not session_start:
-            cwd, provider = connection.execute("SELECT cwd,provider FROM sessions WHERE id=?", (session_id,)).fetchone()
     if session_start:
         text = session_start_instructions(inbox)
         return f"{text}\n\n{lead_instructions(session_id, inbox)}" if lead else text
-    if lead:
-        return lead_instructions(session_id, inbox)
-    return delegation_instructions(inbox, Path(cwd), provider)
+    return lead_instructions(session_id, inbox)
 
 
 def session_start_instructions(inbox: str | Path) -> str:
@@ -1030,19 +1028,6 @@ def session_start_instructions(inbox: str | Path) -> str:
         "This session manages subagents via the subagents-toolkit skill. "
         "If at any time you end up working with this tool, "
         f"this is your assigned inbox `{inbox}`."
-    )
-
-
-def delegation_instructions(inbox: str | Path, cwd: Path, provider: str) -> str:
-    return (
-        f"Conversation inbox: {inbox}\n"
-        "Publish each complete request as a .md file in this inbox using any file-writing tool. "
-        "For multi-step writes, write a temporary file and rename it to .md when complete. "
-        "The runtime scans after tools and before stopping; confirm its launch acknowledgement before reporting a child as started.\n"
-        "Set skill only when the user explicitly requests that skill by name; otherwise omit it. "
-        "A missing requested skill fails the launch.\n"
-        "Invoke the subagents-toolkit skill before launching or continuing a subagent "
-        "if its instructions are not already in the current context.\n"
     )
 
 

@@ -80,6 +80,41 @@ def test_interactive_stop_requires_one_shot_reply_authorization(tmp_path: Path, 
     assert delivery is not None and "The routed answer." in delivery.text
 
 
+@pytest.mark.parametrize("provider", ["claude", "chatgpt"])
+@pytest.mark.parametrize("nested_result", [False, True])
+def test_reply_hook_arms_silently_and_preserves_nested_result_delivery(tmp_path, monkeypatch, provider, nested_result):
+    from subagents_runtime.hooks import handle
+
+    parent, request, child = setup_request(tmp_path, monkeypatch, mode="interactive")
+    with sessions._connect() as connection:
+        connection.execute("UPDATE sessions SET provider=? WHERE id=?", (provider, child))
+    if nested_result:
+        inbox = enable_delegation(child, "subagents-toolkit").inbox
+        (inbox / "nested.md").write_text("---\nmode: auto\n---\nInspect the configuration.", encoding="utf-8")
+        [nested] = process_inbox(child, launch=lambda *_args: "nested-conversation")
+        assert report_child_stop(nested.child_session_id, "Configuration inspected.", success=True)
+
+    output = handle({
+        "session_id": child, "cwd": str(tmp_path), "hook_event_name": "UserPromptSubmit",
+        "prompt": ("/" if provider == "claude" else "$") + "reply-to-agent",
+    }, provider)
+
+    if nested_result:
+        delivery = claim_parent_delivery(child, "UserPromptSubmit")
+        assert delivery is not None
+        assert output["hookSpecificOutput"]["hookEventName"] == "UserPromptSubmit"
+        observe_parent_event(child, "PreToolUse")
+        assert claim_parent_delivery(child, "PostToolUse") is None
+    else:
+        assert output is None
+    with sessions._connect() as connection:
+        assert connection.execute(
+            "SELECT request_id FROM reply_authorizations WHERE child_session_id=?", (child,),
+        ).fetchone() == (request,)
+    assert report_child_stop(child, "Finished.", success=True)
+    assert claim_parent_delivery(parent, "PostToolUse") is not None
+
+
 def test_successful_interactive_reply_offers_parent_terminal_link(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     from subagents_runtime.hooks import handle
 

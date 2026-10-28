@@ -58,7 +58,7 @@ def _context(event: str, text: str) -> dict[str, Any]:
 def _skill_instructions(session_id: str, skill: str) -> str | None:
     inbox = enable_delegation(session_id, skill).inbox
     if skill != "ship":
-        return claim_instructions(session_id, lead=False)
+        return None
     # Every /ship invocation restates the Lead identity, even when already injected.
     return claim_instructions(session_id, lead=True) or lead_instructions(session_id, inbox)
 
@@ -260,13 +260,7 @@ def handle(
         if skill:
             if skill == "reply-to-agent":
                 arm_reply(session_id, execution_id)
-                context = (
-                    "Reply armed. The next successful Stop will be sent to the parent."
-                )
-                return _context(
-                    event,
-                    context if delivery is None else f"{delivery.text}\n\n{context}",
-                )
+                return _context(event, delivery.text) if delivery else None
             instructions = _skill_instructions(session_id, skill)
             text = "\n\n".join(
                 item

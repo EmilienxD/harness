@@ -456,7 +456,7 @@ def test_info_json_exposes_dependency_and_platform_contract(capsys):
     }
     assert package["dependencies"] == [
         {"name": "pi-transport", "constraint": ">=1.1.0,<2.0.0", "lifecycle": "coupled"},
-        {"name": "pi-subagents-toolkit", "constraint": ">=2.0.0,<3.0.0", "lifecycle": "coupled"},
+        {"name": "pi-subagents-toolkit", "constraint": ">=2.0.3,<3.0.0", "lifecycle": "coupled"},
     ]
     assert package["actions"] == ["uv-tool"]
 

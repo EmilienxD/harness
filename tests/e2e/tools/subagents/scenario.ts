@@ -218,9 +218,9 @@ function codexChild(request: OpenAiResponsesRequest, mode: "interactive" | "auto
 }
 
 function requireInbox(text: string, repoRoot: string, provider: "claude" | "codex"): string {
-  const match = /Conversation inbox: ([^\r\n]+)(?:\r?\n|$)/u.exec(text);
-  const inbox = match?.[1]?.trim();
-  if (inbox !== undefined && isAbsolute(inbox)) {
+  for (const match of text.matchAll(/`([^`\r\n]+)`/gu)) {
+    const inbox = match[1]!;
+    if (!isAbsolute(inbox)) continue;
     try {
       const canonicalInbox = realpathSync(inbox);
       if (containsPath(realpathSync(resolve(repoRoot,"..","state","inboxes")), canonicalInbox)) return canonicalInbox;

@@ -19,7 +19,6 @@ from subagents_runtime.delegation import (
     arm_reply,
     claim_parent_delivery,
     clear_reply_authorization,
-    delegation_instructions,
     enable_delegation,
     ensure_inbox,
     has_pending_children,
@@ -141,8 +140,8 @@ def prompt(request: dict[str, Any]) -> dict[str, Any]:
     if skill == "reply-to-agent":
         arm_reply(session_id, _execution_id(session_id))
         return {"context": None, "notice": "Reply armed. The next successful response will be sent to the parent."}
-    inbox = enable_delegation(session_id, skill).inbox
-    return {"context": delegation_instructions(inbox, cwd, "pi"), "notice": None}
+    enable_delegation(session_id, skill)
+    return {"context": None, "notice": None}
 
 
 def previous_reply(request: dict[str, Any]) -> dict[str, Any]:

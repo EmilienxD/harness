@@ -384,14 +384,20 @@ class TestBridge:
         assert forked["harnessSessionId"] == "user-fork"
         assert forked["delegatedMode"] is None
 
-    def test_delegation_skill_supplies_inbox_instructions(self, project):
+    def test_delegation_skill_prepares_inbox_without_extra_model_context(self, project):
         sessions.register_observed("parent", project, "pi")
 
         invoked = bridge("prompt", harnessSessionId="parent", text="/skill:subagents-toolkit review the parser")
         plain = bridge("prompt", harnessSessionId="parent", text="Explain /skill:unknown-with-agent")
 
-        assert invoked["ok"] and invoked["context"]
+        assert invoked["ok"] and invoked["context"] is None
         assert plain["ok"] and plain["context"] is None
+        with sessions._connect() as connection:
+            inbox = connection.execute(
+                "SELECT inbox FROM session_delegation WHERE parent_session_id='parent'"
+            ).fetchone()
+            assert inbox and Path(inbox[0]).is_dir()
+            assert connection.execute("SELECT count(*) FROM requests").fetchone() == (0,)
 
     def test_inbox_scan_launches_only_published_requests_in_the_owned_inbox(self, project, launches):
         sessions.register_observed("parent", project, "pi")
@@ -461,6 +467,7 @@ class TestBridge:
         replied = bridge("settled", harnessSessionId=child, success=True, message="Conclusion.")
 
         assert unarmed["reported"] is False
+        assert armed["context"] is None
         assert armed["notice"] and failed["reported"] is False
         assert replied["reported"] is True
         assert request_row(interactive_child.request_id)[:2] == ("succeeded", "Conclusion.")

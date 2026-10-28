@@ -133,7 +133,7 @@ def test_saved_conversation_has_one_persistent_inbox_for_all_tasks(
 
 
 @pytest.mark.parametrize("provider", ["claude", "chatgpt"])
-def test_runtime_context_is_replayed_then_acknowledged_and_compaction_starts_epoch(
+def test_inbox_context_is_only_supplied_at_session_start_and_restored_after_compaction(
     tmp_path, monkeypatch, provider
 ):
     monkeypatch.setenv("HARNESS_STATE_DIR", str(tmp_path / "state"))
@@ -149,15 +149,16 @@ def test_runtime_context_is_replayed_then_acknowledged_and_compaction_starts_epo
         "hook_event_name": "UserPromptSubmit",
         "prompt": ("/" if provider == "claude" else "$") + "subagents-toolkit do work",
     }
-    assert handle(payload, provider) is not None
-    assert handle({**payload, "prompt": "Continue the work."}, provider) is not None
-    # A different observed event proves the previous injection reached the conversation.
+    assert handle({**payload, "hook_event_name": "SessionStart", "source": "startup"}, provider) is not None
+    assert handle(payload, provider) is None
+    assert handle({**payload, "prompt": "Continue the work."}, provider) is None
     handle({**payload, "hook_event_name": "PreToolUse"}, provider)
     assert handle(payload, provider) is None
     compacted = handle(
         {**payload, "hook_event_name": "SessionStart", "source": "compact"}, provider
     )
     assert compacted is not None
+    assert handle({**payload, "prompt": "Explain the configuration."}, provider) is None
     with sessions._connect() as connection:
         assert connection.execute(
             "SELECT context_epoch, injected_epoch FROM session_delegation WHERE parent_session_id='parent'"
@@ -182,7 +183,7 @@ def test_runtime_context_delivery_does_not_load_instruction_documents(tmp_path, 
         pytest.fail("Runtime context delivery must not load instruction documents")
 
     monkeypatch.setattr(Path, "read_text", unexpected_read)
-    assert claim_instructions("parent", compact=compact) is not None
+    assert claim_instructions("parent", compact=compact, session_start=True) is not None
     assert inbox.is_dir()
 
 
@@ -193,7 +194,7 @@ def test_loading_toolkit_prepares_inbox_without_launching_a_child(tmp_path, monk
         "session_id": "parent", "cwd": str(tmp_path),
         "hook_event_name": "PostToolUse", "tool_name": "Skill",
         "tool_input": {"skill": "subagents-toolkit"}, "tool_response": {"success": True},
-    }, "claude") is not None
+    }, "claude") is None
     with sessions._connect() as connection:
         assert connection.execute("SELECT count(*) FROM session_delegation").fetchone()[0] == 1
         assert connection.execute("SELECT count(*) FROM requests").fetchone()[0] == 0
@@ -869,7 +870,7 @@ def test_parent_resume_delivers_dead_child_interruption_without_restarting_it(
         connection.execute(
             "UPDATE executions SET supervisor_pid=2147483647,supervisor_birth='dead',provider_pid=2147483647,provider_birth='dead'"
         )
-    # Acknowledge the original instructions, so only the interruption produces context.
+    # Observe a parent turn before resuming its saved conversation.
     handle({"session_id": "parent", "cwd": str(tmp_path), "hook_event_name": "UserPromptSubmit"}, provider)
     handle({"session_id": "parent", "cwd": str(tmp_path), "hook_event_name": "PreToolUse"}, provider)
     output = handle(
@@ -1002,7 +1003,7 @@ def test_successful_skill_tool_enables_saved_conversation_without_slash_prompt(
             "tool_response": {"success": True},
         }
     )
-    assert output is not None
+    assert output is None
     with sessions._connect() as connection:
         assert (
             connection.execute(

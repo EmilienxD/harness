@@ -658,16 +658,13 @@ def launch_delegated(request, request_id: str, agent_number: int, cwd: Path) -> 
         )
         return child_id
     continuing = bool(request.resume)
-    initial_prompt = request.prompt if continuing else (
-        "Use skills only when explicitly requested by the user, subject to project and provider instructions.\n\n" + request.prompt
-    )
     if continuing or skill is None:
-        prompt = initial_prompt
+        prompt = request.prompt
     elif request.provider == "pi":
         # Pi reads the skill name up to the first space; a newline would join it to the prompt.
-        prompt = f"/skill:{skill} {initial_prompt}"
+        prompt = f"/skill:{skill} {request.prompt}"
     else:
-        prompt = f"{'$' if request.provider == 'chatgpt' else '/'}{skill}\n\n{initial_prompt}"
+        prompt = f"{'$' if request.provider == 'chatgpt' else '/'}{skill}\n\n{request.prompt}"
     if not continuing and request.provider in _ASSIGNED_IDENTITY:
         conversation = child_id
         if request.provider == "pi":
