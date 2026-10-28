@@ -89,7 +89,7 @@ export async function runPiSubagentsJourney(route: Route, options: {
   try {
     const root = await findHarnessRoot();
     const { projectRoot: project, env, sessionsDir } = fixture.workspace;
-    if (options.shellWrite || options.busyParent) {
+    {
       const path = join(project, ".pi", "settings.json");
       const settings = JSON.parse(await readFile(path, "utf8"));
       settings.defaultTools.push(process.platform === "win32" ? "powershell" : "bash");
@@ -116,6 +116,7 @@ export async function runPiSubagentsJourney(route: Route, options: {
     env[pathKey] = `${bin}${delimiter}${env[pathKey] ?? ""}`;
     const packages = ["subagents", ...(options.fullStack ? ["grill-me-in-cloud", "command-guard", "on-read-reminder", "on-edit-reminder", "no-new-documents", "prefer-fewer-comments", "mid-prompt-skills"] : [])];
     await runFixtureInstaller(fixture.workspace, "install", packages, { scope: "project", pinnedRuntimes: options.pinnedRuntimes ?? true });
+    await readFile(join(project, ".pi", "skills", "subagents-toolkit", "scripts", "enable_inbox.py"));
     if (options.skill) {
       const selectedRoot = join(project, ".pi", "skills", "e2e-selected");
       await mkdir(selectedRoot, { recursive: true });
@@ -206,7 +207,7 @@ export async function runPiSubagentsJourney(route: Route, options: {
 
     const state = await runtimeState(python, stateDir, parentId);
     const [row] = state.requests;
-    assert.ok(row && state.requests.length === 1, `exactly one delegated request is recorded: ${JSON.stringify({ status: parent.status, tools: parent.toolExecutions, inference: fixture.assertions().inferenceRequests, unexpected: fixture.assertions().unexpectedRequests })}`);
+    assert.ok(row && state.requests.length === 1, `exactly one delegated request is recorded: ${JSON.stringify({ status: parent.status, tools: parent.toolExecutions, inference: fixture.assertions().inferenceRequests, unexpected: fixture.assertions().unexpectedRequests, diagnostics: fixture.assertions().observations.map((entry) => entry.diagnostic ?? entry.checkpoint) })}`);
     const [requestState, mode, provider, reply, deliveryId, acknowledged, bound, childId] = row;
     const entries = (await sessionEntries(sessionsDir, parentId)) ?? [];
     const delivered = entries.filter((entry) => entry.type === "custom_message" && entry.customType === RESULT);
@@ -234,7 +235,7 @@ export async function runPiSubagentsJourney(route: Route, options: {
     if (options.skill === "found") assert.deepEqual(JSON.parse(await readFile(join(project, "selected-skill.json"), "utf8")), { skill: "e2e-selected" });
     if (options.skill === "missing") {
       assert.equal(requestState, "failed");
-      assert.equal(assertions.inferenceRequests, 3);
+      assert.equal(assertions.inferenceRequests, 4);
     }
     const childEntries = await sessionEntries(sessionsDir, childId);
     const childModel = childEntries?.filter(entry => entry.type === "model_change").at(-1)?.modelId;

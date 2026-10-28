@@ -53,7 +53,7 @@ def test_stop_wait_uses_the_provider_neutral_session_setting(tmp_path: Path, mon
 @pytest.mark.parametrize("launcher", [
     "subagents-toolkit",
 ])
-def test_direct_ask_skill_opens_an_unpredictable_task_bound_inbox(
+def test_direct_ask_skill_requires_explicit_inbox_activation(
     launcher: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     parent = configured(tmp_path, monkeypatch)
@@ -68,12 +68,9 @@ def test_direct_ask_skill_opens_an_unpredictable_task_bound_inbox(
     assert output is None
     connection = sqlite3.connect(tmp_path / "state" / "sessions.sqlite3")
     try:
-        selected_parent, inbox = connection.execute("SELECT parent_session_id, inbox FROM session_delegation").fetchone()
+        assert connection.execute("SELECT parent_session_id, inbox FROM session_delegation").fetchone() is None
     finally:
         connection.close()
-    assert selected_parent == parent
-    assert parent not in inbox
-    assert Path(inbox).is_relative_to(tmp_path / "state")
 
 
 def test_existing_provider_session_is_registered_by_the_user_invocation_hook(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -120,7 +117,8 @@ def test_ask_skill_invocation_after_prose_opens_its_grant(
 
     assert (output is not None) == (expected_skill == "ship")
     with sqlite3.connect(tmp_path / "state" / "sessions.sqlite3") as connection:
-        assert connection.execute("SELECT parent_session_id FROM session_delegation").fetchone() == (f"existing-{provider}-session",)
+        expected = (f"existing-{provider}-session",) if expected_skill == "ship" else None
+        assert connection.execute("SELECT parent_session_id FROM session_delegation").fetchone() == expected
 
 
 @pytest.mark.parametrize("provider", ["claude", "chatgpt"])

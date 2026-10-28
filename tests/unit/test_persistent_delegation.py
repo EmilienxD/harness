@@ -133,7 +133,7 @@ def test_saved_conversation_has_one_persistent_inbox_for_all_tasks(
 
 
 @pytest.mark.parametrize("provider", ["claude", "chatgpt"])
-def test_inbox_context_is_only_supplied_at_session_start_and_restored_after_compaction(
+def test_inbox_is_not_enabled_by_skill_mentions_startup_or_compaction(
     tmp_path, monkeypatch, provider
 ):
     monkeypatch.setenv("HARNESS_STATE_DIR", str(tmp_path / "state"))
@@ -149,7 +149,7 @@ def test_inbox_context_is_only_supplied_at_session_start_and_restored_after_comp
         "hook_event_name": "UserPromptSubmit",
         "prompt": ("/" if provider == "claude" else "$") + "subagents-toolkit do work",
     }
-    assert handle({**payload, "hook_event_name": "SessionStart", "source": "startup"}, provider) is not None
+    assert handle({**payload, "hook_event_name": "SessionStart", "source": "startup"}, provider) is None
     assert handle(payload, provider) is None
     assert handle({**payload, "prompt": "Continue the work."}, provider) is None
     handle({**payload, "hook_event_name": "PreToolUse"}, provider)
@@ -157,16 +157,16 @@ def test_inbox_context_is_only_supplied_at_session_start_and_restored_after_comp
     compacted = handle(
         {**payload, "hook_event_name": "SessionStart", "source": "compact"}, provider
     )
-    assert compacted is not None
+    assert compacted is None
     assert handle({**payload, "prompt": "Explain the configuration."}, provider) is None
     with sessions._connect() as connection:
         assert connection.execute(
             "SELECT context_epoch, injected_epoch FROM session_delegation WHERE parent_session_id='parent'"
-        ).fetchone() == (1, 1)
+        ).fetchone() is None
     handle({**payload, "hook_event_name": "PreToolUse"}, provider)
     assert (
         handle({**payload, "hook_event_name": "SessionStart", "source": "resume"}, provider)
-        is not None
+        is None
     )
 
 
@@ -183,11 +183,11 @@ def test_runtime_context_delivery_does_not_load_instruction_documents(tmp_path, 
         pytest.fail("Runtime context delivery must not load instruction documents")
 
     monkeypatch.setattr(Path, "read_text", unexpected_read)
-    assert claim_instructions("parent", compact=compact, session_start=True) is not None
+    assert claim_instructions("parent", compact=compact, session_start=True) is None
     assert inbox.is_dir()
 
 
-def test_loading_toolkit_prepares_inbox_without_launching_a_child(tmp_path, monkeypatch):
+def test_loading_toolkit_does_not_activate_inbox(tmp_path, monkeypatch):
     monkeypatch.setenv("HARNESS_STATE_DIR", str(tmp_path / "state"))
     monkeypatch.delenv("HARNESS_SESSION_ID", raising=False)
     assert handle({
@@ -196,7 +196,7 @@ def test_loading_toolkit_prepares_inbox_without_launching_a_child(tmp_path, monk
         "tool_input": {"skill": "subagents-toolkit"}, "tool_response": {"success": True},
     }, "claude") is None
     with sessions._connect() as connection:
-        assert connection.execute("SELECT count(*) FROM session_delegation").fetchone()[0] == 1
+        assert connection.execute("SELECT count(*) FROM session_delegation").fetchone()[0] == 0
         assert connection.execute("SELECT count(*) FROM requests").fetchone()[0] == 0
 
 
@@ -988,7 +988,7 @@ def test_legacy_grants_consolidate_running_files_and_preserve_indices_and_acks(
     assert recovered.status == "uncertain"
 
 
-def test_successful_skill_tool_enables_saved_conversation_without_slash_prompt(
+def test_successful_skill_tool_leaves_activation_to_the_script(
     tmp_path, monkeypatch
 ):
     monkeypatch.setenv("HARNESS_STATE_DIR", str(tmp_path / "state"))
@@ -1009,7 +1009,7 @@ def test_successful_skill_tool_enables_saved_conversation_without_slash_prompt(
             connection.execute(
                 "SELECT count(*) FROM session_delegation WHERE parent_session_id='parent'"
             ).fetchone()[0]
-            == 1
+            == 0
         )
     output = handle(
         {

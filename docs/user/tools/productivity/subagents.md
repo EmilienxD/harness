@@ -22,7 +22,7 @@ Find primary sources for the proposed change.
 
 Harness adds a native skill invocation only when `skill` is supplied. The parent includes it only when the user explicitly requests that skill by name. The child receives the work description, and its provider and project rules govern skill use. Missing requested skills fail before any child process or Aboard launch; the parent receives the failure. Install child workflows separately: subagents no longer installs prototype, websearch, grill-me, or issue-readers.
 
-The runtime supplies the assigned inbox at session start and restores it on resume or compaction. The toolkit contains the delegation instructions; ordinary prompts and toolkit invocations receive no additional delegation instructions. Reply authorization stays internal rather than adding model context. Pi may show a user-facing reply-armed notice.
+The toolkit starts by running its bundled `scripts/enable_inbox.py`. This explicitly creates and enables the conversation's inbox and returns its path. Repeated activation reuses the same assignment, including after resume. Startup, compaction, skill expansion and skill reads neither create an inbox nor inject inbox context. The toolkit contains the delegation instructions. Reply authorization stays internal rather than adding model context. Pi may show a user-facing reply-armed notice.
 
 Availability currently checks conventional project/user skill directories for the child provider and working directory. Plugin namespaces and provider-configured resource locations outside these roots are not supported by this check. Native providers resolve the actual invocation. No task registry or specialized launcher is read; old custom registry files remain user-owned and are ignored.
 
@@ -61,7 +61,7 @@ Configure launches in project `.harness/config.json` or user `~/.harness/config.
 }
 ```
 
-The shared file's `autoRun` settings belong to Aboard and are ignored by this runtime. `harness run` requires an explicit `--provider`. Provider entries can set a `command` and a `delegations.general` profile. This profile accepts `model` and `effort`; `"inherit"` uses native settings. Claude accepts full model IDs such as `claude-opus-5-5` as well as the native `opus`, `sonnet`, and `haiku` aliases. Claude can also set `deniedTools`. Explicit launch overrides take precedence. Skills do not select profiles. `session.stopWaitHours` sets an optional nonnegative wait for an outstanding reply. Session requests and logs live under `~/.harness/runtime/`; set `HARNESS_STATE_DIR` to change the Harness state root. If delegation says its hook did not provide the shared inbox, check that the package's provider hook is installed and active before retrying.
+The shared file's `autoRun` settings belong to Aboard and are ignored by this runtime. `harness run` requires an explicit `--provider`. Provider entries can set a `command` and a `delegations.general` profile. This profile accepts `model` and `effort`; `"inherit"` uses native settings. Claude accepts full model IDs such as `claude-opus-5-5` as well as the native `opus`, `sonnet`, and `haiku` aliases. Claude can also set `deniedTools`. Explicit launch overrides take precedence. Skills do not select profiles. `session.stopWaitHours` sets an optional nonnegative wait for an outstanding reply. Session requests and logs live under `~/.harness/runtime/`; set `HARNESS_STATE_DIR` to change the Harness state root. If inbox activation fails, check that the updated runtime and the package's provider hook or extension are installed and active.
 
 ## Implementation and verification
 
@@ -96,9 +96,8 @@ persisted; replay after reload or restart acknowledges an already persisted batc
 resending it. Delivery is session-wide rather than branch-bound, as with Claude/Codex rewinds,
 so tree navigation cannot strand a child result.
 
-Other boundaries: one stable `harness-subagents` system-prompt section carries the inbox, preserving
-prompt caching and surviving compaction. Delegation skills receive their instructions by input
-transformation. Successful native `write`/`edit` results inside the inbox, including nested calls,
+Other boundaries: inbox activation is explicit through the toolkit's bundled script; no inbox
+section is added to Pi's system prompt. Native tool completions, including failed commands and nested calls,
 launch requests and append the launch status. `/reply-to-agent-with-previous-message`
 sends the latest successful assistant text on the active branch without inference.
 Interactive children report at `agent_settled`; a new prompt or failed turn expires an armed reply,
@@ -127,6 +126,19 @@ these automated acceptance boundaries.
 The task-free 3.0.0 checkout is verified by `e2e:subagents:skills` and `e2e:pi-subagents:skills` in `tests/e2e/`: real headless Claude/Codex/Pi CLIs use fake APIs to cover omitted/found/missing skills, native skill expansion, receipt writes, failure delivery, request counts, cleanup, and Claude/Codex resume. This does not certify the unchanged remote runtime pin or the visible Aboard/TUI paths.
 
 The 3.0.7 checkout (runtime 3.0.4) removes additional delegation instructions, the child skill-use prefix, and model-facing reply-arming notices. The same real-CLI skill journeys pass for Claude/Codex/Pi. Regression tests cover ordinary parent and child turns after startup, resume, and compaction, plus silent reply authorization with pending nested results. The catalogue's remote runtime pin remains unchanged; these runtime fixes require a newly published pin before remote installs include them.
+
+The 3.0.8 checkout (runtime 3.0.5, Pi toolkit 2.0.4) moves inbox allocation to explicit script activation.
+The script delegates to the installed runtime so its Python dependencies stay in the uv-managed environment.
+Claude uses `CLAUDE_CODE_SESSION_ID`, Codex uses `CODEX_THREAD_ID`, and Pi's extension supplies
+`HARNESS_PI_SESSION_ID`; the runtime resolves each native ID to the registered Harness conversation.
+Missing or unregistered identities fail without allocating an inbox. Allocation retains the existing six-character
+random names and exclusive directory creation. Ordinary startup and toolkit invocation remain silent; only
+previously enabled inboxes participate in request recovery. These changes also require a newly published
+runtime pin for remote installations. The checkout passes the Claude/Codex skill-selection journeys,
+including resume, and the Pi skill-selection journeys with five requests for no child skill, six for
+a found skill and four for a missing skill. Claude/Codex also pass interactive, automatic,
+alternate-root and interrupted-child recovery journeys. Unit tests cover silent startup,
+explicit activation, repeated activation, native identity binding and pre-activation request isolation.
 
 ## Remaining integration limits
 

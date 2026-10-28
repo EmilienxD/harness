@@ -8,7 +8,7 @@ metadata:
 
 # Subagents toolkit
 
-Launch or continue subagents only when the user explicitly requests delegation. Use the assigned conversation inbox supplied by the runtime, including after resume. If no inbox was supplied, stop and report the missing runtime context.
+Launch or continue subagents only when the user explicitly requests delegation. If you didn't enable the session's subagents inbox during this session yet, run the `<skill-directory>/scripts/enable_inbox.py` script to create and enable it. It returns the inbox path.
 
 Publish one complete `.md` request directly in that inbox per child launch or continuation. For multi-step writes, use a temporary file with another extension and rename it to `.md` when complete. Confirm the runtime's launch acknowledgement before reporting a child as started. If launch or continuation fails, report the available error details and stop without retrying or substituting another workflow.
 

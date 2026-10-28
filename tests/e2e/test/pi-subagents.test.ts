@@ -32,7 +32,7 @@ for (const route of ["auto", "interactive"] as const) {
     assert.equal(result.childThinkingLevel, "medium");
     assert.equal(result.childSessionSaved, true);
     assert.equal(result.requestFilesRemaining, 0);
-    assert.equal(result.inferenceRequests, 5);
+    assert.equal(result.inferenceRequests, 6);
     assert.equal(result.unexpectedRequests, 0);
     if (route === "interactive") assert.equal(result.previousReplyInferenceRequests, 0);
   });
@@ -48,8 +48,8 @@ for (const pinnedRuntimes of [false, true]) {
     assert.equal(result.deliveryMatchesRequest, true);
     assert.equal(result.childSessionSaved, true);
     assert.equal(result.requestFilesRemaining, 0);
-    // Parent write, parent wait, child answer, parent integration.
-    assert.equal(result.inferenceRequests, 4);
+    // Parent activation, parent write, parent wait, child answer, parent integration.
+    assert.equal(result.inferenceRequests, 5);
     assert.equal(result.unexpectedRequests, 0);
   });
 }
@@ -64,7 +64,7 @@ test("an interactive Pi child replies without inference and wakes its live paren
   assert.equal(result.deliveryMatchesRequest, true);
   assert.equal(result.childSessionSaved, true);
   assert.equal(result.requestFilesRemaining, 0);
-  assert.equal(result.inferenceRequests, 4);
+  assert.equal(result.inferenceRequests, 5);
   assert.equal(result.unexpectedRequests, 0);
 });
 
@@ -79,7 +79,7 @@ test("a busy Pi parent receives its child's reply before its next inference requ
   assert.equal(result.deliveryMatchesRequest, true);
   assert.equal(result.childSessionSaved, true);
   assert.equal(result.requestFilesRemaining, 0);
-  assert.equal(result.inferenceRequests, 5);
+  assert.equal(result.inferenceRequests, 6);
   assert.equal(result.unexpectedRequests, 0);
 });
 
@@ -91,7 +91,7 @@ for (const route of ["auto", "interactive"] as const) {
     assert.equal(result.request.acknowledged, true);
     assert.equal(result.deliveredResults, 1);
     assert.equal(result.requestFilesRemaining, 0);
-    assert.equal(result.inferenceRequests, 4);
+    assert.equal(result.inferenceRequests, 5);
     assert.equal(result.unexpectedRequests, 0);
   });
 }

@@ -984,7 +984,7 @@ def claim_instructions(
     lead: bool | None = None,
     session_start: bool = False,
 ) -> str | None:
-    """Supply the inbox at session start; retain Lead context replay for loop sessions."""
+    """Replay Lead context for loop sessions; toolkit activation is explicit."""
     sessions = _sessions_module()
     with sessions._connect() as connection:
         connection.execute("BEGIN IMMEDIATE")
@@ -993,7 +993,7 @@ def claim_instructions(
                 "SELECT 1 FROM requests WHERE parent_session_id=? AND task='loop' LIMIT 1",
                 (session_id,),
             ).fetchone() is not None
-        if not session_start and not lead:
+        if not lead:
             return None
         row = connection.execute(
             "SELECT inbox,context_epoch,injected_epoch,claim_sequence,acknowledgement_sequence FROM session_delegation WHERE parent_session_id=?",
@@ -1017,18 +1017,7 @@ def claim_instructions(
                 "UPDATE session_delegation SET injected_epoch=?,claim_sequence=?,acknowledgement_sequence=NULL WHERE parent_session_id=?",
                 (epoch, sequence, session_id),
             )
-    if session_start:
-        text = session_start_instructions(inbox)
-        return f"{text}\n\n{lead_instructions(session_id, inbox)}" if lead else text
     return lead_instructions(session_id, inbox)
-
-
-def session_start_instructions(inbox: str | Path) -> str:
-    return (
-        "This session manages subagents via the subagents-toolkit skill. "
-        "If at any time you end up working with this tool, "
-        f"this is your assigned inbox `{inbox}`."
-    )
 
 
 def _plural(total: int, singular: str, plural: str) -> str:

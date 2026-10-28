@@ -357,18 +357,19 @@ def test_pi_children_route_through_aboard_when_it_is_running(project, monkeypatc
 
 
 class TestBridge:
-    def test_session_start_assigns_an_inbox_only_with_the_toolkit(self, project):
+    def test_session_start_never_assigns_or_discloses_an_inbox(self, project):
         plain = bridge("session_start", cwd=str(project), sessionId="plain", reason="startup")
-        assert plain["ok"] and plain["inbox"] is None and plain["instructions"] is None
+        assert plain["ok"] and "inbox" not in plain and "instructions" not in plain
 
         install_skill(project / ".pi" / "skills", "subagents-toolkit")
         started = bridge("session_start", cwd=str(project), sessionId="native", reason="startup")
         reloaded = bridge("session_start", cwd=str(project), sessionId="native", reason="reload")
 
         assert started["ok"], started
-        assert started["inbox"] and Path(started["inbox"]).is_dir() and started["instructions"]
+        assert "inbox" not in started and "instructions" not in started
         assert reloaded["harnessSessionId"] == started["harnessSessionId"]
-        assert reloaded["inbox"] == started["inbox"]
+        with sessions._connect() as connection:
+            assert connection.execute("SELECT count(*) FROM session_delegation").fetchone() == (0,)
         assert started["delegatedMode"] is None
 
     def test_new_and_fork_sessions_are_unrelated_conversations(self, project, launches, monkeypatch):
@@ -384,7 +385,7 @@ class TestBridge:
         assert forked["harnessSessionId"] == "user-fork"
         assert forked["delegatedMode"] is None
 
-    def test_delegation_skill_prepares_inbox_without_extra_model_context(self, project):
+    def test_delegation_skill_requires_explicit_inbox_activation(self, project):
         sessions.register_observed("parent", project, "pi")
 
         invoked = bridge("prompt", harnessSessionId="parent", text="/skill:subagents-toolkit review the parser")
@@ -396,7 +397,7 @@ class TestBridge:
             inbox = connection.execute(
                 "SELECT inbox FROM session_delegation WHERE parent_session_id='parent'"
             ).fetchone()
-            assert inbox and Path(inbox[0]).is_dir()
+            assert inbox is None
             assert connection.execute("SELECT count(*) FROM requests").fetchone() == (0,)
 
     def test_inbox_scan_launches_only_published_requests_in_the_owned_inbox(self, project, launches):
@@ -422,7 +423,7 @@ class TestBridge:
     def test_resume_scans_queued_requests(self, project, launches):
         install_skill(project / ".pi" / "skills", "subagents-toolkit")
         started = bridge("session_start", cwd=str(project), sessionId="parent", reason="startup")
-        inbox = Path(started["inbox"])
+        inbox = enable_delegation(started["harnessSessionId"], "subagents-toolkit").inbox
         (inbox / "work.md").write_text("---\nmode: auto\n---\nWork.", encoding="utf-8")
 
         resumed = bridge("session_start", cwd=str(project), sessionId="parent", reason="reload")
@@ -526,6 +527,7 @@ def test_catalogue_installs_the_pi_extension_with_shared_skills():
     assert not toolkit.selectable
     assert {entry.dest for entry in toolkit.expand("pi")} == {
         "subagents-toolkit/SKILL.md",
+        "subagents-toolkit/scripts/enable_inbox.py",
     }
     assert any(dependency.name == toolkit.name and dependency.lifecycle == "coupled"
                for dependency in tool.dependencies)

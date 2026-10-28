@@ -22,7 +22,7 @@ async function main() {
     assert.equal(result.childThinkingLevel, "medium");
     assert.equal(result.childSessionSaved, true);
     assert.equal(result.requestFilesRemaining, 0);
-    assert.equal(result.inferenceRequests, 5);
+    assert.equal(result.inferenceRequests, 6);
     assert.equal(result.unexpectedRequests, 0);
     if (route === "interactive") assert.equal(result.previousReplyInferenceRequests, 0);
     console.log(JSON.stringify({ route, parentStatus: result.parentStatus, publishedRounds: result.publishedRounds, childModel: result.childModel, childThinkingLevel: result.childThinkingLevel, inferenceRequests: result.inferenceRequests, unexpectedRequests: result.unexpectedRequests, upstreamMode: "forbidden", hosted: new URL(origin).hostname }));

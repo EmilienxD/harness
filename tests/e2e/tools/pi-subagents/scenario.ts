@@ -34,11 +34,20 @@ const message = (route: string, checkpoint: string, body: string): OpenAiScenari
   output: { type: "message", id: `msg_harness_subagents_${route}_${checkpoint}`, role: "assistant", status: "completed", content: [{ type: "output_text", text: body, annotations: [] }] },
 });
 
-/** The model reads its assigned inbox from context, exactly as a real parent would. */
+/** The model obtains its inbox from the activation command's tool result. */
 function inbox(request: OpenAiResponsesRequest): string {
-  const context = [text(request.instructions), ...request.input.map(text)].join("\n");
-  const match = /assigned inbox `([^`\r\n]+)`/u.exec(context);
-  if (!match) throw new OpenAiProtocolError("$.instructions", "the subagents inbox was not supplied", NAME);
+  const activated = request.input.find((item) => item.type === "function_call_output" && item.call_id === "call_enable_inbox");
+  const context = text(activated?.output).replaceAll("\\\\", "\\");
+  const match = /((?:[A-Za-z]:[\\/]|\/)[^\r\n"'`]*?[\\/]inboxes[\\/][a-z0-9]{6})/u.exec(context);
+  if (!match) {
+    const detail = context.includes("can't open file") ? "activation script is missing"
+      : context.includes("Cannot identify") || context.includes("conversation identity") ? "activation has no native identity"
+      : context.includes("not registered") ? "activation conversation is unregistered"
+      : context.includes("No module named") ? "activation runtime is unavailable"
+      : context.includes("not recognized") || context.includes("introuvable") ? "activation command is unavailable"
+      : "the subagents inbox was not supplied";
+    throw new OpenAiProtocolError("$.instructions", detail, NAME);
+  }
   return match[1]!;
 }
 
@@ -65,8 +74,17 @@ export function subagentsScenario(options: { explicitModel?: boolean; grilling?:
         return message(`child-${child}`, "child-answer", childAnswer(child!));
       }
       if (request.model !== "pi-e2e") reject("$.model", "unexpected parent model");
-      const calls = request.input.filter((item) => item.type === "function_call");
-      const results = request.input.filter((item) => item.type === "function_call_output");
+      const activation = request.input.find((item) => item.type === "function_call_output" && item.call_id === "call_enable_inbox");
+      if (!activation) {
+        const shell = request.tools.some((item) => item.name === "powershell") ? "powershell" : "bash";
+        return {
+          scenario: NAME, checkpoint: "parent-inbox-enable",
+          output: { type: "function_call", id: "fc_enable_inbox", call_id: "call_enable_inbox", name: shell,
+            arguments: JSON.stringify({ command: `${process.platform === "win32" ? "python" : "python3"} ".pi/skills/subagents-toolkit/scripts/enable_inbox.py"` }), status: "completed" },
+        };
+      }
+      const calls = request.input.filter((item) => item.type === "function_call" && item.call_id !== "call_enable_inbox");
+      const results = request.input.filter((item) => item.type === "function_call_output" && item.call_id !== "call_enable_inbox");
       const callId = `call_harness_subagents_${route}_write`;
       if (calls.length > (options.grilling || options.busyParent ? 2 : 1) || results.length !== calls.length) reject("$.input", "parent tool history is incomplete");
       const requestPath = `${inbox(request)}${inbox(request).includes("\\") ? "\\" : "/"}${REQUEST_FILE}`;
