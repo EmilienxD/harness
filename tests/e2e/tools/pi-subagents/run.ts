@@ -197,12 +197,13 @@ export async function runPiSubagentsJourney(route: Route, options: {
         parent = await busyRun;
         assert.equal(parent.status, "success", JSON.stringify({ stops: parent.assistantStopReasons, tools: parent.toolExecutions, observations: fixture.assertions().observations }));
         assert.equal(parent.events.filter((event) => event.type === "agent_start").length, 1, "busy delivery must continue the existing run");
-        // RPC emits settlement before all extension bookkeeping has completed.
-        await waitFor(async () => (await runtimeState(python, stateDir, parentId)).requests[0]?.[5] === 1 ? true : undefined, "persisted result acknowledged");
       } else {
         // The live parent is idle; the delivered result itself starts its next turn.
         parent = await rpc.nextRun(start, 60_000);
       }
+      // RPC emits settlement before extension bookkeeping finishes, whether
+      // delivery continued a busy parent or started a new turn in an idle one.
+      await waitFor(async () => (await runtimeState(python, stateDir, parentId)).requests[0]?.[5] === 1 ? true : undefined, "persisted result acknowledged");
     }
 
     const state = await runtimeState(python, stateDir, parentId);

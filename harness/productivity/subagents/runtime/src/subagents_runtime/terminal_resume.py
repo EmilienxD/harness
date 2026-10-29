@@ -1,4 +1,4 @@
-"""Bind a continuation before Aboard submits input to an existing provider TUI."""
+"""Bind reply ownership before an execution host submits terminal input."""
 
 from __future__ import annotations
 
@@ -10,26 +10,27 @@ from subagents_runtime.storage import connect
 
 def prepare_terminal_resume(session_id: str, execution_id: str, agent_id: str,
                             terminal_id: str, conversation_id: str) -> None:
+    from subagents_runtime.backends import supports_live_continuation
     with connect() as connection:
         connection.execute("BEGIN IMMEDIATE")
         current = connection.execute(
-            "SELECT e.state,e.input_execution_id,s.execution_mode FROM executions e JOIN sessions s ON s.id=e.session_id WHERE e.id=? AND e.session_id=? AND e.backend='aboard'",
+            "SELECT e.state,e.input_execution_id,s.execution_mode,e.backend FROM executions e JOIN sessions s ON s.id=e.session_id WHERE e.id=? AND e.session_id=?",
             (execution_id, session_id),
         ).fetchone()
-        if not current or current[2] not in {"interactive", "loop"}:
+        if not current or current[2] not in {"interactive", "loop"} or not supports_live_continuation(current[3]):
             raise SessionError("Terminal continuation identity or mode does not match")
         if current[0] == "running" and current[1]:
             return
         if current[0] != "starting":
             raise SessionError("Terminal continuation is not awaiting delivery")
         previous = connection.execute(
-            "SELECT COALESCE(input_execution_id,id),provider_pid,provider_birth,supervisor_pid,supervisor_birth FROM executions WHERE session_id=? AND aboard_agent_id=? AND aboard_handle=? AND state='running' AND superseded_at IS NOT NULL ORDER BY rowid DESC LIMIT 1",
+            "SELECT COALESCE(input_execution_id,id),provider_pid,provider_birth,supervisor_pid,supervisor_birth FROM executions WHERE session_id=? AND backend_agent_id=? AND backend_handle=? AND state='running' AND superseded_at IS NOT NULL ORDER BY rowid DESC LIMIT 1",
             (session_id, agent_id, terminal_id),
         ).fetchone()
         if not previous:
             raise SessionError("Existing terminal execution ownership is unavailable")
         connection.execute(
-            "UPDATE executions SET input_execution_id=?,provider_pid=?,provider_birth=?,supervisor_pid=?,supervisor_birth=?,aboard_agent_id=?,aboard_handle=?,fork_of=NULL,state='running',started_at=CURRENT_TIMESTAMP WHERE id=?",
+            "UPDATE executions SET input_execution_id=?,provider_pid=?,provider_birth=?,supervisor_pid=?,supervisor_birth=?,backend_agent_id=?,backend_handle=?,fork_of=NULL,state='running',started_at=CURRENT_TIMESTAMP WHERE id=?",
             (*previous, agent_id, terminal_id, execution_id),
         )
         connection.execute("UPDATE sessions SET provider_session_id=? WHERE id=?", (conversation_id, session_id))

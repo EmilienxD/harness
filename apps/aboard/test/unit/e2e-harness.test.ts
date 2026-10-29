@@ -236,6 +236,31 @@ test("OpenAI auto-run preserves its address route across history-only continuati
   }
 });
 
+test("OpenAI auto-run waits for a running code cell before validating the read", async () => {
+  const root = await mkdtemp(join(tmpdir(), "aboard-code-cell-"));
+  const server = await startFakeOpenAiServer({ repoRoot: root });
+  const headers = { authorization: `Bearer ${server.authToken}`, "content-type": "application/json" };
+  const input: Record<string, unknown>[] = [{ type: "additional_tools", tools: [{ type: "custom", name: "exec" }, { type: "function", name: "wait" }] }, { type: "message", role: "user", content: [{ type: "input_text", text: `Address issue. ${AUTO_RUN_AFK_MARKER} ${AUTO_RUN_PERMANENT_NOTE} ${AUTO_RUN_NESTED_CONTEXT}` }] }];
+  const next = async () => {
+    const response = await fetch(`${server.baseUrl}/responses`, { method: "POST", headers, body: JSON.stringify({ model: "codex-e2e", stream: true, store: false, input }) });
+    assert.equal(response.status, 200);
+    return (completedResponse(await response.text()).output as Record<string, unknown>[])[0]!;
+  };
+  try {
+    const read = await next();
+    input.push(read, { type: "custom_tool_call_output", call_id: read.call_id, output: "Script running with cell ID 42" });
+    const wait = await next();
+    assert.equal(wait.name, "wait");
+    assert.equal(JSON.parse(String(wait.arguments)).cell_id, "42");
+    input.push(wait, { type: "function_call_output", call_id: wait.call_id, output: 'Script completed. {"exit_code":0,"output":"harness e2e fixture: before\\n"}' });
+    assert.equal((await next()).name, "exec");
+    assert.deepEqual(server.assertions().checkpoints, ["auto-run-afk:auto-afk-read", "auto-run-afk:auto-tool-wait", "auto-run-afk:auto-afk-edit"]);
+  } finally {
+    await server.close();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("OpenAI AFK review creates an empty completion commit before reporting approval", async () => {
   const root = await mkdtemp(join(tmpdir(), "aboard-codex-review-"));
   const server = await startFakeOpenAiServer({ repoRoot: root });

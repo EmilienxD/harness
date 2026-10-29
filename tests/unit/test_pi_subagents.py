@@ -9,7 +9,7 @@ from pathlib import Path
 import pytest
 
 from harness_cli.manifest import SupportStatus, discover
-from subagents_runtime import pi_bridge, processes, progress, roles, sessions
+from subagents_runtime import pi_bridge, processes, progress, roles, sessions, bridge_backend
 from subagents_runtime.delegation import (
     RequestFileError,
     arm_reply,
@@ -31,9 +31,9 @@ def project(tmp_path, monkeypatch):
     monkeypatch.setenv("HARNESS_STATE_DIR", str(tmp_path / "state"))
     monkeypatch.setenv("PI_CODING_AGENT_DIR", str(tmp_path / "home" / ".pi" / "agent"))
     for name in ("HARNESS_SESSION_ID", "HARNESS_EXECUTION_ID", "HARNESS_EXECUTION_MODE",
-                 "HARNESS_PROVIDER", "HARNESS_PARENT_TERMINAL_URI", "ABOARD_BRIDGE_PORT", "ABOARD_BRIDGE_TOKEN"):
+                 "HARNESS_PROVIDER", "HARNESS_PARENT_TERMINAL_URI", "HARNESS_BRIDGE_PORT", "HARNESS_BRIDGE_TOKEN"):
         monkeypatch.delenv(name, raising=False)
-    monkeypatch.setattr(sessions, "_discover_delegation_endpoint", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(bridge_backend, "discover", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(sessions, "_command_from_config", lambda _config, provider: [{"chatgpt": "codex"}.get(provider, provider)])
     authenticated_models(monkeypatch, MODELS)
     return project
@@ -339,14 +339,14 @@ def test_pi_watch_summarizes_native_events():
 
 
 def test_pi_children_route_through_aboard_when_it_is_running(project, monkeypatch):
-    monkeypatch.setattr(sessions, "_discover_delegation_endpoint", lambda *_args, **_kwargs: ("127.0.0.1", 4823, "token"))
+    monkeypatch.setattr(bridge_backend, "discover", lambda *_args, **_kwargs: ("127.0.0.1", 4823, "token"))
     bodies = []
 
     def urlopen(http_request, timeout):
         bodies.append(json.loads(http_request.data))
         return io.BytesIO(b'{"ok":true,"sessionId":"aboard-pi-session"}')
 
-    monkeypatch.setattr(sessions.urllib.request, "urlopen", urlopen)
+    monkeypatch.setattr(bridge_backend.urllib.request, "urlopen", urlopen)
     monkeypatch.setattr(processes, "start", lambda *_args, **_kwargs: pytest.fail("native launch used"))
     sessions.register_observed("parent", project, "pi")
 

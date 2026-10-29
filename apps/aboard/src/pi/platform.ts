@@ -30,7 +30,8 @@ export class PiAgentPlatform implements AgentPlatform {
     const [program, ...prefix] = plan.command;
     if (program === undefined) throw new Error("Pi command is empty");
     const result = await this.options.commandRunner(program, [...prefix, "--version"], 10_000);
-    if (result.code !== 0 || !/^1\.2\.0(?:\s|$)/u.test(result.stdout.trim())) throw new Error("Aboard Pi integration requires Pi 1.2.0; the configured command did not report that supported version.");
+    const version = /^1\.(\d+)\.(\d+)(?:\s|$)/u.exec(result.stdout.trim());
+    if (result.code !== 0 || version === null || Number(version[1]) < 2) throw new Error("Aboard Pi integration requires a stable Pi version >=1.2.0 and <2.0.0; the configured command did not report a supported version.");
     const index = plan.args.indexOf("--model");
     if (index !== -1) {
       const pattern = plan.args[index + 1]!.toLowerCase();

@@ -150,7 +150,8 @@ export async function runPiSmoke(): Promise<void> {
     const parentId = randomUUID();
     const stateDirectory = join(fixture.root, "delegation-state");
     const environment = { ...fixture.workspace.env, PYTHONPATH: runtimeSource, HARNESS_STATE_DIR: stateDirectory,
-      UV_PYTHON: python, ABOARD_BRIDGE_PORT: String((bridge.address() as AddressInfo).port), ABOARD_BRIDGE_TOKEN: "fixture-bridge" };
+      UV_PYTHON: python, ABOARD_BRIDGE_PORT: String((bridge.address() as AddressInfo).port), ABOARD_BRIDGE_TOKEN: "fixture-bridge",
+      HARNESS_BRIDGE_PORT: String((bridge.address() as AddressInfo).port), HARNESS_BRIDGE_TOKEN: "fixture-bridge" };
     const runPython = async (script: string) => {
       const result = await promisify(execFile)(python, ["-c", script], { cwd: fixture.workspace.projectRoot, env: environment, windowsHide: true, timeout: 60_000 });
       return JSON.parse(result.stdout) as Record<string, any>;

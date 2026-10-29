@@ -7,7 +7,7 @@ import re
 from pathlib import Path
 
 
-# Canonical provider lists and token boundaries are also bundled into Aboard.
+# Canonical provider lists and token boundaries may also be consumed by execution hosts.
 # Lists exclude bundled skills and their aliases. Provider evidence:
 # docs/CHATGPT-REFERENCES/developer-commands.md, docs/CLAUDE-REFERENCES/skills.md,
 # docs/PI-REFERENCES/docs/slash-commands.md, https://code.claude.com/docs/en/commands

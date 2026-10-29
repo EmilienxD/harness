@@ -17,6 +17,8 @@ export interface CommandEndpointRecord {
   readonly activatedAt: string;
 }
 
+export type DelegationEndpointRecord = Omit<CommandEndpointRecord, "commandToken">;
+
 export const COMMAND_ENDPOINT_DIRECTORY_NAME = "endpoints";
 
 export function commandEndpointDirectory(
@@ -75,7 +77,7 @@ export class FileCommandEndpointRegistry {
     return this.#directory;
   }
 
-  public async publish(record: CommandEndpointRecord): Promise<string> {
+  public async publish(record: CommandEndpointRecord | DelegationEndpointRecord): Promise<string> {
     // Each activation owns its record, including across overlapping reloads.
     const fileName = recordFileName(this.#activationId);
     this.#fileName = fileName;

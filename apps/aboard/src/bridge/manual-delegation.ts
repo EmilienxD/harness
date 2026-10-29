@@ -258,7 +258,9 @@ export function createDelegationRoutes(
       return { status: 201, body: { ok: true, ...launched } };
     } catch (error) {
       if (error instanceof StartupUncertain) return protocolError(409, "startup-uncertain", error.message);
-      return protocolError(409, "conflict", error instanceof Error ? error.message : "Delegation launch failed");
+      // Keep host branding out of the neutral delegation diagnostics.
+      const detail = error instanceof Error ? error.message.replace(/\baboard\b/giu, "the runtime") : "Delegation launch failed";
+      return protocolError(409, "conflict", detail);
     }
   };
 }

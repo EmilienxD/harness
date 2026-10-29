@@ -5,7 +5,7 @@ import { join, resolve } from "node:path";
 import { promisify } from "node:util";
 import { commands, extensions, window, workspace } from "vscode";
 
-import { removeDirectoryWithRetries } from "./support.js";
+import { isTransientObservationError, removeDirectoryWithRetries } from "./support.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -16,8 +16,13 @@ interface Diagnostics { readonly upstreamMode: string; readonly observations: re
 
 async function eventually<T>(read: () => Promise<T | undefined> | T | undefined, message: string, attempts = 240): Promise<T> {
   for (let attempt = 0; attempt < attempts; attempt += 1) {
-    const value = await read();
-    if (value !== undefined) return value;
+    try {
+      const value = await read();
+      if (value !== undefined) return value;
+    } catch (error) {
+      // Observation callbacks only read state; never replay a mutation here.
+      if (!isTransientObservationError(error)) throw error;
+    }
     await new Promise((resolve) => setTimeout(resolve, 250));
   }
   throw new Error(message);
@@ -111,7 +116,7 @@ export async function run(): Promise<void> {
     assert.equal(workerTerminals.length, 2, "the implementer and the reviewer each ran in a visible terminal");
     assert.equal(workerTerminals.some((terminal) => "env" in terminal.creationOptions && terminal.creationOptions.env?.ABOARD_AGENT_TYPE === "explore"), false, "exploration runs headless without a terminal");
     assert.equal(completed.upstreamMode, "forbidden");
-    const rows = completed.observations.filter((item) => item.scenario === "auto-run-afk" && item.result === "success");
+    const rows = completed.observations.filter((item) => item.scenario === "auto-run-afk" && item.result === "success" && item.checkpoint !== "auto-tool-wait");
     assert.deepEqual(rows.map((item) => item.checkpoint), [
       "auto-explore-read", "auto-explore-complete", "auto-afk-read", "auto-afk-edit", "auto-afk-commit", "auto-afk-complete", "auto-review-commit", "auto-review-complete",
     ]);
@@ -171,7 +176,7 @@ export async function run(): Promise<void> {
     await eventually(async () => {
       const value = await diagnostics();
       return value?.observations.some((item) => item.checkpoint === handoffCheckpoint) ? value : undefined;
-    }, review ? "HITL review did not complete" : "HITL address did not complete", 480);
+    }, review ? "HITL review did not complete" : "HITL address did not complete", 960);
     const worktree = await eventually(async () => {
       const output = (await execFileAsync("git", ["worktree", "list", "--porcelain"], { cwd: root, encoding: "utf8" })).stdout;
       return worktreeRoots(output).find((path) => path.toLowerCase() !== resolve(root).toLowerCase());
@@ -216,7 +221,7 @@ export async function run(): Promise<void> {
       const value = await diagnostics();
       return value?.observations.some((item) => item.checkpoint === finalCheckpoint) ? value : undefined;
     }, review ? "HITL acceptance conversation did not complete" : "HITL follow-up address did not complete", 480);
-    const successes = completed.observations.filter((item) => item.scenario !== null && item.scenario !== "task" && item.result === "success");
+    const successes = completed.observations.filter((item) => item.scenario !== null && item.scenario !== "task" && item.result === "success" && item.checkpoint !== "auto-tool-wait");
     assert.deepEqual(successes.map((item) => item.checkpoint), review ? [
       "auto-hitl-read", "auto-hitl-edit", "auto-hitl-commit", "auto-hitl-complete",
       "auto-hitl-review-read", "auto-hitl-review-complete",

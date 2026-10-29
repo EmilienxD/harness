@@ -93,7 +93,8 @@ export async function runAutoRunJourney(platform: E2ePlatform): Promise<void> {
       if (!assertions.checkpoints.includes(expected)) throw new Error(`Auto-run journey did not reach ${checkpoint}`);
     }
     const taskReads = platform === "pi" ? assertions.observations.filter((observation) => observation.checkpoint === "task-read").length : 0;
-    if (assertions.inferenceRequests !== 8 + taskReads || assertions.unexpectedRequests !== 0) {
+    const toolWaits = assertions.observations.filter((item) => item.checkpoint === "auto-tool-wait").length;
+    if (assertions.inferenceRequests !== 8 + taskReads + toolWaits || assertions.unexpectedRequests !== 0) {
       throw new Error(`Unexpected ${platform} auto-run inference activity: ${assertions.inferenceRequests} inference requests, ${assertions.unexpectedRequests} rejected requests`);
     }
   } finally {
@@ -317,7 +318,8 @@ async function runHitlJourney(platform: E2ePlatform, branchMode: "per-issue" | "
       if (!assertions.checkpoints.includes(expected)) throw new Error(`HITL auto-run did not reach ${checkpoint}`);
     }
     const expectedRequests = (review ? 6 : 7) + (platform === "pi" ? assertions.observations.filter((observation) => observation.checkpoint === "task-read").length : 0);
-    if (assertions.inferenceRequests !== expectedRequests || assertions.unexpectedRequests !== 0) throw new Error("Unexpected HITL inference activity");
+    const toolWaits = assertions.observations.filter((item) => item.checkpoint === "auto-tool-wait").length;
+    if (assertions.inferenceRequests !== expectedRequests + toolWaits || assertions.unexpectedRequests !== 0) throw new Error("Unexpected HITL inference activity");
   } finally {
     await server.close();
     await resetHarness();

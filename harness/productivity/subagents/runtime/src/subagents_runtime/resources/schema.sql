@@ -35,7 +35,7 @@ CREATE TABLE executions (
  backend TEXT NOT NULL, state TEXT NOT NULL CHECK(state IN ('prepared','starting','running','uncertain','exited','failed','cancelled')),
  reservation_pid INTEGER, reservation_birth TEXT,
  supervisor_pid INTEGER, supervisor_birth TEXT, provider_pid INTEGER, provider_birth TEXT,
- aboard_agent_id TEXT, aboard_handle TEXT, exit_code INTEGER,
+ backend_agent_id TEXT, backend_handle TEXT, exit_code INTEGER,
  fork_of TEXT, superseded_at TEXT, input_execution_id TEXT REFERENCES executions(id),
  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, started_at TEXT, exited_at TEXT,
  FOREIGN KEY(request_id,session_id) REFERENCES requests(id,child_session_id)

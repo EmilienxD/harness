@@ -8,7 +8,7 @@ import sqlite3
 import uuid
 from pathlib import Path
 
-SCHEMA_VERSION = 10
+SCHEMA_VERSION = 11
 # Lowercase letters and digits without the look-alikes 0/o and 1/i/l.
 INBOX_ALPHABET = "abcdefghjkmnpqrstuvwxyz23456789"
 
@@ -70,6 +70,21 @@ def _migrate(connection):
     try:
         version = connection.execute("PRAGMA user_version").fetchone()[0]
         if version >= SCHEMA_VERSION:
+            connection.commit()
+            return
+        # Older schemas named these two host handles after the integration.
+        # Discover their structural suffixes rather than depending on a host name.
+        columns = [row[1] for row in connection.execute("PRAGMA table_info(executions)")]
+        for suffix, target in (("_agent_id", "backend_agent_id"), ("_handle", "backend_handle")):
+            if target not in columns:
+                candidates = [name for name in columns if name.endswith(suffix)]
+                if len(candidates) == 1:
+                    source = candidates[0].replace('"', '""')
+                    connection.execute(f'ALTER TABLE executions RENAME COLUMN "{source}" TO {target}')
+        if columns:
+            connection.execute("UPDATE executions SET backend='bridge' WHERE backend NOT IN ('standalone','legacy','bridge')")
+        if version == 10:
+            connection.execute(f"PRAGMA user_version={SCHEMA_VERSION}")
             connection.commit()
             return
         connection.execute("""

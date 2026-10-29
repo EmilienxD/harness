@@ -2,7 +2,7 @@ import os
 import subprocess
 
 import pytest
-from subagents_runtime import sessions
+from subagents_runtime import sessions, bridge_backend
 from subagents_runtime.delegation import enable_delegation, process_inbox
 from subagents_runtime.hooks import handle
 
@@ -266,7 +266,7 @@ def _standalone_provider(tmp_path, monkeypatch, provider):
 
     started = []
     monkeypatch.setenv("HARNESS_STATE_DIR", str(tmp_path / "state"))
-    monkeypatch.setattr(sessions, "_discover_delegation_endpoint", lambda _cwd: None)
+    monkeypatch.setattr(bridge_backend, "discover", lambda _cwd: None)
     monkeypatch.setattr(sessions, "_command_from_config", lambda _config, _provider="claude": ["provider"])
 
     def start(execution_id, argv, _environment, _cwd, *, visible):
@@ -356,7 +356,7 @@ def test_terminal_continuations_reply_through_the_original_process_hooks(tmp_pat
     _, inbox, first = _live_delegated_child(tmp_path, monkeypatch, provider)
     with sessions._connect() as connection:
         original = connection.execute("SELECT id FROM executions WHERE request_id=?", (first.request_id,)).fetchone()[0]
-        connection.execute("UPDATE executions SET backend='aboard',aboard_agent_id='child',aboard_handle='terminal' WHERE id=?", (original,))
+        connection.execute("UPDATE executions SET backend='bridge',backend_agent_id='child',backend_handle='terminal' WHERE id=?", (original,))
         if schema_version == 3:
             connection.execute("DROP TABLE loop_messages")
             connection.execute("DROP TABLE loop_waits")
@@ -367,7 +367,7 @@ def test_terminal_continuations_reply_through_the_original_process_hooks(tmp_pat
     def reuse(request, request_id, *_):
         with sessions._connect() as connection:
             execution = connection.execute("SELECT id FROM executions WHERE request_id=?", (request_id,)).fetchone()[0]
-            connection.execute("UPDATE executions SET backend='aboard',state='starting' WHERE id=?", (execution,))
+            connection.execute("UPDATE executions SET backend='bridge',state='starting' WHERE id=?", (execution,))
             connection.execute("UPDATE sessions SET provider_session_id=NULL WHERE id=?", (first.child_session_id,))
         prepare_terminal_resume(first.child_session_id, execution, "child", "terminal", "saved-conversation")
         return "saved-conversation"
@@ -390,8 +390,8 @@ def test_live_chatgpt_continuation_uses_aboard_instead_of_external_terminal(tmp_
 
     started, inbox, first = _live_delegated_child(tmp_path, monkeypatch, "chatgpt")
     with sessions._connect() as connection:
-        connection.execute("UPDATE executions SET aboard_agent_id='boarded-child',backend='aboard' WHERE request_id=?", (first.request_id,))
-    monkeypatch.setattr(sessions, "_discover_delegation_endpoint", lambda _: ("127.0.0.1", 4823, "token"))
+        connection.execute("UPDATE executions SET backend_agent_id='boarded-child',backend='bridge' WHERE request_id=?", (first.request_id,))
+    monkeypatch.setattr(bridge_backend, "discover", lambda _: ("127.0.0.1", 4823, "token"))
     requests = []
 
     def urlopen(request, **kwargs):
@@ -408,7 +408,7 @@ def test_live_chatgpt_continuation_uses_aboard_instead_of_external_terminal(tmp_
             assert sessions.bind_observed("forked-conversation", tmp_path, "chatgpt") == body["harnessSessionId"]
         return io.BytesIO(b'{"agentId":"boarded-fork","sessionId":"forked-conversation","terminalId":"vscode-terminal"}')
 
-    monkeypatch.setattr(sessions.urllib.request, "urlopen", urlopen)
+    monkeypatch.setattr(bridge_backend.urllib.request, "urlopen", urlopen)
     (inbox / "continue.md").write_text("---\nresume: agent-1\n---\nNext task.", encoding="utf-8")
     [result] = process_inbox("parent", launch=sessions.launch_delegated)
 
@@ -609,7 +609,7 @@ def test_detached_supervisor_binds_conversation_and_delivers_after_process_exit(
     monkeypatch.setenv("HARNESS_STATE_DIR", str(tmp_path / "state"))
     monkeypatch.delenv("ABOARD_BRIDGE_PORT", raising=False)
     monkeypatch.delenv("ABOARD_BRIDGE_TOKEN", raising=False)
-    monkeypatch.setattr(sessions, "_discover_delegation_endpoint", lambda _: None)
+    monkeypatch.setattr(bridge_backend, "discover", lambda _: None)
     monkeypatch.setattr(
         sessions, "_visible_terminal", lambda *_: pytest.fail("visible terminal opened")
     )
@@ -1040,8 +1040,8 @@ def test_aboard_receives_runtime_location_and_execution_identity(tmp_path, monke
         "---\nmode: auto\n---\nTask.", encoding="utf-8"
     )
     monkeypatch.setattr(
-        sessions,
-        "_discover_delegation_endpoint",
+        bridge_backend,
+        "discover",
         lambda cwd: ("127.0.0.1", 4823, "dummy"),
     )
     sent = []
@@ -1052,7 +1052,7 @@ def test_aboard_receives_runtime_location_and_execution_identity(tmp_path, monke
             b'{"ok":true,"sessionId":"provider-id","agentId":"aboard-child","terminalId":"headless-handle"}'
         )
 
-    monkeypatch.setattr(sessions.urllib.request, "urlopen", response)
+    monkeypatch.setattr(bridge_backend.urllib.request, "urlopen", response)
     [started] = process_inbox("parent", launch=sessions.launch_delegated)
     assert started.status == "launched" and not list(inbox.iterdir())
     assert sent[0]["harnessSessionId"] == started.child_session_id
@@ -1092,7 +1092,7 @@ def test_aboard_refusal_fails_definitively_and_reports_its_reason(tmp_path, monk
         "---\nmode: auto\n---\nTask.", encoding="utf-8"
     )
     monkeypatch.setattr(
-        sessions, "_discover_delegation_endpoint", lambda cwd: ("127.0.0.1", 4823, "t")
+        bridge_backend, "discover", lambda cwd: ("127.0.0.1", 4823, "t")
     )
     body = json.dumps(
         {
@@ -1109,7 +1109,7 @@ def test_aboard_refusal_fails_definitively_and_reports_its_reason(tmp_path, monk
             request.full_url, 409, "Conflict", {}, io.BytesIO(body)
         )
 
-    monkeypatch.setattr(sessions.urllib.request, "urlopen", refuse)
+    monkeypatch.setattr(bridge_backend.urllib.request, "urlopen", refuse)
 
     [refused] = process_inbox("parent", launch=sessions.launch_delegated)
 
@@ -1132,7 +1132,7 @@ def test_aboard_uncertain_startup_keeps_its_reservation_for_recovery(
         "---\nmode: auto\n---\nTask.", encoding="utf-8"
     )
     monkeypatch.setattr(
-        sessions, "_discover_delegation_endpoint", lambda cwd: ("127.0.0.1", 4823, "t")
+        bridge_backend, "discover", lambda cwd: ("127.0.0.1", 4823, "t")
     )
     body = json.dumps(
         {
@@ -1149,7 +1149,7 @@ def test_aboard_uncertain_startup_keeps_its_reservation_for_recovery(
             request.full_url, 409, "Conflict", {}, io.BytesIO(body)
         )
 
-    monkeypatch.setattr(sessions.urllib.request, "urlopen", refuse)
+    monkeypatch.setattr(bridge_backend.urllib.request, "urlopen", refuse)
 
     [unresolved] = process_inbox("parent", launch=sessions.launch_delegated)
 

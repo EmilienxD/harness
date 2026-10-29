@@ -108,6 +108,7 @@ import { PromptSubmissions } from "./platform/prompt-submissions.js";
 
 let bridge: BridgeRuntime | undefined;
 let commandEndpointRegistry: FileCommandEndpointRegistry | undefined;
+let delegationEndpointRegistry: FileCommandEndpointRegistry | undefined;
 let persistence: PersistOnChange | undefined;
 let activeAutoRun: AutoRunEngine | undefined;
 let activeWorkspaceOwnership: WorkspaceOwnerLease | undefined;
@@ -153,6 +154,7 @@ export interface AboardExtensionApi {
   readonly agentWorkspaceStorageRoot: string;
   /** Where `/commands` publishes this window's port and command-scoped token. */
   readonly commandEndpointDirectory: string;
+  readonly delegationEndpointDirectory: string;
 }
 
 export async function activate(context: ExtensionContext): Promise<AboardExtensionApi | undefined> {
@@ -739,6 +741,9 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
     isResumable: (platform, sessionId, cwd, type) => sessionIsResumable(platform, sessionId, cwd ?? workspaceRoot, type),
   });
   const commandEndpoint = new FileCommandEndpointRegistry({ directory: commandEndpointDirectory(process.platform, process.env, homedir()) });
+  const delegationEndpoint = new FileCommandEndpointRegistry({ directory: join(homedir(), ".harness", "backends", "endpoints") });
+  delegationEndpointRegistry = delegationEndpoint;
+  context.subscriptions.push({ dispose: () => void delegationEndpoint.clear() });
   await commandEndpoint.clearWorkspace(workspaceRoot).catch(() => undefined);
   commandEndpointRegistry = commandEndpoint;
   context.subscriptions.push({ dispose: () => void commandEndpoint.clear() });
@@ -918,7 +923,7 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
     await bridgeIdentityStore.save(bridgeEnvironment);
     if (persistedBridgeIdentity !== undefined && persistedBridgeIdentity.port !== bridge.port) output.appendLine("The previous owner bridge port is occupied. Existing terminal controls remain available, but their lifecycle hooks require the original port; new sessions use the current bridge.");
     try {
-    const published = await commandEndpoint.publish({
+    const endpointRecord = {
       version: 2,
       host: bridge.host,
       port: bridge.port,
@@ -927,7 +932,10 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
       delegationToken: bridge.delegationToken,
       pid: process.pid,
       activatedAt: new Date().toISOString(),
-    });
+    } as const;
+    const published = await commandEndpoint.publish(endpointRecord);
+    const { commandToken: _commandToken, ...delegationRecord } = endpointRecord;
+    await delegationEndpoint.publish(delegationRecord);
     output.appendLine(`Command endpoint published at ${published}`);
     } catch (error) {
     // A script losing its way in is worth a line; it is not worth refusing to
@@ -1076,6 +1084,7 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
       await bridge?.stop();
       bridge = undefined;
       await commandEndpoint.clear().catch(() => undefined);
+      await delegationEndpoint.clear().catch(() => undefined);
       output.appendLine(scaffoldState === "uninitialized"
         ? "Project state directory .abd/ was removed; aboard runtime access is suspended. Saved activity is retained."
         : "aboard's project assets no longer match this extension; runtime access was closed until they are updated.");
@@ -1273,7 +1282,7 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
       void window.showErrorMessage(message);
     }
   }
-  return { commandEndpointDirectory: commandEndpoint.directory, agentWorkspaceStorageRoot: context.globalStorageUri.fsPath };
+  return { commandEndpointDirectory: commandEndpoint.directory, delegationEndpointDirectory: delegationEndpoint.directory, agentWorkspaceStorageRoot: context.globalStorageUri.fsPath };
 }
 
 let activeSessionMonitor: SessionProcessMonitor | undefined;
@@ -1293,6 +1302,8 @@ export async function deactivate(): Promise<void> {
   // The published record names a port and a token that both die with the bridge.
   await commandEndpointRegistry?.clear().catch(() => undefined);
   commandEndpointRegistry = undefined;
+  await delegationEndpointRegistry?.clear().catch(() => undefined);
+  delegationEndpointRegistry = undefined;
   await activeWorkspaceOwnership?.release();
   activeWorkspaceOwnership = undefined;
 }

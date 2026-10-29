@@ -11,7 +11,7 @@ import io
 
 import pytest
 
-from subagents_runtime import hooks, loop, processes, sessions
+from subagents_runtime import hooks, loop, processes, sessions, bridge_backend
 from subagents_runtime.cli import main
 from subagents_runtime.delegation import enable_delegation, process_inbox
 
@@ -318,20 +318,20 @@ def test_lead_interrupt_preserves_queued_report_for_next_prompt(tmp_path, monkey
 def test_released_implementer_resumes_in_its_aboard_session(tmp_path, monkeypatch, capsys, provider):
     child = configured(tmp_path, monkeypatch, provider, difficulty="routine")
     with sessions._connect() as db:
-        db.execute("UPDATE executions SET backend='aboard',aboard_agent_id='aboard-child',aboard_handle='terminal' WHERE session_id=?", (child,))
+        db.execute("UPDATE executions SET backend='bridge',backend_agent_id='aboard-child',backend_handle='terminal' WHERE session_id=?", (child,))
     with ThreadPoolExecutor() as pool:
         result = pool.submit(event, tmp_path, provider, child, "Stop", last_assistant_message="complete")
         loop.respond(child, waiting(child))
         assert result.result(timeout=5) is None
-    monkeypatch.setenv("ABOARD_BRIDGE_PORT", "4823")
-    monkeypatch.setenv("ABOARD_BRIDGE_TOKEN", "test-token")
+    monkeypatch.setenv("HARNESS_BRIDGE_PORT", "4823")
+    monkeypatch.setenv("HARNESS_BRIDGE_TOKEN", "test-token")
     monkeypatch.setenv("HARNESS_SESSION_ID", "lead")
     monkeypatch.setenv("CODEX_HOME", str(tmp_path / "codex"))
     requests = []
     def urlopen(request, timeout):
         requests.append(json.loads(request.data))
         return io.BytesIO(b'{"sessionId":"provider-child","agentId":"aboard-child","terminalId":"terminal"}')
-    monkeypatch.setattr(sessions.urllib.request, "urlopen", urlopen)
+    monkeypatch.setattr(bridge_backend.urllib.request, "urlopen", urlopen)
     feedback = tmp_path / "review.md"
     feedback.write_text("Address review comments.", encoding="utf-8")
     assert main(["loop", "resume", child, "--file", str(feedback)]) == 0
@@ -364,9 +364,9 @@ def test_standalone_resume_requires_closed_terminal_and_keeps_conversation(tmp_p
     # Simulate the operating-system exit recorded by the existing supervisor.
     with sessions._connect() as db:
         db.execute("UPDATE executions SET state='exited' WHERE session_id=?", (child,))
-    monkeypatch.delenv("ABOARD_BRIDGE_PORT", raising=False)
-    monkeypatch.delenv("ABOARD_BRIDGE_TOKEN", raising=False)
-    monkeypatch.setattr(sessions, "_endpoint_directory", lambda: tmp_path / "no-endpoints")
+    monkeypatch.delenv("HARNESS_BRIDGE_PORT", raising=False)
+    monkeypatch.delenv("HARNESS_BRIDGE_TOKEN", raising=False)
+    monkeypatch.setattr(bridge_backend, "endpoint_directory", lambda: tmp_path / "no-endpoints")
     monkeypatch.setenv("CODEX_HOME", str(tmp_path / "codex"))
     config = tmp_path / ".harness/config.json"
     config.parent.mkdir()
@@ -395,14 +395,14 @@ def test_standalone_resume_requires_closed_terminal_and_keeps_conversation(tmp_p
 def test_unavailable_aboard_does_not_duplicate_a_live_released_loop(tmp_path, monkeypatch):
     child = configured(tmp_path, monkeypatch, "claude")
     with sessions._connect() as db:
-        db.execute("UPDATE executions SET backend='aboard',aboard_agent_id='aboard-child',aboard_handle='terminal' WHERE session_id=?", (child,))
+        db.execute("UPDATE executions SET backend='bridge',backend_agent_id='aboard-child',backend_handle='terminal' WHERE session_id=?", (child,))
     with ThreadPoolExecutor() as pool:
         result = pool.submit(event, tmp_path, "claude", child, "Stop", last_assistant_message="complete")
         loop.respond(child, waiting(child))
         result.result(timeout=5)
-    monkeypatch.delenv("ABOARD_BRIDGE_PORT", raising=False)
-    monkeypatch.delenv("ABOARD_BRIDGE_TOKEN", raising=False)
-    monkeypatch.setattr(sessions, "_endpoint_directory", lambda: tmp_path / "no-endpoints")
+    monkeypatch.delenv("HARNESS_BRIDGE_PORT", raising=False)
+    monkeypatch.delenv("HARNESS_BRIDGE_TOKEN", raising=False)
+    monkeypatch.setattr(bridge_backend, "endpoint_directory", lambda: tmp_path / "no-endpoints")
     def terminal(*args):
         pytest.fail("a live conversation must not be opened a second time")
     monkeypatch.setattr(sessions, "_visible_terminal", terminal)
@@ -421,9 +421,9 @@ def test_new_lead_conversation_resumes_a_released_implementer(tmp_path, monkeypa
         assert result.result(timeout=5) is None
     with sessions._connect() as db:
         db.execute("UPDATE executions SET state='exited' WHERE session_id=?", (child,))
-    monkeypatch.delenv("ABOARD_BRIDGE_PORT", raising=False)
-    monkeypatch.delenv("ABOARD_BRIDGE_TOKEN", raising=False)
-    monkeypatch.setattr(sessions, "_endpoint_directory", lambda: tmp_path / "no-endpoints")
+    monkeypatch.delenv("HARNESS_BRIDGE_PORT", raising=False)
+    monkeypatch.delenv("HARNESS_BRIDGE_TOKEN", raising=False)
+    monkeypatch.setattr(bridge_backend, "endpoint_directory", lambda: tmp_path / "no-endpoints")
     monkeypatch.setenv("CODEX_HOME", str(tmp_path / "codex"))
     config = tmp_path / ".harness/config.json"
     config.parent.mkdir()

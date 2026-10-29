@@ -147,9 +147,9 @@ export class PiRpcClient {
     this.#child.stderr.resume();
     this.#child.stdin.on("error", () => this.#fail(new Error("Pi RPC stdin closed before submission")));
     this.#child.once("error", () => this.#fail(new Error("Pi RPC could not start the real CLI")));
-    this.#closed = new Promise((resolve) => this.#child.once("close", () => {
+    this.#closed = new Promise((resolve) => this.#child.once("close", (code, signal) => {
       clearTimeout(this.#deadline);
-      this.#failure ??= new Error("Pi RPC process exited before the expected record");
+      this.#failure ??= new Error(`Pi RPC process exited before the expected record (code=${code}, signal=${signal}, records=${this.#events.length})`);
       for (const waiter of this.#waiters) waiter.reject(this.#failure);
       this.#waiters.clear();
       resolve();

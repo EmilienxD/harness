@@ -48,7 +48,7 @@ def test_request_file_parses_the_public_frontmatter_contract() -> None:
 def test_published_schemas_describe_the_implemented_contracts() -> None:
     schemas = Path(sessions.__file__).parent / "schemas"
     request = json.loads((schemas / "delegation-request.schema.json").read_text(encoding="utf-8"))
-    aboard = json.loads((schemas / "aboard-delegation.schema.json").read_text(encoding="utf-8"))
+    aboard = json.loads((schemas / "bridge-delegation.schema.json").read_text(encoding="utf-8"))
     assert set(request["properties"]) == {"skill", "provider", "mode", "model", "effort", "root", "resume", "cwd", "difficulty", "prompt-file"}
     assert request["oneOf"][0]["required"] == ["mode"]
     assert "task" not in aboard["properties"]

@@ -276,6 +276,8 @@ export class TerminalController {
     const env: Record<string, string> = {
       ABOARD_BRIDGE_PORT: String(environment.port),
       ABOARD_BRIDGE_TOKEN: environment.token,
+      HARNESS_BRIDGE_PORT: String(environment.port),
+      HARNESS_BRIDGE_TOKEN: environment.token,
       ABOARD_AGENT_ID: request.agentId,
       ABOARD_EXECUTION_ID: randomUUID(),
       ABOARD_SESSION_ID: request.sessionId,

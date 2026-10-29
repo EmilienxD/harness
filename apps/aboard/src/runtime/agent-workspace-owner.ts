@@ -1,5 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
-import { mkdir, open, readFile, readdir, rename, rm, stat, writeFile } from "node:fs/promises";
+import { mkdir, open, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
+import { atomicReplace } from "./atomic-replace.js";
 import { basename, dirname, join, resolve } from "node:path";
 import { normalizeProjectPath } from "../bridge/command-endpoint.js";
 
@@ -213,7 +214,7 @@ export class WorkspaceRequestJournal {
     const completed = await open(temporary, "wx", 0o600);
     try { await completed.writeFile(JSON.stringify({ version: 1, state: "completed", fingerprint, result: result ?? null })); await completed.sync(); }
     finally { await completed.close(); }
-    try { await rename(temporary, path); }
+    try { await atomicReplace(temporary, path); }
     finally { await rm(temporary, { force: true }); }
     return result;
   }

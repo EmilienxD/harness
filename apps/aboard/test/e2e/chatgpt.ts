@@ -260,6 +260,7 @@ async function runScenario(root: string, scenario: Scenario): Promise<SessionId>
       ...process.env,
       ...plan.providerEnvironment,
       ABOARD_BRIDGE_PORT: String(bridge.port), ABOARD_BRIDGE_TOKEN: bridge.token,
+      HARNESS_BRIDGE_PORT: String(bridge.port), HARNESS_BRIDGE_TOKEN: bridge.token,
       ABOARD_AGENT_ID: agentId, ABOARD_SESSION_ID: expectedSessionId, ABOARD_AGENT_TYPE: agentType,
       ABOARD_RUNTIME_ROOT: runtimeRoot, ABOARD_WORKSPACE_ROOT: root, ABOARD_ATTENDED: "1",
     });

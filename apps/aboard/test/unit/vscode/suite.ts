@@ -15,7 +15,7 @@ import { WorkspaceStartup } from "../../../src/runtime/workspace-startup.js";
 import { WorkspaceBatchLauncher } from "../../../src/platform/workspace-launcher.js";
 
 interface CommandEndpoint { readonly port: number; readonly workspaceRoot: string; readonly commandToken: string; readonly pid: number }
-interface AboardApi { readonly commandEndpointDirectory: string; readonly agentWorkspaceStorageRoot: string }
+interface AboardApi { readonly commandEndpointDirectory: string; readonly delegationEndpointDirectory: string; readonly agentWorkspaceStorageRoot: string }
 
 function onPath(command: string): boolean {
   const suffixes = process.platform === "win32" ? (process.env.PATHEXT ?? ".EXE").split(";") : [""];
@@ -300,6 +300,12 @@ export async function run(): Promise<void> {
     if (endpoint === undefined) await new Promise((resolve) => setTimeout(resolve, 50));
   }
   assert.ok(endpoint, "this window published a command endpoint record");
+  const hostRecords = await Promise.all((await readdir(api.delegationEndpointDirectory)).filter((name) => name.endsWith(".json")).map(async (name) => JSON.parse(await readFile(join(api.delegationEndpointDirectory, name), "utf8")) as { workspaceRoot: string; port: number; delegationToken: string; commandToken?: string }));
+  const host = hostRecords.find((record) => record.workspaceRoot === root && record.port === endpoint?.port);
+  assert.ok(host, "the initialized window advertises the generic Sub-Agent execution protocol");
+  assert.equal(host.commandToken, undefined, "backend discovery grants no command-terminal authority");
+  const hostDenied = await fetch(`http://127.0.0.1:${host.port}/commands`, { headers: { authorization: `Bearer ${host.delegationToken}` } });
+  assert.equal(hostDenied.status, 403, "the backend credential is restricted to delegation");
 
   const beforeCommand = new Set(window.terminals);
   const commandResponse = await fetch(`http://127.0.0.1:${endpoint.port}/commands`, {
@@ -351,6 +357,8 @@ export async function run(): Promise<void> {
     if (recordSurvives) await new Promise((resolve) => setTimeout(resolve, 50));
   }
   assert.equal(recordSurvives, false, "deleting .abd clears the published endpoint");
+  const remainingHosts = await Promise.all((await readdir(api.delegationEndpointDirectory)).filter((name) => name.endsWith(".json")).map(async (name) => JSON.parse(await readFile(join(api.delegationEndpointDirectory, name), "utf8")) as { workspaceRoot: string }));
+  assert.equal(remainingHosts.some((record) => record.workspaceRoot === root), false, "reset also withdraws generic execution-host discovery");
   await assert.rejects(fetch(`http://127.0.0.1:${endpoint.port}/commands`), "deleting .abd stops the bridge");
   await assert.rejects(access(join(root, ".abd")), "reset cannot recreate .abd after bridge shutdown");
 }

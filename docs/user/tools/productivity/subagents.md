@@ -140,6 +140,45 @@ a found skill and four for a missing skill. Claude/Codex also pass interactive, 
 alternate-root and interrupted-child recovery journeys. Unit tests cover silent startup,
 explicit activation, repeated activation, native identity binding and pre-activation request isolation.
 
+## Execution backends (3.1.0 checkout)
+
+Provider selection and execution hosting are independent. `StandaloneBackend` owns native CLI
+process launches; `BridgeBackend` implements the optional loopback execution-host protocol.
+Neither the Sub-Agent runtime nor its payloads depend on a particular editor or application.
+`harness run` continues to open a standalone terminal. Delegated launches first select an
+available host, otherwise the standalone backend. Refusals, invalid inherited credentials,
+timeouts and uncertain startup never trigger a second launch through another backend.
+
+Execution hosts publish version-2 JSON records in `~/.harness/backends/endpoints/`, independently
+of `HARNESS_STATE_DIR`. Records contain `host: "127.0.0.1"`, `port`, `workspaceRoot`,
+`delegationToken`, `pid`, and `activatedAt`. Discovery rejects dead processes and mismatching
+projects and prefers the newest applicable record. Loop continuations can match registered
+sibling worktrees. A hosted parent passes `HARNESS_BRIDGE_PORT` and `HARNESS_BRIDGE_TOKEN`;
+an incomplete inherited pair is an error rather than permission to fall back.
+
+The host implements authenticated `POST /delegations` using
+`runtime/src/subagents_runtime/schemas/bridge-delegation.schema.json`, returns `sessionId`,
+`agentId` and `terminalId`, deduplicates `requestId`, and reports `startup-uncertain` when an
+existing launch cannot safely be replayed. Lifecycle wrappers call `execution_host.started`
+and `execution_host.exited`; they must not query runtime tables. Before submitting input to a
+live child, the host calls `python -m subagents_runtime.terminal_resume` to bind reply ownership.
+Bridge background streams retain the shared `runtime/watch/<execution-id>/stdout.jsonl` layout.
+
+Additional Python backends register a factory in the `harness.subagents.backends` entry-point
+group, installed in the runtime's managed environment. They implement `ExecutionBackend` in
+`backends.py`: a stable name, live-continuation capability, effect-free `probe`, durable-reservation
+`launch`, and `progress_path`. Extension backends precede the built-in bridge and standalone
+fallback. Launch implementations must persist startup intent before effects and retain uncertainty
+when they cannot prove that no process started. The public `execution_host` API provides
+`reservation`, `starting`, `bind`, `rejected`, `started`, and `exited` so adapters do not need
+SQL knowledge. `starting` atomically rejects a second launch intent. Backend names and opaque handles survive in
+execution state; schema 11 migrates older host-handle columns without discarding saved sessions.
+
+Aboard implements this neutral protocol and publishes its own adapter registration. Auto Run's
+worker policy remains entirely on that side; no Auto Run engine change is needed. The 3.1.0
+checkout requires coordinated runtime and extension publication: the catalogue's immutable runtime
+and VSIX pins are unchanged and do not yet ship this refactor.
+
 ## Remaining integration limits
 
 Pi context-usage telemetry remains unimplemented rather than estimated. Ordinary launch/reply/resume support does not enable Pi loop implementers for the unavailable `ship` workflow. On Pi, automatic loading of inline `@path` references requires the [file-mentions](file-mentions.md) extension to be installed and active in the child session. Without it, `@path` remains a valid file reference for the child to read explicitly; subagents alone does not attach its contents.

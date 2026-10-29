@@ -28,12 +28,16 @@ test("a real headless Pi parent receives its Codex child's result after SessionE
   const database = join(stateDir, "sessions.sqlite3");
   const parentId = randomUUID();
   try {
+    const settingsPath = join(project, ".pi", "settings.json");
+    const piSettings = JSON.parse(await readFile(settingsPath, "utf8"));
+    piSettings.defaultTools.push(process.platform === "win32" ? "powershell" : "bash");
+    await writeFile(settingsPath, JSON.stringify(piSettings));
     await mkdir(bin);
     Object.assign(env, { UV_TOOL_DIR: toolRoot, UV_TOOL_BIN_DIR: bin, UV_PYTHON: join(root, ".venv", process.platform === "win32" ? "Scripts/python.exe" : "bin/python"), UV_PYTHON_DOWNLOADS: "never", PYTHONIOENCODING: "utf-8" });
     const pathKey = Object.keys(env).find((key) => key.toLowerCase() === "path") ?? "PATH";
     env[pathKey] = `${bin}${delimiter}${env[pathKey] ?? ""}`;
     for (const platform of ["pi", "chatgpt"] as const) {
-      await runFixtureInstaller(fixture.workspace, "install", ["subagents"], { platform, catalogueRoot: root });
+      await runFixtureInstaller(fixture.workspace, "install", ["subagents"], { platform, catalogueRoot: root, pinnedRuntimes: false });
     }
     const models = JSON.parse(await readFile(join(agentDir, "models.json"), "utf8"));
     const provider = Object.values(models.providers)[0] as { baseUrl: string };
@@ -55,7 +59,7 @@ test("a real headless Pi parent receives its Codex child's result after SessionE
     await writeFile(join(project, ".harness", "config.json"), JSON.stringify({ version: 1, providers: { chatgpt: { command: [process.execPath, join(root, "tests", "e2e", "dist", "tools", "subagents", "cli-bridge.js"), "--provider", "chatgpt", native.file, ...native.args] } } }));
 
     const parent = await fixture.runJson({ prompt: `/skill:subagents-toolkit ${parentMarker("auto")}`, sessionId: parentId, timeoutMs: 180_000 });
-    assert.equal(parent.status, "success");
+    assert.equal(parent.status, "success", JSON.stringify({ stops: parent.assistantStopReasons, tools: parent.toolExecutions, observations: fixture.assertions().observations }));
     const final = parent.events.filter((event) => event.type === "message_end").map((event) => event.message as { role: string; content: { type: string; text?: string }[] }).filter((message) => message.role === "assistant").at(-1);
     assert.equal(final?.content.filter((block) => block.type === "text").map((block) => block.text).join(""), parentDone("auto"));
     const { stdout } = await execFileAsync(python, ["-c", [
@@ -86,7 +90,7 @@ test("a real headless Pi parent receives its Codex child's result after SessionE
     assert.equal(deliveries[0].details.deliveryId, deliveryId);
     assert.ok((await readdir(join(env.CODEX_HOME!, "sessions"), { recursive: true })).some((name) => name.endsWith(`${childId}.jsonl`)));
     assert.equal((await readdir(join(stateDir, "inboxes"), { recursive: true })).filter((name) => /\.md(?:\.running)?$/u.test(name)).length, 0);
-    assert.equal(fixture.assertions().inferenceRequests, 4);
+    assert.equal(fixture.assertions().inferenceRequests, 5);
     assert.equal(fixture.assertions().unexpectedRequests, 0);
   } finally {
     try {

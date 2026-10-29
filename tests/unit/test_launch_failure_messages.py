@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from subagents_runtime import processes, sessions
+from subagents_runtime import processes, sessions, bridge_backend
 from subagents_runtime.delegation import claim_parent_delivery, enable_delegation, process_inbox
 
 CODEX_REFUSAL = "Not inside a trusted directory and --skip-git-repo-check was not specified."
@@ -15,9 +15,9 @@ def project(tmp_path, monkeypatch):
     project = tmp_path / "project"
     project.mkdir()
     monkeypatch.setenv("HARNESS_STATE_DIR", str(tmp_path / "state"))
-    for name in ("HARNESS_SESSION_ID", "HARNESS_EXECUTION_ID", "ABOARD_BRIDGE_PORT", "ABOARD_BRIDGE_TOKEN"):
+    for name in ("HARNESS_SESSION_ID", "HARNESS_EXECUTION_ID", "HARNESS_BRIDGE_PORT", "HARNESS_BRIDGE_TOKEN"):
         monkeypatch.delenv(name, raising=False)
-    monkeypatch.setattr(sessions, "_discover_delegation_endpoint", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(bridge_backend, "discover", lambda *_args, **_kwargs: None)
     return project
 
 

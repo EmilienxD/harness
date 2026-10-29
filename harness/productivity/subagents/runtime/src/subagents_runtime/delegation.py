@@ -687,7 +687,8 @@ def _process_inbox(
                             raise RequestFileError("Release the previous wait before resuming an idle implementer")
                         if fork:
                             backend = connection.execute("SELECT backend FROM executions WHERE session_id=? AND superseded_at IS NULL AND state IN ('running','starting','uncertain','prepared')", (child_id,)).fetchone()
-                            if not backend or backend[0] != "aboard":
+                            from subagents_runtime.backends import supports_live_continuation
+                            if not backend or not supports_live_continuation(backend[0]):
                                 raise RequestFileError("Standalone implementer terminal is still open; close it before resuming, or launch a fresh implementer")
                         try:
                             connection.execute("UPDATE loop_sessions SET active=1,released_at=NULL WHERE session_id=?", (child_id,))

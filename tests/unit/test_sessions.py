@@ -7,8 +7,18 @@ from pathlib import Path
 
 import pytest
 
-from subagents_runtime import sessions
+from subagents_runtime import sessions, bridge_backend
 from subagents_runtime.cli import build_parser
+
+
+def reserve_bridge_request(project, monkeypatch):
+    from subagents_runtime import processes
+    sessions.register_observed("parent", project, "claude")
+    with sessions._connect() as db:
+        db.execute("INSERT INTO sessions(id,cwd,parent_session_id,agent_index) VALUES ('child',?,'parent',1)", (str(project),))
+        db.execute("INSERT INTO requests(id,parent_session_id,child_session_id,state) VALUES ('request','parent','child','launching')")
+        db.execute("INSERT INTO executions(id,session_id,request_id,backend,state) VALUES ('execution','child','request','bridge','prepared')")
+    monkeypatch.setattr(processes, "confirm_startup", lambda *_: None)
 
 
 def configured(tmp_path, monkeypatch, launches):
@@ -59,7 +69,7 @@ def test_delegated_model_overrides_only_when_requested(tmp_path, monkeypatch, pr
 
     launches = []
     configured(tmp_path / "state", monkeypatch, launches)
-    monkeypatch.setattr(sessions, "_discover_delegation_endpoint", lambda _: None)
+    monkeypatch.setattr(bridge_backend, "discover", lambda _: None)
     (tmp_path / ".harness").mkdir()
     (tmp_path / ".harness" / "config.json").write_text(json.dumps({
         "version": 1,
@@ -96,7 +106,7 @@ def test_delegated_resume_retains_explicit_model(tmp_path, monkeypatch, provider
 
     launches = []
     configured(tmp_path / "state", monkeypatch, launches)
-    monkeypatch.setattr(sessions, "_discover_delegation_endpoint", lambda _: None)
+    monkeypatch.setattr(bridge_backend, "discover", lambda _: None)
     sessions.register_observed("parent", tmp_path, provider)
     inbox = enable_delegation("parent", "subagents-toolkit").inbox
     (inbox / "work.md").write_text(f"---\nmode: auto\nmodel: {model}\n---\nWork.", encoding="utf-8")
@@ -127,8 +137,8 @@ def test_delegated_launch_prefers_the_scoped_aboard_endpoint(tmp_path, monkeypat
     project = tmp_path / "project"
     project.mkdir()
     monkeypatch.setattr(
-        sessions,
-        "_discover_delegation_endpoint",
+        bridge_backend,
+        "discover",
         lambda _cwd: ("127.0.0.1", 4823, "scoped-secret"),
     )
     captured = {}
@@ -138,10 +148,13 @@ def test_delegated_launch_prefers_the_scoped_aboard_endpoint(tmp_path, monkeypat
         captured["body"] = json.loads(request.data)
         return io.BytesIO(b'{"ok":true,"sessionId":"aboard-child"}')
 
-    monkeypatch.setattr(sessions.urllib.request, "urlopen", urlopen)
+    monkeypatch.setattr(bridge_backend.urllib.request, "urlopen", urlopen)
     monkeypatch.setattr(sessions, "_visible_terminal", lambda *_args: pytest.fail("native fallback used"))
     request = type("Request", (), {"task": "general", "child_skill": "prototype", "resume": None, "provider": "chatgpt", "mode": "auto", "prompt": "Build it.", "model": model, "effort": effort})()
-    assert sessions._launch_through_aboard(request, "request", project) == "aboard-child"
+    reserve_bridge_request(project, monkeypatch)
+    backend = bridge_backend.BridgeBackend()
+    assert backend.probe(request, project)
+    assert backend.launch(request, "request", 1, project) == "child"
     assert captured["authorization"] == "Bearer scoped-secret"
     assert captured["body"]["requestId"] == "request"
     assert "task" not in captured["body"]
@@ -158,7 +171,7 @@ def test_existing_database_keeps_children_when_model_selection_is_added(tmp_path
 
     launches = []
     configured(tmp_path / "state", monkeypatch, launches)
-    monkeypatch.setattr(sessions, "_discover_delegation_endpoint", lambda _: None)
+    monkeypatch.setattr(bridge_backend, "discover", lambda _: None)
     sessions.register_observed("parent", tmp_path, "claude")
     inbox = enable_delegation("parent", "subagents-toolkit").inbox
     (inbox / "old.md").write_text("---\nmode: auto\n---\nWork.", encoding="utf-8")
@@ -182,7 +195,7 @@ def test_existing_database_keeps_children_when_model_selection_is_added(tmp_path
 def test_native_provider_adapter_uses_reserved_id_mode_and_cwd(provider,mode,tmp_path,monkeypatch):
     launches = []
     configured(tmp_path / "state",monkeypatch,launches)
-    monkeypatch.setattr(sessions,"_discover_delegation_endpoint",lambda _: None)
+    monkeypatch.setattr(bridge_backend,"discover",lambda _: None)
     from subagents_runtime.delegation import enable_delegation,process_inbox
     sessions.register_observed("parent",tmp_path,provider)
     inbox = enable_delegation("parent","subagents-toolkit").inbox
@@ -208,7 +221,7 @@ def test_file_reference_conversion_reaches_both_launch_backends(
     launches = []
     configured(tmp_path / "state", monkeypatch, launches)
     monkeypatch.setattr(
-        sessions, "_discover_delegation_endpoint",
+        bridge_backend, "discover",
         lambda _: ("127.0.0.1", 4823, "token") if backend == "aboard" else None,
     )
     bodies = []
@@ -217,7 +230,7 @@ def test_file_reference_conversion_reaches_both_launch_backends(
         bodies.append(json.loads(request.data))
         return io.BytesIO(b'{"ok":true,"sessionId":"aboard-child"}')
 
-    monkeypatch.setattr(sessions.urllib.request, "urlopen", urlopen)
+    monkeypatch.setattr(bridge_backend.urllib.request, "urlopen", urlopen)
     sessions.register_observed("parent", tmp_path, provider)
     inbox = enable_delegation("parent", "subagents-toolkit").inbox
     (inbox / "work.md").write_text(
@@ -240,7 +253,7 @@ def test_interactive_claude_child_does_not_inherit_nested_session_marker(
 ):
     launches = []
     configured(tmp_path / "state", monkeypatch, launches)
-    monkeypatch.setattr(sessions, "_discover_delegation_endpoint", lambda _: None)
+    monkeypatch.setattr(bridge_backend, "discover", lambda _: None)
     monkeypatch.setenv("CLAUDE_CODE_CHILD_SESSION", "1")
     from subagents_runtime.delegation import enable_delegation, process_inbox
 
@@ -262,7 +275,7 @@ def test_scoped_aboard_launch_refreshes_endpoint_after_unauthorized_response(tmp
         ("127.0.0.1", 4823, "expired"),
         ("127.0.0.1", 4923, "fresh"),
     ])
-    monkeypatch.setattr(sessions, "_discover_delegation_endpoint", lambda _cwd: next(endpoints))
+    monkeypatch.setattr(bridge_backend, "discover", lambda _cwd: next(endpoints))
     calls = []
 
     def urlopen(request, timeout):
@@ -271,10 +284,12 @@ def test_scoped_aboard_launch_refreshes_endpoint_after_unauthorized_response(tmp
             raise urllib.error.HTTPError(request.full_url, 401, "Unauthorized", {}, None)
         return io.BytesIO(b'{"ok":true,"sessionId":"aboard-child"}')
 
-    monkeypatch.setattr(sessions.urllib.request, "urlopen", urlopen)
-    request = type("Request", (), {"task": "general", "provider": "claude", "mode": "auto", "prompt": "Do it."})()
-
-    assert sessions._launch_through_aboard(request, "request", tmp_path) == "aboard-child"
+    monkeypatch.setattr(bridge_backend.urllib.request, "urlopen", urlopen)
+    request = type("Request", (), {"task": "general", "resume": None, "provider": "claude", "mode": "auto", "prompt": "Do it."})()
+    reserve_bridge_request(tmp_path, monkeypatch)
+    backend = bridge_backend.BridgeBackend()
+    assert backend.probe(request, tmp_path)
+    assert backend.launch(request, "request", 1, tmp_path) == "child"
     assert calls == [
         ("http://127.0.0.1:4823/delegations", "Bearer expired"),
         ("http://127.0.0.1:4923/delegations", "Bearer fresh"),
@@ -318,13 +333,13 @@ def test_endpoint_discovery_rejects_dead_processes_and_incomplete_fleet_auth(tmp
         "workspaceRoot": str(project), "delegationToken": "secret",
         "pid": 999_999_999, "activatedAt": "2026-09-10T10:00:00Z",
     }), encoding="utf-8")
-    monkeypatch.setattr(sessions, "_endpoint_directory", lambda: endpoint)
-    assert sessions._discover_delegation_endpoint(project) is None
+    monkeypatch.setattr(bridge_backend, "endpoint_directory", lambda: endpoint)
+    assert bridge_backend.discover(project) is None
 
-    monkeypatch.setenv("ABOARD_BRIDGE_PORT", "4823")
-    monkeypatch.delenv("ABOARD_BRIDGE_TOKEN", raising=False)
+    monkeypatch.setenv("HARNESS_BRIDGE_PORT", "4823")
+    monkeypatch.delenv("HARNESS_BRIDGE_TOKEN", raising=False)
     with pytest.raises(sessions.SessionError, match="incomplete"):
-        sessions._discover_delegation_endpoint(project)
+        bridge_backend.discover(project)
 
 
 def test_launch_configuration_resolves_project_then_global_then_defaults(tmp_path, monkeypatch):
