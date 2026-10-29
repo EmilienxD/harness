@@ -26,6 +26,7 @@ Install a package from the Harness catalogue, or run `harness install <package>`
 | [`setup-command-aliases`](productivity/setup-command-aliases.md) | Claude Code, ChatGPT, Pi | Add or modify cross-platform shell command aliases (PowerShell, Bash, Zsh) |
 | [`setup-text-replacements`](productivity/setup-text-replacements.md) | Claude Code, ChatGPT, Pi | Add or change always-on AutoHotkey text replacements (Windows only) |
 | [`statusline`](productivity/statusline.md) | Pi | Minimal Pi footer with project, branch, provider, model, thinking level, and context usage |
+| [`turn-timer`](productivity/turn-timer.md) | Pi | Elapsed time since the latest user input beside the Working label |
 | [`stop-overthinking`](productivity/stop-overthinking.md) | Claude Code, ChatGPT, Pi | Stops overthinking and gives a short, practical decision |
 | [`subagents`](productivity/subagents.md) | Claude Code, ChatGPT, Pi | Persistent conversation delegation with mode-preserving resume |
 | [`todo-hitl`](productivity/todo-hitl.md) | Claude Code, ChatGPT, Pi | Mark deferred code work for human review and address it deliberately |

@@ -384,6 +384,20 @@ Restart Pi or run `/reload`. Use `--scope project` for a project-only installati
 The extension uses local OS/session metadata and read-only Git commands; it makes no model
 requests of its own. Git state is a snapshot and should be rechecked before destructive actions.
 
+## Turn timer
+
+`turn-timer` adds elapsed time beside Pi's working label: `Working · 25m 10s`.
+The timer resets on user input and updates once per second. When the run fully settles,
+a frozen `Worked · 25m 10s` line stays above the editor without a spinner until the next input.
+It preserves Pi's spinner while working, leaves the editor unchanged, and makes no model requests.
+
+```powershell
+uv run harness install turn-timer --platform pi --scope user
+```
+
+Restart Pi or run `/reload`. See the [turn-timer guide](docs/user/tools/productivity/turn-timer.md)
+for timing semantics and verification limits.
+
 ## Statusline
 
 `statusline` replaces Pi's footer with one line when space allows:

@@ -1,0 +1,21 @@
+name = "turn-timer"
+version = "1.1.0"
+description = "Show elapsed time since the latest user input beside Pi's Working label"
+docs = "https://github.com/EmilienxD/harness/blob/main/docs/user/tools/productivity/turn-timer.md"
+
+[platforms.claude]
+status = "unsupported"
+reason = "Uses Pi's interactive working message API."
+
+[platforms.chatgpt]
+status = "unsupported"
+reason = "Uses Pi's interactive working message API."
+
+[platforms.pi]
+status = "supported"
+
+[[files]]
+src = "pi/extension.ts"
+dest = ".harness-turn-timer/index.ts"
+root = "extensions"
+platforms = ["pi"]
