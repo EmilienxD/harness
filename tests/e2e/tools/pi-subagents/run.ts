@@ -75,6 +75,7 @@ export async function runPiSubagentsJourney(route: Route, options: {
   shellWrite?: boolean;
   failedWrite?: boolean;
   busyParent?: boolean;
+  alternateRoot?: boolean;
   localBoard?: { origin: string; code: string };
 } = {}): Promise<PiSubagentsResult> {
   if (options.busyParent && (route !== "interactive" || options.fullStack)) throw new Error("Busy-parent acceptance requires the standalone interactive journey");
@@ -83,7 +84,7 @@ export async function runPiSubagentsJourney(route: Route, options: {
   }
   const transport = options.fullStack && !options.localBoard ? await startGrillBoard() : undefined;
   const board = options.localBoard ?? transport;
-  const fixture = await createPiFixture(subagentsScenario({ ...(options.skill ? { skill: options.skill } : {}), explicitModel: options.explicitModel ?? false, grilling: !!board, shellWrite: options.shellWrite ?? false, failedWrite: options.failedWrite ?? false, busyParent: options.busyParent ?? false })).catch(async (error) => { await transport?.close(); throw error; });
+  const fixture = await createPiFixture(subagentsScenario({ alternateRoot: options.alternateRoot ?? false, ...(options.skill ? { skill: options.skill } : {}), explicitModel: options.explicitModel ?? false, grilling: !!board, shellWrite: options.shellWrite ?? false, failedWrite: options.failedWrite ?? false, busyParent: options.busyParent ?? false })).catch(async (error) => { await transport?.close(); throw error; });
   const parentId = randomUUID();
   let child: PiRpcClient | undefined;
   try {
@@ -94,6 +95,11 @@ export async function runPiSubagentsJourney(route: Route, options: {
       const settings = JSON.parse(await readFile(path, "utf8"));
       settings.defaultTools.push(process.platform === "win32" ? "powershell" : "bash");
       await writeFile(path, JSON.stringify(settings));
+    }
+    const unrelated = join(fixture.root, "unrelated");
+    if (options.alternateRoot) {
+      await mkdir(join(unrelated, ".pi"), { recursive: true });
+      await writeFile(join(unrelated, ".pi/settings.json"), await readFile(join(project, ".pi/settings.json")));
     }
     if (options.busyParent) {
       // A bounded real tool holds the parent busy until its extension claims the reply.
@@ -138,6 +144,10 @@ export async function runPiSubagentsJourney(route: Route, options: {
     await writeFile(join(project, ".harness", "config.json"), JSON.stringify({
       version: 1, providers: { pi: { command: ["pi", "--offline", "--approve", "--no-mcp", "--no-prompt-templates", "--no-themes"] } },
     }), { flag: "wx" });
+    if (options.alternateRoot) {
+      await mkdir(join(unrelated, ".harness"), { recursive: true });
+      await writeFile(join(unrelated, ".harness/config.json"), await readFile(join(project, ".harness/config.json")));
+    }
     const captures = join(fixture.root, "terminals");
     const stateDir = env.HARNESS_STATE_DIR!;
     await mkdir(stateDir, { recursive: true });
@@ -168,7 +178,7 @@ export async function runPiSubagentsJourney(route: Route, options: {
       };
       const model = launchOption("--model");
       const thinkingLevel = launchOption("--thinking");
-      child = new PiRpcClient({ ...fixture.workspace, env: specification.environment }, {
+      child = new PiRpcClient({ ...fixture.workspace, projectRoot: options.alternateRoot ? unrelated : project, env: specification.environment }, {
         sessionId: childId, timeoutMs: 180_000,
         ...(model ? { model } : {}), ...(thinkingLevel ? { thinkingLevel } : {}),
       });
@@ -204,6 +214,9 @@ export async function runPiSubagentsJourney(route: Route, options: {
       // RPC emits settlement before extension bookkeeping finishes, whether
       // delivery continued a busy parent or started a new turn in an idle one.
       await waitFor(async () => (await runtimeState(python, stateDir, parentId)).requests[0]?.[5] === 1 ? true : undefined, "persisted result acknowledged");
+      if (options.alternateRoot) {
+        assert.equal((await child.prompt(`${childMarker(route)} Continue after replying.`, 60_000)).status, "success");
+      }
     }
 
     const state = await runtimeState(python, stateDir, parentId);

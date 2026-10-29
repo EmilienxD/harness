@@ -580,7 +580,17 @@ def launch_delegated(request, request_id: str, agent_number: int, cwd: Path) -> 
     if request.mode == "loop" and request.provider == "chatgpt":
         from subagents_runtime.codex_trust import trust_worktree
         trust_worktree(cwd)
-    return select_backend(request, cwd).launch(request, request_id, agent_number, cwd)
+    if request.mode == "interactive":
+        from subagents_runtime.reply_support import prepare
+
+        prepare(cwd, request.provider)
+    child_id = select_backend(request, cwd).launch(request, request_id, agent_number, cwd)
+    if request.mode == "interactive":
+        from subagents_runtime.reply_support import wait_ready
+        from subagents_runtime.execution_host import reservation
+
+        wait_ready(reservation(request_id).execution_id, request.provider)
+    return child_id
 
 
 def resolve_session(identifier: str, parent_id: str | None = None) -> str:

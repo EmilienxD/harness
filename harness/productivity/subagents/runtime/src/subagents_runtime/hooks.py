@@ -207,6 +207,10 @@ def handle(
         from subagents_runtime.processes import confirm_startup
 
         confirm_startup(execution_id)
+    if event in {"SessionStart", "UserPromptSubmit"}:
+        from subagents_runtime.reply_support import acknowledge
+
+        acknowledge(cwd, selected_provider)
     if event == "SessionStart":
         recovered = []
         with sessions._connect() as connection:

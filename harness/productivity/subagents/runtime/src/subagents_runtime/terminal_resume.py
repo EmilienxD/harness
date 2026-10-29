@@ -29,6 +29,15 @@ def prepare_terminal_resume(session_id: str, execution_id: str, agent_id: str,
         ).fetchone()
         if not previous:
             raise SessionError("Existing terminal execution ownership is unavailable")
+        if current[2] == "interactive":
+            from subagents_runtime.storage import state_dir
+
+            ready = state_dir() / "runtime/reply-ready" / previous[0]
+            if not ready.is_file():
+                raise SessionError("Existing terminal has no verified reply support; reopen it before continuing")
+            from subagents_runtime.reply_support import _write
+
+            _write(ready.parent / execution_id, ready.read_bytes())
         connection.execute(
             "UPDATE executions SET input_execution_id=?,provider_pid=?,provider_birth=?,supervisor_pid=?,supervisor_birth=?,backend_agent_id=?,backend_handle=?,fork_of=NULL,state='running',started_at=CURRENT_TIMESTAMP WHERE id=?",
             (*previous, agent_id, terminal_id, execution_id),

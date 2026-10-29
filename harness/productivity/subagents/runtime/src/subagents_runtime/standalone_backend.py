@@ -35,6 +35,9 @@ class StandaloneBackend:
             "HARNESS_EXECUTION_ID": execution_id, "HARNESS_EXECUTION_MODE": request.mode,
             "HARNESS_PROVIDER": request.provider,
         })
+        environment.pop("HARNESS_REPLY_REQUIRED", None)
+        if request.mode == "interactive":
+            environment["HARNESS_REPLY_REQUIRED"] = "1"
         if request.provider == "claude" and request.mode in {"interactive", "loop"}:
             environment.pop("CLAUDE_CODE_CHILD_SESSION", None)
         runtime_root = str(Path(__file__).resolve().parent.parent)

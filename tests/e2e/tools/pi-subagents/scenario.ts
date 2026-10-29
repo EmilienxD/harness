@@ -11,8 +11,8 @@ export const BUSY_MARKER = "[E2E:pi-subagents:busy]";
 export const BUSY_COMMAND = "node busy-parent.cjs";
 const NAME = "pi-subagents";
 
-export const requestBody = (route: Route, explicitModel = false, childProvider = "pi", skill: "none" | "found" | "missing" = "none") =>
-  `---\nmode: ${route}\n${skill === "none" ? "" : `skill: ${skill === "found" ? "e2e-selected" : "missing-e2e"}\n`}${explicitModel ? `provider: ${childProvider}\nmodel: gpt-6.1-sol\neffort: medium\n` : ""}---\n${childMarker(route)} Reply with your answer.`;
+export const requestBody = (route: Route, explicitModel = false, childProvider = "pi", skill: "none" | "found" | "missing" = "none", alternateRoot = false) =>
+  `---\nmode: ${route}\n${alternateRoot ? "root: ../unrelated\n" : ""}${skill === "none" ? "" : `skill: ${skill === "found" ? "e2e-selected" : "missing-e2e"}\n`}${explicitModel ? `provider: ${childProvider}\nmodel: gpt-6.1-sol\neffort: medium\n` : ""}---\n${childMarker(route)} Reply with your answer.`;
 
 export const roundPayload = {
   questions: [{
@@ -51,7 +51,7 @@ function inbox(request: OpenAiResponsesRequest): string {
   return match[1]!;
 }
 
-export function subagentsScenario(options: { explicitModel?: boolean; grilling?: boolean; childProvider?: "pi" | "chatgpt"; shellWrite?: boolean; failedWrite?: boolean; busyParent?: boolean; skill?: "none" | "found" | "missing" } = {}) {
+export function subagentsScenario(options: { alternateRoot?: boolean; explicitModel?: boolean; grilling?: boolean; childProvider?: "pi" | "chatgpt"; shellWrite?: boolean; failedWrite?: boolean; busyParent?: boolean; skill?: "none" | "found" | "missing" } = {}) {
   return {
     scenarioCatalogHash: createHash("sha256").update(JSON.stringify({ NAME, routes: ["auto", "interactive"], options, version: 2 })).digest("hex"),
     transition(request: OpenAiResponsesRequest): OpenAiScenarioResponse {
@@ -88,7 +88,7 @@ export function subagentsScenario(options: { explicitModel?: boolean; grilling?:
       const callId = `call_harness_subagents_${route}_write`;
       if (calls.length > (options.grilling || options.busyParent ? 2 : 1) || results.length !== calls.length) reject("$.input", "parent tool history is incomplete");
       const requestPath = `${inbox(request)}${inbox(request).includes("\\") ? "\\" : "/"}${REQUEST_FILE}`;
-      const requestContent = requestBody(route, options.explicitModel, options.childProvider, options.skill);
+      const requestContent = requestBody(route, options.explicitModel, options.childProvider, options.skill, options.alternateRoot);
       const tool = options.shellWrite ? (request.tools.some((item) => item.name === "powershell") ? "powershell" : "bash") : "write";
       const command = `node -e "require('fs').writeFileSync(Buffer.from('${Buffer.from(requestPath).toString("base64")}','base64').toString(),Buffer.from('${Buffer.from("\ufeff" + requestContent).toString("base64")}','base64'))"${options.failedWrite ? "; exit 7" : ""}`;
       const input = options.shellWrite ? { command } : { path: requestPath, content: requestContent };

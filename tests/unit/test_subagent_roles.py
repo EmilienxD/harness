@@ -36,6 +36,10 @@ def test_explicit_skill_launch_and_resume(project, monkeypatch, provider, mode, 
     launches = []
     def start(execution, argv, environment, cwd, visible):
         launches.append((argv, environment, cwd, visible))
+        from subagents_runtime.reply_support import _write
+        from subagents_runtime.storage import state_dir
+
+        _write(state_dir() / "runtime/reply-ready" / execution, provider.encode())
         with sessions._connect() as connection:
             connection.execute("UPDATE sessions SET provider_session_id=id WHERE id=?", (environment["HARNESS_SESSION_ID"],))
         processes.confirm_startup(execution)

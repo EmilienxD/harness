@@ -331,6 +331,10 @@ def start(
         if state == "failed":
             raise sessions.SessionError(_startup_failure(execution_id, root, name))
         time.sleep(0.05)
+    if environment.get("HARNESS_REPLY_REQUIRED") == "1":
+        from subagents_runtime.reply_support import ReplySupportUnavailable
+
+        raise ReplySupportUnavailable(f"Reply support unavailable: {_unverified_startup(root, name, cwd, visible)}")
     raise sessions.SessionError(_unverified_startup(root, name, cwd, visible))
 
 

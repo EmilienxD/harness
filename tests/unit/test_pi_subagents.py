@@ -67,6 +67,10 @@ def launches(monkeypatch):
 
     def start(execution_id, argv, environment, cwd, visible):
         recorded.append({"execution": execution_id, "argv": argv, "env": environment, "cwd": cwd, "visible": visible})
+        from subagents_runtime.reply_support import _write
+        from subagents_runtime.storage import state_dir
+
+        _write(state_dir() / "runtime/reply-ready" / execution_id, b"pi")
 
     monkeypatch.setattr(processes, "start", start)
     return recorded

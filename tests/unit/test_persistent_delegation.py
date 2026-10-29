@@ -271,6 +271,10 @@ def _standalone_provider(tmp_path, monkeypatch, provider):
 
     def start(execution_id, argv, _environment, _cwd, *, visible):
         started.append((argv, visible))
+        from subagents_runtime.reply_support import _write
+        from subagents_runtime.storage import state_dir
+
+        _write(state_dir() / "runtime/reply-ready" / execution_id, provider.encode())
         processes.confirm_startup(execution_id)
 
     monkeypatch.setattr(processes, "start", start)

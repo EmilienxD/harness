@@ -53,8 +53,12 @@ def test_an_unconfirmed_visible_start_names_what_to_check(project, monkeypatch):
 
     result = launch(project, "claude", "interactive")
 
-    assert result.status == "uncertain"
+    assert result.status == "failed"
+    assert "Reply support unavailable" in result.reason
     assert "Claude Code" in result.reason and str(project.resolve()) in result.reason
+    delivery = claim_parent_delivery("parent", "Stop")
+    assert delivery is not None
+    assert "Reply support unavailable" in delivery.text
 
 
 def test_a_pi_crash_before_settlement_reports_its_stderr(project, tmp_path):

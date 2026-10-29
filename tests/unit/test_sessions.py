@@ -26,6 +26,10 @@ def configured(tmp_path, monkeypatch, launches):
     from subagents_runtime import processes
     def start(execution_id,argv,environment,cwd,visible):
         launches.append((argv,environment,cwd))
+        from subagents_runtime.reply_support import _write
+        from subagents_runtime.storage import state_dir
+
+        _write(state_dir() / "runtime/reply-ready" / execution_id, environment["HARNESS_PROVIDER"].encode())
         processes.confirm_startup(execution_id)
     monkeypatch.setattr(processes,"start",start)
     monkeypatch.setattr(sessions, "_visible_terminal", lambda argv, environment, cwd: launches.append((argv, environment, cwd)))
@@ -228,6 +232,10 @@ def test_file_reference_conversion_reaches_both_launch_backends(
 
     def urlopen(request, timeout):
         bodies.append(json.loads(request.data))
+        from subagents_runtime.reply_support import _write
+        from subagents_runtime.storage import state_dir
+
+        _write(state_dir() / "runtime/reply-ready" / bodies[-1]["executionId"], provider.encode())
         return io.BytesIO(b'{"ok":true,"sessionId":"aboard-child"}')
 
     monkeypatch.setattr(bridge_backend.urllib.request, "urlopen", urlopen)

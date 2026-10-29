@@ -333,6 +333,15 @@ def _finish_launch(request, request_id, execution_id, child_id, number, cwd, pat
 
 
 def _fail_request(path, request_id, execution_id, child_id, exc, session_id):
+    from subagents_runtime.reply_support import ReplySupportUnavailable
+
+    if isinstance(exc, ReplySupportUnavailable):
+        # Keep process ownership intact: lack of reply support is not proof that
+        # the provider exited and must never authorize a duplicate launch.
+        report_child_stop(child_id, "", success=False, reason=str(exc), cancelled=True, execution_id=execution_id)
+        path.unlink(missing_ok=True)
+        path.with_name(path.name + ".running").unlink(missing_ok=True)
+        return ProcessResult(path, "failed", request_id, child_id, str(exc))
     sessions = _sessions_module()
     claimed = path.with_name(path.name + ".running")
     with sessions._connect() as connection:

@@ -55,7 +55,7 @@ export async function runSubagentsRecoveryJourney(platform: Platform): Promise<S
 }
 
 export async function runSubagentsRootJourney(platform: Platform): Promise<SubagentsJourneyResult> {
-  return runSubagentsJourney(platform, "auto", false, true);
+  return runSubagentsJourney(platform, "interactive", false, true);
 }
 
 export async function runSubagentsJourney(platform: Platform, mode: "interactive" | "auto" = "interactive", recovery = false, alternateRoot = false, options: { shutdownBeforeResult?: boolean; stopFallback?: boolean; failedWrite?: boolean; skill?: SkillSelection } = {}): Promise<SubagentsJourneyResult> {
@@ -80,6 +80,11 @@ export async function runSubagentsJourney(platform: Platform, mode: "interactive
     const runtimeSource = join(root, "runtime", "src");
     await mkdir(projectRoot, { recursive: true });
     await cp(join(packageRoot, "runtime", "src"), runtimeSource, { recursive: true });
+    const replyResources = join(runtimeSource, "subagents_runtime", "resources", "reply-support");
+    for (const directory of ["reply-to-agent", "reply-to-agent-with-previous-message", "claude", "chatgpt", "pi"]) {
+      await cp(join(packageRoot, directory), join(replyResources, directory), { recursive: true });
+    }
+    await cp(join(harnessRoot, "harness/internal/pi-transport/transport.ts"), join(replyResources, "pi/transport.ts"));
     await cp(join(packageRoot, "subagents-toolkit"), join(root, "subagents-toolkit"), { recursive: true });
     const python = await pythonCommand(runtimeSource);
     const binRoot = await createRuntimeShim(root, python);
@@ -113,9 +118,8 @@ export async function runSubagentsJourney(platform: Platform, mode: "interactive
     }
     await initializeRepository(projectRoot);
     if (alternateRoot) {
-      await execFileAsync("git", ["-c", "user.name=Harness E2E", "-c", "user.email=harness-e2e@example.invalid", "commit", "--quiet", "--allow-empty", "-m", "fixture"], { cwd: projectRoot, windowsHide: true });
-      await execFileAsync("git", ["worktree", "add", "--quiet", "--detach", worktreeRoot, "HEAD"], { cwd: projectRoot, windowsHide: true });
-      await stagePayload(platform, packageRoot, worktreeRoot, python);
+      await mkdir(worktreeRoot, { recursive: true });
+      await initializeRepository(worktreeRoot);
     }
 
     const bridge = join(harnessRoot, "tests", "e2e", "dist", "tools", "subagents", "cli-bridge.js");

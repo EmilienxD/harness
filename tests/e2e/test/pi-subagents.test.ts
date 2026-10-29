@@ -54,6 +54,17 @@ for (const pinnedRuntimes of [false, true]) {
   });
 }
 
+test("an unrelated-root Pi child replies without inference and wakes its live parent", { timeout: 300_000 }, async () => {
+  const result = await runPiSubagentsJourney("interactive", { pinnedRuntimes: false, alternateRoot: true });
+  assert.equal(result.previousReplyInferenceRequests, 0);
+  assert.equal(result.parentStatus, "success");
+  assert.equal(result.request.state, "succeeded");
+  assert.equal(result.request.acknowledged, true);
+  assert.equal(result.inferenceRequests, 6);
+  assert.equal(result.deliveredResults, 1);
+  assert.equal(result.unexpectedRequests, 0);
+});
+
 test("an interactive Pi child replies without inference and wakes its live parent", { timeout: 300_000 }, async () => {
   const result = await runPiSubagentsJourney("interactive", { pinnedRuntimes: true });
   assert.equal(result.previousReplyInferenceRequests, 0);

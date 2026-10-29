@@ -179,6 +179,33 @@ worker policy remains entirely on that side; no Auto Run engine change is needed
 checkout requires coordinated runtime and extension publication: the catalogue's immutable runtime
 and VSIX pins are unchanged and do not yet ship this refactor.
 
+## Interactive reply preparation (3.1.1 checkout)
+
+Interactive delegation prepares project-local reply skills and provider integration before selecting
+an execution backend, including on resume and fork. The runtime distribution bundles the canonical
+reply skills, Claude/Codex hook fragments, and Pi extension/transport. A destination project does not
+need a prior Subagents installation. Existing matching hook registrations and installed Pi packages
+are reused; unrelated configuration, permissions and instruction files are retained. Conflicting
+reply payloads are refused rather than overwritten. Generated support remains in the destination
+project for later continuations; it is not a temporary configuration directory or an Aboard asset.
+
+The loaded integration acknowledges reply readiness separately from provider process startup. A
+missing acknowledgment after 30 seconds cancels the pending request with an explicit unavailable-support
+reason while retaining process ownership, so a still-live child cannot be launched twice. Provider trust
+and hook authorization remain native prerequisites; preparation does not grant either. Live-terminal
+reuse requires the original process to have acknowledged reply support; older terminals must be reopened.
+Ordinary answers still do not complete interactive requests. Both explicit reply actions retain their
+existing semantics, including no inference for sending the previous successful answer.
+
+Real headless Claude and Codex journeys against fake APIs reproduce the old failure with an unrelated
+Git root lacking reply support, then verify successful delivery and continuation with the prepared
+integration. Pi's checkout-runtime RPC journey covers an unrelated root without Subagents, previous-message
+delivery with zero additional inference, one acknowledged parent delivery, and another successful child
+turn afterward (six total inference requests). E2E type checks and Aboard's consuming adapter unit checks
+also pass. These checks do not certify the visible TUI, Aboard-hosted real-CLI launches, POSIX, or the
+unchanged immutable remote runtime pin. The pinned full-stack cloud/subagent journeys currently fail
+in inbox activation; checkout acceptance is not evidence that those pins have been repaired.
+
 ## Remaining integration limits
 
 Pi context-usage telemetry remains unimplemented rather than estimated. Ordinary launch/reply/resume support does not enable Pi loop implementers for the unavailable `ship` workflow. On Pi, automatic loading of inline `@path` references requires the [file-mentions](file-mentions.md) extension to be installed and active in the child session. Without it, `@path` remains a valid file reference for the child to read explicitly; subagents alone does not attach its contents.

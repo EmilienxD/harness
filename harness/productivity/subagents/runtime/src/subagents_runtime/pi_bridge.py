@@ -86,6 +86,9 @@ def session_start(request: dict[str, Any]) -> dict[str, Any]:
     observe_activity(session_id)
     execution_id = _execution_id(session_id)
     if execution_id and reason in {"startup", "reload"}:
+        from subagents_runtime.reply_support import acknowledge
+
+        acknowledge(cwd, "pi")
         confirm_startup(execution_id)
     with sessions._connect() as connection:
         enabled = connection.execute(

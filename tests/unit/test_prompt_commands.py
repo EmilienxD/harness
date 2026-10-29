@@ -102,6 +102,10 @@ def test_explicit_skill_is_added_after_sanitization(tmp_path, monkeypatch, provi
 
     def start(execution_id, argv, *_args, **_kwargs):
         invocations.extend(re.findall(r"([/$])([\w-]+)", argv[-1]))
+        from subagents_runtime.reply_support import _write
+        from subagents_runtime.storage import state_dir
+
+        _write(state_dir() / "runtime/reply-ready" / execution_id, provider.encode())
         with sessions._connect() as connection:
             connection.execute("UPDATE executions SET state='exited' WHERE id=?", (execution_id,))
 
