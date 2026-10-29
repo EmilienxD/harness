@@ -24,8 +24,11 @@ to their start time. Minutes are unbounded and seconds always use two digits.
 
 Tool calls and automatic continuations retain the timestamp. Final `agent_settled`
 stops the timer and replaces the working display with a frozen `Worked · 25m 10s`
-widget above the editor, without a spinner. Pi removes its built-in working row at
-loop end, so the extension uses an above-editor widget for this completed state.
+widget above the editor, without a spinner. It uses Pi's theme `muted` color,
+matching native event-status text rather than model-message text. Pi removes its
+built-in working row at loop end, and the public working-visibility API only shows
+that row during streaming. The completed state therefore sits above the editor's
+upper border, not embedded in it; the extension does not replace the editor.
 The next input or run clears it; session switching, shutdown and reload clear it too.
 The original animated spinner remains untouched while working.
 No session entries or model requests are generated. The completed duration is not

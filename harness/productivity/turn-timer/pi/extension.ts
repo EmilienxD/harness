@@ -56,7 +56,7 @@ export default function (pi: ExtensionAPI) {
     if (!ctx.hasUI || startedAt === undefined) return;
     const completed = `Worked · ${duration()}`;
     stop();
-    ctx.ui.setWidget(widgetKey, [completed], { placement: "aboveEditor" });
+    ctx.ui.setWidget(widgetKey, [ctx.ui.theme.fg("muted", completed)], { placement: "aboveEditor" });
     clearWidget = () => ctx.ui.setWidget(widgetKey, undefined);
   });
   pi.on("session_switch", stop);

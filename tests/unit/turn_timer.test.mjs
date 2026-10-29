@@ -11,6 +11,7 @@ function fixture(t, hasUI = true) {
   const labels = [];
   const widgets = new Map();
   const ctx = { hasUI, ui: {
+    theme: { fg: (color, text) => { assert.equal(color, "muted"); return text; } },
     setWorkingMessage: (text) => labels.push(text),
     setWidget: (key, content) => { if (content) widgets.set(key, content); else widgets.delete(key); },
   } };

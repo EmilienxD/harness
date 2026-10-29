@@ -7,6 +7,8 @@ import path from "node:path";
 import { pathToFileURL } from "node:url";
 
 const sdk = await import(pathToFileURL(path.join(process.argv[2], "dist/index.js")));
+sdk.initTheme("dark", false);
+const { theme } = await import(pathToFileURL(path.join(process.argv[2], "dist/modes/interactive/theme/theme.js")));
 const dir = await mkdtemp(path.join(tmpdir(), "turn-timer-"));
 const settings = sdk.SettingsManager.inMemory({});
 const loader = new sdk.DefaultResourceLoader({
@@ -28,6 +30,7 @@ try {
   await session.bindExtensions({
     mode: "interactive",
     uiContext: {
+      theme,
       setWorkingMessage: (message) => labels.push(message),
       setWidget: (key, content) => { if (content) widgets.set(key, content); else widgets.delete(key); },
     },
@@ -43,11 +46,11 @@ try {
   assert.equal(labels.at(-1), "Working · 0m 00s");
   await runner.emit({ type: "agent_settled", outcome: "completed" });
   assert.equal(labels.at(-1), undefined);
-  assert.deepEqual([...widgets.values()], [["Worked · 0m 00s"]]);
+  assert.deepEqual([...widgets.values()], [[theme.fg("muted", "Worked · 0m 00s")]]);
   const count = labels.length;
   await new Promise((resolve) => setTimeout(resolve, 1100));
   assert.equal(labels.length, count);
-  assert.deepEqual([...widgets.values()], [["Worked · 0m 00s"]]);
+  assert.deepEqual([...widgets.values()], [[theme.fg("muted", "Worked · 0m 00s")]]);
   await runner.emitInput("next", undefined, "interactive");
   assert.equal(widgets.size, 0);
   await runner.emit({ type: "agent_start" });
