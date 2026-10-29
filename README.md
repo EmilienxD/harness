@@ -484,6 +484,19 @@ uv run harness install clear-alias --platform pi --scope user
 
 Restart Pi or run `/reload`, then use `/clear`.
 
+## Effort alias
+
+`effort-alias` is a Pi-only extension that adds `/effort [level]` for session thinking
+control. Use `/effort high` to set a level or `/effort` to choose from the current
+model's supported levels, without a model request. Startup defaults stay unchanged;
+use native `/thinking` for its save-default shortcut.
+
+```powershell
+uv run harness install effort-alias --platform pi --scope user
+```
+
+Restart Pi or run `/reload` to activate it.
+
 ## Calm
 
 `calm` is a Pi-only extension that hides every tool's transcript output and file diffs,

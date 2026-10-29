@@ -13,6 +13,7 @@ Install a package from the Harness catalogue, or run `harness install <package>`
 | [`clear-alias`](productivity/clear-alias.md) | Pi | Alias Pi's /new command as /clear to start a fresh session |
 | [`copy-all`](productivity/copy-all.md) | Pi | Copy the current Pi conversation's user and assistant messages to the clipboard |
 | [`decisions`](productivity/decisions.md) | Claude Code, ChatGPT, Pi | Surfaces important decisions from the current work where confidence remains low |
+| [`effort-alias`](productivity/effort-alias.md) | Pi | Set session thinking effort with /effort, or pick a model-supported level |
 | [`enable-desktop-notification`](productivity/enable-desktop-notification.md) | Claude Code, ChatGPT, Pi | Enable desktop notifications for final responses in the current session without a model call |
 | [`environment-context`](productivity/environment-context.md) | Pi | Add OS, fixed session-start time, and compact Git status with full file counts to Pi context |
 | [`file-mentions`](productivity/file-mentions.md) | Pi | Automatically include @referenced text files and bounded folder listings in Pi prompts |

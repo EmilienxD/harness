@@ -1442,6 +1442,7 @@ def test_every_catalogue_manifest_loads():
             "chrome-devtools",
             "calm",
             "clear-alias",
+            "effort-alias",
             "copy-all",
             "enable-desktop-notification",
             "environment-context",
