@@ -97,11 +97,45 @@ export async function runPiDocumentsJourney(mode: "json" | "rpc", scope: "projec
   } finally { await fixture.close(); }
 }
 
+export async function runPiDocumentsPolicyJourney() {
+  const marker = "[E2E:pi-documents-policy]";
+  const fixture = await createPiFixture(createPiToolScenario({ name: "pi-documents-policy", marker, steps: [
+    { checkpoint: "excluded-source", tool: "write", input: { path: "website/src/lib/docs/catalog.test.ts", content: "source\n" } },
+    { checkpoint: "protected-document", tool: "write", input: { path: "docs/new.md", content: "blocked\n" } },
+    { checkpoint: "invalid-pattern-skipped", tool: "write", input: { path: "ordinary.txt", content: "ordinary\n" } },
+  ] }));
+  try {
+    const project = fixture.workspace.projectRoot;
+    await runFixtureInstaller(fixture.workspace, "install", ["no-new-documents"], { scope: "user" });
+    const initial = await fixture.runJson({ prompt: marker });
+    assert.equal(initial.status, "success");
+    assert.equal(await readFile(join(project, "website/src/lib/docs/catalog.test.ts"), "utf8"), "source\n");
+    assert.equal(existsSync(join(project, "docs/new.md")), false);
+    // Remove allowed creations so every mode proves creation, not existing-file edits.
+    await unlink(join(project, "website/src/lib/docs/catalog.test.ts"));
+    await unlink(join(project, "ordinary.txt"));
+    await writeFile(join(fixture.workspace.agentDir, "harness/no-new-documents.toml"), 'version=1\nprotected=["**/docs/**", "../invalid", 42]\n');
+    await mkdir(join(project, ".harness/guards"), { recursive: true });
+    await writeFile(join(project, ".harness/guards/no-new-documents.toml"), 'version=1\nunprotected=["website/src/lib/docs/**", "/invalid", false]\n');
+    for (const mode of ["json", "rpc"] as const) {
+      const run = mode === "json" ? await fixture.runJson({ prompt: marker }) : await fixture.rpc().prompt(marker);
+      assert.equal(run.status, "success");
+      assert.equal(await readFile(join(project, "website/src/lib/docs/catalog.test.ts"), "utf8"), "source\n");
+      assert.equal(existsSync(join(project, "docs/new.md")), false);
+      assert.equal(await readFile(join(project, "ordinary.txt"), "utf8"), "ordinary\n");
+      await unlink(join(project, "website/src/lib/docs/catalog.test.ts"));
+      await unlink(join(project, "ordinary.txt"));
+    }
+    assert.equal(fixture.assertions().inferenceRequests, 12);
+    assert.equal(fixture.assertions().unexpectedRequests, 0);
+  } finally { await fixture.close(); }
+}
+
 export async function runPiDocumentsSafetyJourney() {
   const marker = "[E2E:pi-documents-invalid-policy]";
   const fixture = await createPiFixture(createPiToolScenario({ name: "pi-documents-invalid-policy", marker, steps: [
-    { checkpoint: "invalid-policy-denies-write", tool: "write", input: { path: "docs/invalid.md", content: "forbidden\n" } },
-    { checkpoint: "invalid-policy-denies-existing-write", tool: "write", input: { path: "existing.txt", content: "forbidden\n" } },
+    { checkpoint: "invalid-policy-retains-valid-default", tool: "write", input: { path: "docs/invalid.md", content: "forbidden\n" } },
+    { checkpoint: "invalid-policy-skips-existing-write", tool: "write", input: { path: "existing.txt", content: "forbidden\n" } },
   ] }));
   try {
     const project = fixture.workspace.projectRoot;
@@ -112,9 +146,10 @@ export async function runPiDocumentsSafetyJourney() {
     await writeFile(join(project, "existing.txt"), "before\n");
     const run = await fixture.runJson({ prompt: marker });
     assert.equal(run.status, "success");
-    assert.deepEqual(run.toolExecutions.map((tool) => tool.isError), [true, true]);
+    assert.deepEqual(run.toolExecutions.map((tool) => tool.isError), [true, false]);
     assert.equal(existsSync(join(project, "docs/invalid.md")), false);
-    assert.equal(await readFile(join(project, "existing.txt"), "utf8"), "before\n");
+    assert.equal(await readFile(join(project, "existing.txt"), "utf8"), "forbidden\n");
+    await writeFile(join(project, "existing.txt"), "before\n");
     await writeFile(policy, 'version = 1\nprotected = ["**/docs/**"]\n');
     const probe = join(project, ".pi/extensions/documents-probe");
     await mkdir(probe, { recursive: true });

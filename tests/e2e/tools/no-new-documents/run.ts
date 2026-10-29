@@ -37,7 +37,7 @@ export async function runNoNewDocumentsJourney(platform: Platform): Promise<NoNe
     await copyFile(join(harnessRoot, "harness", "guards", "no-new-documents", "no_new_documents_hook.py"), hookPath);
     const guardRoot = join(projectRoot, ".harness", "guards");
     await mkdir(guardRoot, { recursive: true });
-    await copyFile(join(harnessRoot, "harness", "guards", "no-new-documents", "no-new-documents.toml"), join(guardRoot, "no-new-documents.toml"));
+    await writeFile(join(guardRoot, "no-new-documents.toml"), 'version=1\nprotected=["**/docs/**"]\n');
 
     let finalText: string;
     if (platform === "claude") {

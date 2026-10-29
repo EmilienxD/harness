@@ -590,14 +590,16 @@ when GitHub acceptance is needed; `npm test` retains credential-free local journ
 `test:pi-no-new-documents` installs actual project/user catalogue payloads, then runs JSON/RPC
 with the fake Responses endpoint shared with Codex. It checks denied direct/shell/nested creations,
 allowed existing-document edits, mirrored drafts, quoted paths, zero-inference approval/rejection,
-no overwrite, competing publication, malformed policy, escaping paths, reload/resume/tree notices,
+no overwrite, competing publication, skipped malformed policy, escaping paths, reload/resume/tree notices,
 starter preservation and receipt-driven removal. Other extensions' direct I/O and arbitrary scripts
 remain outside the guardrail; native commands are also callable by trusted extensions.
 The two native-path journeys verify `@`, tilde, file URL and Unicode-space expansion plus Windows
 MSYS/WSL/Cygwin paths and casing, aliases into docs, docs links outside the project and linked
 draft rejection. Both installation scopes deny twelve creations on Windows and preserve exact
-native write/edit and approved bytes. The complete gate has seven journeys; commands add zero
-inference requests. See the [document-guard implementation and source evidence](../../docs/user/tools/guards/no-new-documents.md#implementation-and-verification)
+native write/edit and approved bytes. A policy journey verifies the root-only starter, project
+exclusions overriding recursive user protection, and skipped invalid entries in both JSON and RPC;
+it asserts newly created files, denied effects and twelve inference requests. The complete gate has
+eight journeys; commands add zero inference requests. See the [document-guard implementation and source evidence](../../docs/user/tools/guards/no-new-documents.md#implementation-and-verification)
 for the event-guard choice and coverage boundary.
 
 `test:pi-cleanup-git` verifies project JSON and user RPC invocation through native skill expansion.

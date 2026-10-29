@@ -79,23 +79,27 @@ DRAFT_COMMAND = re.compile(r"(?<!\S)[$@/](approve|reject)-doc-draft(?=\s|$)(.*)$
 CWD_CHANGE = re.compile(r"(?:^|[;&|]\s*)(?:cd|chdir|Set-Location|Push-Location)\b", re.IGNORECASE)
 
 
-def _configuration(root: Path) -> tuple[re.Pattern[str], ...]:
-    compiled: list[re.Pattern[str]] = []
-    sources = _config_sources(root)
-    if not sources:
-        raise ValueError("no-new-documents configuration is missing")
-    for source in sources:
-        data = tomllib.loads(source.read_text(encoding="utf-8"))
-        raw_patterns = data.get("protected")
-        if data.get("version") != 1 or set(data) != {"version", "protected"}:
-            raise ValueError("invalid no-new-documents configuration")
-        if not isinstance(raw_patterns, list) or not raw_patterns:
-            raise ValueError("protected must be a non-empty array")
-        source_patterns = tuple(_compile_pattern(item) for item in raw_patterns if isinstance(item, str))
-        if len(source_patterns) != len(raw_patterns) or any(item is None for item in source_patterns):
-            raise ValueError("invalid protected pattern")
-        compiled.extend(item for item in source_patterns if item is not None)
-    return tuple(compiled)
+def _configuration(root: Path) -> tuple[tuple[re.Pattern[str], ...], tuple[re.Pattern[str], ...]]:
+    """Combine scopes; exclusions win globally. Invalid policy input is skipped."""
+    protected: list[re.Pattern[str]] = []
+    unprotected: list[re.Pattern[str]] = []
+    for source in _config_sources(root):
+        try:
+            data = tomllib.loads(source.read_text(encoding="utf-8"))
+        except (OSError, UnicodeError, tomllib.TOMLDecodeError):
+            continue
+        if data.get("version") != 1:
+            continue
+        for key, compiled in (("protected", protected), ("unprotected", unprotected)):
+            raw_patterns = data.get(key, [])
+            if not isinstance(raw_patterns, list):
+                continue
+            for item in raw_patterns:
+                if isinstance(item, str):
+                    pattern = _compile_pattern(item)
+                    if pattern is not None:
+                        compiled.append(pattern)
+    return tuple(protected), tuple(unprotected)
 
 
 def _root(payload: dict[str, Any]) -> Path:
@@ -148,9 +152,10 @@ def _compile_pattern(pattern: str) -> re.Pattern[str] | None:
     return re.compile(("^" if anchored else "^(?:[^/]+/)*") + body + "$")
 
 
-def _is_protected(parts: tuple[str, ...], patterns: tuple[re.Pattern[str], ...]) -> bool:
+def _is_protected(parts: tuple[str, ...], patterns: tuple[tuple[re.Pattern[str], ...], tuple[re.Pattern[str], ...]]) -> bool:
     path = "/".join(parts)
-    return any(pattern.match(path) for pattern in patterns)
+    protected, unprotected = patterns
+    return any(pattern.match(path) for pattern in protected) and not any(pattern.match(path) for pattern in unprotected)
 
 
 def _literal_path(groups: tuple[str | None, ...]) -> str | None:
@@ -273,7 +278,7 @@ def _deny_reason(reason: str) -> None:
 
 
 def new_document(
-    candidates: list[str], root: Path, patterns: tuple[re.Pattern[str], ...], *, strict_paths: bool = False,
+    candidates: list[str], root: Path, patterns: tuple[tuple[re.Pattern[str], ...], tuple[re.Pattern[str], ...]], *, strict_paths: bool = False,
 ) -> str | None:
     """Return a protected creation target using one already parsed policy snapshot.
 

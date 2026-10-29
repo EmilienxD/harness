@@ -77,6 +77,7 @@ def write_draft(root: Path, target: str, content: str = "# Draft\n") -> Path:
 
 
 def test_write_cannot_create_a_document_in_a_nested_docs_directory(tmp_path):
+    staged_hook(tmp_path, 'version=1\nprotected=["**/docs/**"]\n')
     intended = tmp_path / "packages" / "api" / "docs" / "design.md"
 
     code, output, stderr = run_hook(
@@ -117,6 +118,7 @@ def test_drafts_can_be_written_although_they_mirror_a_protected_path(tmp_path):
 
 
 def test_apply_patch_cannot_add_a_file_beneath_docs(tmp_path):
+    staged_hook(tmp_path, 'version=1\nprotected=["**/docs/**"]\n')
     code, output, stderr = run_hook(
         {
             "hook_event_name": "PreToolUse",
@@ -183,6 +185,7 @@ def test_claude_project_root_wins_over_a_nested_working_directory(tmp_path):
 
 
 def test_shell_redirection_to_a_new_document_is_denied(tmp_path):
+    staged_hook(tmp_path, 'version=1\nprotected=["**/docs/**"]\n')
     code, output, stderr = run_hook(
         {
             "hook_event_name": "PreToolUse",
@@ -223,6 +226,7 @@ def test_shell_commands_with_no_confident_creation_target_are_allowed(tmp_path):
 
 
 def test_powershell_explicit_new_file_creation_is_denied(tmp_path):
+    staged_hook(tmp_path, 'version=1\nprotected=["**/docs/**"]\n')
     code, output, stderr = run_hook(
         {
             "hook_event_name": "PreToolUse",
@@ -445,6 +449,38 @@ def test_root_anchored_pattern_can_limit_nested_docs_matching(tmp_path):
     assert output["hookSpecificOutput"]["permissionDecision"] == "deny"
 
 
+@pytest.mark.parametrize("provider", ["claude", "chatgpt"])
+@pytest.mark.parametrize("policy", [
+    'version=1\nprotected=["**/docs/**", "../bad", 42]\nunprotected=["website/src/lib/docs/**", "/bad", false]\n',
+    'version=1\nprotected=[]\n',
+    'broken [ TOML\n',
+    'version=99\nprotected=["**/docs/**"]\n',
+    'version=1\nprotected="invalid"\n',
+])
+def test_invalid_policy_and_exclusions_do_not_block_source(tmp_path, provider, policy):
+    hook = staged_hook(tmp_path, policy)
+    assert run_hook(pre_tool("Write", {"file_path": "website/src/lib/docs/catalog.test.ts"}, tmp_path), tmp_path, hook, provider=provider) == (0, None, "")
+
+
+@pytest.mark.parametrize("provider", ["claude", "chatgpt"])
+def test_project_exclusions_override_installed_policy_without_losing_valid_protection(tmp_path, provider):
+    hook = staged_hook(tmp_path, 'version=1\nunprotected=["website/src/lib/docs/**", "../bad", 42]\n')
+    hook.with_name("no-new-documents.toml").write_text(
+        'version=1\nprotected=["**/docs/**", "../bad", false]\n', encoding="utf-8"
+    )
+    assert run_hook(pre_tool("Write", {"file_path": "website/src/lib/docs/catalog.test.ts"}, tmp_path), tmp_path, hook, provider=provider) == (0, None, "")
+    code, output, stderr = run_hook(pre_tool("Write", {"file_path": "docs/new.md"}, tmp_path), tmp_path, hook, provider=provider)
+    assert (code, stderr) == (0, "")
+    assert output["hookSpecificOutput"]["permissionDecision"] == "deny"
+
+
+def test_default_only_protects_root_docs(tmp_path):
+    hook = staged_hook(tmp_path)
+    for path in ("website/src/lib/docs/catalog.test.ts", "nested/docs/new.md"):
+        assert run_hook(pre_tool("Write", {"file_path": path}, tmp_path), tmp_path, hook) == (0, None, "")
+    assert run_hook(pre_tool("Write", {"file_path": "docs/new.md"}, tmp_path), tmp_path, hook)[1] is not None
+
+
 def test_configuration_accepts_multiple_protected_paths(tmp_path):
     hook = staged_hook(tmp_path, 'version = 1\nprotected = ["**/docs/**", "**/project-notes/**"]\n')
     code, output, stderr = run_hook(
@@ -506,7 +542,7 @@ def test_install_registers_both_platforms_and_preserves_editable_configuration(
     config = tmp_path / ".harness/guards/no-new-documents.toml"
     assert hook.is_file()
     assert not (hook_dir / "no-new-documents.toml").exists()
-    assert 'protected = ["**/docs/**"]' in config.read_text(encoding="utf-8")
+    assert 'protected = ["docs/**"]' in config.read_text(encoding="utf-8")
     settings = json.loads((tmp_path / settings_path).read_text(encoding="utf-8"))
     group = settings["hooks"]["PreToolUse"][0]
     assert group["matcher"] == matcher
