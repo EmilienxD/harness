@@ -1447,7 +1447,6 @@ def test_every_catalogue_manifest_loads():
             "enable-desktop-notification",
             "environment-context",
             "statusline",
-            "turn-timer",
             "agent-launcher", "caveman", "cleanup-git", "setup-command-aliases", "handoff", "handoff-grilling", "mid-prompt-skills", "decisions", "report-gotchas", "subagents", "next-decision",
             "setup-text-replacements", "todo-hitl", "tool-inspector", "writing-for-agents", "stop-overthinking", "zoom-out",
             "polished-code-blocks",
