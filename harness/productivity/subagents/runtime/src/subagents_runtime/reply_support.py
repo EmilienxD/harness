@@ -8,7 +8,6 @@ import json
 import os
 import sys
 import tempfile
-import time
 from pathlib import Path
 
 from subagents_runtime.storage import connect, state_dir
@@ -69,16 +68,10 @@ def acknowledge(cwd: Path, provider: str) -> None:
         _write(state_dir() / "runtime/reply-ready" / execution, provider.encode())
 
 
-def wait_ready(execution: str, provider: str) -> None:
-    from subagents_runtime.sessions import SessionError
-
+def is_ready(execution: str, provider: str) -> bool:
+    """Observe readiness without imposing a deadline on provider initialization."""
     path = state_dir() / "runtime/reply-ready" / execution
-    deadline = time.monotonic() + 30
-    while time.monotonic() < deadline:
-        if path.is_file() and path.read_text() == provider:
-            return
-        time.sleep(0.05)
-    raise ReplySupportUnavailable(f"Reply support unavailable for {provider}: the active provider integration did not acknowledge readiness; check project and hook trust")
+    return path.is_file() and path.read_text() == provider
 
 
 def prepare(cwd: Path, provider: str) -> None:

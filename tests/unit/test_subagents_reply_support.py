@@ -67,11 +67,11 @@ def test_readiness_requires_loaded_integration_and_skills(project, monkeypatch):
     reply_support.prepare(project, "claude")
     assert not marker.exists()
     reply_support.acknowledge(project, "claude")
-    reply_support.wait_ready("execution", "claude")
+    assert reply_support.is_ready("execution", "claude")
     assert marker.read_text() == "claude"
 
 
-def test_unavailable_support_settles_request_without_forgetting_process(project, monkeypatch):
+def test_pending_readiness_keeps_request_and_process_active(project, monkeypatch):
     from subagents_runtime import processes
     from subagents_runtime.delegation import enable_delegation, process_inbox
 
@@ -79,23 +79,23 @@ def test_unavailable_support_settles_request_without_forgetting_process(project,
     inbox = enable_delegation("parent", "subagents-toolkit").inbox
     (inbox / "child.md").write_text("---\nmode: interactive\n---\nWork.")
     monkeypatch.setattr(processes, "start", lambda execution, *args, **kwargs: processes.confirm_startup(execution))
-    def unavailable(*args):
-        raise reply_support.ReplySupportUnavailable("Reply support unavailable: disabled hooks")
-    monkeypatch.setattr(reply_support, "wait_ready", unavailable)
     [result] = process_inbox("parent", launch=sessions.launch_delegated)
-    assert result.status == "failed"
+    assert result.status == "launched"
     with sessions._connect() as db:
         request = db.execute("SELECT state,reason,delivery_id FROM requests WHERE id=?", (result.request_id,)).fetchone()
         execution = db.execute("SELECT state FROM executions WHERE request_id=?", (result.request_id,)).fetchone()
-    assert request[0] == "cancelled"
-    assert request[1] == "Reply support unavailable: disabled hooks"
-    assert request[2]
+    assert request[0] == "pending"
+    assert request[1] is None
+    assert request[2] is None
     assert execution[0] == "running"
     assert processes.live_executions(result.child_session_id)
 
 
-def test_missing_readiness_is_bounded_and_explicit(project, monkeypatch):
-    times = iter([0, 31])
-    monkeypatch.setattr(reply_support.time, "monotonic", lambda: next(times))
-    with pytest.raises(reply_support.ReplySupportUnavailable, match="did not acknowledge"):
-        reply_support.wait_ready("execution", "claude")
+def test_missing_readiness_can_arrive_later(project, monkeypatch):
+    assert not reply_support.is_ready("execution", "claude")
+    monkeypatch.setenv("HARNESS_EXECUTION_ID", "execution")
+    monkeypatch.setenv("HARNESS_EXECUTION_MODE", "interactive")
+    reply_support.prepare(project, "claude")
+    reply_support.acknowledge(project, "claude")
+    assert reply_support.is_ready("execution", "claude")
+    assert not reply_support.is_ready("execution", "pi")

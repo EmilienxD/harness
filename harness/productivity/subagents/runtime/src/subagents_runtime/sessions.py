@@ -585,11 +585,8 @@ def launch_delegated(request, request_id: str, agent_number: int, cwd: Path) -> 
 
         prepare(cwd, request.provider)
     child_id = select_backend(request, cwd).launch(request, request_id, agent_number, cwd)
-    if request.mode == "interactive":
-        from subagents_runtime.reply_support import wait_ready
-        from subagents_runtime.execution_host import reservation
-
-        wait_ready(reservation(request_id).execution_id, request.provider)
+    # The integration acknowledges readiness asynchronously. Slow startup or
+    # compaction is not evidence that reply support is unavailable.
     return child_id
 
 

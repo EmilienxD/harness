@@ -189,11 +189,20 @@ are reused; unrelated configuration, permissions and instruction files are retai
 reply payloads are refused rather than overwritten. Generated support remains in the destination
 project for later continuations; it is not a temporary configuration directory or an Aboard asset.
 
-The loaded integration acknowledges reply readiness separately from provider process startup. A
-missing acknowledgment after 30 seconds cancels the pending request with an explicit unavailable-support
-reason while retaining process ownership, so a still-live child cannot be launched twice. Provider trust
-and hook authorization remain native prerequisites; preparation does not grant either. Live-terminal
-reuse requires the original process to have acknowledged reply support; older terminals must be reopened.
+The loaded integration acknowledges reply readiness separately from provider process startup.
+In the 3.1.2 checkout, the 15-second startup wait bounds only the launching call: without confirmation,
+both automatic and interactive requests remain uncertain and active while the existing execution is
+monitored. Later native startup confirmation restores pending/running state. Reply readiness is
+acknowledged asynchronously, without a separate 30-second blocking wait or silence-based cancellation.
+Compaction and slow initialization can therefore exceed either former deadline without failing the
+request. Process errors, exits and explicit cancellation still settle requests; lack of activity alone
+does not. Provider trust and hook authorization remain native prerequisites; preparation does not grant
+either. Live-terminal reuse requires the original process to have acknowledged reply support; older
+terminals must be reopened. These changes require runtime publication before remote installs include them.
+A subprocess regression covers delayed startup in both modes, including an interactive child silent for
+31 seconds before confirming startup, acknowledging readiness and successfully replying. Real-CLI
+Claude/Codex skill-selection and resume journeys and Pi skill-selection journeys pass against fake APIs.
+The delayed subprocess is a provider stand-in, not a real-provider compaction reproduction.
 Ordinary answers still do not complete interactive requests. Both explicit reply actions retain their
 existing semantics, including no inference for sending the previous successful answer.
 
