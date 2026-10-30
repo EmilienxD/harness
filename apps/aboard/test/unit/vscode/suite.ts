@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { existsSync } from "node:fs";
-import { access, readFile, readdir, rm } from "node:fs/promises";
+import { access, mkdir, readFile, readdir, rm } from "node:fs/promises";
 import { delimiter, join } from "node:path";
 
 import { ConfigurationTarget, TabInputTerminal, TabInputText, TerminalLocation, ThemeIcon, Uri, commands, extensions, window, workspace, type TabGroup, type Terminal } from "vscode";
@@ -47,6 +47,7 @@ export async function run(): Promise<void> {
     : undefined;
   if (handoff) {
     assert.deepEqual(await new WorkspaceStartup(api.agentWorkspaceStorageRoot, handoff).wait(), { started: 2, failed: [], cancelled: 0 });
+    await assert.rejects(access(join(childRoot!, ".abd")), "new-window startup leaves optional scaffold absent");
     await eventually(() => window.tabGroups.all.length === 2 && window.tabGroups.all.every((group) => group.tabs.filter((tab) => tab.input instanceof TabInputTerminal).length === 1), "new workspace must have a shell terminal in each assigned pane");
     return;
   }
@@ -333,7 +334,9 @@ export async function run(): Promise<void> {
   // Regular shell assignments check the full launch path without requiring a provider.
   const files = new AgentWorkspaceFiles(api.agentWorkspaceStorageRoot);
   const emptyPlan = { preset: { id: "integration-pair", name: "Integration pair", columns: 1, rows: 2, panes: [{ providers: [""] }, { providers: [] }] }, empty: false, manual: false };
-  const launchHandoff = await files.create(root, emptyPlan);
+  const bareCheckout = join(root, "bare-window-target");
+  await mkdir(bareCheckout, { recursive: true });
+  const launchHandoff = await files.create(bareCheckout, emptyPlan);
   const beforeGroups = captureEditorPanes();
   const beforeTerminals = new Set(window.terminals);
   await commands.executeCommand("vscode.openFolder", Uri.file(launchHandoff.workspaceFile), { forceNewWindow: true });
@@ -349,16 +352,13 @@ export async function run(): Promise<void> {
   assert.equal(duplicate.started, 2);
 
   await rm(join(root, ".abd"), { recursive: true, force: true });
-  let recordSurvives = true;
-  for (let attempt = 0; attempt < 100 && recordSurvives; attempt += 1) {
-    const entries = await readdir(api.commandEndpointDirectory).catch(() => []);
-    const records = await Promise.all(entries.map(async (entry) => JSON.parse(await readFile(join(api.commandEndpointDirectory, entry), "utf8")) as CommandEndpoint));
-    recordSurvives = records.some((candidate) => candidate.workspaceRoot === root);
-    if (recordSurvives) await new Promise((resolve) => setTimeout(resolve, 50));
-  }
-  assert.equal(recordSurvives, false, "deleting .abd clears the published endpoint");
+  await new Promise((resolve) => setTimeout(resolve, 1000));
+  const records = await Promise.all((await readdir(api.commandEndpointDirectory)).map(async (entry) => JSON.parse(await readFile(join(api.commandEndpointDirectory, entry), "utf8")) as CommandEndpoint));
+  assert.ok(records.some((candidate) => candidate.workspaceRoot === root), "deleting optional scaffold preserves the endpoint");
+  for (const terminal of beforeTerminals) assert.ok(window.terminals.includes(terminal), "scaffold removal preserves existing terminals");
   const remainingHosts = await Promise.all((await readdir(api.delegationEndpointDirectory)).filter((name) => name.endsWith(".json")).map(async (name) => JSON.parse(await readFile(join(api.delegationEndpointDirectory, name), "utf8")) as { workspaceRoot: string }));
-  assert.equal(remainingHosts.some((record) => record.workspaceRoot === root), false, "reset also withdraws generic execution-host discovery");
-  await assert.rejects(fetch(`http://127.0.0.1:${endpoint.port}/commands`), "deleting .abd stops the bridge");
-  await assert.rejects(access(join(root, ".abd")), "reset cannot recreate .abd after bridge shutdown");
+  assert.equal(remainingHosts.some((record) => record.workspaceRoot === root), true, "scaffold removal preserves execution-host discovery");
+  const response = await fetch(`http://127.0.0.1:${endpoint.port}/commands`, { headers: { authorization: `Bearer ${endpoint.commandToken}` } });
+  assert.equal(response.status, 200);
+  await assert.rejects(access(join(root, ".abd")), "runtime does not recreate optional scaffold");
 }

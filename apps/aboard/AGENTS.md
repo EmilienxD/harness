@@ -30,7 +30,7 @@ points.
   command-terminal API.
 - `src/runtime/`: admission, persistence, activity recording, layout, counters, and lock markers.
 - `src/scaffold/`: `.abd/` initialization, updates, and scaffold ownership.
-- `src/git/` and `src/github/`: Git/GitHub mutation boundaries; `git/worktree.ts` owns shared checkout allocation, configuration overlays, and setup primitives.
+- `src/git/` and `src/github/`: Git/GitHub mutation boundaries; `git/worktree.ts` owns shared checkout allocation, and setup primitives.
 - `src/vscode/`: tree views, the Run Agent launcher, commands, native UI, terminals, reviews, and activity
   presentation.
 - `assets/scaffold/`: project files installed into `.abd/`.
@@ -57,8 +57,8 @@ unfocused visible terminal even in AFK mode, because the user takes them over, c
 their work. `isHeadlessExecution` in `domain/contracts.ts` is the one decision the terminal controller and
 all launch adapters ask, so a mode never means headless in one of them and visible in another.
 
-`.abd/scaffold.json` is the initialized-project marker; when absent, runtime surfaces and the command
-endpoint are closed. Mutable runtime state belongs in VS Code storage, not the workspace.
+`.abd/scaffold.json` records optional project scaffold installation. Runtime services and manual launches
+operate independently of its presence or revision; scaffold changes preserve running terminals. Mutable runtime state belongs in VS Code storage, not the workspace.
 
 `.harness/config.json` is a sparse launch authority and is re-read whenever launch, resume, or reopen
 starts a new process. Resuming into an existing terminal retains that process's configuration.
@@ -105,10 +105,11 @@ browser tooling when they have a tool for it and to skip the step otherwise; Cla
 launch with `--chrome`. Codex `BROWSER_USE_AVAILABLE_BACKENDS` enforcement is retained in
 `chatgpt/browser.ts` but disabled, because a backend requirement contradicts that skip-if-absent policy.
 
-New worktrees copy ignored local `.claude`, `.agents`, `.codex`, `.pi`, `.abd`, and `.harness` configuration
-without overwriting checkout files or copying live session state. Refuse preparation when a copied path is
-not ignored. `platform/checkouts.ts` owns retained manual checkout preparation and retry state; Auto Run
-keeps its separate cleanup policy. Anchor numbered sibling names at the main checkout even when launching
+New worktrees use Git checkout contents and run the user's optional setup script from the source checkout
+with the new checkout as its working directory. The user owns configuration copying and ignore rules;
+Aboard leaves local project configuration alone. `platform/checkouts.ts` creates retained manual checkouts and runs optional setup; manual launches
+use existing/current checkouts independently of setup history. Keep locking scoped to active creation/setup
+operations, with no persistent readiness records or launch gate. Auto Run keeps its separate cleanup policy. Anchor numbered sibling names at the main checkout even when launching
 from a linked checkout. Existing manual checkouts retain their files and skip setup; launch and reopen read
 the target checkout's launch configuration. See README.md, “Choosing a checkout,” for the user flow.
 
@@ -241,6 +242,6 @@ Pi visible sessions use the native TUI; only existing headless modes use JSON. W
 explicitly, disable MCP and discovered extensions, and enforce allowed tools on nested calls.
 The Python guard owns Git/GitHub command policy. Pi worktrees use the assigned working directory
 and per-turn guidance for `protectedPaths`; filesystem isolation is not required.
-Pi models inherit native settings; explicit overrides require authenticated provider/model IDs.
+Pi models inherit native settings; explicit overrides use native Pi model patterns and extension providers.
 Pi loop delegations are unsupported. Native session lookup follows Pi's storage precedence, including
 relative global settings resolved from the project and explicit `--session-dir` command arguments.

@@ -56,8 +56,8 @@ export class ChatGptAgentPlatform implements AgentPlatform {
   public requireEnforceableRestrictions(): void {}
   public planLaunch(request: PlatformLaunchRequest): PlatformLaunchPlan { return planChatGptLaunch(request); }
   public planSessionResume(request: PlatformResumeRequest): PlatformLaunchPlan { return planChatGptSessionResume(request); }
-  public async preflight(plan: PlatformLaunchPlan): Promise<void> {
-    const command = await this.#commandProbe.require(plan.command);
+  public async preflight(plan: PlatformLaunchPlan, context?: Parameters<CommandRunner>[3]): Promise<void> {
+    const command = await this.#commandProbe.require(plan.command, context);
     if (plan.permissionProfile !== undefined) requirePermissionProfileVersion(command.version);
     await this.#policyProbe.require(plan.agentType, plan.permissionProfile);
     if (plan.args.includes("--dangerously-bypass-hook-trust") && this.options.approveHooks !== undefined

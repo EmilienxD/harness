@@ -303,31 +303,32 @@ test("home abbreviation handles Git path separators and does not shorten similar
   panel.registration.dispose();
 });
 
-test("branch validation blocks existing and invalid branches inline and rechecks before launch", async () => {
+test("branch validation blocks invalid names but allows existing branches to reach launch confirmation", async () => {
   const launches: LauncherRequest[] = [];
   const panel = await mount({ store: store(), providers, runAgent: async () => {},
     checkoutChoices: async () => ({ nextPath: "/project-2", entries: [] }),
-    validateBranch: async branch => branch === "existing" ? "Branch already exists." : branch.includes(" ") ? "Invalid branch name" : undefined,
+    validateBranch: async branch => branch.includes(" ") ? "Invalid branch name" : undefined,
     launch: async request => { launches.push(request); },
   });
   const ui = await browser(panel);
   const branch = ui.elements.get("branch")!;
   ui.elements.get("checkout")!.value = "new"; ui.elements.get("checkout")!.onchange!();
-  for (const name of ["existing", "bad branch"]) {
+  for (const name of ["bad branch"]) {
     branch.value = name; branch.oninput!(); await ui.flush();
     assert.equal(ui.elements.get("launch")!.disabled, true);
     assert.equal(ui.elements.get("branchError")!.hidden, false);
     assert.equal(branch.attributes.get("aria-invalid"), "true");
   }
   branch.value = "existing"; branch.oninput!(); await ui.flush();
-  assert.equal(ui.elements.get("branchError")!.textContent, "Branch already exists.");
+  assert.equal(ui.elements.get("branchError")!.hidden, true);
+  assert.equal(ui.elements.get("launch")!.disabled, false);
   await panel.receive({ type: "launch", destination: "new", preset: store().preferredPreset, checkout: { kind: "new", branch: "existing" } });
-  assert.equal(launches.length, 0);
+  assert.equal(launches.length, 1);
   branch.value = "fresh"; branch.oninput!(); await ui.flush();
   assert.equal(ui.elements.get("branchError")!.hidden, true);
   assert.equal(ui.elements.get("launch")!.disabled, false);
   ui.elements.get("launch")!.onclick!(); await ui.flush();
-  assert.equal(launches.length, 1);
+  assert.equal(launches.length, 2);
   panel.registration.dispose();
 });
 

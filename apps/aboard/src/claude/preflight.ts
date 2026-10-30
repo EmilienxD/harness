@@ -21,12 +21,12 @@ export class ClaudeCommandProbe {
 
   public constructor(private readonly options: ClaudeCommandProbeOptions) {}
 
-  public async verify(command: readonly string[] = DEFAULT_CLAUDE_COMMAND): Promise<PreflightResult> {
+  public async verify(command: readonly string[] = DEFAULT_CLAUDE_COMMAND, context?: Parameters<CommandRunner>[3]): Promise<PreflightResult> {
     const tokens = command.length === 0 ? DEFAULT_CLAUDE_COMMAND : command;
-    const key = JSON.stringify(tokens);
+    const key = JSON.stringify([tokens, context]);
     const cached = this.#results.get(key);
     if (cached !== undefined) return cached;
-    const pending = this.#probe(tokens);
+    const pending = this.#probe(tokens, context);
     this.#results.set(key, pending);
     // A probe that fails to run must not poison the cache forever: a user who
     // installs Claude and retries should get a fresh answer.
@@ -35,8 +35,8 @@ export class ClaudeCommandProbe {
   }
 
   /** Throwing wrapper for launch paths, which report failures as launch errors. */
-  public async require(command?: readonly string[]): Promise<void> {
-    const result = await this.verify(command);
+  public async require(command?: readonly string[], context?: Parameters<CommandRunner>[3]): Promise<void> {
+    const result = await this.verify(command, context);
     if (!result.ok) throw new ClaudePreflightError(result.reason);
   }
 
@@ -44,11 +44,11 @@ export class ClaudeCommandProbe {
     this.#results.clear();
   }
 
-  async #probe(tokens: readonly string[]): Promise<PreflightResult> {
+  async #probe(tokens: readonly string[], context?: Parameters<CommandRunner>[3]): Promise<PreflightResult> {
     const [program, ...fixed] = tokens;
     if (program === undefined) return { ok: false, reason: "the command is empty" };
     try {
-      const execution = await this.options.run(program, [...fixed, "--version"], this.options.timeoutMs ?? DEFAULT_PROBE_TIMEOUT_MS);
+      const execution = await this.options.run(program, [...fixed, "--version"], this.options.timeoutMs ?? DEFAULT_PROBE_TIMEOUT_MS, context);
       if (execution.code === 0) return { ok: true, version: firstLine(execution.stdout) };
       const detail = complaintLine(execution.stderr) || complaintLine(execution.stdout);
       return { ok: false, reason: `${program} exited with code ${execution.code ?? "unknown"}${detail === "" ? "" : ` (${detail})`}` };

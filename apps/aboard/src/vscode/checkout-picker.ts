@@ -8,7 +8,7 @@ export async function pickCheckout(checkouts: ManualCheckouts, workspaceRoot: st
   const selected = await window.showQuickPick([
     { label: "Current checkout", description: current ? current.branch ?? "Detached HEAD" : "Current folder", selection: { kind: "current" } as CheckoutSelection },
     ...(choices.nextPath ? [{ label: "New worktree…", description: choices.nextPath, selection: { kind: "new", branch: "" } as CheckoutSelection }] : []),
-    ...choices.entries.filter((entry) => !samePath(entry.path, workspaceRoot)).map((entry) => ({ label: entry.branch ?? "Detached HEAD", description: entry.path, detail: [!entry.available ? "Missing or unavailable checkout" : entry.reserved ? "Reserved by Auto Run" : entry.preparation ? "Setup incomplete" : entry.dirty ? "Modified files" : "", entry.agents ? `${entry.agents} agents in this window share these files` : ""].filter(Boolean).join(" · "), selection: { kind: "existing", path: entry.path } as CheckoutSelection })),
+    ...choices.entries.filter((entry) => !samePath(entry.path, workspaceRoot)).map((entry) => ({ label: entry.branch ?? "Detached HEAD", description: entry.path, detail: [!entry.available ? "Missing or unavailable checkout" : entry.reserved ? "Reserved by Auto Run" : entry.dirty ? "Modified files" : "", entry.agents ? `${entry.agents} agents in this window share these files` : ""].filter(Boolean).join(" · "), selection: { kind: "existing", path: entry.path } as CheckoutSelection })),
   ], { placeHolder: choices.error ?? "Choose the checkout for this agent" });
   if (!selected) return undefined;
   if (selected.selection.kind !== "new") return selected.selection;
@@ -34,11 +34,11 @@ export async function prepareCheckout(checkouts: ManualCheckouts, selection: Che
     }
     if (!(error instanceof CheckoutSetupError)) throw error;
     log(error.message);
-    const action = await window.showErrorMessage(error.message, "Retry setup", "Open checkout", "View log");
+    const action = await window.showErrorMessage(error.message, "Use existing worktree", "Open checkout", "View log");
     if (action === "Open checkout") await commands.executeCommand("vscode.openFolder", Uri.file(error.path), { forceNewWindow: true });
     if (action === "View log") showLog();
-    if (action === "Retry setup") {
-      return window.withProgress({ location: ProgressLocation.Window, title: "Retrying worktree setup", cancellable: false }, (progress) => checkouts.retrySetup(error.path, (message) => { log(message); progress.report({ message }); }));
+    if (action === "Use existing worktree") {
+      return prepareCheckout(checkouts, { kind: "existing", path: error.path }, log, showLog);
     }
     return undefined;
   }

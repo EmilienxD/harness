@@ -18,6 +18,18 @@ test("Pi preflight accepts stable compatible minors and rejects unsupported vers
   }
 });
 
+test("Pi preflight leaves native and extension model resolution to Pi", async () => {
+  for (const model of ["sonnet", "my-extension/custom", "sonnet:high"]) {
+    const observed: string[][] = [];
+    const platform = new PiAgentPlatform({ lifecycleAssets: { settings: "unused", script: "unused" }, commandRunner: async (_program, args) => { observed.push([...args]); return { code: 0, stdout: "1.2.0", stderr: "" }; } });
+    const configuration = parseLaunchFile(JSON.stringify({ version: 1, providers: { pi: { interactive: { model } } } })).value.configurationFor("pi", "interactive").settings;
+    const plan = platform.planLaunch({ agentId: "native-model" as AgentId, sessionId: platform.createSession().sessionId, shell: "powershell", agentType: "interactive", configuration });
+    await platform.preflight(plan);
+    assert.deepEqual(observed, [["--version"]]);
+    assert.equal(plan.args[plan.args.indexOf("--model") + 1], model);
+  }
+});
+
 test("Pi profiles accept native thinking and shared effort aliases", () => {
   const platform = new PiAgentPlatform({ lifecycleAssets: { settings: "unused", script: "unused" }, commandRunner: async () => ({ code: 0, stdout: "1.2.0", stderr: "" }) });
   for (const [effort, native] of [["off", "off"], ["none", "off"], ["ultra", "max"], ["max", "max"]]) {

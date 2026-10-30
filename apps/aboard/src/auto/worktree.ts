@@ -2,7 +2,7 @@ import { mkdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { autoRunMessage, type WorktreeSettings } from "../domain/auto-run.js";
 import { isWorkingTreeClean, type GitClient } from "../git/client.js";
-import { RunWorkspaceError, overlayProjectConfiguration, runWorkspacePath, samePath, setupCommandPath, hasSetupCommands, setupCommandLine, processSetupCommandRunner, type ProjectConfigurationOverlayRequest, type SetupCommandRunner } from "../git/worktree.js";
+import { RunWorkspaceError, runWorkspacePath, samePath, setupCommandPath, hasSetupCommands, setupCommandLine, processSetupCommandRunner, type SetupCommandRunner } from "../git/worktree.js";
 export * from "../git/worktree.js";
 
 /** Where a run's issue branches are checked out and its agents are launched. */
@@ -99,7 +99,6 @@ export interface WorktreeRunWorkspaceOptions {
   readonly platform?: NodeJS.Platform;
   readonly setup?: SetupCommandRunner;
   readonly readSetupFile?: (path: string) => Promise<string | undefined>;
-  readonly overlayProjectConfiguration?: (request: ProjectConfigurationOverlayRequest) => Promise<void>;
   readonly resolveGitMetadataRoots?: (worktreeRoot: string, projectRoot: string) => Promise<readonly string[]>;
   readonly directories?: RunWorkspaceDirectories;
   /**
@@ -128,7 +127,6 @@ export class WorktreeRunWorkspaces implements RunWorkspaceProvider {
   readonly #platform: NodeJS.Platform;
   readonly #setup: SetupCommandRunner;
   readonly #readSetupFile: (path: string) => Promise<string | undefined>;
-  readonly #overlayProjectConfiguration: (request: ProjectConfigurationOverlayRequest) => Promise<void>;
   readonly #resolveGitMetadataRoots: (worktreeRoot: string, projectRoot: string) => Promise<readonly string[]>;
 
   public constructor(private readonly options: WorktreeRunWorkspaceOptions) {
@@ -137,7 +135,6 @@ export class WorktreeRunWorkspaces implements RunWorkspaceProvider {
     this.#setup = options.setup ?? processSetupCommandRunner;
     this.#readSetupFile = options.readSetupFile
       ?? (async (path) => { try { return await readFile(path, "utf8"); } catch { return undefined; } });
-    this.#overlayProjectConfiguration = options.overlayProjectConfiguration ?? overlayProjectConfiguration;
     this.#resolveGitMetadataRoots = options.resolveGitMetadataRoots ?? worktreeGitMetadataRoots;
   }
 
@@ -183,11 +180,6 @@ export class WorktreeRunWorkspaces implements RunWorkspaceProvider {
     const created = await this.#checkout(path, request);
     try {
       if (created) {
-        await this.#overlayProjectConfiguration({
-          workspaceRoot: this.options.workspaceRoot,
-          worktreeRoot: path,
-          git: this.options.gitFor(path),
-        });
         await this.#runSetup(path, request, settings.setupTimeoutSeconds);
       }
       await this.#requireCleanCheckout(path, created);

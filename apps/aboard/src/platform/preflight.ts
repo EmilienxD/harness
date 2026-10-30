@@ -12,6 +12,7 @@ export type CommandRunner = (
   program: string,
   args: readonly string[],
   timeoutMs: number,
+  context?: { readonly cwd?: string; readonly env?: Readonly<Record<string, string>> },
 ) => Promise<CommandExecution>;
 
 export type PreflightResult =
@@ -20,8 +21,8 @@ export type PreflightResult =
 
 export function spawnCommandRunner(cwd: string): CommandRunner {
   const windows = process.platform === "win32";
-  return (program, args, timeoutMs) => new Promise<CommandExecution>((resolve, reject) => {
-    const options = { cwd, timeout: timeoutMs, windowsHide: true } as const;
+  return (program, args, timeoutMs, context) => new Promise<CommandExecution>((resolve, reject) => {
+    const options = { cwd: context?.cwd ?? cwd, env: { ...process.env, ...context?.env }, timeout: timeoutMs, windowsHide: true } as const;
     const done = (error: Error | null, stdout: string | Buffer, stderr: string | Buffer): void => {
       if (error !== null && typeof (error as { code?: unknown }).code === "string") {
         reject(new Error(`${program}: ${error.message}`));

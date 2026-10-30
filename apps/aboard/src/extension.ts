@@ -211,7 +211,7 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
   const scaffoldAssetRoot = join(context.extensionPath, "assets", "scaffold");
   const expectedScaffoldRevision = await scaffoldCatalogRevision(scaffoldAssetRoot);
   let scaffoldState = await readScaffoldState(workspaceRoot, expectedScaffoldRevision).catch(() => "uninitialized" as const);
-  let initialized = scaffoldState === "ready";
+  const initialized = true;
   let scaffoldUpdateWarningShown = false;
   const runtimeAdmission = new RuntimeAdmission(initialized);
 
@@ -302,9 +302,10 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
   let grillRelayResolved = false;
   const promptSubmissions = new PromptSubmissions();
   const syncGrillRelay = (): void => {
-    if (initialized === grillRelayResolved) return;
-    grillRelayResolved = initialized;
-    if (!initialized) { grillRelay?.dispose(); grillRelay = undefined; return; }
+    const enabled = scaffoldState === "ready";
+    if (enabled === grillRelayResolved) return;
+    grillRelayResolved = enabled;
+    if (!enabled) { grillRelay?.dispose(); grillRelay = undefined; return; }
     grillRelay = createGrillCloudRelay({ fleet, terminals, workspaceRoot, prompts: promptSubmissions, log: (message) => output.appendLine(message) });
     grillRelay?.start();
     output.appendLine(grillRelay === undefined
@@ -1062,50 +1063,16 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
 
 
   const publishScaffoldState = async () => {
-    const wasInitialized = initialized;
     scaffoldState = await readScaffoldState(workspaceRoot, expectedScaffoldRevision).catch(() => "uninitialized" as const);
-    const next = scaffoldState === "ready";
-    if (initialized && !next) {
-      initialized = false;
-      const runtimeDrained = runtimeAdmission.close();
-
-      const reason = scaffoldState === "uninitialized" ? "project state was removed" : "project assets became incompatible";
-      autoRun.stop(reason);
-      await autoRun.settle();
-      await runtimeDrained;
-      for (const terminal of terminals.list()) {
-        if (terminal.status === "open") try { terminals.kill(terminal.terminalId); } catch { /* already closing */ }
-      }
-      const at = new Date().toISOString() as IsoTimestamp;
-      if (lease.current() !== undefined) lease.forceRelease(at, reason);
-      fleet.clear(at);
-
-      bridgeEnvironment = undefined;
-      await bridge?.stop();
-      bridge = undefined;
-      await commandEndpoint.clear().catch(() => undefined);
-      await delegationEndpoint.clear().catch(() => undefined);
-      output.appendLine(scaffoldState === "uninitialized"
-        ? "Project state directory .abd/ was removed; aboard runtime access is suspended. Saved activity is retained."
-        : "aboard's project assets no longer match this extension; runtime access was closed until they are updated.");
-    }
-    initialized = next;
-    if (initialized && !wasInitialized) {
-      runtimeAdmission.open();
-      // The store on disk is the only history a newly initialized project has.
-      await activity.load().catch((error: unknown) => output.appendLine(`Activity store could not be read: ${error instanceof Error ? error.message : "unknown error"}`));
-      agentIdCounter = WorkspaceAgentIdCounter.load(runtime.root, knownAgentIds, runtimeAdmission.isOpen, storageRoot);
-      void refreshActivityTitles();
-
-    }
-    if (initialized) await startRuntimeBridge();
+    // Optional project assets never control the lifetime of terminals or runtime services.
+    await startRuntimeBridge();
     syncGrillRelay();
-    await commands.executeCommand("setContext", "aboard.initialized", next);
+    await commands.executeCommand("setContext", "aboard.initialized", initialized);
     await commands.executeCommand("setContext", "aboard.scaffoldUpdateRequired", scaffoldState === "update-required");
     if (scaffoldState !== "update-required") scaffoldUpdateWarningShown = false;
     if (scaffoldState === "update-required" && !scaffoldUpdateWarningShown) {
       scaffoldUpdateWarningShown = true;
-      void window.showWarningMessage("aboard's project assets were created by another extension version. Update .abd/ before starting or resuming aboard.");
+      void window.showWarningMessage("aboard's optional project assets were created by another extension version. You can update them with Update Project.");
     }
     fleetUi.refresh();
   };
@@ -1173,23 +1140,21 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
       checkoutChoices: () => checkouts.choices(),
       validateBranch: async (branch) => {
         await new ProcessGitClient(workspaceRoot).validateBranchName(branch);
-        return await checkouts.branchExists(branch) ? "Branch already exists." : undefined;
+        return undefined;
       },
       launch: async (request) => {
         if (!requireInitialized()) return;
         // Reject invalid profiles before creating a checkout or opening another window.
         for (const provider of new Set(request.preset.panes.flatMap((pane) => pane.providers).filter(Boolean))) await launchFile.getForWorktree(provider as AgentPlatformId, "interactive", request.checkout?.kind === "existing" ? request.checkout.path : workspaceRoot);
-        const selection = request.checkout ?? { kind: "current" as const };
+        let selection = request.checkout ?? { kind: "current" as const };
+        if (selection.kind === "new" && !selection.useExistingBranch && await checkouts.branchExists(selection.branch)) {
+          const answer = await window.showWarningMessage(`Branch ${selection.branch} already exists. Create a worktree using that branch?`, { modal: true }, "Use existing branch");
+          if (!answer) return;
+          selection = { ...selection, useExistingBranch: true };
+        }
         const checkoutRoot = await prepareCheckout(checkouts, selection, (message) => output.appendLine(message), () => output.show());
         if (!checkoutRoot) return;
         if (request.destination === "new") {
-          const targetState = await readScaffoldState(checkoutRoot, expectedScaffoldRevision);
-          if (targetState !== "ready") {
-            const report = await scaffoldProject({ projectRoot: checkoutRoot, assetRoot: scaffoldAssetRoot });
-            for (const warning of report.warnings) output.appendLine(`Checkout initialization: ${warning}`);
-            for (const path of report.preserved) output.appendLine(`Checkout initialization preserved: ${path}`);
-            if (await readScaffoldState(checkoutRoot, expectedScaffoldRevision) !== "ready") throw new Error(`The checkout at ${checkoutRoot} still needs an Aboard update. Open it and resolve its preserved project assets before launching.`);
-          }
           await workspaceLauncher.launch(request, checkoutRoot);
           return;
         }

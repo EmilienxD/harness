@@ -343,7 +343,7 @@ export class DelegationCoordinator {
       ...(this.options.wrapper === undefined ? {} : { wrapper: this.options.wrapper }),
     });
     const startupTimeoutMs = this.#startupTimeout(plan, executionMode);
-    await platform.preflight(plan);
+    await platform.preflight(plan, { cwd, env: plan.providerEnvironment ?? {} });
     const resumable = await platform.isResumable(target.sessionId, cwd, plan.command);
     if (!resumable) {
       throw new DelegationError("unresumable-session", `Session ${target.sessionId} has no agent conversation to resume`);
@@ -563,7 +563,7 @@ export class DelegationCoordinator {
       ...(this.options.wrapper === undefined ? {} : { wrapper: this.options.wrapper }),
     });
     const startupTimeoutMs = this.#startupTimeout(plan, executionMode, input.forkSessionId);
-    await platform.preflight(plan);
+    await platform.preflight(plan, { cwd: input.isolation?.cwd ?? this.options.workspaceRoot, env: plan.providerEnvironment ?? {} });
     const occurredAt = this.#timestamp();
     if (leaseRequired(origin, attended)) {
       this.#acquire(plan.writeCapability, agentId, sessionId, occurredAt, leaseReason(origin));

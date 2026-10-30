@@ -15,28 +15,28 @@ export class ChatGptCommandProbe {
 
   public constructor(private readonly options: { readonly run: CommandRunner; readonly timeoutMs?: number }) {}
 
-  public async verify(command: readonly string[] = DEFAULT_CHATGPT_COMMAND): Promise<PreflightResult> {
+  public async verify(command: readonly string[] = DEFAULT_CHATGPT_COMMAND, context?: Parameters<CommandRunner>[3]): Promise<PreflightResult> {
     const tokens = command.length === 0 ? DEFAULT_CHATGPT_COMMAND : command;
-    const key = JSON.stringify(tokens);
+    const key = JSON.stringify([tokens, context]);
     const cached = this.#results.get(key);
     if (cached !== undefined) return cached;
-    const pending = this.#probe(tokens);
+    const pending = this.#probe(tokens, context);
     this.#results.set(key, pending);
     void pending.then((result) => { if (!result.ok) this.#results.delete(key); });
     return pending;
   }
 
-  public async require(command?: readonly string[]): Promise<Extract<PreflightResult, { readonly ok: true }>> {
-    const result = await this.verify(command);
+  public async require(command?: readonly string[], context?: Parameters<CommandRunner>[3]): Promise<Extract<PreflightResult, { readonly ok: true }>> {
+    const result = await this.verify(command, context);
     if (!result.ok) throw new ChatGptPreflightError(result.reason);
     return result;
   }
 
-  async #probe(tokens: readonly string[]): Promise<PreflightResult> {
+  async #probe(tokens: readonly string[], context?: Parameters<CommandRunner>[3]): Promise<PreflightResult> {
     const [program, ...fixed] = tokens;
     if (program === undefined) return { ok: false, reason: "the command is empty" };
     try {
-      const execution = await this.options.run(program, [...fixed, "--version"], this.options.timeoutMs ?? DEFAULT_PROBE_TIMEOUT_MS);
+      const execution = await this.options.run(program, [...fixed, "--version"], this.options.timeoutMs ?? DEFAULT_PROBE_TIMEOUT_MS, context);
       if (execution.code === 0) return { ok: true, version: execution.stdout.split(/\r?\n/, 1)[0]?.trim() ?? "" };
       const detail = [...execution.stderr.split(/\r?\n/), ...execution.stdout.split(/\r?\n/)].map((line) => line.trim()).find(Boolean) ?? "";
       return { ok: false, reason: `${program} exited with code ${execution.code ?? "unknown"}${detail === "" ? "" : ` (${detail})`}` };
