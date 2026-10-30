@@ -113,7 +113,7 @@ try {
     [17, ["demo", "125k/200k/256k"]],
     [14, ["demo", "125k/200k/256k"]],
     [12, ["demo"]],
-    [3, ["..."]],
+    [3, ["de…"]],
   ];
   for (const [width, expected] of layouts) {
     const lines = component.render(width);
@@ -126,6 +126,23 @@ try {
   assert.deepEqual(component.render(43).map(strip), [
     "demo (long-feature-branch)", "anthropic other-model off  125k/200k/256k",
   ]);
+  // A location wider than the terminal must not evict fitting second-row details.
+  branch = "proto/complete-analysis-with-a-very-long-branch-name";
+  for (const [width, details] of [
+    [45, "anthropic other-model off  125k/200k/256k"],
+    [41, "anthropic other-model off  125k/200k/256k"],
+    [40, "other-model off  125k/200k/256k"],
+    [31, "other-model off  125k/200k/256k"],
+    [30, "other-model  125k/200k/256k"],
+    [27, "other-model  125k/200k/256k"],
+    [26, "125k/200k/256k"],
+    [14, "125k/200k/256k"],
+  ]) {
+    const location = `demo (${branch})`;
+    assert.deepEqual(component.render(width).map(strip), [
+      strip(tui.truncateToWidth(location, width, "…")), details,
+    ], `long branch at width ${width}`);
+  }
   branch = null;
   for (const [value, expected] of [[0, "0"], [999, "999"], [1000, "1k"], [125499, "125k"], [125500, "126k"]]) {
     session.getContextUsage = () => ({ tokens: value, contextWindow: 256000, percent: null });
