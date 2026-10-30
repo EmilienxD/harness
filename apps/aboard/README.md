@@ -103,13 +103,15 @@ many agents are ready. Preset terminals open without waiting for earlier agents 
 The **Run Claude Code**, **Run Codex**, and **Run Pi** commands remain direct shortcuts through the same launcher.
 Each provider's command, model, and reasoning effort come from `.harness/config.json`. Aboard reads
 that file whenever a launch, resume, or reopen starts a new process, so existing processes keep their
-configuration while future sessions use your latest choices.
+configuration while future sessions use your latest choices. User-facing Reopen retains the provider's
+saved model and effort instead of applying the current launch profile's model and effort.
 
 The Fleet shows live sessions. Recent Activity keeps completed work available for inspection and supported reopen flows.
 
 Focusing a live interactive session reveals its existing terminal. Background sessions have no terminal.
 Reopening an ended session preserves its provider, working directory, and conversation, and opens an
-interactive terminal ready for you to type. If that conversation is
+interactive terminal ready for you to type. Paste a recorded session's full UUID into the existing
+Reopen picker to select it directly; UUIDs are not displayed in its rows. If that conversation is
 no longer available, its activity remains visible but cannot be reopened.
 
 Interactive sessions and manual subagents have separate launch profiles and inherit native model and

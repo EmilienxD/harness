@@ -98,6 +98,7 @@ export interface AutomatedLaunchOutcome {
 }
 
 export interface ReopenTarget {
+  readonly preserveSessionModel?: boolean;
   readonly title?: string;
   readonly harnessPython?: string;
   readonly editorPane?: object;
@@ -323,6 +324,7 @@ export class DelegationCoordinator {
       ...(target.autoRunRestricted === true ? { autoRunRestricted: true as const } : {}),
       ...(isAutoRunWorkerType(target.type) && target.chromeEnabled === true ? { chrome: true } : {}),
       configuration: configured.settings,
+      ...(target.preserveSessionModel === true ? { preserveSessionModel: true } : {}),
       ...(target.effort === undefined ? {} : { effortOverride: target.effort }),
       ...(target.model === undefined ? {} : { modelOverride: target.model }),
       runtimeDirectory: this.options.runtimeDirectory ?? (this.options.wrapper === undefined ? undefined : dirname(dirname(this.options.wrapper.lockPathFor(target.agentId)))),

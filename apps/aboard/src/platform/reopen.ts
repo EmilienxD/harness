@@ -112,6 +112,7 @@ export class ReopenCoordinator {
     }
     if (!resumable) return { action: "unresumable", candidate, reason: "no-transcript" };
     const handles = await this.options.launcher.reopen({
+      preserveSessionModel: true,
       executionMode: "interactive",
       platform: candidate.platform,
       agentId: candidate.agentId,

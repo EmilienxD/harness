@@ -60,7 +60,7 @@ import { isInteractiveLaunch, shouldRecordEndedSession, type AgentOutcome } from
 import { completedCount } from "./domain/run-plan.js";
 import { isLiveSession } from "./vscode/fleet.js";
 import { ReopenCoordinator, describeReopenOutcome } from "./platform/reopen.js";
-import { registerReopenCommand } from "./vscode/reopen.js";
+import { registerReopenCommand, reopenItemsForQuery } from "./vscode/reopen.js";
 import { combineHandlers } from "./bridge/router.js";
 import { DelegationCoordinator, type DelegationConfigurationSource } from "./bridge/delegation.js";
 import { WorkerHookService, createWorkerHookRoutes } from "./bridge/worker-hooks.js";
@@ -1188,7 +1188,30 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
       }),
       // `matchOnDetail` so "ended", or an age, filters the list, which is how a
       // user with a long history finds the one they mean.
-      pick: async (items, placeHolder) => window.showQuickPick([...items], { placeHolder, matchOnDescription: true, matchOnDetail: true }),
+      pick: async (items, placeHolder) => {
+        const picker = window.createQuickPick<(typeof items)[number]>();
+        picker.placeholder = placeHolder;
+        picker.matchOnDescription = true;
+        picker.matchOnDetail = true;
+        picker.items = [...items];
+        return new Promise<(typeof items)[number] | undefined>((resolve) => {
+          const subscriptions = [
+            picker.onDidChangeValue((value) => {
+              picker.items = [...reopenItemsForQuery(items, value)];
+            }),
+            picker.onDidAccept(() => {
+              const chosen = picker.selectedItems[0] ?? picker.activeItems[0];
+              if (chosen !== undefined) { resolve(chosen); picker.hide(); }
+            }),
+            picker.onDidHide(() => {
+              resolve(undefined);
+              for (const subscription of subscriptions) subscription.dispose();
+              picker.dispose();
+            }),
+          ];
+          picker.show();
+        });
+      },
       info: (message) => { void window.showInformationMessage(message); },
       warning: (message) => { void window.showWarningMessage(message); },
       error: (message) => { void window.showErrorMessage(message); },

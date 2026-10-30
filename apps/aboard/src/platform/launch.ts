@@ -78,6 +78,8 @@ export interface SessionWrapperLayout {
 export interface PlatformLaunchRequest {
   readonly cwd?: string | undefined;
   readonly forkSessionId?: SessionId;
+  /** User-facing reopen lets the provider restore its saved model and effort. */
+  readonly preserveSessionModel?: boolean;
   readonly agentId: AgentId;
   readonly sessionId: SessionId;
   readonly agentType: AgentType;

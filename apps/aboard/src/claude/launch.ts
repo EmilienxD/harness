@@ -515,7 +515,9 @@ export function planSessionResume(request: SessionResumePlanRequest): LaunchPlan
   const { command, wrapper, runtimeDirectory, launchCode, threshold } = commonPreconditions(request, request.configuration);
   const { configuration } = request;
   assertLaunchShape(request.agentType, configuration);
-  const policy = launchPolicy(configuration.shape === "default" && request.executionMode !== "loop" ? {} : configuration, request);
+  const policy = request.preserveSessionModel === true
+    ? launchPolicy({}, {})
+    : launchPolicy(configuration.shape === "default" && request.executionMode !== "loop" ? {} : configuration, request);
 
   const launchRuntimeDirectory = agentRuntimeDirectory(runtimeDirectory, request.agentId);
   // Claude Code restores a builtin's `--agent` selection with the conversation.

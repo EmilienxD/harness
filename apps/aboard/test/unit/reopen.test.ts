@@ -106,6 +106,7 @@ test("reopening workers and delegated sessions waits for user input in an intera
     assert.equal(outcome.action, "reopened");
     const target = targets.at(-1)!;
     assert.equal(target.executionMode, "interactive");
+    assert.equal(target.preserveSessionModel, true);
     assert.equal(target.prompt, undefined);
     assert.equal(target.sessionId, sessionId);
     assert.equal(target.type, session.type);

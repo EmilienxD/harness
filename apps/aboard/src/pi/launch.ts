@@ -31,9 +31,10 @@ export function planPiSession(request: PlatformLaunchRequest, kind: "start" | "r
   const restricted = explore || worker || request.autoRunRestricted === true || request.restrictions?.denySubagents === true || request.restrictions?.denyWeb === true || (request.restrictions?.deniedCommands?.length ?? 0) > 0;
   const tools = explore ? ["read", "grep", "find", "ls"] : ["read", "grep", "find", "ls", "bash", ...(process.platform === "win32" ? ["powershell"] : []), "edit", "write"];
   const guard: RuntimeFile | undefined = restricted ? { agentId: request.agentId, relativePath: join(runtimeDirectory, "guard.json"), contents: JSON.stringify({ denySubagents: true, denyCommands: request.restrictions?.deniedCommands ?? [], allowedTools: tools, readOnly: explore }) } : undefined;
-  const model = request.modelOverride ?? config.declaredModel ?? request.model;
+  const preserveModel = kind === "resume" && request.preserveSessionModel === true;
+  const model = preserveModel ? undefined : request.modelOverride ?? config.declaredModel ?? request.model;
   if (model !== undefined && (!model.trim() || model.startsWith("-") || /[\r\n\0]/u.test(model))) throw new LaunchPlanError("invalid-model", "Invalid Pi model");
-  const rawEffort = request.effortOverride ?? config.declaredEffort ?? request.effort;
+  const rawEffort = preserveModel ? undefined : request.effortOverride ?? config.declaredEffort ?? request.effort;
   const effort = rawEffort === "none" ? "off" : rawEffort === "ultra" ? "max" : rawEffort;
   if (effort !== undefined && !PI_EFFORTS.includes(effort as never)) throw new LaunchPlanError("invalid-effort", "Invalid Pi thinking level");
   const assignSession = kind === "start" && request.forkSessionId === undefined;
