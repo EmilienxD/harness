@@ -74,7 +74,7 @@ Every visual explains the decision rather than decorating it:
 
 - **Static diagrams** use inline SVG (`viewBox`, `width="100%"`, `<title>`) for illustrations that need explicit visual composition, with page variables, short labels, and prose outside. SVGs loaded through `<img>` cannot read page variables, so give them literal fallbacks such as `var(--surface, #fbfaf6)`.
 
-- **Dynamic & editable diagrams** use the Mermaid figure:
+- **Dynamic & editable diagrams** use the Mermaid figure; give meaningful node groups explicit Mermaid `style` or `classDef` fill, stroke, and text colors using literal hex values, since Mermaid theme colors do not reliably survive Excalidraw conversion:
 
 ```html
 <figure data-grill-diagram="publication-flow">

@@ -6,6 +6,7 @@ const figure = (id: string, source: string) =>
 test("conversion failure retries locally while other diagrams and authored controls remain usable", async ({
   page,
 }) => {
+  const savedColors: { backgroundColor: string; strokeColor: string }[] = [];
   const session = {
     id: "failure-session",
     provider: "chatgpt",
@@ -39,7 +40,10 @@ test("conversion failure retries locally while other diagrams and authored contr
           explanation_html:
             '<button class="independent">Independent content</button>' +
             figure("retry", "flowchart LR\n A[Recover] --> B[Ready]") +
-            figure("valid", "flowchart LR\n A[Valid] --> B[Usable]") +
+            figure(
+              "valid",
+              "flowchart LR\n A[Valid] --> B[Usable]\n style A fill:#dcfce7,stroke:#16a34a,color:#052e16",
+            ) +
             figure("invalid", "this is not valid Mermaid"),
           init_js:
             'root.querySelector(".independent").onclick = (event) => { event.target.textContent = "Content still works"; };',
@@ -56,8 +60,11 @@ test("conversion failure retries locally while other diagrams and authored contr
       });
     if (path === "/api/v1/rounds/failure-round") return route.fulfill({ json: { round } });
     if (path === "/api/v1/rounds/failure-round/scenes") return route.fulfill({ json: { scenes: [] } });
-    if (path.includes("/scenes/") && route.request().method() === "PUT")
-      return route.fulfill({ json: { revision: "a".repeat(64), baseline: route.request().postDataJSON().baseline } });
+    if (path.includes("/scenes/") && route.request().method() === "PUT") {
+      const body = route.request().postDataJSON();
+      savedColors.push(...body.scene.elements);
+      return route.fulfill({ json: { revision: "a".repeat(64), baseline: body.baseline } });
+    }
     throw new Error(`Unexpected API request ${path}`);
   });
   // A transient font-loading failure exercises the actual conversion error path without replacing the converter.
@@ -86,6 +93,10 @@ test("conversion failure retries locally while other diagrams and authored contr
   if (await valid.getByRole("button", { name: "Retry diagram", exact: true }).isVisible())
     await valid.getByRole("button", { name: "Retry diagram", exact: true }).click();
   await expect(valid.locator("canvas").first()).toBeVisible();
+  await expect.poll(() => savedColors.some((element) => element.backgroundColor === "#e7f0ff")).toBe(true);
+  expect(
+    savedColors.some((element) => element.backgroundColor === "#dcfce7" && element.strokeColor === "#16a34a"),
+  ).toBe(true);
   // Viewing must retain native navigation, both inline and in the fullscreen dialog.
   for (const fullscreen of [false, true]) {
     if (fullscreen) await valid.getByRole("button", { name: "Fullscreen", exact: true }).click();
