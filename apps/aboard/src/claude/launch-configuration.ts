@@ -11,9 +11,8 @@ const MODELS = ["haiku", "sonnet", "opus"] as const;
 const PATH = "config.json providers.claude";
 
 type AutoRunTask = (typeof AUTO_RUN_TASKS)[number];
-type Model = (typeof MODELS)[number] | "inherit" | typeof BY_DIFFICULTY;
 type Effort = EffortLevel | "inherit" | typeof BY_DIFFICULTY;
-interface Profile { readonly command?: readonly string[]; readonly model: Model; readonly effort: Effort; readonly deniedTools: readonly string[]; }
+interface Profile { readonly command?: readonly string[]; readonly model: string; readonly effort: Effort; readonly deniedTools: readonly string[]; }
 
 const INHERIT: Profile = { model: "inherit", effort: "inherit", deniedTools: [] };
 const EXPLORE: Profile = { model: "haiku", effort: "low", deniedTools: [] };
@@ -42,7 +41,7 @@ function profile(value: unknown, fallback: Profile, path: string, options: { rea
   const effortAllowed = options.byDifficulty === true ? [BY_DIFFICULTY, ...EFFORT_LEVELS] : ["inherit", ...EFFORT_LEVELS];
   const selectedModel = input.model ?? fallback.model;
   const selectedEffort = input.effort ?? (options.delegation && selectedModel === BY_DIFFICULTY ? BY_DIFFICULTY : fallback.effort);
-  if (typeof selectedModel !== "string" || !modelAllowed.includes(selectedModel as never)) throw new LaunchFileError(`${path}.model is not valid for platform claude; expected one of ${modelAllowed.join(", ")}`);
+  if (typeof selectedModel !== "string" || (!modelAllowed.includes(selectedModel as never) && !/^claude-\S+$/u.test(selectedModel))) throw new LaunchFileError(`${path}.model is not valid for platform claude; expected a full Claude model ID (claude-...) or one of ${modelAllowed.join(", ")}`);
   if (typeof selectedEffort !== "string" || (!effortAllowed.includes(selectedEffort as never) && !(options.delegation && input.effort === undefined && selectedEffort === BY_DIFFICULTY))) throw new LaunchFileError(`${path}.effort is not valid for platform claude; expected one of ${effortAllowed.join(", ")}`);
   if (options.deniedTools === false && input.deniedTools !== undefined) throw new LaunchFileError(`${path}.deniedTools is not supported for platform claude`);
   const deniedTools = input.deniedTools ?? fallback.deniedTools;
@@ -50,7 +49,7 @@ function profile(value: unknown, fallback: Profile, path: string, options: { rea
   return {
     value: {
       ...(selectedCommand === undefined ? {} : { command: selectedCommand }),
-      model: selectedModel as Model,
+      model: selectedModel,
       effort: selectedEffort as Effort,
       deniedTools: [...new Set(deniedTools)],
     },

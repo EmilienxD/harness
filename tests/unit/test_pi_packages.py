@@ -8,7 +8,7 @@ import pytest
 
 from harness_cli.installer import CatalogueInstaller, InstallError, Target
 from harness_cli import pi_packages
-from harness_cli.manifest import FileSpec, PackageDependency, PlatformSupport, SupportStatus, Tool
+from harness_cli.manifest import FileSpec, PackageDependency, PlatformSupport, SupportStatus, Tool, discover
 from harness_cli.platforms import Platform
 from harness_cli.receipts import ReceiptStore
 
@@ -59,6 +59,58 @@ def test_pi_extension_uses_native_package_identity_and_preserves_personal_settin
     assert not manifest.exists()
     assert [call[0] for call in fake_pi_packages] == ["install", "remove"]
     assert archive.is_file(), "Copied worktrees can still reference this immutable archive"
+
+
+@pytest.mark.parametrize("scope", ["project", "user"])
+def test_native_package_starter_skills_have_one_installed_copy(tmp_path, monkeypatch, scope):
+    available = {name: replace(tool, requires=()) for name, tool in discover().items()}
+    monkeypatch.setenv("PI_CODING_AGENT_DIR", str(tmp_path / "agent"))
+    target = (
+        Target.for_user(Platform.PI)
+        if scope == "user"
+        else Target.for_project(tmp_path / "project", Platform.PI)
+    )
+    store = ReceiptStore.load(tmp_path / "receipts.json")
+    installer = CatalogueInstaller(available, target, store)
+
+    installer.reconcile({"issue-readers"})
+
+    package = pi_packages.package_root(target.install_root, "issue-readers")
+    manifest = json.loads((package / "package.json").read_text())
+    assert manifest["pi"]["skills"] == ["skills/address-this", "skills/review-this"]
+    for name in ("address-this", "review-this"):
+        packaged = package / "skills" / name / "SKILL.md"
+        assert packaged.read_bytes() == (available["issue-readers"].root / name / "SKILL.md").read_bytes()
+        assert not (target.install_root / "skills" / name).exists()
+    records = installer.installation["packages"]["issue-readers"]["files"]
+    assert all(Path(record["path"]).is_relative_to(package) for record in records)
+    assert installer.reconcile({"issue-readers"}) == []
+
+
+@pytest.mark.parametrize("name", [
+    "command-guard", "no-new-documents", "on-edit-block", "on-edit-reminder",
+    "on-read-reminder", "prefer-fewer-comments",
+])
+def test_native_user_guard_policy_stays_editable_outside_the_package(tmp_path, monkeypatch, name, fake_pi_packages):
+    available = discover()
+    monkeypatch.setenv("PI_CODING_AGENT_DIR", str(tmp_path / "agent"))
+    target = Target.for_user(Platform.PI)
+    installer = CatalogueInstaller(available, target, ReceiptStore.load(tmp_path / "receipts.json"))
+
+    installer.reconcile({name})
+
+    policy = target.install_root / "harness" / f"{name}.toml"
+    assert policy.read_bytes() == (available[name].root / f"{name}.toml").read_bytes()
+    records = installer.installation["packages"][name]["files"]
+    record = next(record for record in records if Path(record["path"]) == policy)
+    assert record["starter"] is True
+    edited = policy.read_text(encoding="utf-8") + "\n# Personal policy\n"
+    policy.write_text(edited, encoding="utf-8")
+    installer.reconcile({name})
+    assert policy.read_text(encoding="utf-8") == edited
+    installer.reconcile(set())
+    assert policy.read_text(encoding="utf-8") == edited
+    assert not pi_packages.package_root(target.install_root, name).exists()
 
 
 @pytest.mark.parametrize("newline", ["\n", "\r\n"])

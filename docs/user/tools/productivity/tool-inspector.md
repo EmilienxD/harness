@@ -27,3 +27,5 @@ Pi persists them once the session contains a conversation.
 The exact startup placement uses Pi 1.2.0's internal resource-list layout and may need
 an update after a Pi upgrade. Quiet startup settings remain respected. The extension
 works independently of Calm and does not change tool execution or active-tool settings.
+Pi 1.4.0 also passes the real loader, registry and startup component checks; see the
+[upgrade checks](https://github.com/EmilienxD/harness/blob/main/tests/e2e/README.md#pi-140-upgrade-checks).

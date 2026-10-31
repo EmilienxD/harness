@@ -235,10 +235,10 @@ def _startup_failure(execution_id: str, root: Path, name: str) -> str:
 def _unverified_startup(root: Path, name: str, cwd: Path, visible: bool) -> str:
     if visible:
         return (
-            f"{name} startup could not be verified: its session did not report within {STARTUP_SECONDS} seconds. "
+            f"{name} startup confirmation is pending after {STARTUP_SECONDS} seconds; the existing launch remains active. "
             f"Check that subagents is installed for {name} in {cwd}, and accept any trust prompt in the new terminal"
         )
-    return with_detail(f"{name} startup could not be verified within {STARTUP_SECONDS} seconds", stderr_detail(root))
+    return f"{name} startup confirmation is pending after {STARTUP_SECONDS} seconds; the existing launch remains active"
 
 
 def start(
@@ -331,6 +331,8 @@ def start(
         if state == "failed":
             raise sessions.SessionError(_startup_failure(execution_id, root, name))
         time.sleep(0.05)
+    # This bounds the caller's wait, not the provider's initialization. Silence
+    # (including compaction) must retain an uncertain execution, never cancel it.
     raise sessions.SessionError(_unverified_startup(root, name, cwd, visible))
 
 

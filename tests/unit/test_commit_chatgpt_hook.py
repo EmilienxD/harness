@@ -24,9 +24,10 @@ core = adapter
 
 
 @pytest.fixture(autouse=True)
-def chatgpt_provider():
+def chatgpt_provider(tmp_path, monkeypatch):
     """Every test here runs the hook as the ChatGPT fragment invokes it."""
     adapter.set_provider("chatgpt")
+    monkeypatch.setenv("HARNESS_STATE_DIR", str(tmp_path / "state"))
     yield
     adapter.set_provider("claude")
 

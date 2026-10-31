@@ -1,5 +1,8 @@
 version = 1
 
 # Gitignore-style patterns where existing files may be edited but new files
-# may not be created. This matches a docs directory at any depth.
-protected = ["**/docs/**"]
+# may not be created. This matches only the project's root docs directory.
+protected = ["docs/**"]
+
+# Exclusions override protected paths from every scope.
+unprotected = []

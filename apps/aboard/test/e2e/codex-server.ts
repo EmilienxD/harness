@@ -363,22 +363,44 @@ function commandSequence(body: ResponsesRequest, steps: readonly { readonly chec
   const calls = toolCalls(body);
   const outputs = toolOutputs(body);
   if (calls.length !== outputs.length) throw new ProtocolMismatch("$.input", "contains a shell call without its output");
+  let completed = 0;
+  let pendingCell: string | undefined;
+  let waits = 0;
   calls.forEach((call, index) => {
     if (!matchingToolPair(call, outputs[index])) throw new ProtocolMismatch("$.input", "contains an unknown shell call output");
+    if (call.name === "wait") {
+      const args = JSON.parse(String(call.arguments)) as { cell_id?: string };
+      if (pendingCell === undefined || args.cell_id !== pendingCell || ++waits > 8) throw new ProtocolMismatch("$.input", "contains an unknown or excessive code-mode wait");
+    } else if (pendingCell !== undefined) {
+      throw new ProtocolMismatch("$.input", "started another command before the running cell completed");
+    }
     const output = toolOutputText(outputs[index]);
+    const running = /Script running with cell ID:?\s+([\w-]+)/iu.exec(output);
+    if (running) {
+      pendingCell = running[1];
+      return;
+    }
+    pendingCell = undefined;
     if (toolCallFailed(output)) throw new ProtocolMismatch("$.input", "auto-run tool call failed");
-    if (steps[index]?.requireOutput !== undefined && !output.includes(steps[index].requireOutput)) {
+    const required = steps[completed]?.requireOutput;
+    if (required !== undefined && !output.includes(required)) {
       throw new ProtocolMismatch("$.input", `read result omitted the expected fixture marker (${toolOutputShape(output)})`);
     }
+    completed += 1;
   });
-  const next = steps[outputs.length];
+  if (pendingCell !== undefined) return { checkpoint: "auto-tool-wait", output: {
+    type: "function_call", id: stableId("fc", body, scenario, idScope), call_id: stableId("call", body, scenario, idScope),
+    name: "wait", arguments: JSON.stringify({ cell_id: pendingCell, yield_time_ms: 120000, max_output_tokens: 1000 }), status: "completed",
+  } };
+  const next = steps[completed];
   return next === undefined ? { checkpoint: finalCheckpoint, output: finalOutput(message) } : { checkpoint: next.checkpoint, output: functionOutput(next.command, body, scenario, idScope) };
 }
 
 function toolOutputShape(output: string): string {
   const exitCode = /exit_code["']?\s*[:=]\s*(-?\d+)/iu.exec(output)?.[1];
   const completion = /script completed/iu.test(output) ? "completed" : /script failed/iu.test(output) ? "failed" : "unclassified";
-  return `${completion}, exit ${exitCode ?? "unreported"}, ${output.length} characters`;
+  const categories = ["TypeError", "ReferenceError", "SyntaxError", "not a function", "not defined", "Unknown tool", "running", "in progress", "not allowed", "sandbox", "Session ID", "cell_id"].filter((category) => output.toLowerCase().includes(category.toLowerCase()));
+  return `${completion}, exit ${exitCode ?? "unreported"}, ${output.length} characters, categories=${categories.join("/") || "none"}`;
 }
 
 function toolCallFailed(output: string): boolean {
@@ -398,7 +420,7 @@ function toolOutputs(body: ResponsesRequest): readonly Record<string, unknown>[]
 
 function matchingToolPair(call: Record<string, unknown>, output: Record<string, unknown> | undefined): boolean {
   if (output === undefined || typeof call.call_id !== "string") return false;
-  if (call.type === "function_call") return call.name === "exec_command" && output.type === "function_call_output" && output.call_id === call.call_id;
+  if (call.type === "function_call") return (call.name === "exec_command" || call.name === "wait") && output.type === "function_call_output" && output.call_id === call.call_id;
   return call.type === "custom_tool_call" && call.name === "exec" && output.type === "custom_tool_call_output" && output.call_id === call.call_id;
 }
 
@@ -426,7 +448,7 @@ function writeCommand(repoRoot: string, content: string): string {
 }
 
 type ResponseOutput =
-  | { readonly type: "function_call"; readonly id: string; readonly call_id: string; readonly name: "exec_command"; readonly arguments: string; readonly status: "completed" }
+  | { readonly type: "function_call"; readonly id: string; readonly call_id: string; readonly name: "exec_command" | "wait"; readonly arguments: string; readonly status: "completed" }
   | { readonly type: "custom_tool_call"; readonly id: string; readonly call_id: string; readonly name: "exec"; readonly input: string; readonly status: "completed" }
   | { readonly type: "message"; readonly id: string; readonly role: "assistant"; readonly status: "completed"; readonly content: readonly [{ readonly type: "output_text"; readonly text: string; readonly annotations: readonly [] }] };
 

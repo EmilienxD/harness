@@ -86,6 +86,27 @@ test("conversion failure retries locally while other diagrams and authored contr
   if (await valid.getByRole("button", { name: "Retry diagram", exact: true }).isVisible())
     await valid.getByRole("button", { name: "Retry diagram", exact: true }).click();
   await expect(valid.locator("canvas").first()).toBeVisible();
+  // Viewing must retain native navigation, both inline and in the fullscreen dialog.
+  for (const fullscreen of [false, true]) {
+    if (fullscreen) await valid.getByRole("button", { name: "Fullscreen", exact: true }).click();
+    const editor = page.locator('[data-diagram-editor="valid"]');
+    const canvas = editor.locator("canvas.excalidraw__canvas.interactive");
+    await expect(canvas).toBeVisible();
+    const beforeZoom = await canvas.screenshot();
+    const box = (await canvas.boundingBox())!;
+    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+    await page.keyboard.down("Control");
+    await page.mouse.wheel(0, -100);
+    await page.keyboard.up("Control");
+    await expect.poll(async () => (await canvas.screenshot()).equals(beforeZoom)).toBe(false);
+    const beforePan = await canvas.screenshot();
+    await page.mouse.down();
+    await page.mouse.move(box.x + box.width / 2 + 80, box.y + box.height / 2 + 60, { steps: 10 });
+    await page.mouse.up();
+    await expect.poll(async () => (await canvas.screenshot()).equals(beforePan)).toBe(false);
+    await expect(editor.getByRole("button", { name: "Edit diagram", exact: true })).toBeVisible();
+    if (fullscreen) await editor.getByRole("button", { name: "Close fullscreen", exact: true }).click();
+  }
   await valid.getByRole("button", { name: "Edit diagram", exact: true }).click();
   await expect(valid.getByRole("button", { name: "Done editing", exact: true })).toBeVisible();
   await page.getByRole("button", { name: "Independent content", exact: true }).click();

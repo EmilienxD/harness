@@ -40,19 +40,24 @@ async function fixture(t: TestContext) {
   return { directory, root, git, create, calls, reserve: (path: string) => { reserved = path; } };
 }
 
-test("manual checkout creation uses numbered siblings, exact local HEAD, and shared project configuration", async (t) => {
+test("manual checkout creation uses numbered siblings and exact local HEAD without copying local configuration", async (t) => {
   const f = await fixture(t);
   await writeFile(join(f.root, "tracked.txt"), "local committed change\n");
+  await writeFile(join(f.root, ".gitignore"), ".abd/\n.harness/*\n!.harness/doc-drafts/\n");
   await f.git("commit", "-am", "local only");
   const sha = await new ProcessGitClient(f.root).headSha();
   await writeFile(join(f.root, "tracked.txt"), "uncommitted\n");
+  await mkdir(join(f.root, ".harness", "doc-drafts"));
+  await writeFile(join(f.root, ".harness", "doc-drafts", ".gitignore"), "*\n!.gitignore\n");
   const service = f.create();
   const target = await service.prepare({ kind: "new", branch: "feature/test" });
   assert.equal(target, join(f.directory, "project-1"));
   assert.equal(await new ProcessGitClient(target).headSha(), sha);
   assert.equal(await readFile(join(target, "tracked.txt"), "utf8"), "local committed change\n");
   assert.equal(await readFile(join(f.root, "tracked.txt"), "utf8"), "uncommitted\n");
-  assert.equal(await readFile(join(target, ".harness", "config.json"), "utf8"), '{"version":1}\n');
+  await assert.rejects(stat(join(target, ".harness")), { code: "ENOENT" });
+  await assert.rejects(stat(join(target, ".abd")), { code: "ENOENT" });
+  assert.deepEqual((await new ProcessGitClient(target).status()).entries, []);
   assert.equal(await service.prepare({ kind: "existing", path: target }), target);
   assert.equal(await new ProcessGitClient(f.root).currentBranch(), "main");
 });
@@ -103,21 +108,32 @@ test("setup runs once per new checkout and never for existing or dirty checkouts
   assert.equal(await readFile(join(path, "tracked.txt"), "utf8"), "work in progress\n");
 });
 
-test("failed setup retains the checkout across service restarts and requires an explicit retry", async (t) => {
+test("real setup script owns preparation without Aboard copying configuration", async (t) => {
+  const f = await fixture(t);
+  await writeFile(join(f.root, ".abd", "session-setup.ps1"), "Set-Content -Path setup-result.txt -Value $env:ABOARD_SESSION_BRANCH\n");
+  await writeFile(join(f.root, ".abd", "session-setup.sh"), 'printf "%s\\n" "$ABOARD_SESSION_BRANCH" > setup-result.txt\n');
+  const service = new ManualCheckouts({
+    workspaceRoot: f.root, storageRoot: join(f.directory, "storage"),
+    settings: () => ({ root: "", setupTimeoutSeconds: 12 }), reserved: () => false, log: () => {},
+  });
+  const target = await service.prepare({ kind: "new", branch: "real-setup" });
+  assert.equal((await readFile(join(target, "setup-result.txt"), "utf8")).trim(), "real-setup");
+  await assert.rejects(stat(join(target, ".harness")), { code: "ENOENT" });
+  await assert.rejects(stat(join(target, ".abd")), { code: "ENOENT" });
+  assert.equal(await service.prepare({ kind: "existing", path: target }), target);
+});
+
+test("failed setup retains the checkout and never blocks later manual launches", async (t) => {
   const f = await fixture(t);
   for (const suffix of ["sh", "ps1"]) await writeFile(join(f.root, ".abd", `session-setup.${suffix}`), "echo setup\n");
-  let preparationId: string | undefined;
-  const broken = f.create(f.root, async (request) => { preparationId = request.env.ABOARD_RUN_ID; throw new Error("installation failed"); });
+  const broken = f.create(f.root, async () => { throw new Error("installation failed"); });
   await assert.rejects(broken.prepare({ kind: "new", branch: "retry" }), CheckoutSetupError);
   const target = join(f.directory, "project-1");
   assert.equal((await stat(target)).isDirectory(), true);
   const recovered = f.create();
-  assert.equal((await recovered.choices()).entries.find((entry) => entry.path.replaceAll("\\", "/") === target.replaceAll("\\", "/"))?.preparation, "failed");
-  await assert.rejects(recovered.prepare({ kind: "existing", path: target }), CheckoutSetupError);
-  assert.equal(await recovered.retrySetup(target), target);
   assert.equal(await recovered.prepare({ kind: "existing", path: target }), target);
-  assert.equal(f.calls.length, 1);
-  assert.equal(f.calls[0]?.env.ABOARD_RUN_ID, preparationId);
+  assert.equal(await f.create(target).prepare({ kind: "current" }), target);
+  assert.equal(f.calls.length, 0);
   assert.equal((await new ProcessGitClient(f.root).worktrees()).length, 2);
 });
 
@@ -161,22 +177,20 @@ test("non-Git folders retain current-folder launch and explain unavailable creat
   assert.match((await service.choices()).error!, /Git repository/);
 });
 
-test("setup retries across windows cannot execute the same preparation concurrently", async (t) => {
+test("legacy failed or interrupted setup records do not affect checkout selection", async (t) => {
   const f = await fixture(t);
-  for (const suffix of ["sh", "ps1"]) await writeFile(join(f.root, ".abd", `session-setup.${suffix}`), "echo setup\n");
-  await assert.rejects(f.create(f.root, async () => { throw new Error("fail"); }).prepare({ kind: "new", branch: "retry-lock" }), CheckoutSetupError);
-  const path = join(f.directory, "project-1");
-  let entered!: () => void;
-  let finish!: () => void;
-  const started = new Promise<void>((resolve) => { entered = resolve; });
-  const paused = new Promise<void>((resolve) => { finish = resolve; });
-  const first = f.create(f.root, async () => { entered(); await paused; });
-  const running = first.retrySetup(path);
-  try {
-    await started;
-    await assert.rejects(f.create().retrySetup(path), /already in progress/);
-  } finally { finish(); }
-  assert.equal(await running, path);
+  const path = await f.create().prepare({ kind: "new", branch: "legacy" });
+  const { createHash } = await import("node:crypto");
+  const { normalizeProjectPath } = await import("../../src/runtime/agent-workspace-owner.js");
+  const records = join(f.directory, "storage", "manual-checkouts");
+  await mkdir(records, { recursive: true });
+  const record = join(records, `${createHash("sha256").update(normalizeProjectPath(path)).digest("hex")}.json`);
+  for (const state of ["failed", "preparing"]) {
+    await writeFile(record, JSON.stringify({ id: "old", source: f.root, branch: "legacy", state }));
+    assert.equal(await f.create().prepare({ kind: "existing", path }), path);
+    assert.equal(await f.create(path).prepare({ kind: "current" }), path);
+    assert.equal((await f.create().choices()).entries.find((entry) => entry.branch === "legacy")?.available, true);
+  }
   assert.equal(f.calls.length, 0);
 });
 
@@ -219,7 +233,6 @@ test("losing Git's checkout race does not leave retryable setup on the external 
   });
   await assert.rejects(service.prepare({ kind: "new", branch: "loser" }));
   assert.equal(await service.prepare({ kind: "existing", path: target }), target);
-  await assert.rejects(service.retrySetup(target), /no failed setup/);
   assert.equal(f.calls.length, 0);
 });
 
@@ -229,6 +242,7 @@ test("delegations and reopen from checkout subdirectories use the checkout launc
   const target = await f.create().prepare({ kind: "new", branch: "nested-config" });
   const nested = join(target, "src", "nested");
   await mkdir(nested, { recursive: true });
+  await mkdir(join(target, ".harness"));
   const providers = ["claude", "chatgpt", "pi"] as const;
   await writeFile(join(target, ".harness", "config.json"), JSON.stringify({ version: 1, providers: Object.fromEntries(providers.map((provider) => [provider, { command: [`target-${provider}`] }])) }));
   const source = new FileLaunchConfigurationSource(join(f.root, ".harness", "config.json"));

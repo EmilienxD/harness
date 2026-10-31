@@ -12,6 +12,7 @@ Any other prompt is let through untouched.
 """
 from __future__ import annotations
 
+import errno
 import hashlib
 import json
 import os
@@ -1906,13 +1907,9 @@ def _token(value: str) -> str:
 
 
 def _session_dir(repo_root: str, session_id: str) -> Path:
-    relative = f"harness/commit/v2/{PROVIDER}/{_token(session_id)}"
-    result = run(["git", "rev-parse", "--git-path", relative], repo_root)
-    raw = result.stdout.strip() if result.returncode == 0 else os.path.join(".git", relative)
-    path = Path(raw)
-    if not path.is_absolute():
-        path = Path(repo_root) / path
-    return path.resolve()
+    state = Path(os.environ.get("HARNESS_STATE_DIR") or Path.home() / ".harness").expanduser()
+    checkout = os.path.normcase(str(Path(repo_root).resolve()))
+    return state.resolve() / "runtime" / "commit" / "v2" / _token(checkout) / PROVIDER / _token(session_id)
 
 
 def _atomic_json(path: Path, data: dict[str, Any]) -> None:
@@ -1972,16 +1969,46 @@ def _ownership_records(root: Path) -> list[dict[str, Any]]:
 
 
 @contextmanager
-def _session_lock(root: Path):
+def _session_lock(root: Path, *, timeout: float = 10.0):
     root.mkdir(parents=True, exist_ok=True)
-    lock = root / "ownership.lock"
-    # Never guess whether a missing completion or stale lock is harmless.
-    descriptor = os.open(lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
-    try:
-        yield
-    finally:
-        os.close(descriptor)
-        lock.unlink()
+    descriptor = os.open(root / "ownership.lock", os.O_CREAT | os.O_RDWR, 0o600)
+    # Keep a stable file: unlinking lets waiters lock different file identities.
+    # The OS releases the lock on close, including after abrupt process exit.
+    with os.fdopen(descriptor, "r+b") as handle:
+        if os.name == "nt":
+            import msvcrt
+
+            def acquire():
+                handle.seek(0)
+                msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
+
+            def release():
+                handle.seek(0)
+                msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
+        else:
+            import fcntl
+
+            def acquire():
+                fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+
+            def release():
+                fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+
+        deadline = time.monotonic() + timeout
+        while True:
+            try:
+                acquire()
+                break
+            except OSError as exc:
+                if exc.errno not in {errno.EACCES, errno.EAGAIN, errno.EDEADLK}:
+                    raise
+                if time.monotonic() >= deadline:
+                    raise TimeoutError("Commit ownership is busy; retry after the active hook finishes") from exc
+                time.sleep(0.05)
+        try:
+            yield
+        finally:
+            release()
 
 
 def _record_pre(payload: dict[str, Any], repo_root: str, root: Path) -> None:

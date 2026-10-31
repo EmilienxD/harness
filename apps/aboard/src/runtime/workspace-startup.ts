@@ -1,4 +1,5 @@
-import { readFile, rename, rm, writeFile } from "node:fs/promises";
+import { readFile, rm, writeFile } from "node:fs/promises";
+import { atomicReplace } from "./atomic-replace.js";
 import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 import type { WorkspaceBatchResult, WorkspaceLaunchPlan } from "../platform/workspace-launcher.js";
@@ -39,7 +40,7 @@ export class WorkspaceStartup {
     const temporary = `${path}.${randomUUID()}.tmp`;
     try {
       await writeFile(temporary, JSON.stringify(owner), { flag: "wx", mode: 0o600 });
-      await rename(temporary, path);
+      await atomicReplace(temporary, path);
     } finally { await rm(temporary, { force: true }); }
   }
 

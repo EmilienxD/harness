@@ -97,7 +97,9 @@ function planChatGptSession(request: PlatformLaunchRequest | PlatformResumeReque
         contents: `${JSON.stringify({ denySubagents: subagentsDenied, denyCommands }, null, 2)}\n`,
       }
     : undefined;
-  const policy = launchPolicy(configuration, request.difficulty, request.modelOverride, request.effortOverride);
+  const policy = kind === "resume" && request.preserveSessionModel === true
+    ? { model: undefined, effort: undefined }
+    : launchPolicy(configuration, request.difficulty, request.modelOverride, request.effortOverride);
   const permissionProfile = readOnlyFiles.length === 0
     ? []
     : permissionProfileArguments(readOnlyFiles, explore, worker ? request.writableRoots ?? [] : []);

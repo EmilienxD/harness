@@ -8,14 +8,19 @@ Install with `harness install no-new-documents` and restart the provider. Set pr
 
 ```toml
 version = 1
-protected = ["**/docs/**", "project-notes/**"]
+protected = ["docs/**", "project-notes/**"]
+unprotected = ["docs/generated/**"]
 ```
 
-The starter protects `**/docs/**`. Patterns use gitignore-style `*`, `?`, and `**`. User and project protected paths both apply; Harness preserves the starter file after edits.
+The starter protects only the root `docs/**`, not source directories named `docs` deeper in the tree. Use `**/docs/**` explicitly to protect docs directories at every depth. Patterns use gitignore-style `*`, `?`, and `**`; exclusions use the same syntax, not `!` prefixes.
+
+Protected paths from all scopes combine. Optional `unprotected` paths also combine and override protection from **every scope**, so a project exclusion can narrow a user-level rule. For example, `protected = ["**/docs/**"]` with `unprotected = ["website/src/lib/docs/**"]` permits source files such as `catalog.test.ts` there. This only bypasses draft routing, not provider permissions. Existing customized starters are preserved on upgrade, including older recursive defaults.
+
+Invalid pattern entries are skipped individually; other valid entries still apply. Missing or incorrectly typed lists are ignored, and malformed/unreadable TOML or unsupported versions cause that policy source to be skipped. Valid policies from other scopes remain active. With no valid protection patterns, the guard permits creation. This is a configurable workflow guardrail, not a security boundary.
 
 For Pi, add `--platform pi`. Its user-scope starter lives at `<PI_CODING_AGENT_DIR>/harness/no-new-documents.toml`, defaulting to `~/.pi/agent/harness/no-new-documents.toml`. Home and project policies also apply. The extension guards native writes and recognized literal shell creations, including nested tool calls; arbitrary scripts and other extensions' direct filesystem access remain outside this guardrail.
 
-Native writes follow Pi's `@`, tilde, file URL, Unicode-space and Windows shell-path expansion. Logical and resolved paths both retain protection, and draft writes reject linked ancestors. Malformed policy or an unavailable Python helper blocks covered calls. Existing documents remain editable.
+Native writes follow Pi's `@`, tilde, file URL, Unicode-space and Windows shell-path expansion. Logical and resolved paths both retain protection, and draft writes reject linked ancestors. Invalid policy input is skipped; an unavailable Python helper still blocks covered calls. Existing documents remain editable.
 
 Review the draft, then run `/approve-doc-draft docs/arch/plan.md` or `/reject-doc-draft docs/arch/plan.md` in Claude Code or Pi; use `$approve-doc-draft` or `$reject-doc-draft` in ChatGPT. With no path, these commands list drafts; a directory handles its pending drafts together. Quote paths containing spaces. Approval never overwrites an existing target. To request changes, tell the agent what to revise in the draft.
 
@@ -29,9 +34,9 @@ For a new `docs/arch/plan.md`, inspect `.harness/doc-drafts/docs/arch/plan.md` a
 
 ## Implementation and verification
 
-`no-new-documents` 3.2.1 uses the same bridge with package-local native tool and command translation.
+`no-new-documents` 3.3.0 uses the same bridge with package-local native tool and command translation.
 It denies native writes and recognized literal shell creations in protected paths, including nested
-calls, while allowing draft mirrors and existing-document edits. Malformed policy or transport failure
+calls, while allowing draft mirrors and existing-document edits. Invalid policy input is skipped; transport failure
 blocks covered calls. Native `/approve-doc-draft` and `/reject-doc-draft` commands make zero inference requests.
 Their skill shims are installed only for Claude Code and ChatGPT.
 Publication uses exclusive hard-link creation followed by draft removal, so an existing destination
@@ -64,7 +69,7 @@ when widening the tested Pi version range.
 
 The shared Python core accepts parsed policy and returns creation targets and draft guidance
 directly; Pi does not fabricate a Claude hook event or decode hook stdout. One policy snapshot
-serves the entire decision, so a second read cannot silently turn a broken policy into an allow.
+serves the entire decision, so matching and exclusions use a consistent view of all valid entries.
 Pi matches both logical and resolved paths, with case-insensitive patterns on Windows. A link
 into protected docs and a protected docs directory linked outside the project both retain
 protection. Linked draft ancestors are denied. Existing documents remain editable; concurrent
@@ -72,10 +77,10 @@ external deletion or replacement between a check and tool execution is outside t
 Approval still checks source/destination containment and uses exclusive publication.
 
 The headless acceptance gate runs actual catalogue project/user installations through Pi 1.2.0
-JSON/RPC and the fake Codex Responses API. Seven journeys cover native path aliases (twelve
+JSON/RPC and the fake Codex Responses API. Eight journeys cover native path aliases (twelve
 denials per scope on Windows), nested aliased writes, existing native write/edit, ordinary files,
-safe drafts, linked draft paths, deterministic commands, collision/racing publication, malformed
-policy, missing helper, reload/resume/tree ancestry, starter preservation and coupled removal.
+safe drafts, linked draft paths, deterministic commands, collision/racing publication, skipped malformed
+policy, cross-scope exclusions, invalid pattern entries, missing helper, reload/resume/tree ancestry, starter preservation and coupled removal.
 They assert denied filesystem effects and exact inference counts; command execution adds zero
 requests. POSIX branches are present but this acceptance run was on Windows.
 
@@ -84,3 +89,8 @@ install real catalogue payloads at project/user scope and exercise Pi 1.2.0 JSON
 the authenticated fake Responses endpoint. They verify filesystem/Git/manifest effects, request counts,
 command failures, lifecycle behavior and receipt-driven removal. They certify native integration with
 scripted inference; they do not certify unscripted model judgments or POSIX/TUI runtime behavior.
+
+The 3.3.0 Windows headless regression also verifies the root-only starter, project exclusions
+overriding recursive user protection in both JSON and RPC, skipped invalid pattern entries,
+and malformed TOML leaving other valid policies active. Claude Code and Codex headless draft-denial
+journeys remain part of the regression checks.

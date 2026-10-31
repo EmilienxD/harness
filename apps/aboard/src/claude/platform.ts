@@ -64,7 +64,7 @@ export class ClaudeAgentPlatform implements AgentPlatform {
     return { ...planSessionResume({ ...request, configuration: request.configuration as SessionResumePlanRequest["configuration"] }), platform: this.id };
   }
 
-  public preflight(plan: PlatformLaunchPlan): Promise<void> { return this.#probe.require(plan.command); }
+  public preflight(plan: PlatformLaunchPlan, context?: Parameters<CommandRunner>[3]): Promise<void> { return this.#probe.require(plan.command, context); }
   public isResumable(sessionId: SessionId, cwd: string): Promise<boolean> {
     return (this.options.resumable ?? sessionIsResumable)(sessionId, cwd);
   }

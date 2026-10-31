@@ -20,7 +20,7 @@ Related references that GitHub reports as missing issues are skipped, and traver
 
 ## Files and prerequisites
 
-The package requires `git` and `gh`. Its two skill bodies are user-editable starter files. Claude Code, ChatGPT, and Pi are supported; callers such as Aboard can add a completion contract.
+The package requires `git` and `gh`. Its two skill bodies are user-editable starter files on Claude Code and ChatGPT. On Pi, they are managed resources installed only inside the native npm package. Claude Code, ChatGPT, and Pi are supported; callers such as Aboard can add a completion contract.
 
 ## Example
 
@@ -51,7 +51,7 @@ are deduplicated, and every included issue retains its full paginated context.
 Real JSON/RPC tools implement and review a fixture, stop dirty addressing before inference, write
 the supplied session draft path, and publish through a local fake GitHub CLI. Checks include dry-run,
 invalid options, reload, session isolation, native skill routes, removed writer aliases, response-only specs without draft setup, exact request counts,
-starter ownership and last-dependent bridge removal. This certifies native integration and shared
+packaged skill ownership and last-dependent bridge removal. This certifies native integration and shared
 core reuse, not unscripted model judgment.
 
 `npm run e2e:pi-issues:live` additionally verifies real `gh` against the private

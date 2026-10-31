@@ -8,11 +8,7 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 
-from subagents_runtime.storage import connect, state_dir
-
-
-def aboard_log_path(execution_id: str) -> Path:
-    return state_dir() / "runtime" / "watch" / execution_id / "stdout.jsonl"
+from subagents_runtime.storage import connect
 
 
 def _short(value: object, limit: int = 160) -> str:
@@ -130,7 +126,8 @@ def _selection(identifier: str):
         raise SessionError(f"session {identifier} has no execution to watch")
     if session[1] != "auto":
         raise SessionError(f"session {identifier} has a visible terminal; watch is for background sessions")
-    log = (aboard_log_path(execution[0]) if execution[1] == "aboard" else state_dir() / "runtime" / "sessions" / (session[2] or session_id) / "executions" / execution[0] / "stdout.jsonl")
+    from subagents_runtime.backends import get_backend
+    log = get_backend(execution[1]).progress_path(execution[0], session[2] or session_id)
     return session_id, session[0], execution[0], log, execution[3]
 
 

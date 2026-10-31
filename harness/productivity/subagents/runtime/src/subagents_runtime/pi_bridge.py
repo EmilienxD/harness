@@ -19,15 +19,11 @@ from subagents_runtime.delegation import (
     arm_reply,
     claim_parent_delivery,
     clear_reply_authorization,
-    delegation_instructions,
-    enable_delegation,
-    ensure_inbox,
     has_pending_children,
     scan_inbox,
     report_child_stop,
     results_marker,
     send_previous_reply,
-    session_start_instructions,
 )
 from subagents_runtime.hooks import (
     PREVIOUS_REPLY_SKILL,
@@ -39,7 +35,6 @@ from subagents_runtime.hooks import (
     _stop_wait_seconds,
 )
 from subagents_runtime.messages import runtime_message
-from subagents_runtime.roles import find_skill
 
 PROTOCOL = 1
 INVOCATION = re.compile(rf"(?<!\S)/skill:{SKILL_NAME}(?=\s|$)")
@@ -91,9 +86,10 @@ def session_start(request: dict[str, Any]) -> dict[str, Any]:
     observe_activity(session_id)
     execution_id = _execution_id(session_id)
     if execution_id and reason in {"startup", "reload"}:
+        from subagents_runtime.reply_support import acknowledge
+
+        acknowledge(cwd, "pi")
         confirm_startup(execution_id)
-    toolkit = find_skill(_role_directory(session_id), "pi", "subagents-toolkit") is not None
-    inbox = ensure_inbox(session_id).inbox if toolkit else None
     with sessions._connect() as connection:
         enabled = connection.execute(
             "SELECT 1 FROM session_delegation WHERE parent_session_id=?", (session_id,)
@@ -112,8 +108,6 @@ def session_start(request: dict[str, Any]) -> dict[str, Any]:
     return {
         "harnessSessionId": session_id,
         "delegatedMode": mode if _parent else None,
-        "inbox": str(inbox) if inbox else None,
-        "instructions": session_start_instructions(inbox) if inbox else None,
         "recovered": _processing_context(recovered) if recovered else None,
         "marker": str(results_marker(session_id)),
         "pending": has_pending_children(session_id),
@@ -141,8 +135,7 @@ def prompt(request: dict[str, Any]) -> dict[str, Any]:
     if skill == "reply-to-agent":
         arm_reply(session_id, _execution_id(session_id))
         return {"context": None, "notice": "Reply armed. The next successful response will be sent to the parent."}
-    inbox = enable_delegation(session_id, skill).inbox
-    return {"context": delegation_instructions(inbox, cwd, "pi"), "notice": None}
+    return {"context": None, "notice": None}
 
 
 def previous_reply(request: dict[str, Any]) -> dict[str, Any]:

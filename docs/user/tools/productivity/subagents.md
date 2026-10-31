@@ -20,7 +20,9 @@ skill: websearch
 Find primary sources for the proposed change.
 ```
 
-Harness adds a native skill invocation only when `skill` is supplied. The parent includes it only when the user explicitly requests that skill by name. Otherwise the child receives the work description with an explicit-only skill instruction, subject to its project and provider rules. Missing requested skills fail before any child process or Aboard launch; the parent receives the failure. Install child workflows separately: subagents no longer installs prototype, websearch, grill-me, or issue-readers.
+Harness adds a native skill invocation only when `skill` is supplied. The parent includes it only when the user explicitly requests that skill by name. The child receives the work description, and its provider and project rules govern skill use. Missing requested skills fail before any child process or Aboard launch; the parent receives the failure. Install child workflows separately: subagents no longer installs prototype, websearch, grill-me, or issue-readers.
+
+The toolkit starts by running its bundled `scripts/enable_inbox.py`. This explicitly creates and enables the conversation's inbox and returns its path. Repeated activation reuses the same assignment, including after resume. Startup, compaction, skill expansion and skill reads neither create an inbox nor inject inbox context. The toolkit contains the delegation instructions. Reply authorization stays internal rather than adding model context. Pi may show a user-facing reply-armed notice.
 
 Availability currently checks conventional project/user skill directories for the child provider and working directory. Plugin namespaces and provider-configured resource locations outside these roots are not supported by this check. Native providers resolve the actual invocation. No task registry or specialized launcher is read; old custom registry files remain user-owned and are ignored.
 
@@ -51,7 +53,6 @@ Configure launches in project `.harness/config.json` or user `~/.harness/config.
 ```json
 {
   "version": 1,
-  "autoRun": { "provider": "chatgpt" },
   "providers": {
     "chatgpt": {
       "delegations": { "general": { "model": "gpt-6.1-sol", "effort": "high" } }
@@ -60,7 +61,7 @@ Configure launches in project `.harness/config.json` or user `~/.harness/config.
 }
 ```
 
-`autoRun.provider` defaults to Claude and does not restrict explicit `harness run --provider` choices. Provider entries can set a `command` and a `delegations.general` profile. This profile accepts `model` and `effort`; `"inherit"` uses native settings. Claude can also set `deniedTools`. Explicit launch overrides take precedence. Skills do not select profiles. `session.stopWaitHours` sets an optional nonnegative wait for an outstanding reply. Session requests and logs live under `~/.harness/runtime/`; set `HARNESS_STATE_DIR` to change the Harness state root. If delegation says its hook did not provide the shared inbox, check that the package's provider hook is installed and active before retrying.
+The shared file's `autoRun` settings belong to Aboard and are ignored by this runtime. `harness run` requires an explicit `--provider`. Provider entries can set a `command` and a `delegations.general` profile. This profile accepts `model` and `effort`; `"inherit"` uses native settings. Claude accepts full model IDs such as `claude-opus-5-5` as well as the native `opus`, `sonnet`, and `haiku` aliases. Claude can also set `deniedTools`. Explicit launch overrides take precedence. Skills do not select profiles. `session.stopWaitHours` sets an optional nonnegative wait for an outstanding reply. Session requests and logs live under `~/.harness/runtime/`; set `HARNESS_STATE_DIR` to change the Harness state root. If inbox activation fails, check that the updated runtime and the package's provider hook or extension are installed and active.
 
 ## Implementation and verification
 
@@ -95,9 +96,8 @@ persisted; replay after reload or restart acknowledges an already persisted batc
 resending it. Delivery is session-wide rather than branch-bound, as with Claude/Codex rewinds,
 so tree navigation cannot strand a child result.
 
-Other boundaries: one stable `harness-subagents` system-prompt section carries the inbox, preserving
-prompt caching and surviving compaction. Delegation skills receive their instructions by input
-transformation. Successful native `write`/`edit` results inside the inbox, including nested calls,
+Other boundaries: inbox activation is explicit through the toolkit's bundled script; no inbox
+section is added to Pi's system prompt. Native tool completions, including failed commands and nested calls,
 launch requests and append the launch status. `/reply-to-agent-with-previous-message`
 sends the latest successful assistant text on the active branch without inference.
 Interactive children report at `agent_settled`; a new prompt or failed turn expires an armed reply,
@@ -124,6 +124,96 @@ are outside this gate. Interactive behavior has also been manually verified; tha
 these automated acceptance boundaries.
 
 The task-free 3.0.0 checkout is verified by `e2e:subagents:skills` and `e2e:pi-subagents:skills` in `tests/e2e/`: real headless Claude/Codex/Pi CLIs use fake APIs to cover omitted/found/missing skills, native skill expansion, receipt writes, failure delivery, request counts, cleanup, and Claude/Codex resume. This does not certify the unchanged remote runtime pin or the visible Aboard/TUI paths.
+
+The 3.0.7 checkout (runtime 3.0.4) removes additional delegation instructions, the child skill-use prefix, and model-facing reply-arming notices. The same real-CLI skill journeys pass for Claude/Codex/Pi. Regression tests cover ordinary parent and child turns after startup, resume, and compaction, plus silent reply authorization with pending nested results. The catalogue's remote runtime pin remains unchanged; these runtime fixes require a newly published pin before remote installs include them.
+
+The 3.0.8 checkout (runtime 3.0.5, Pi toolkit 2.0.4) moves inbox allocation to explicit script activation.
+The script delegates to the installed runtime so its Python dependencies stay in the uv-managed environment.
+Claude uses `CLAUDE_CODE_SESSION_ID`, Codex uses `CODEX_THREAD_ID`, and Pi's extension supplies
+`HARNESS_PI_SESSION_ID`; the runtime resolves each native ID to the registered Harness conversation.
+Missing or unregistered identities fail without allocating an inbox. Allocation retains the existing six-character
+random names and exclusive directory creation. Ordinary startup and toolkit invocation remain silent; only
+previously enabled inboxes participate in request recovery. These changes also require a newly published
+runtime pin for remote installations. The checkout passes the Claude/Codex skill-selection journeys,
+including resume, and the Pi skill-selection journeys with five requests for no child skill, six for
+a found skill and four for a missing skill. Claude/Codex also pass interactive, automatic,
+alternate-root and interrupted-child recovery journeys. Unit tests cover silent startup,
+explicit activation, repeated activation, native identity binding and pre-activation request isolation.
+
+## Execution backends (3.1.0 checkout)
+
+Provider selection and execution hosting are independent. `StandaloneBackend` owns native CLI
+process launches; `BridgeBackend` implements the optional loopback execution-host protocol.
+Neither the Sub-Agent runtime nor its payloads depend on a particular editor or application.
+`harness run` continues to open a standalone terminal. Delegated launches first select an
+available host, otherwise the standalone backend. Refusals, invalid inherited credentials,
+timeouts and uncertain startup never trigger a second launch through another backend.
+
+Execution hosts publish version-2 JSON records in `~/.harness/backends/endpoints/`, independently
+of `HARNESS_STATE_DIR`. Records contain `host: "127.0.0.1"`, `port`, `workspaceRoot`,
+`delegationToken`, `pid`, and `activatedAt`. Discovery rejects dead processes and mismatching
+projects and prefers the newest applicable record. Loop continuations can match registered
+sibling worktrees. A hosted parent passes `HARNESS_BRIDGE_PORT` and `HARNESS_BRIDGE_TOKEN`;
+an incomplete inherited pair is an error rather than permission to fall back.
+
+The host implements authenticated `POST /delegations` using
+`runtime/src/subagents_runtime/schemas/bridge-delegation.schema.json`, returns `sessionId`,
+`agentId` and `terminalId`, deduplicates `requestId`, and reports `startup-uncertain` when an
+existing launch cannot safely be replayed. Lifecycle wrappers call `execution_host.started`
+and `execution_host.exited`; they must not query runtime tables. Before submitting input to a
+live child, the host calls `python -m subagents_runtime.terminal_resume` to bind reply ownership.
+Bridge background streams retain the shared `runtime/watch/<execution-id>/stdout.jsonl` layout.
+
+Additional Python backends register a factory in the `harness.subagents.backends` entry-point
+group, installed in the runtime's managed environment. They implement `ExecutionBackend` in
+`backends.py`: a stable name, live-continuation capability, effect-free `probe`, durable-reservation
+`launch`, and `progress_path`. Extension backends precede the built-in bridge and standalone
+fallback. Launch implementations must persist startup intent before effects and retain uncertainty
+when they cannot prove that no process started. The public `execution_host` API provides
+`reservation`, `starting`, `bind`, `rejected`, `started`, and `exited` so adapters do not need
+SQL knowledge. `starting` atomically rejects a second launch intent. Backend names and opaque handles survive in
+execution state; schema 11 migrates older host-handle columns without discarding saved sessions.
+
+Aboard implements this neutral protocol and publishes its own adapter registration. Auto Run's
+worker policy remains entirely on that side; no Auto Run engine change is needed. The 3.1.0
+checkout requires coordinated runtime and extension publication: the catalogue's immutable runtime
+and VSIX pins are unchanged and do not yet ship this refactor.
+
+## Interactive reply preparation (3.1.1 checkout)
+
+Interactive delegation prepares project-local reply skills and provider integration before selecting
+an execution backend, including on resume and fork. The runtime distribution bundles the canonical
+reply skills, Claude/Codex hook fragments, and Pi extension/transport. A destination project does not
+need a prior Subagents installation. Existing matching hook registrations and installed Pi packages
+are reused; unrelated configuration, permissions and instruction files are retained. Conflicting
+reply payloads are refused rather than overwritten. Generated support remains in the destination
+project for later continuations; it is not a temporary configuration directory or an Aboard asset.
+
+The loaded integration acknowledges reply readiness separately from provider process startup.
+In the 3.1.2 checkout, the 15-second startup wait bounds only the launching call: without confirmation,
+both automatic and interactive requests remain uncertain and active while the existing execution is
+monitored. Later native startup confirmation restores pending/running state. Reply readiness is
+acknowledged asynchronously, without a separate 30-second blocking wait or silence-based cancellation.
+Compaction and slow initialization can therefore exceed either former deadline without failing the
+request. Process errors, exits and explicit cancellation still settle requests; lack of activity alone
+does not. Provider trust and hook authorization remain native prerequisites; preparation does not grant
+either. Live-terminal reuse requires the original process to have acknowledged reply support; older
+terminals must be reopened. These changes require runtime publication before remote installs include them.
+A subprocess regression covers delayed startup in both modes, including an interactive child silent for
+31 seconds before confirming startup, acknowledging readiness and successfully replying. Real-CLI
+Claude/Codex skill-selection and resume journeys and Pi skill-selection journeys pass against fake APIs.
+The delayed subprocess is a provider stand-in, not a real-provider compaction reproduction.
+Ordinary answers still do not complete interactive requests. Both explicit reply actions retain their
+existing semantics, including no inference for sending the previous successful answer.
+
+Real headless Claude and Codex journeys against fake APIs reproduce the old failure with an unrelated
+Git root lacking reply support, then verify successful delivery and continuation with the prepared
+integration. Pi's checkout-runtime RPC journey covers an unrelated root without Subagents, previous-message
+delivery with zero additional inference, one acknowledged parent delivery, and another successful child
+turn afterward (six total inference requests). E2E type checks and Aboard's consuming adapter unit checks
+also pass. These checks do not certify the visible TUI, Aboard-hosted real-CLI launches, POSIX, or the
+unchanged immutable remote runtime pin. The pinned full-stack cloud/subagent journeys currently fail
+in inbox activation; checkout acceptance is not evidence that those pins have been repaired.
 
 ## Remaining integration limits
 

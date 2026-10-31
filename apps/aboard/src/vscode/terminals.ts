@@ -56,8 +56,9 @@ export async function terminalPane(terminal: Terminal, timeoutMs = 1_000): Promi
       if (showing() && window.tabGroups.activeTabGroup !== before) finish(window.tabGroups.activeTabGroup);
     };
     const timer = setTimeout(() => finish(undefined), timeoutMs);
-    subscriptions.push(window.onDidChangeActiveTerminal(check), window.tabGroups.onDidChangeTabGroups(check));
+    subscriptions.push(window.onDidChangeActiveTerminal(check), window.tabGroups.onDidChangeTabGroups(check), window.tabGroups.onDidChangeTabs(check));
     terminal.show(false);
+    check();
   });
 }
 

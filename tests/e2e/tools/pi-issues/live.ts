@@ -85,9 +85,8 @@ export async function runLivePiIssues(scope: "project" | "user") {
     const platform = scope === "project" ? join(project, ".pi") : fixture.workspace.agentDir;
     const originalSkills = new Map<string, string>();
     for (const [skill, marker] of [["draft-issues", draftMarker], ["address-this", addressMarker], ["review-this", reviewMarker]]) {
-      const path = skill === "draft-issues"
-        ? join(platform, "npm/node_modules/harness-pi-issue-writers", "skills", skill, "SKILL.md")
-        : join(platform, "skills", skill!, "SKILL.md");
+      const packageName = skill === "draft-issues" ? "harness-pi-issue-writers" : "harness-pi-issue-readers";
+      const path = join(platform, "npm/node_modules", packageName, "skills", skill!, "SKILL.md");
       const original = await readFile(path, "utf8");
       originalSkills.set(path, original);
       await writeFile(path, original + `\n${marker}\n`);

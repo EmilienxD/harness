@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from subagents_runtime import processes, sessions
+from subagents_runtime import processes, sessions, bridge_backend
 from subagents_runtime.delegation import claim_parent_delivery, enable_delegation, process_inbox
 
 CODEX_REFUSAL = "Not inside a trusted directory and --skip-git-repo-check was not specified."
@@ -15,9 +15,9 @@ def project(tmp_path, monkeypatch):
     project = tmp_path / "project"
     project.mkdir()
     monkeypatch.setenv("HARNESS_STATE_DIR", str(tmp_path / "state"))
-    for name in ("HARNESS_SESSION_ID", "HARNESS_EXECUTION_ID", "ABOARD_BRIDGE_PORT", "ABOARD_BRIDGE_TOKEN"):
+    for name in ("HARNESS_SESSION_ID", "HARNESS_EXECUTION_ID", "HARNESS_BRIDGE_PORT", "HARNESS_BRIDGE_TOKEN"):
         monkeypatch.delenv(name, raising=False)
-    monkeypatch.setattr(sessions, "_discover_delegation_endpoint", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(bridge_backend, "discover", lambda *_args, **_kwargs: None)
     return project
 
 
@@ -46,7 +46,7 @@ def test_a_refused_headless_start_reports_the_providers_own_reason(project, tmp_
     assert CODEX_REFUSAL in delivery.text
 
 
-def test_an_unconfirmed_visible_start_names_what_to_check(project, monkeypatch):
+def test_an_unconfirmed_visible_start_remains_uncertain(project, monkeypatch):
     monkeypatch.setattr(processes, "STARTUP_SECONDS", 0.2)
     monkeypatch.setattr(sessions, "_visible_terminal", lambda *_args: None)
     monkeypatch.setattr(sessions, "_command_from_config", lambda _config, _provider: ["claude"])
@@ -55,6 +55,51 @@ def test_an_unconfirmed_visible_start_names_what_to_check(project, monkeypatch):
 
     assert result.status == "uncertain"
     assert "Claude Code" in result.reason and str(project.resolve()) in result.reason
+    assert claim_parent_delivery("parent", "Stop") is None
+
+
+@pytest.mark.parametrize("mode", ["auto", "interactive"])
+def test_silent_child_can_confirm_and_reply_after_startup_deadline(project, tmp_path, monkeypatch, mode):
+    import subprocess
+    import time
+
+    script = tmp_path / "slow_provider.py"
+    script.write_text(
+        "import os, time, json\n"
+        f"time.sleep({31 if mode == 'interactive' else 0.6})\n"
+        "from subagents_runtime.processes import confirm_startup\n"
+        "confirm_startup(os.environ['HARNESS_EXECUTION_ID'])\n"
+        "from subagents_runtime.reply_support import acknowledge\n"
+        "from pathlib import Path\n"
+        "acknowledge(Path.cwd(), 'claude')\n"
+        "from subagents_runtime.delegation import arm_reply, report_child_stop\n"
+        "if os.environ['HARNESS_EXECUTION_MODE'] == 'interactive': arm_reply(os.environ['HARNESS_SESSION_ID'], os.environ['HARNESS_EXECUTION_ID'])\n"
+        "report_child_stop(os.environ['HARNESS_SESSION_ID'], 'Completed', success=True, execution_id=os.environ['HARNESS_EXECUTION_ID'])\n"
+        "print(json.dumps({'type': 'result', 'result': 'Completed'}), flush=True)\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(processes, "STARTUP_SECONDS", 0.1)
+    monkeypatch.setattr(sessions, "_command_from_config", lambda *_: [sys.executable, str(script)])
+    children = []
+    def terminal(command, environment, cwd):
+        children.append(subprocess.Popen(command, env=environment, cwd=cwd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL))
+    monkeypatch.setattr(sessions, "_visible_terminal", terminal)
+    result = launch(project, "claude", mode)
+    try:
+        assert result.status == "uncertain"
+        assert claim_parent_delivery("parent", "Stop") is None
+        deadline = time.monotonic() + 45
+        while time.monotonic() < deadline:
+            with sessions._connect() as db:
+                state = db.execute("SELECT state FROM requests WHERE id=?", (result.request_id,)).fetchone()[0]
+            if state == "succeeded":
+                break
+            time.sleep(0.05)
+        assert state == "succeeded"
+        assert claim_parent_delivery("parent", "Stop") is not None
+    finally:
+        for child in children:
+            child.wait(timeout=45)
 
 
 def test_a_pi_crash_before_settlement_reports_its_stderr(project, tmp_path):

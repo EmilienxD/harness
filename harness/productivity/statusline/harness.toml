@@ -1,5 +1,5 @@
 name = "statusline"
-version = "1.4.5"
+version = "1.4.7"
 description = "Minimal Pi footer with project, branch, provider, model, thinking level, and context usage"
 docs = "https://github.com/EmilienxD/harness/blob/main/README.md#statusline"
 

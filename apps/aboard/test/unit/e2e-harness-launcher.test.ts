@@ -11,7 +11,7 @@ import {
   parseStreamJson,
   redactProcessError,
 } from "../e2e/smoke.js";
-import { removeDirectoryWithRetries } from "../e2e/vscode/support.js";
+import { isTransientObservationError, removeDirectoryWithRetries } from "../e2e/vscode/support.js";
 
 test("VS Code E2E cleanup retries transient Windows directory locks", async () => {
   let observed: { readonly path: string; readonly options: unknown } | undefined;
@@ -22,6 +22,14 @@ test("VS Code E2E cleanup retries transient Windows directory locks", async () =
     path: "C:\\fixture\\.abd",
     options: { recursive: true, force: true, maxRetries: 20, retryDelay: 100 },
   });
+});
+
+test("fixture observations retry transport failures, never assertions or authorization", () => {
+  assert.equal(isTransientObservationError(Object.assign(new Error("gh issue view failed"), { stderr: "HTTP 504: Gateway Timeout" })), true);
+  assert.equal(isTransientObservationError(new Error("connect ETIMEDOUT")), true);
+  assert.equal(isTransientObservationError(new Error("HTTP 403: Forbidden")), false);
+  assert.equal(isTransientObservationError(new Error("Unexpected issue state")), false);
+  assert.equal(isTransientObservationError("HTTP 504"), false);
 });
 
 test("E2E configuration rejects malformed repository slugs", () => {

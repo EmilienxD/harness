@@ -106,6 +106,8 @@ def test_subagents_install_and_removal_cover_the_complete_workflow(tmp_path, mon
 
     installer.reconcile({"subagents"})
     assert target.destination_path("skills", "subagents-toolkit/SKILL.md").exists()
+    activation = target.destination_path("skills", "subagents-toolkit/scripts/enable_inbox.py")
+    assert activation.is_file()
     metadata = target.destination_path("skills", "subagents-toolkit/agents/openai.yaml")
     assert metadata.exists() == (provider == "chatgpt")
     assert not target.destination_path("skills", "work-with-agent/SKILL.md").exists()
@@ -126,6 +128,7 @@ def test_subagents_install_and_removal_cover_the_complete_workflow(tmp_path, mon
 
     installer.reconcile(set())
     assert not target.destination_path("skills", "subagents-toolkit/SKILL.md").exists()
+    assert not activation.exists()
     assert not metadata.exists()
     assert not target.destination_path("skills", "prototype-with-agent/SKILL.md").exists()
     assert not target.destination_path("skills", "address-with-agent/SKILL.md").exists()

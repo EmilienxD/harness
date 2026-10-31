@@ -39,6 +39,16 @@ export function renderReopenItems(
   });
 }
 
+/** An exact pasted session ID bypasses VS Code's visible-text filter without displaying IDs. */
+export function reopenItemsForQuery(
+  items: readonly ReopenQuickPickItem[],
+  value: string,
+): readonly (ReopenQuickPickItem & { readonly alwaysShow?: boolean })[] {
+  const sessionId = value.trim().toLowerCase();
+  const matches = items.filter((item) => item.option.candidate.sessionId.toLowerCase() === sessionId);
+  return matches.length > 0 ? matches.map((item) => ({ ...item, alwaysShow: true })) : items;
+}
+
 function detailFor(option: ReopenOption, now: Date): string {
   const { candidate } = option;
   const chrome = candidate.chromeEnabled === true ? " · Chrome" : "";

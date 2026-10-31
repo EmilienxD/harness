@@ -18,7 +18,10 @@ export type SkillSelection = "none" | "found" | "missing";
 export const SKILL_RESOURCE = "[E2E:subagents:loaded-skill]";
 export const SKILL_RECEIPT = "selected-skill.json";
 export const CHILD_PROGRESS = "child checkpoint before interruption\n";
-export const scenarioCatalogHash = createHash("sha256").update("subagents:v4:shell-inbox-bom").digest("hex");
+export const scenarioCatalogHash = createHash("sha256").update("subagents:v5:explicit-inbox-activation").digest("hex");
+
+const CLAUDE_ENABLE_ID = "toolu_e2e_subagents_enable";
+const CODEX_ENABLE_ID = "call_e2e_subagents_enable";
 
 const CLAUDE_WRITE_ID = "toolu_e2e_subagents_request";
 const CLAUDE_REPLY_ID = "toolu_e2e_subagents_reply";
@@ -109,9 +112,17 @@ function codexCommand(request: OpenAiResponsesRequest, id: string, checkpoint: s
 }
 
 function claudeParent(request: AnthropicMessagesRequest, repoRoot: string, text: string, mode: "interactive" | "auto", alternateRoot: boolean, stopFallback: boolean, selection: SkillSelection): AnthropicScenarioResponse {
+  const activation = claudeResult(request, CLAUDE_ENABLE_ID);
+  if (!activation) {
+    if (existsSync(resolve(repoRoot, "..", "state", "inboxes"))) throw new E2eProtocolError("$.messages", "inbox existed before activation", "subagents");
+    return claudeResponse("parent-inbox-enable", "tool_use", [{
+      type: "tool_use", id: CLAUDE_ENABLE_ID, name: "Bash",
+      input: { command: `${process.platform === "win32" ? "python" : "python3"} ".claude/skills/subagents-toolkit/scripts/enable_inbox.py"` },
+    }]);
+  }
   const result = claudeResult(request, CLAUDE_WRITE_ID);
   if (result === undefined) {
-    const inbox = requireInbox(text, repoRoot, "claude");
+    const inbox = requireInbox(deepText(activation), repoRoot, "claude");
     if (!request.tools.some((tool) => tool.name === "Bash")) {
       throw new E2eProtocolError("$.tools", "Bash is unavailable", "subagents");
     }
@@ -154,8 +165,13 @@ function claudeChild(request: AnthropicMessagesRequest, mode: "interactive" | "a
 
 function codexParent(request: OpenAiResponsesRequest, repoRoot: string, text: string, mode: "interactive" | "auto", alternateRoot: boolean, stopFallback: boolean, selection: SkillSelection): OpenAiScenarioResponse {
   const outputs = request.input.filter((item) => item.type === "custom_tool_call_output" || item.type === "function_call_output");
+  const activation = outputs.find((item) => item.call_id === CODEX_ENABLE_ID);
+  if (!activation) {
+    if (existsSync(resolve(repoRoot, "..", "state", "inboxes"))) throw new OpenAiProtocolError("$.input", "inbox existed before activation", "subagents");
+    return codexCommand(request, CODEX_ENABLE_ID, "parent-inbox-enable", `${process.platform === "win32" ? "python" : "python3"} ".agents/skills/subagents-toolkit/scripts/enable_inbox.py"`);
+  }
   if (!outputs.some((item) => item.call_id === CODEX_WRITE_ID)) {
-    const inbox = requireInbox(text, repoRoot, "codex");
+    const inbox = requireInbox(deepText(activation), repoRoot, "codex");
     const offered = request.tools.map((tool) => String(tool.name ?? tool.type ?? "unknown"));
     if (!request.codeMode && !offered.includes("exec_command")) {
       throw new OpenAiProtocolError("$.tools", `exec_command is unavailable; offered: ${offered.join(", ")}`, "subagents");
@@ -218,9 +234,10 @@ function codexChild(request: OpenAiResponsesRequest, mode: "interactive" | "auto
 }
 
 function requireInbox(text: string, repoRoot: string, provider: "claude" | "codex"): string {
-  const match = /Conversation inbox: ([^\r\n]+)(?:\r?\n|$)/u.exec(text);
-  const inbox = match?.[1]?.trim();
-  if (inbox !== undefined && isAbsolute(inbox)) {
+  const decoded = text.replaceAll("\\\\", "\\");
+  for (const match of decoded.matchAll(/((?:[A-Za-z]:[\\/]|\/)[^\r\n"'`]*?[\\/]inboxes[\\/][a-z0-9]{6})/gu)) {
+    const inbox = match[1]!;
+    if (!isAbsolute(inbox)) continue;
     try {
       const canonicalInbox = realpathSync(inbox);
       if (containsPath(realpathSync(resolve(repoRoot,"..","state","inboxes")), canonicalInbox)) return canonicalInbox;

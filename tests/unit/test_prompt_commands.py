@@ -86,7 +86,8 @@ def test_explicit_skill_is_added_after_sanitization(tmp_path, monkeypatch, provi
     monkeypatch.setenv("HARNESS_STATE_DIR", str(tmp_path / "state"))
     monkeypatch.setattr(sessions, "launch_configuration", lambda _cwd: {})
     monkeypatch.setattr(sessions, "_provider_command", lambda _config, _provider: [_provider])
-    monkeypatch.setattr(sessions, "_launch_through_aboard", lambda *_args: None)
+    from subagents_runtime import bridge_backend
+    monkeypatch.setattr(bridge_backend, "discover", lambda *_args: None)
     directory = ".claude" if provider == "claude" else ".agents"
     skill = tmp_path / directory / "skills" / "prototype" / "SKILL.md"
     skill.parent.mkdir(parents=True)
@@ -101,6 +102,10 @@ def test_explicit_skill_is_added_after_sanitization(tmp_path, monkeypatch, provi
 
     def start(execution_id, argv, *_args, **_kwargs):
         invocations.extend(re.findall(r"([/$])([\w-]+)", argv[-1]))
+        from subagents_runtime.reply_support import _write
+        from subagents_runtime.storage import state_dir
+
+        _write(state_dir() / "runtime/reply-ready" / execution_id, provider.encode())
         with sessions._connect() as connection:
             connection.execute("UPDATE executions SET state='exited' WHERE id=?", (execution_id,))
 

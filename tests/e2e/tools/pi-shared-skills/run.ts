@@ -10,7 +10,7 @@ export const SHARED_SKILL_PACKAGES = [
   ["building", "tdd"], ["engineering", "resolving-merge-conflicts"], ["engineering", "setup-git-worktree-maker"],
   ["planning", "audit"], ["planning", "grill-me"], ["planning", "breakdown-help-wanted-issue"],
   ["planning", "read-all-adrs"], ["planning", "writing-adrs"], ["productivity", "writing-for-agents"],
-  ["productivity", "zoom-out"], ["planning", "prototype"], ["planning", "lavish"],
+  ["productivity", "zoom-out"], ["planning", "prototype"],
   ["productivity", "handoff"], ["productivity", "handoff-grilling"], ["productivity", "todo-hitl"],
   ["productivity", "decisions"], ["productivity", "next-decision"], ["productivity", "stop-overthinking"],
   ["productivity", "setup-command-aliases"], ["productivity", "setup-text-replacements"],
@@ -44,8 +44,9 @@ export async function runPiSharedSkillsJourney(scope: "project" | "user") {
           // Skill instructions are checked as file bytes above, not matched in model prompts.
           if (file !== "SKILL.md") reads.push({ path: join(destination, file), bytes });
         }
-        if (packageName === "websearch" && scope === "project") {
-          const path = join(fixture.workspace.projectRoot, ".harness", "websearch", "INDEX.md");
+        if (packageName === "websearch") {
+          const workspaceRoot = scope === "project" ? fixture.workspace.projectRoot : fixture.workspace.env.HOME!;
+          const path = join(workspaceRoot, ".harness", "websearch", "INDEX.md");
           const bytes = await readFile(path, "utf8");
           assert.equal(bytes, await readFile(join(source, "INDEX.md"), "utf8"));
           reads.push({ path, bytes });

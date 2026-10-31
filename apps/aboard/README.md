@@ -4,7 +4,7 @@ Aboard is a VS Code extension for Claude Code, ChatGPT, and Pi conversations. It
 
 Install it through the [Harness catalogue](../../README.md#installation) by selecting `aboard`. Harness verifies the VSIX and installs the worker assets Aboard needs.
 
-Pi support is shipped in the catalogue's Aboard 0.3.13 release for Pi 1.2.0. Select Pi in Run Agent, or set `autoRun.provider` to `"pi"` in `.harness/config.json`. Configure `providers.pi.interactive`, `delegations`, and `autoRun` independently with `command`, `model`, and `effort`. Models inherit Pi settings unless overridden; explicit models use authenticated `provider/model` IDs. Exploration defaults to low thinking.
+Pi support is shipped in the catalogue's Aboard 0.3.13 release for Pi 1.2.0. The source checkout's headless Pi integration was also revalidated against Pi 1.4.0 on Windows with the fake API on 2026-10-27. Select Pi in Run Agent, or set `autoRun.provider` to `"pi"` in `.harness/config.json`. Configure `providers.pi.interactive`, `delegations`, and `autoRun` independently with `command`, `model`, and `effort`. Models inherit Pi settings unless overridden; explicit models use native Pi model patterns, including extension-provided models. Exploration defaults to low thinking.
 
 Pi workers invoke `/skill:address-this` and `/skill:review-this` from the installed Harness issue-readers skills. Ordinary sessions preserve native Pi resources. Exploration and Auto Run workers load only Aboard's extension and a fixed native tool set, disable MCP, and enforce restrictions on nested tool calls through the shared Python guard. Pi Auto Run supports worktrees: workers launch in the assigned checkout and receive that checkout guidance on every turn, including after resume or compaction. Pi relies on agents following this guidance rather than filesystem sandboxing. `/auto` is supplied by Harness's native Pi extension.
 
@@ -63,15 +63,17 @@ and so on, reusing available gaps. Launching from `project-2` still allocates a 
 The existing `aboard.autoRun.worktree.root` directory override and `setupTimeoutSeconds` limit also apply to
 manual worktree creation; its `enabled` and `keep` settings do not control manual launches.
 
-Creation uses the same local-configuration overlay and `.abd/session-setup.ps1` / `.abd/session-setup.sh`
-scripts as Auto Run. The script comes from the source checkout and runs with the new checkout as its working
+Creation runs the same optional `.abd/session-setup.ps1` / `.abd/session-setup.sh`
+scripts as Auto Run. Aboard does not copy local project configuration or require it to be ignored by Git;
+the setup script controls any preparation the user wants. The script comes from the source checkout and runs with the new checkout as its working
 directory, once per worktree rather than per terminal. Existing checkout selection never reruns setup or copies
-configuration. Failed preparation launches no agents, retains the checkout, and offers **Retry setup**,
-**Open checkout**, and **View log**; incomplete preparation remains detectable after a reload.
+configuration. If the setup script fails, Aboard reports the error, retains the checkout, and offers
+**Use existing worktree**, **Open checkout**, and **View log**. Existing/current checkout launches do not
+require setup success, consult historical setup records, or rerun setup.
 
-A new window opens the selected checkout as its project folder. If an existing checkout has no Aboard scaffold
-or needs an update, Aboard initializes/updates it before opening the layout; this is distinct
-from worktree setup and preserves existing configuration. In the current window, only terminal working
+A new window opens the selected checkout as its project folder without installing or updating scaffold files.
+Project scaffolding is explicit and optional; its absence or revision does not block launches or terminate
+running sessions. In the current window, only terminal working
 directories change: Explorer remains on the original folder. Launch layout and Run Agent show a short yellow warning without
 an additional confirmation.
 Fleet rows and terminal titles identify checkout directories; a Fleet or reopenable Recent Activity row offers **Open Checkout in New Window**. Activity and reopen retain the original checkout,
@@ -101,13 +103,15 @@ many agents are ready. Preset terminals open without waiting for earlier agents 
 The **Run Claude Code**, **Run Codex**, and **Run Pi** commands remain direct shortcuts through the same launcher.
 Each provider's command, model, and reasoning effort come from `.harness/config.json`. Aboard reads
 that file whenever a launch, resume, or reopen starts a new process, so existing processes keep their
-configuration while future sessions use your latest choices.
+configuration while future sessions use your latest choices. User-facing Reopen retains the provider's
+saved model and effort instead of applying the current launch profile's model and effort.
 
 The Fleet shows live sessions. Recent Activity keeps completed work available for inspection and supported reopen flows.
 
 Focusing a live interactive session reveals its existing terminal. Background sessions have no terminal.
 Reopening an ended session preserves its provider, working directory, and conversation, and opens an
-interactive terminal ready for you to type. If that conversation is
+interactive terminal ready for you to type. Paste a recorded session's full UUID into the existing
+Reopen picker to select it directly; UUIDs are not displayed in its rows. If that conversation is
 no longer available, its activity remains visible but cannot be reopened.
 
 Interactive sessions and manual subagents have separate launch profiles and inherit native model and
@@ -246,9 +250,11 @@ For example, Claude Auto Run can explore through Kiro while its address and revi
 }
 ```
 
+Claude profiles accept full model IDs such as `claude-opus-5-5`, alongside the native `haiku`, `sonnet`, and `opus` aliases. Full IDs select a specific model version; aliases follow Claude Code's native resolution. This requires Aboard 0.3.14 or later.
+
 Manual subagents use `delegations.general` regardless of their optional explicit `skill`. Both `auto` and `interactive` modes accept any skill; a missing skill fails before launch. Older named profiles are not selected by new Harness requests. AUTO RUN has separate `explore`, `address`, and `review` keys under each provider's `autoRun` object. The JSON schema supplies completion and documents key defaults; Aboard resolves the effective values in code.
 
-Worktree mode gives a run its own checkout. Aboard copies ignored local `.claude`, `.agents`, `.codex`, `.pi`, `.abd`, and `.harness` configuration without overwriting checkout files or copying provider session state. Optional setup commands live in `.abd/session-setup.ps1` and `.abd/session-setup.sh`.
+Worktree mode gives a run its own checkout. Aboard runs the user's optional setup script from `.abd/session-setup.ps1` or `.abd/session-setup.sh` in the source checkout, with the new checkout as its working directory. The script owns project preparation, including any desired configuration copying; Aboard does not copy local configuration or impose ignore rules on it.
 
 The hosted Grill-Me board relay runs per project and defaults to `https://grill-me-in-cloud.vercel.app`. Only the shared four-digit `code` is required; `url` is an optional override (an origin without a trailing slash). It reads these fields from the same sources as the grill hook: `.harness/config.local.json`, `.harness/config.json` (URL only), `~/.harness/config.json`, then the extension host's `HARNESS_GRILL_URL` and `HARNESS_GRILL_CODE`. The workspace must also be initialized, and a changed source takes effect after a window reload. A project without a ready `.abd/` neither reports presence nor polls the board, and removing `.abd/` stops its relay. Each relay reports its own project name and home-relative path alongside presence, so the board's Aboard status names the project it belongs to. Aboard reports only open, bound provider sessions and revalidates the terminal binding before delivery. It submits exactly the reviewed website prompt for Claude Code, Codex, and Pi, preserving the answer text without a delivery header, file reference, or added instructions. Delivery is acknowledged only after the provider's `UserPromptSubmit` hook confirms the prompt arrived; an unconfirmed prompt is reported as failed after 15 seconds. Confirmation means the prompt was submitted, not that the agent has applied the answers. Aboard-launched terminals inherit both environment values.
 

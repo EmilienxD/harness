@@ -8,7 +8,7 @@ metadata:
 
 # Subagents toolkit
 
-Launch or continue subagents only when the user explicitly requests delegation. Use the assigned conversation inbox supplied by the runtime, including after resume. If no inbox was supplied, stop and report the missing runtime context.
+Launch or continue subagents only when the user explicitly requests delegation. If you didn't enable the session's subagents inbox during this session yet, run the `<skill-directory>/scripts/enable_inbox.py` script to create and enable it. It returns the inbox path.
 
 Publish one complete `.md` request directly in that inbox per child launch or continuation. For multi-step writes, use a temporary file with another extension and rename it to `.md` when complete. Confirm the runtime's launch acknowledgement before reporting a child as started. If launch or continuation fails, report the available error details and stop without retrying or substituting another workflow.
 
@@ -53,8 +53,6 @@ Omit `root` to start the subagent in this conversation's working directory. When
 Set `skill` only when the user explicitly asks the subagent to use a skill by name. Use the exact skill name provided, without a prefix such as `/`, `$`, `/skill:`. The system checks availability and adds the native invocation to its prompt. An unavailable skill fails the launch; report the error to the user and stop.
 
 Use `auto` when the subagent should work independently and report back. Use `interactive` when the user wants to work directly in its visible session; default to interactive when unspecified. Both modes accept skills.
-
-Give the subagent only the requested skill selection. Instruct it to use skills only when explicitly requested by the user, subject to its project and provider instructions.
 
 Each new subagent starts with a fresh conversation and knows only the project and user memory files such as `AGENTS.md`/`CLAUDE.md`. Give it a self-contained prompt that explains why, what, where, and how, including constraints and completion criteria, without repeating general project information it can read there.
 

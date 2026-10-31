@@ -2,7 +2,7 @@ import os
 import subprocess
 
 import pytest
-from subagents_runtime import sessions
+from subagents_runtime import sessions, bridge_backend
 from subagents_runtime.delegation import enable_delegation, process_inbox
 from subagents_runtime.hooks import handle
 
@@ -133,7 +133,7 @@ def test_saved_conversation_has_one_persistent_inbox_for_all_tasks(
 
 
 @pytest.mark.parametrize("provider", ["claude", "chatgpt"])
-def test_runtime_context_is_replayed_then_acknowledged_and_compaction_starts_epoch(
+def test_inbox_is_not_enabled_by_skill_mentions_startup_or_compaction(
     tmp_path, monkeypatch, provider
 ):
     monkeypatch.setenv("HARNESS_STATE_DIR", str(tmp_path / "state"))
@@ -149,23 +149,24 @@ def test_runtime_context_is_replayed_then_acknowledged_and_compaction_starts_epo
         "hook_event_name": "UserPromptSubmit",
         "prompt": ("/" if provider == "claude" else "$") + "subagents-toolkit do work",
     }
-    assert handle(payload, provider) is not None
-    assert handle({**payload, "prompt": "Continue the work."}, provider) is not None
-    # A different observed event proves the previous injection reached the conversation.
+    assert handle({**payload, "hook_event_name": "SessionStart", "source": "startup"}, provider) is None
+    assert handle(payload, provider) is None
+    assert handle({**payload, "prompt": "Continue the work."}, provider) is None
     handle({**payload, "hook_event_name": "PreToolUse"}, provider)
     assert handle(payload, provider) is None
     compacted = handle(
         {**payload, "hook_event_name": "SessionStart", "source": "compact"}, provider
     )
-    assert compacted is not None
+    assert compacted is None
+    assert handle({**payload, "prompt": "Explain the configuration."}, provider) is None
     with sessions._connect() as connection:
         assert connection.execute(
             "SELECT context_epoch, injected_epoch FROM session_delegation WHERE parent_session_id='parent'"
-        ).fetchone() == (1, 1)
+        ).fetchone() is None
     handle({**payload, "hook_event_name": "PreToolUse"}, provider)
     assert (
         handle({**payload, "hook_event_name": "SessionStart", "source": "resume"}, provider)
-        is not None
+        is None
     )
 
 
@@ -182,20 +183,20 @@ def test_runtime_context_delivery_does_not_load_instruction_documents(tmp_path, 
         pytest.fail("Runtime context delivery must not load instruction documents")
 
     monkeypatch.setattr(Path, "read_text", unexpected_read)
-    assert claim_instructions("parent", compact=compact) is not None
+    assert claim_instructions("parent", compact=compact, session_start=True) is None
     assert inbox.is_dir()
 
 
-def test_loading_toolkit_prepares_inbox_without_launching_a_child(tmp_path, monkeypatch):
+def test_loading_toolkit_does_not_activate_inbox(tmp_path, monkeypatch):
     monkeypatch.setenv("HARNESS_STATE_DIR", str(tmp_path / "state"))
     monkeypatch.delenv("HARNESS_SESSION_ID", raising=False)
     assert handle({
         "session_id": "parent", "cwd": str(tmp_path),
         "hook_event_name": "PostToolUse", "tool_name": "Skill",
         "tool_input": {"skill": "subagents-toolkit"}, "tool_response": {"success": True},
-    }, "claude") is not None
+    }, "claude") is None
     with sessions._connect() as connection:
-        assert connection.execute("SELECT count(*) FROM session_delegation").fetchone()[0] == 1
+        assert connection.execute("SELECT count(*) FROM session_delegation").fetchone()[0] == 0
         assert connection.execute("SELECT count(*) FROM requests").fetchone()[0] == 0
 
 
@@ -265,11 +266,15 @@ def _standalone_provider(tmp_path, monkeypatch, provider):
 
     started = []
     monkeypatch.setenv("HARNESS_STATE_DIR", str(tmp_path / "state"))
-    monkeypatch.setattr(sessions, "_discover_delegation_endpoint", lambda _cwd: None)
+    monkeypatch.setattr(bridge_backend, "discover", lambda _cwd: None)
     monkeypatch.setattr(sessions, "_command_from_config", lambda _config, _provider="claude": ["provider"])
 
     def start(execution_id, argv, _environment, _cwd, *, visible):
         started.append((argv, visible))
+        from subagents_runtime.reply_support import _write
+        from subagents_runtime.storage import state_dir
+
+        _write(state_dir() / "runtime/reply-ready" / execution_id, provider.encode())
         processes.confirm_startup(execution_id)
 
     monkeypatch.setattr(processes, "start", start)
@@ -355,7 +360,7 @@ def test_terminal_continuations_reply_through_the_original_process_hooks(tmp_pat
     _, inbox, first = _live_delegated_child(tmp_path, monkeypatch, provider)
     with sessions._connect() as connection:
         original = connection.execute("SELECT id FROM executions WHERE request_id=?", (first.request_id,)).fetchone()[0]
-        connection.execute("UPDATE executions SET backend='aboard',aboard_agent_id='child',aboard_handle='terminal' WHERE id=?", (original,))
+        connection.execute("UPDATE executions SET backend='bridge',backend_agent_id='child',backend_handle='terminal' WHERE id=?", (original,))
         if schema_version == 3:
             connection.execute("DROP TABLE loop_messages")
             connection.execute("DROP TABLE loop_waits")
@@ -366,7 +371,7 @@ def test_terminal_continuations_reply_through_the_original_process_hooks(tmp_pat
     def reuse(request, request_id, *_):
         with sessions._connect() as connection:
             execution = connection.execute("SELECT id FROM executions WHERE request_id=?", (request_id,)).fetchone()[0]
-            connection.execute("UPDATE executions SET backend='aboard',state='starting' WHERE id=?", (execution,))
+            connection.execute("UPDATE executions SET backend='bridge',state='starting' WHERE id=?", (execution,))
             connection.execute("UPDATE sessions SET provider_session_id=NULL WHERE id=?", (first.child_session_id,))
         prepare_terminal_resume(first.child_session_id, execution, "child", "terminal", "saved-conversation")
         return "saved-conversation"
@@ -389,8 +394,8 @@ def test_live_chatgpt_continuation_uses_aboard_instead_of_external_terminal(tmp_
 
     started, inbox, first = _live_delegated_child(tmp_path, monkeypatch, "chatgpt")
     with sessions._connect() as connection:
-        connection.execute("UPDATE executions SET aboard_agent_id='boarded-child',backend='aboard' WHERE request_id=?", (first.request_id,))
-    monkeypatch.setattr(sessions, "_discover_delegation_endpoint", lambda _: ("127.0.0.1", 4823, "token"))
+        connection.execute("UPDATE executions SET backend_agent_id='boarded-child',backend='bridge' WHERE request_id=?", (first.request_id,))
+    monkeypatch.setattr(bridge_backend, "discover", lambda _: ("127.0.0.1", 4823, "token"))
     requests = []
 
     def urlopen(request, **kwargs):
@@ -407,7 +412,7 @@ def test_live_chatgpt_continuation_uses_aboard_instead_of_external_terminal(tmp_
             assert sessions.bind_observed("forked-conversation", tmp_path, "chatgpt") == body["harnessSessionId"]
         return io.BytesIO(b'{"agentId":"boarded-fork","sessionId":"forked-conversation","terminalId":"vscode-terminal"}')
 
-    monkeypatch.setattr(sessions.urllib.request, "urlopen", urlopen)
+    monkeypatch.setattr(bridge_backend.urllib.request, "urlopen", urlopen)
     (inbox / "continue.md").write_text("---\nresume: agent-1\n---\nNext task.", encoding="utf-8")
     [result] = process_inbox("parent", launch=sessions.launch_delegated)
 
@@ -608,7 +613,7 @@ def test_detached_supervisor_binds_conversation_and_delivers_after_process_exit(
     monkeypatch.setenv("HARNESS_STATE_DIR", str(tmp_path / "state"))
     monkeypatch.delenv("ABOARD_BRIDGE_PORT", raising=False)
     monkeypatch.delenv("ABOARD_BRIDGE_TOKEN", raising=False)
-    monkeypatch.setattr(sessions, "_discover_delegation_endpoint", lambda _: None)
+    monkeypatch.setattr(bridge_backend, "discover", lambda _: None)
     monkeypatch.setattr(
         sessions, "_visible_terminal", lambda *_: pytest.fail("visible terminal opened")
     )
@@ -869,7 +874,7 @@ def test_parent_resume_delivers_dead_child_interruption_without_restarting_it(
         connection.execute(
             "UPDATE executions SET supervisor_pid=2147483647,supervisor_birth='dead',provider_pid=2147483647,provider_birth='dead'"
         )
-    # Acknowledge the original instructions, so only the interruption produces context.
+    # Observe a parent turn before resuming its saved conversation.
     handle({"session_id": "parent", "cwd": str(tmp_path), "hook_event_name": "UserPromptSubmit"}, provider)
     handle({"session_id": "parent", "cwd": str(tmp_path), "hook_event_name": "PreToolUse"}, provider)
     output = handle(
@@ -987,7 +992,7 @@ def test_legacy_grants_consolidate_running_files_and_preserve_indices_and_acks(
     assert recovered.status == "uncertain"
 
 
-def test_successful_skill_tool_enables_saved_conversation_without_slash_prompt(
+def test_successful_skill_tool_leaves_activation_to_the_script(
     tmp_path, monkeypatch
 ):
     monkeypatch.setenv("HARNESS_STATE_DIR", str(tmp_path / "state"))
@@ -1002,13 +1007,13 @@ def test_successful_skill_tool_enables_saved_conversation_without_slash_prompt(
             "tool_response": {"success": True},
         }
     )
-    assert output is not None
+    assert output is None
     with sessions._connect() as connection:
         assert (
             connection.execute(
                 "SELECT count(*) FROM session_delegation WHERE parent_session_id='parent'"
             ).fetchone()[0]
-            == 1
+            == 0
         )
     output = handle(
         {
@@ -1039,8 +1044,8 @@ def test_aboard_receives_runtime_location_and_execution_identity(tmp_path, monke
         "---\nmode: auto\n---\nTask.", encoding="utf-8"
     )
     monkeypatch.setattr(
-        sessions,
-        "_discover_delegation_endpoint",
+        bridge_backend,
+        "discover",
         lambda cwd: ("127.0.0.1", 4823, "dummy"),
     )
     sent = []
@@ -1051,7 +1056,7 @@ def test_aboard_receives_runtime_location_and_execution_identity(tmp_path, monke
             b'{"ok":true,"sessionId":"provider-id","agentId":"aboard-child","terminalId":"headless-handle"}'
         )
 
-    monkeypatch.setattr(sessions.urllib.request, "urlopen", response)
+    monkeypatch.setattr(bridge_backend.urllib.request, "urlopen", response)
     [started] = process_inbox("parent", launch=sessions.launch_delegated)
     assert started.status == "launched" and not list(inbox.iterdir())
     assert sent[0]["harnessSessionId"] == started.child_session_id
@@ -1091,7 +1096,7 @@ def test_aboard_refusal_fails_definitively_and_reports_its_reason(tmp_path, monk
         "---\nmode: auto\n---\nTask.", encoding="utf-8"
     )
     monkeypatch.setattr(
-        sessions, "_discover_delegation_endpoint", lambda cwd: ("127.0.0.1", 4823, "t")
+        bridge_backend, "discover", lambda cwd: ("127.0.0.1", 4823, "t")
     )
     body = json.dumps(
         {
@@ -1108,7 +1113,7 @@ def test_aboard_refusal_fails_definitively_and_reports_its_reason(tmp_path, monk
             request.full_url, 409, "Conflict", {}, io.BytesIO(body)
         )
 
-    monkeypatch.setattr(sessions.urllib.request, "urlopen", refuse)
+    monkeypatch.setattr(bridge_backend.urllib.request, "urlopen", refuse)
 
     [refused] = process_inbox("parent", launch=sessions.launch_delegated)
 
@@ -1131,7 +1136,7 @@ def test_aboard_uncertain_startup_keeps_its_reservation_for_recovery(
         "---\nmode: auto\n---\nTask.", encoding="utf-8"
     )
     monkeypatch.setattr(
-        sessions, "_discover_delegation_endpoint", lambda cwd: ("127.0.0.1", 4823, "t")
+        bridge_backend, "discover", lambda cwd: ("127.0.0.1", 4823, "t")
     )
     body = json.dumps(
         {
@@ -1148,7 +1153,7 @@ def test_aboard_uncertain_startup_keeps_its_reservation_for_recovery(
             request.full_url, 409, "Conflict", {}, io.BytesIO(body)
         )
 
-    monkeypatch.setattr(sessions.urllib.request, "urlopen", refuse)
+    monkeypatch.setattr(bridge_backend.urllib.request, "urlopen", refuse)
 
     [unresolved] = process_inbox("parent", launch=sessions.launch_delegated)
 

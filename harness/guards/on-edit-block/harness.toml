@@ -1,5 +1,5 @@
 name = "on-edit-block"
-version = "2.3.0"
+version = "2.3.1"
 description = "Blocks supported native edits and recognized shell writes on matching paths until required guidance has been read"
 docs = "https://github.com/EmilienxD/harness/blob/main/README.md#hooks"
 

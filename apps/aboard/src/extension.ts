@@ -60,7 +60,7 @@ import { isInteractiveLaunch, shouldRecordEndedSession, type AgentOutcome } from
 import { completedCount } from "./domain/run-plan.js";
 import { isLiveSession } from "./vscode/fleet.js";
 import { ReopenCoordinator, describeReopenOutcome } from "./platform/reopen.js";
-import { registerReopenCommand } from "./vscode/reopen.js";
+import { registerReopenCommand, reopenItemsForQuery } from "./vscode/reopen.js";
 import { combineHandlers } from "./bridge/router.js";
 import { DelegationCoordinator, type DelegationConfigurationSource } from "./bridge/delegation.js";
 import { WorkerHookService, createWorkerHookRoutes } from "./bridge/worker-hooks.js";
@@ -108,6 +108,7 @@ import { PromptSubmissions } from "./platform/prompt-submissions.js";
 
 let bridge: BridgeRuntime | undefined;
 let commandEndpointRegistry: FileCommandEndpointRegistry | undefined;
+let delegationEndpointRegistry: FileCommandEndpointRegistry | undefined;
 let persistence: PersistOnChange | undefined;
 let activeAutoRun: AutoRunEngine | undefined;
 let activeWorkspaceOwnership: WorkspaceOwnerLease | undefined;
@@ -153,6 +154,7 @@ export interface AboardExtensionApi {
   readonly agentWorkspaceStorageRoot: string;
   /** Where `/commands` publishes this window's port and command-scoped token. */
   readonly commandEndpointDirectory: string;
+  readonly delegationEndpointDirectory: string;
 }
 
 export async function activate(context: ExtensionContext): Promise<AboardExtensionApi | undefined> {
@@ -209,7 +211,7 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
   const scaffoldAssetRoot = join(context.extensionPath, "assets", "scaffold");
   const expectedScaffoldRevision = await scaffoldCatalogRevision(scaffoldAssetRoot);
   let scaffoldState = await readScaffoldState(workspaceRoot, expectedScaffoldRevision).catch(() => "uninitialized" as const);
-  let initialized = scaffoldState === "ready";
+  const initialized = true;
   let scaffoldUpdateWarningShown = false;
   const runtimeAdmission = new RuntimeAdmission(initialized);
 
@@ -300,9 +302,10 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
   let grillRelayResolved = false;
   const promptSubmissions = new PromptSubmissions();
   const syncGrillRelay = (): void => {
-    if (initialized === grillRelayResolved) return;
-    grillRelayResolved = initialized;
-    if (!initialized) { grillRelay?.dispose(); grillRelay = undefined; return; }
+    const enabled = scaffoldState === "ready";
+    if (enabled === grillRelayResolved) return;
+    grillRelayResolved = enabled;
+    if (!enabled) { grillRelay?.dispose(); grillRelay = undefined; return; }
     grillRelay = createGrillCloudRelay({ fleet, terminals, workspaceRoot, prompts: promptSubmissions, log: (message) => output.appendLine(message) });
     grillRelay?.start();
     output.appendLine(grillRelay === undefined
@@ -739,6 +742,9 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
     isResumable: (platform, sessionId, cwd, type) => sessionIsResumable(platform, sessionId, cwd ?? workspaceRoot, type),
   });
   const commandEndpoint = new FileCommandEndpointRegistry({ directory: commandEndpointDirectory(process.platform, process.env, homedir()) });
+  const delegationEndpoint = new FileCommandEndpointRegistry({ directory: join(homedir(), ".harness", "backends", "endpoints") });
+  delegationEndpointRegistry = delegationEndpoint;
+  context.subscriptions.push({ dispose: () => void delegationEndpoint.clear() });
   await commandEndpoint.clearWorkspace(workspaceRoot).catch(() => undefined);
   commandEndpointRegistry = commandEndpoint;
   context.subscriptions.push({ dispose: () => void commandEndpoint.clear() });
@@ -918,7 +924,7 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
     await bridgeIdentityStore.save(bridgeEnvironment);
     if (persistedBridgeIdentity !== undefined && persistedBridgeIdentity.port !== bridge.port) output.appendLine("The previous owner bridge port is occupied. Existing terminal controls remain available, but their lifecycle hooks require the original port; new sessions use the current bridge.");
     try {
-    const published = await commandEndpoint.publish({
+    const endpointRecord = {
       version: 2,
       host: bridge.host,
       port: bridge.port,
@@ -927,7 +933,10 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
       delegationToken: bridge.delegationToken,
       pid: process.pid,
       activatedAt: new Date().toISOString(),
-    });
+    } as const;
+    const published = await commandEndpoint.publish(endpointRecord);
+    const { commandToken: _commandToken, ...delegationRecord } = endpointRecord;
+    await delegationEndpoint.publish(delegationRecord);
     output.appendLine(`Command endpoint published at ${published}`);
     } catch (error) {
     // A script losing its way in is worth a line; it is not worth refusing to
@@ -1054,49 +1063,16 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
 
 
   const publishScaffoldState = async () => {
-    const wasInitialized = initialized;
     scaffoldState = await readScaffoldState(workspaceRoot, expectedScaffoldRevision).catch(() => "uninitialized" as const);
-    const next = scaffoldState === "ready";
-    if (initialized && !next) {
-      initialized = false;
-      const runtimeDrained = runtimeAdmission.close();
-
-      const reason = scaffoldState === "uninitialized" ? "project state was removed" : "project assets became incompatible";
-      autoRun.stop(reason);
-      await autoRun.settle();
-      await runtimeDrained;
-      for (const terminal of terminals.list()) {
-        if (terminal.status === "open") try { terminals.kill(terminal.terminalId); } catch { /* already closing */ }
-      }
-      const at = new Date().toISOString() as IsoTimestamp;
-      if (lease.current() !== undefined) lease.forceRelease(at, reason);
-      fleet.clear(at);
-
-      bridgeEnvironment = undefined;
-      await bridge?.stop();
-      bridge = undefined;
-      await commandEndpoint.clear().catch(() => undefined);
-      output.appendLine(scaffoldState === "uninitialized"
-        ? "Project state directory .abd/ was removed; aboard runtime access is suspended. Saved activity is retained."
-        : "aboard's project assets no longer match this extension; runtime access was closed until they are updated.");
-    }
-    initialized = next;
-    if (initialized && !wasInitialized) {
-      runtimeAdmission.open();
-      // The store on disk is the only history a newly initialized project has.
-      await activity.load().catch((error: unknown) => output.appendLine(`Activity store could not be read: ${error instanceof Error ? error.message : "unknown error"}`));
-      agentIdCounter = WorkspaceAgentIdCounter.load(runtime.root, knownAgentIds, runtimeAdmission.isOpen, storageRoot);
-      void refreshActivityTitles();
-
-    }
-    if (initialized) await startRuntimeBridge();
+    // Optional project assets never control the lifetime of terminals or runtime services.
+    await startRuntimeBridge();
     syncGrillRelay();
-    await commands.executeCommand("setContext", "aboard.initialized", next);
+    await commands.executeCommand("setContext", "aboard.initialized", initialized);
     await commands.executeCommand("setContext", "aboard.scaffoldUpdateRequired", scaffoldState === "update-required");
     if (scaffoldState !== "update-required") scaffoldUpdateWarningShown = false;
     if (scaffoldState === "update-required" && !scaffoldUpdateWarningShown) {
       scaffoldUpdateWarningShown = true;
-      void window.showWarningMessage("aboard's project assets were created by another extension version. Update .abd/ before starting or resuming aboard.");
+      void window.showWarningMessage("aboard's optional project assets were created by another extension version. You can update them with Update Project.");
     }
     fleetUi.refresh();
   };
@@ -1164,23 +1140,21 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
       checkoutChoices: () => checkouts.choices(),
       validateBranch: async (branch) => {
         await new ProcessGitClient(workspaceRoot).validateBranchName(branch);
-        return await checkouts.branchExists(branch) ? "Branch already exists." : undefined;
+        return undefined;
       },
       launch: async (request) => {
         if (!requireInitialized()) return;
         // Reject invalid profiles before creating a checkout or opening another window.
         for (const provider of new Set(request.preset.panes.flatMap((pane) => pane.providers).filter(Boolean))) await launchFile.getForWorktree(provider as AgentPlatformId, "interactive", request.checkout?.kind === "existing" ? request.checkout.path : workspaceRoot);
-        const selection = request.checkout ?? { kind: "current" as const };
+        let selection = request.checkout ?? { kind: "current" as const };
+        if (selection.kind === "new" && !selection.useExistingBranch && await checkouts.branchExists(selection.branch)) {
+          const answer = await window.showWarningMessage(`Branch ${selection.branch} already exists. Create a worktree using that branch?`, { modal: true }, "Use existing branch");
+          if (!answer) return;
+          selection = { ...selection, useExistingBranch: true };
+        }
         const checkoutRoot = await prepareCheckout(checkouts, selection, (message) => output.appendLine(message), () => output.show());
         if (!checkoutRoot) return;
         if (request.destination === "new") {
-          const targetState = await readScaffoldState(checkoutRoot, expectedScaffoldRevision);
-          if (targetState !== "ready") {
-            const report = await scaffoldProject({ projectRoot: checkoutRoot, assetRoot: scaffoldAssetRoot });
-            for (const warning of report.warnings) output.appendLine(`Checkout initialization: ${warning}`);
-            for (const path of report.preserved) output.appendLine(`Checkout initialization preserved: ${path}`);
-            if (await readScaffoldState(checkoutRoot, expectedScaffoldRevision) !== "ready") throw new Error(`The checkout at ${checkoutRoot} still needs an Aboard update. Open it and resolve its preserved project assets before launching.`);
-          }
           await workspaceLauncher.launch(request, checkoutRoot);
           return;
         }
@@ -1214,7 +1188,30 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
       }),
       // `matchOnDetail` so "ended", or an age, filters the list, which is how a
       // user with a long history finds the one they mean.
-      pick: async (items, placeHolder) => window.showQuickPick([...items], { placeHolder, matchOnDescription: true, matchOnDetail: true }),
+      pick: async (items, placeHolder) => {
+        const picker = window.createQuickPick<(typeof items)[number]>();
+        picker.placeholder = placeHolder;
+        picker.matchOnDescription = true;
+        picker.matchOnDetail = true;
+        picker.items = [...items];
+        return new Promise<(typeof items)[number] | undefined>((resolve) => {
+          const subscriptions = [
+            picker.onDidChangeValue((value) => {
+              picker.items = [...reopenItemsForQuery(items, value)];
+            }),
+            picker.onDidAccept(() => {
+              const chosen = picker.selectedItems[0] ?? picker.activeItems[0];
+              if (chosen !== undefined) { resolve(chosen); picker.hide(); }
+            }),
+            picker.onDidHide(() => {
+              resolve(undefined);
+              for (const subscription of subscriptions) subscription.dispose();
+              picker.dispose();
+            }),
+          ];
+          picker.show();
+        });
+      },
       info: (message) => { void window.showInformationMessage(message); },
       warning: (message) => { void window.showWarningMessage(message); },
       error: (message) => { void window.showErrorMessage(message); },
@@ -1273,7 +1270,7 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
       void window.showErrorMessage(message);
     }
   }
-  return { commandEndpointDirectory: commandEndpoint.directory, agentWorkspaceStorageRoot: context.globalStorageUri.fsPath };
+  return { commandEndpointDirectory: commandEndpoint.directory, delegationEndpointDirectory: delegationEndpoint.directory, agentWorkspaceStorageRoot: context.globalStorageUri.fsPath };
 }
 
 let activeSessionMonitor: SessionProcessMonitor | undefined;
@@ -1293,6 +1290,8 @@ export async function deactivate(): Promise<void> {
   // The published record names a port and a token that both die with the bridge.
   await commandEndpointRegistry?.clear().catch(() => undefined);
   commandEndpointRegistry = undefined;
+  await delegationEndpointRegistry?.clear().catch(() => undefined);
+  delegationEndpointRegistry = undefined;
   await activeWorkspaceOwnership?.release();
   activeWorkspaceOwnership = undefined;
 }

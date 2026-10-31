@@ -54,12 +54,15 @@ export default function (pi: ExtensionAPI) {
           const fields = [provider, thinking, model, `${colored}/${limit}/${formatTokens(total)}`];
           const available = Math.max(0, width);
           const useSecondRow = visibleWidth(`${location}  ${provider} ${model} ${thinking}  ${fields[3]}`) > available;
+          // Location has its own truncation budget: an overlong branch must not
+          // force otherwise fitting details off the other row.
+          const rowLocation = truncateToWidth(location, available, "…");
           const layout = () => {
             const modelFields = [fields[0], fields[2], fields[1]].filter(Boolean).join(" ");
             const details = [modelFields, fields[3]].filter(Boolean).join("  ");
-            const single = [location, details].filter(Boolean).join("  ");
+            const single = [rowLocation, details].filter(Boolean).join("  ");
             if (!useSecondRow || !details) return [single];
-            const lines = [location, modelFields];
+            const lines = [rowLocation, modelFields];
             if (fields[3]) {
               const row = visibleWidth(lines[0]) <= visibleWidth(lines[1]) ? 0 : 1;
               lines[row] = [lines[row], fields[3]].filter(Boolean).join("  ");
@@ -73,7 +76,7 @@ export default function (pi: ExtensionAPI) {
             fields[i] = "";
             lines = layout();
           }
-          return lines.map((line) => truncateToWidth(line, available));
+          return lines.map((line) => truncateToWidth(line, available, "…"));
         },
       };
     });

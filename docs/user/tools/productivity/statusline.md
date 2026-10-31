@@ -28,8 +28,10 @@ the full context window instead. Unknown usage remains uncolored.
 Outside Git, the branch parentheses are omitted. When the footer no longer fits on one
 line, provider, model, and thinking level move together onto a second line while the
 project/branch stays on the first. Context counters go on whichever row has more space
-available (the first row on a tie). If two lines still cannot fit, fields are removed
-in this order: provider, thinking level, model, context. Only then is the project/branch truncated.
+available (the first row on a tie). The project/branch is independently truncated to the
+available width using `…`, so a long branch never forces otherwise fitting details off the second row. If the details still cannot fit
+across two lines, fields are removed in this order: provider, thinking level, model, context.
+Context placement is recalculated after each removal.
 No costs, paths, or extension status rows are added.
 
 ```powershell
@@ -39,4 +41,6 @@ uv run harness install statusline --platform pi --scope user
 Restart Pi or run `/reload`. Use `--scope project` for a project-only installation.
 This is a Pi-only presentation extension; it does not change model settings or request
 inference. Install only one custom-footer extension at a time, since Pi has one footer
-slot. Verified against Pi 1.2.0's extension loader and footer component API.
+slot. Verified against Pi 1.2.0 and 1.4.0's extension loader and footer component API.
+The [upgrade checks](https://github.com/EmilienxD/harness/blob/main/tests/e2e/README.md#pi-140-upgrade-checks)
+cover live context thresholds, model/thinking changes, wrapping and reload without inference.

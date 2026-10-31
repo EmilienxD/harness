@@ -93,7 +93,23 @@ class ConfiguredLaunchFile implements LaunchFile {
   }
 }
 
-export function parseLaunchFile(text: string): ParsedLaunchFile {
+interface LaunchSelection { readonly platform?: AgentPlatformId; readonly type?: AgentType; readonly task?: DelegationTask; }
+
+function selectedSection(values: Record<string, unknown>, provider: AgentPlatformId, selection?: LaunchSelection): Record<string, unknown> {
+  if (!selection) return providerSection(values[provider], provider);
+  if (selection.platform !== provider) return {};
+  const section = providerSection(values[provider], provider);
+  const selected: Record<string, unknown> = { command: section.command };
+  if (selection.task) selected.delegations = { [selection.task]: object(section.delegations ?? {}, `providers.${provider}.delegations`)[selection.task] };
+  else if (selection.type === "interactive") selected.interactive = section.interactive;
+  else {
+    const group = ["explore", "address", "review"].includes(selection.type!) ? "autoRun" : "delegations";
+    selected[group] = { [selection.type!]: object(section[group] ?? {}, `providers.${provider}.${group}`)[selection.type!] };
+  }
+  return selected;
+}
+
+export function parseLaunchFile(text: string, selection?: LaunchSelection): ParsedLaunchFile {
   let parsed: unknown;
   try { parsed = JSON.parse(text) as unknown; }
   catch (error) { throw new LaunchFileError(`config.json contains invalid JSON: ${error instanceof Error ? error.message : "parse error"}`); }
@@ -105,12 +121,13 @@ export function parseLaunchFile(text: string): ParsedLaunchFile {
   }
   const autoRun = root.autoRun === undefined ? {} : object(root.autoRun, "config.json autoRun");
   const autoRunProvider = root.autoRun === undefined || autoRun.provider === undefined ? "claude" : platform(autoRun.provider, "config.json autoRun.provider");
+  if (selection && selection.platform === undefined) selection = { ...selection, platform: autoRunProvider };
   const providerValues = root.providers === undefined ? {} : object(root.providers, "config.json providers");
-  const session = sessionSettings(root.session);
-  const loop = loopSettings(root.loop);
-  const claude = parseClaudeLaunchFile(providerSection(providerValues.claude, "claude"));
-  const chatgpt = parseChatGptLaunchFile(providerSection(providerValues.chatgpt, "chatgpt"));
-  const pi = parsePiLaunchFile(providerSection(providerValues.pi, "pi"));
+  const session = sessionSettings(selection ? undefined : root.session);
+  const loop = loopSettings(selection ? undefined : root.loop);
+  const claude = parseClaudeLaunchFile(selectedSection(providerValues, "claude", selection));
+  const chatgpt = parseChatGptLaunchFile(selectedSection(providerValues, "chatgpt", selection));
+  const pi = parsePiLaunchFile(selectedSection(providerValues, "pi", selection));
   const unknownFields = [
     // `grill` belongs to the grill-me-in-cloud hook, which shares this file.
     ...Object.keys(root).filter((field) => !["version", "autoRun", "providers", "session", "loop", "grill"].includes(field)),
@@ -130,11 +147,15 @@ export function parseLaunchFile(text: string): ParsedLaunchFile {
   const diagnostics = unknownFields.length === 0
     ? []
     : [{ severity: "warning" as const, message: `config.json ignores unsupported fields: ${unknownFields.join(", ")}` }];
+  if (selection) {
+    try { diagnostics.push(...parseLaunchFile(text).diagnostics); }
+    catch (error) { diagnostics.push({ severity: "warning", message: `Unused configuration: ${error instanceof Error ? error.message : String(error)}` }); }
+  }
   return { value, diagnostics };
 }
 
-export async function readLaunchFile(path: string): Promise<ParsedLaunchFile> {
-  try { return parseLaunchFile(await readFile(path, "utf8")); }
+export async function readLaunchFile(path: string, selection?: LaunchSelection): Promise<ParsedLaunchFile> {
+  try { return parseLaunchFile(await readFile(path, "utf8"), selection); }
   catch (error) {
     if (error instanceof LaunchFileError) throw error;
     throw new LaunchFileError(`Unable to read config.json: ${error instanceof Error ? error.message : "unknown error"}`, error);
@@ -165,23 +186,23 @@ export class FileLaunchConfigurationSource implements DelegationConfigurationSou
       : path;
   }
 
-  public async load(): Promise<ParsedLaunchFile> {
+  public async load(selection?: LaunchSelection): Promise<ParsedLaunchFile> {
     for (const path of [this.#paths.project, this.#paths.global]) {
-      try { return await readLaunchFile(path); }
+      try { return await readLaunchFile(path, selection); }
       catch (error) { if (!missing(error)) throw error; }
     }
-    return this.#paths.defaults === undefined ? defaultLaunchFile() : parseLaunchFile(this.#paths.defaults);
+    return this.#paths.defaults === undefined ? defaultLaunchFile() : parseLaunchFile(this.#paths.defaults, selection);
   }
   public async get(type: AgentType): Promise<ConfiguredLaunch> {
-    const value = (await this.load()).value;
+    const value = (await this.load({ type })).value;
     return value.configurationFor(value.autoRunProvider, type);
   }
 
   public async getFor(platform: AgentPlatformId, type: AgentType): Promise<ConfiguredLaunch> {
-    return (await this.load()).value.configurationFor(platform, type);
+    return (await this.load({ platform, type })).value.configurationFor(platform, type);
   }
   public async getDelegationFor(platform: AgentPlatformId, task: DelegationTask): Promise<ConfiguredLaunch> {
-    return (await this.load()).value.delegationConfigurationFor(platform, task);
+    return (await this.load({ platform, task })).value.delegationConfigurationFor(platform, task);
   }
   public async getForWorktree(platform: AgentPlatformId, type: AgentType, cwd: string): Promise<ConfiguredLaunch> {
     return (await this.#forCheckout(cwd)).getFor(platform, type);

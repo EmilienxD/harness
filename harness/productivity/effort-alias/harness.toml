@@ -1,0 +1,21 @@
+name = "effort-alias"
+version = "1.0.0"
+description = "Alias Pi's /thinking command as /effort to set session reasoning effort"
+docs = "https://github.com/EmilienxD/harness/blob/main/README.md#effort-alias"
+
+[platforms.claude]
+status = "unsupported"
+reason = "Adds an alias for Pi's native thinking command only."
+
+[platforms.chatgpt]
+status = "unsupported"
+reason = "Adds an alias for Pi's native thinking command only."
+
+[platforms.pi]
+status = "supported"
+
+[[files]]
+src = "pi/extension.ts"
+dest = ".harness-effort-alias/index.ts"
+root = "extensions"
+platforms = ["pi"]

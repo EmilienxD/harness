@@ -57,7 +57,7 @@ export interface AgentPlatform {
   requireEnforceableRestrictions(restrictions: LaunchRestrictions): void;
   planLaunch(request: PlatformLaunchRequest): PlatformLaunchPlan;
   planSessionResume(request: PlatformResumeRequest): PlatformLaunchPlan;
-  preflight(plan: PlatformLaunchPlan): Promise<void>;
+  preflight(plan: PlatformLaunchPlan, context?: Parameters<import("./preflight.js").CommandRunner>[3]): Promise<void>;
   isResumable(sessionId: SessionId, cwd: string, command?: readonly string[]): Promise<boolean>;
 }
 

@@ -13,6 +13,7 @@ Install a package from the Harness catalogue, or run `harness install <package>`
 | [`clear-alias`](productivity/clear-alias.md) | Pi | Alias Pi's /new command as /clear to start a fresh session |
 | [`copy-all`](productivity/copy-all.md) | Pi | Copy the current Pi conversation's user and assistant messages to the clipboard |
 | [`decisions`](productivity/decisions.md) | Claude Code, ChatGPT, Pi | Surfaces important decisions from the current work where confidence remains low |
+| [`effort-alias`](productivity/effort-alias.md) | Pi | Set session thinking effort with /effort, or pick a model-supported level |
 | [`enable-desktop-notification`](productivity/enable-desktop-notification.md) | Claude Code, ChatGPT, Pi | Enable desktop notifications for final responses in the current session without a model call |
 | [`environment-context`](productivity/environment-context.md) | Pi | Add OS, fixed session-start time, and compact Git status with full file counts to Pi context |
 | [`file-mentions`](productivity/file-mentions.md) | Pi | Automatically include @referenced text files and bounded folder listings in Pi prompts |
@@ -25,6 +26,7 @@ Install a package from the Harness catalogue, or run `harness install <package>`
 | [`setup-command-aliases`](productivity/setup-command-aliases.md) | Claude Code, ChatGPT, Pi | Add or modify cross-platform shell command aliases (PowerShell, Bash, Zsh) |
 | [`setup-text-replacements`](productivity/setup-text-replacements.md) | Claude Code, ChatGPT, Pi | Add or change always-on AutoHotkey text replacements (Windows only) |
 | [`statusline`](productivity/statusline.md) | Pi | Minimal Pi footer with project, branch, provider, model, thinking level, and context usage |
+| [`turn-timer`](productivity/turn-timer.md) | Pi | Elapsed time since the latest user input beside the Working label |
 | [`stop-overthinking`](productivity/stop-overthinking.md) | Claude Code, ChatGPT, Pi | Stops overthinking and gives a short, practical decision |
 | [`subagents`](productivity/subagents.md) | Claude Code, ChatGPT, Pi | Persistent conversation delegation with mode-preserving resume |
 | [`todo-hitl`](productivity/todo-hitl.md) | Claude Code, ChatGPT, Pi | Mark deferred code work for human review and address it deliberately |

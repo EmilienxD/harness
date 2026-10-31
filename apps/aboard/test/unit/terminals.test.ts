@@ -256,6 +256,8 @@ test("creates one real-terminal record with the complete aboard environment", ()
   assert.deepEqual(environment, {
     ABOARD_BRIDGE_PORT: "4932",
     ABOARD_BRIDGE_TOKEN: "secret",
+    HARNESS_BRIDGE_PORT: "4932",
+    HARNESS_BRIDGE_TOKEN: "secret",
     ABOARD_AGENT_ID: "agent-6",
     ABOARD_SESSION_ID: "4db0ed4c-5d9e-4ab5-a493-2b8575ab19ee",
     ABOARD_AGENT_TYPE: "address",

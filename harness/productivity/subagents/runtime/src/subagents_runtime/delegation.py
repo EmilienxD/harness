@@ -333,6 +333,15 @@ def _finish_launch(request, request_id, execution_id, child_id, number, cwd, pat
 
 
 def _fail_request(path, request_id, execution_id, child_id, exc, session_id):
+    from subagents_runtime.reply_support import ReplySupportUnavailable
+
+    if isinstance(exc, ReplySupportUnavailable):
+        # Keep process ownership intact: lack of reply support is not proof that
+        # the provider exited and must never authorize a duplicate launch.
+        report_child_stop(child_id, "", success=False, reason=str(exc), cancelled=True, execution_id=execution_id)
+        path.unlink(missing_ok=True)
+        path.with_name(path.name + ".running").unlink(missing_ok=True)
+        return ProcessResult(path, "failed", request_id, child_id, str(exc))
     sessions = _sessions_module()
     claimed = path.with_name(path.name + ".running")
     with sessions._connect() as connection:
@@ -687,7 +696,8 @@ def _process_inbox(
                             raise RequestFileError("Release the previous wait before resuming an idle implementer")
                         if fork:
                             backend = connection.execute("SELECT backend FROM executions WHERE session_id=? AND superseded_at IS NULL AND state IN ('running','starting','uncertain','prepared')", (child_id,)).fetchone()
-                            if not backend or backend[0] != "aboard":
+                            from subagents_runtime.backends import supports_live_continuation
+                            if not backend or not supports_live_continuation(backend[0]):
                                 raise RequestFileError("Standalone implementer terminal is still open; close it before resuming, or launch a fresh implementer")
                         try:
                             connection.execute("UPDATE loop_sessions SET active=1,released_at=NULL WHERE session_id=?", (child_id,))
@@ -984,7 +994,7 @@ def claim_instructions(
     lead: bool | None = None,
     session_start: bool = False,
 ) -> str | None:
-    """Replay context until acknowledged; refresh it on session start or compaction."""
+    """Replay Lead context for loop sessions; toolkit activation is explicit."""
     sessions = _sessions_module()
     with sessions._connect() as connection:
         connection.execute("BEGIN IMMEDIATE")
@@ -993,6 +1003,8 @@ def claim_instructions(
                 "SELECT 1 FROM requests WHERE parent_session_id=? AND task='loop' LIMIT 1",
                 (session_id,),
             ).fetchone() is not None
+        if not lead:
+            return None
         row = connection.execute(
             "SELECT inbox,context_epoch,injected_epoch,claim_sequence,acknowledgement_sequence FROM session_delegation WHERE parent_session_id=?",
             (session_id,),
@@ -1015,35 +1027,7 @@ def claim_instructions(
                 "UPDATE session_delegation SET injected_epoch=?,claim_sequence=?,acknowledgement_sequence=NULL WHERE parent_session_id=?",
                 (epoch, sequence, session_id),
             )
-        if not session_start:
-            cwd, provider = connection.execute("SELECT cwd,provider FROM sessions WHERE id=?", (session_id,)).fetchone()
-    if session_start:
-        text = session_start_instructions(inbox)
-        return f"{text}\n\n{lead_instructions(session_id, inbox)}" if lead else text
-    if lead:
-        return lead_instructions(session_id, inbox)
-    return delegation_instructions(inbox, Path(cwd), provider)
-
-
-def session_start_instructions(inbox: str | Path) -> str:
-    return (
-        "This session manages subagents via the subagents-toolkit skill. "
-        "If at any time you end up working with this tool, "
-        f"this is your assigned inbox `{inbox}`."
-    )
-
-
-def delegation_instructions(inbox: str | Path, cwd: Path, provider: str) -> str:
-    return (
-        f"Conversation inbox: {inbox}\n"
-        "Publish each complete request as a .md file in this inbox using any file-writing tool. "
-        "For multi-step writes, write a temporary file and rename it to .md when complete. "
-        "The runtime scans after tools and before stopping; confirm its launch acknowledgement before reporting a child as started.\n"
-        "Set skill only when the user explicitly requests that skill by name; otherwise omit it. "
-        "A missing requested skill fails the launch.\n"
-        "Invoke the subagents-toolkit skill before launching or continuing a subagent "
-        "if its instructions are not already in the current context.\n"
-    )
+    return lead_instructions(session_id, inbox)
 
 
 def _plural(total: int, singular: str, plural: str) -> str:

@@ -67,6 +67,17 @@ test("publishes a readable record outside any workspace and clears it again", as
   await registry.clear();
 });
 
+test("the delegation protocol publishes without granting command authority", async () => {
+  const registry = new FileCommandEndpointRegistry({ directory: await directory() });
+  const { commandToken: _commandToken, ...delegation } = record();
+  const path = await registry.publish(delegation);
+  const saved = JSON.parse(await readFile(path, "utf8")) as Record<string, unknown>;
+  assert.equal(saved.delegationToken, "delegation-token");
+  assert.equal("commandToken" in saved, false);
+  await registry.clear();
+  assert.deepEqual(await readdir(registry.directory), []);
+});
+
 test("a window that reopens replaces its own record rather than adding one", async () => {
   const registry = new FileCommandEndpointRegistry({ directory: await directory() });
 

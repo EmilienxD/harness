@@ -11,7 +11,6 @@ from typing import Any
 
 from subagents_runtime import sessions
 from subagents_runtime.messages import runtime_message
-from subagents_runtime.roles import find_skill
 from subagents_runtime.previous_message import PreviousMessageError, read_previous_message
 from subagents_runtime.delegation import (
     arm_reply,
@@ -19,7 +18,6 @@ from subagents_runtime.delegation import (
     claim_parent_delivery,
     clear_reply_authorization,
     enable_delegation,
-    ensure_inbox,
     lead_instructions,
     observe_parent_event,
     scan_inbox,
@@ -56,9 +54,9 @@ def _context(event: str, text: str) -> dict[str, Any]:
 
 
 def _skill_instructions(session_id: str, skill: str) -> str | None:
-    inbox = enable_delegation(session_id, skill).inbox
     if skill != "ship":
-        return claim_instructions(session_id, lead=False)
+        return None
+    inbox = enable_delegation(session_id, skill).inbox
     # Every /ship invocation restates the Lead identity, even when already injected.
     return claim_instructions(session_id, lead=True) or lead_instructions(session_id, inbox)
 
@@ -209,12 +207,11 @@ def handle(
         from subagents_runtime.processes import confirm_startup
 
         confirm_startup(execution_id)
+    if event in {"SessionStart", "UserPromptSubmit"}:
+        from subagents_runtime.reply_support import acknowledge
+
+        acknowledge(cwd, selected_provider)
     if event == "SessionStart":
-        toolkit_installed = find_skill(
-            _role_directory(session_id), selected_provider, "subagents-toolkit"
-        ) is not None
-        if toolkit_installed:
-            ensure_inbox(session_id)
         recovered = []
         with sessions._connect() as connection:
             enabled = connection.execute(
@@ -232,11 +229,9 @@ def handle(
                 ).fetchall()
             for (child_id,) in children:
                 live_executions(child_id)
-        instructions = None
-        if toolkit_installed:
-            instructions = claim_instructions(
-                session_id, compact=payload.get("source") == "compact", session_start=True
-            )
+        instructions = claim_instructions(
+            session_id, compact=payload.get("source") == "compact", session_start=True
+        )
         delivery = claim_parent_delivery(session_id, event)
         text = "\n\n".join(
             item
@@ -260,13 +255,7 @@ def handle(
         if skill:
             if skill == "reply-to-agent":
                 arm_reply(session_id, execution_id)
-                context = (
-                    "Reply armed. The next successful Stop will be sent to the parent."
-                )
-                return _context(
-                    event,
-                    context if delivery is None else f"{delivery.text}\n\n{context}",
-                )
+                return _context(event, delivery.text) if delivery else None
             instructions = _skill_instructions(session_id, skill)
             text = "\n\n".join(
                 item
@@ -411,6 +400,10 @@ def failure_output(event: str, reason: str) -> dict[str, Any]:
 
 
 def main() -> int:
+    if sys.argv[1:] == ["--enable-inbox"]:
+        from subagents_runtime.inbox_activation import main as activate
+
+        return activate()
     provider = provider_from_argv(sys.argv[1:])
     if provider == "pi":
         from subagents_runtime.pi_bridge import main as pi_main

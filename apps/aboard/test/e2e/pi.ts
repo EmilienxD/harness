@@ -150,7 +150,8 @@ export async function runPiSmoke(): Promise<void> {
     const parentId = randomUUID();
     const stateDirectory = join(fixture.root, "delegation-state");
     const environment = { ...fixture.workspace.env, PYTHONPATH: runtimeSource, HARNESS_STATE_DIR: stateDirectory,
-      UV_PYTHON: python, ABOARD_BRIDGE_PORT: String((bridge.address() as AddressInfo).port), ABOARD_BRIDGE_TOKEN: "fixture-bridge" };
+      UV_PYTHON: python, ABOARD_BRIDGE_PORT: String((bridge.address() as AddressInfo).port), ABOARD_BRIDGE_TOKEN: "fixture-bridge",
+      HARNESS_BRIDGE_PORT: String((bridge.address() as AddressInfo).port), HARNESS_BRIDGE_TOKEN: "fixture-bridge" };
     const runPython = async (script: string) => {
       const result = await promisify(execFile)(python, ["-c", script], { cwd: fixture.workspace.projectRoot, env: environment, windowsHide: true, timeout: 60_000 });
       return JSON.parse(result.stdout) as Record<string, any>;
@@ -174,7 +175,7 @@ export async function runPiSmoke(): Promise<void> {
       "import json", "from pathlib import Path", "from subagents_runtime import sessions",
       "from subagents_runtime.delegation import ensure_inbox,process_inbox,claim_parent_delivery,acknowledge_parent_delivery",
       `parent=${JSON.stringify(parentId)}`, "sessions.register_observed(parent,Path.cwd(),'pi')", "inbox=ensure_inbox(parent).inbox",
-      "(inbox/'request.md').write_text('---\\ntask: general\\nprovider: pi\\nmode: auto\\n---\\nABOARD_PI_JOURNEY',encoding='utf-8')",
+      "(inbox/'request.md').write_text('---\\nprovider: pi\\nmode: auto\\n---\\nABOARD_PI_JOURNEY',encoding='utf-8')",
       "results=process_inbox(parent,launch=sessions.launch_delegated)",
       "with sessions._connect() as db:",
       " row=db.execute('SELECT r.state,r.child_session_id,s.provider_session_id,r.reply,e.state FROM requests r JOIN sessions s ON s.id=r.child_session_id JOIN executions e ON e.request_id=r.id').fetchone()",
@@ -216,7 +217,7 @@ export async function runPiSmoke(): Promise<void> {
     const unarmed = await runPython([
       "import json", "from subagents_runtime import sessions", "from subagents_runtime.delegation import ensure_inbox,process_inbox",
       `parent=${JSON.stringify(parentId)}`, "inbox=ensure_inbox(parent).inbox",
-      "(inbox/'interactive.md').write_text('---\\ntask: general\\nprovider: pi\\nmode: interactive\\n---\\nABOARD_PI_JOURNEY',encoding='utf-8')",
+      "(inbox/'interactive.md').write_text('---\\nprovider: pi\\nmode: interactive\\n---\\nABOARD_PI_JOURNEY',encoding='utf-8')",
       "results=process_inbox(parent,launch=sessions.launch_delegated)",
       "with sessions._connect() as db:", " state=db.execute(\"SELECT state FROM requests WHERE mode='interactive'\").fetchone()[0]",
       "print(json.dumps({'state':state}))",

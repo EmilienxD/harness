@@ -10,7 +10,7 @@ import tomllib
 
 import pytest
 
-from subagents_runtime import sessions
+from subagents_runtime import sessions, bridge_backend
 from subagents_runtime.cli import main
 
 
@@ -53,9 +53,9 @@ def test_loop_cli_launches_visible_child_in_worktree_and_refuses_duplicate(provi
     monkeypatch.setenv("HARNESS_STATE_DIR", str(state))
     monkeypatch.setenv("CODEX_HOME", str(tmp_path / "codex"))
     monkeypatch.setenv("HARNESS_SESSION_ID", "lead")
-    monkeypatch.delenv("ABOARD_BRIDGE_PORT", raising=False)
-    monkeypatch.delenv("ABOARD_BRIDGE_TOKEN", raising=False)
-    monkeypatch.setattr(sessions, "_endpoint_directory", lambda: tmp_path / "no-endpoints")
+    monkeypatch.delenv("HARNESS_BRIDGE_PORT", raising=False)
+    monkeypatch.delenv("HARNESS_BRIDGE_TOKEN", raising=False)
+    monkeypatch.setattr(bridge_backend, "endpoint_directory", lambda: tmp_path / "no-endpoints")
     sessions.register_observed("lead", tmp_path, provider)
     worktree = tmp_path / "feature"
     (worktree / ".harness").mkdir(parents=True)
@@ -128,8 +128,8 @@ def test_codex_trust_preserves_unrelated_configuration_and_is_idempotent(tmp_pat
 def test_loop_uses_initialized_aboard_window_for_a_registered_sibling_worktree(tmp_path, monkeypatch):
     from subagents_runtime.loop import launch
     monkeypatch.setenv("HARNESS_STATE_DIR", str(tmp_path / "state"))
-    monkeypatch.delenv("ABOARD_BRIDGE_PORT", raising=False)
-    monkeypatch.delenv("ABOARD_BRIDGE_TOKEN", raising=False)
+    monkeypatch.delenv("HARNESS_BRIDGE_PORT", raising=False)
+    monkeypatch.delenv("HARNESS_BRIDGE_TOKEN", raising=False)
     root = tmp_path / "project"
     worktree = tmp_path / "feature"
     subprocess.run(["git", "init", str(root)], check=True, capture_output=True)
@@ -141,14 +141,14 @@ def test_loop_uses_initialized_aboard_window_for_a_registered_sibling_worktree(t
         "version": 2, "host": "127.0.0.1", "port": 4823, "delegationToken": "scoped",
         "workspaceRoot": str(root), "pid": os.getpid(), "activatedAt": "2026-09-30T00:00:00Z",
     }), encoding="utf-8")
-    monkeypatch.setattr(sessions, "_endpoint_directory", lambda: endpoints)
+    monkeypatch.setattr(bridge_backend, "endpoint_directory", lambda: endpoints)
     observed = []
 
     def urlopen(request, timeout):
         observed.append(json.loads(request.data))
         return io.BytesIO(b'{"sessionId":"provider-child","agentId":"agent-1","terminalId":"visible"}')
 
-    monkeypatch.setattr(sessions.urllib.request, "urlopen", urlopen)
+    monkeypatch.setattr(bridge_backend.urllib.request, "urlopen", urlopen)
     sessions.register_observed("lead", root, "claude")
     prompt = tmp_path / "prompt.md"
     prompt.write_text("Read the feature criteria.", encoding="utf-8")
@@ -160,4 +160,4 @@ def test_loop_uses_initialized_aboard_window_for_a_registered_sibling_worktree(t
     assert observed[0]["difficulty"] == "basic"
     assert observed[0]["cwd"] == str(worktree.resolve())
     assert observed[0]["harnessSessionId"] == result["session_id"]
-    assert sessions._discover_delegation_endpoint(worktree) is None
+    assert bridge_backend.discover(worktree) is None

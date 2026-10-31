@@ -5,7 +5,6 @@ import { requestCommand } from "../../harness/pi-transport/transport.ts";
 const COMMAND = ["harness-subagents-hook", "--pi"];
 const RESULT = "harness-subagents-result";
 const NOTICE = "harness-subagents-notice";
-const SECTION = "harness-subagents";
 const PREVIOUS = "reply-to-agent-with-previous-message";
 const FAILED_STOPS = new Set(["error", "aborted", "length"]);
 const MARKER_POLL_MS = 500;
@@ -15,8 +14,6 @@ const DATABASE_POLL_MS = 30_000;
 type State = {
   harnessSessionId: string;
   delegatedMode: string | null;
-  inbox: string | null;
-  instructions: string | null;
   marker: string;
   stopWaitMs: number;
 };
@@ -63,6 +60,7 @@ export default function (pi: any): void {
     controller = new AbortController();
     stopWatching();
     state = undefined;
+    delete process.env.HARNESS_PI_SESSION_ID;
     context = undefined;
     inFlight = undefined;
     wake?.();
@@ -143,9 +141,11 @@ export default function (pi: any): void {
       if (signal.aborted) return;
       state = {
         harnessSessionId: result.harnessSessionId, delegatedMode: result.delegatedMode ?? null,
-        inbox: result.inbox ?? null, instructions: result.instructions ?? null, marker: result.marker,
+        marker: result.marker,
         stopWaitMs: Math.max(0, Number(result.stopWaitSeconds ?? 86_400)) * 1000,
       };
+      process.env.HARNESS_PI_SESSION_ID = ctx.sessionManager.getSessionId();
+      process.env.HARNESS_PROVIDER = "pi";
       context = ctx;
       stamp = "";
       await markerChanged();
@@ -168,11 +168,6 @@ export default function (pi: any): void {
     } catch {
       // Recovery runs again on the next start; shutdown must not be blocked by bookkeeping.
     }
-  });
-
-  pi.on("before_agent_start", (event: any) => {
-    // One stable section keeps the provider prompt cache intact and survives compaction.
-    if (state?.instructions) event.systemPromptOptions.sections[SECTION] = state.instructions;
   });
 
   const previousReply = async (ctx: any) => {
@@ -208,7 +203,7 @@ export default function (pi: any): void {
   });
 
   pi.on("tool_result", async (event: any, ctx: any) => {
-    if (!state?.inbox) return;
+    if (!state) return;
     let text: string;
     try {
       const result = await call("inbox_scan", ctx, {}, 120_000);

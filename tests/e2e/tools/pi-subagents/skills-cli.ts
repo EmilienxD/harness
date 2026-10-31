@@ -7,7 +7,7 @@ async function main() {
     assert.equal(result.parentStatus, "success");
     assert.equal(result.request.state, skill === "missing" ? "failed" : "succeeded");
     assert.equal(result.childSessionSaved, skill !== "missing");
-    assert.equal(result.inferenceRequests, skill === "missing" ? 3 : skill === "found" ? 5 : 4);
+    assert.equal(result.inferenceRequests, skill === "missing" ? 4 : skill === "found" ? 6 : 5);
     assert.equal(result.unexpectedRequests, 0);
     assert.equal(result.requestFilesRemaining, 0);
     console.log(`subagents pi ${skill} E2E passed (${result.inferenceRequests} inference requests; upstream forbidden)`);

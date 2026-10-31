@@ -41,7 +41,7 @@ test("interactive bridge completion is published only by its terminal driver", a
 test("automatic Codex SessionEnd cannot discard the supervisor's successful reply", { timeout: 180_000 }, async () => {
   const result = await runSubagentsJourney("chatgpt", "auto", false, false, { shutdownBeforeResult: true });
   assert.equal(result.shutdownsBeforeResult, 2);
-  assert.equal(result.inferenceRequests, 5);
+  assert.equal(result.inferenceRequests, 6);
   assert.deepEqual(result.completedClis, ["child", "parent"]);
   assert.equal(result.requestFilesRemaining, 0);
   assert.equal(result.unexpectedRequests, 0);
@@ -95,7 +95,7 @@ for (const platform of ["claude", "chatgpt"] as const) {
  for (const mode of ["interactive","auto"] as const) {
   test(`subagents delegates and explicitly replies through real ${platform} ${mode} CLIs`, { timeout: 180_000 }, async () => {
     const result = await runSubagentsJourney(platform,mode);
-    assert.deepEqual(result.checkpoints.filter((item) => item !== "parent-waiting").sort(), ["child-complete", ...(mode === "interactive" ? ["child-reply-armed", "child-resume-reply-armed"] : []), "child-resume-complete", "parent-received-reply", "parent-request-write"].sort());
+    assert.deepEqual(result.checkpoints.filter((item) => item !== "parent-waiting").sort(), ["child-complete", ...(mode === "interactive" ? ["child-reply-armed", "child-resume-reply-armed"] : []), "child-resume-complete", "parent-inbox-enable", "parent-received-reply", "parent-request-write"].sort());
     assert.deepEqual(result.completedClis, ["child", "parent"]);
     assert.equal(result.requestFilesRemaining, 0);
     assert.equal(result.unexpectedRequests, 0);

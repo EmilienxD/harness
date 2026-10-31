@@ -53,7 +53,7 @@ def test_stop_wait_uses_the_provider_neutral_session_setting(tmp_path: Path, mon
 @pytest.mark.parametrize("launcher", [
     "subagents-toolkit",
 ])
-def test_direct_ask_skill_opens_an_unpredictable_task_bound_inbox(
+def test_direct_ask_skill_requires_explicit_inbox_activation(
     launcher: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     parent = configured(tmp_path, monkeypatch)
@@ -65,16 +65,12 @@ def test_direct_ask_skill_opens_an_unpredictable_task_bound_inbox(
         "cwd": str(tmp_path),
     })
 
-    assert output is not None
-    context = output["hookSpecificOutput"]["additionalContext"]
+    assert output is None
     connection = sqlite3.connect(tmp_path / "state" / "sessions.sqlite3")
     try:
-        selected_parent, inbox = connection.execute("SELECT parent_session_id, inbox FROM session_delegation").fetchone()
+        assert connection.execute("SELECT parent_session_id, inbox FROM session_delegation").fetchone() is None
     finally:
         connection.close()
-    assert selected_parent == parent
-    assert parent not in inbox
-    assert Path(inbox).is_relative_to(tmp_path / "state")
 
 
 def test_existing_provider_session_is_registered_by_the_user_invocation_hook(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -84,7 +80,7 @@ def test_existing_provider_session_is_registered_by_the_user_invocation_hook(tmp
         "prompt": "$subagents-toolkit", "cwd": str(tmp_path),
     }, provider="chatgpt")
 
-    assert output is not None
+    assert output is None
     connection = sqlite3.connect(tmp_path / "state" / "sessions.sqlite3")
     try:
         assert connection.execute("SELECT provider, cwd FROM sessions WHERE id = 'existing-codex-session'").fetchone() == ("chatgpt", str(tmp_path.resolve()))
@@ -119,9 +115,10 @@ def test_ask_skill_invocation_after_prose_opens_its_grant(
         "cwd": str(tmp_path),
     }, provider=provider)
 
-    assert output is not None
+    assert (output is not None) == (expected_skill == "ship")
     with sqlite3.connect(tmp_path / "state" / "sessions.sqlite3") as connection:
-        assert connection.execute("SELECT parent_session_id FROM session_delegation").fetchone() == (f"existing-{provider}-session",)
+        expected = (f"existing-{provider}-session",) if expected_skill == "ship" else None
+        assert connection.execute("SELECT parent_session_id FROM session_delegation").fetchone() == expected
 
 
 @pytest.mark.parametrize("provider", ["claude", "chatgpt"])
@@ -198,7 +195,7 @@ def test_codex_apply_patch_alias_can_launch_multiple_exact_files(tmp_path: Path,
     output = hooks.handle({
         "session_id": parent, "hook_event_name": "UserPromptSubmit", "prompt": "$subagents-toolkit", "cwd": str(tmp_path),
     }, provider="chatgpt")
-    assert output is not None
+    assert output is None
     inbox = __import__("subagents_runtime.delegation",fromlist=["enable_delegation"]).enable_delegation(parent,"subagents-toolkit").inbox
     paths = [inbox / "one.md", inbox / "two.md"]
     for index, path in enumerate(paths, 1):
@@ -221,7 +218,7 @@ def test_structured_request_launch_keeps_the_original_parent_cwd(tmp_path: Path,
     output = hooks.handle({
         "session_id": parent, "hook_event_name": "UserPromptSubmit", "prompt": "/subagents-toolkit", "cwd": str(project),
     })
-    assert output is not None
+    assert output is None
     inbox = __import__("subagents_runtime.delegation",fromlist=["enable_delegation"]).enable_delegation(parent,"subagents-toolkit").inbox
     request = inbox / "child.md"
     request.write_text("---\nmode: auto\n---\n\nDo it.\n", encoding="utf-8")
@@ -245,7 +242,7 @@ def test_chatgpt_stop_delivery_wakes_the_waiting_parent(tmp_path: Path, monkeypa
     output = hooks.handle({
         "session_id": parent, "hook_event_name": "UserPromptSubmit", "prompt": "/subagents-toolkit", "cwd": str(tmp_path),
     })
-    assert output is not None
+    assert output is None
     inbox = __import__("subagents_runtime.delegation",fromlist=["enable_delegation"]).enable_delegation(parent,"subagents-toolkit").inbox
     request = inbox / "child.md"
     request.write_text("---\nmode: auto\n---\n\nDo it.\n", encoding="utf-8")
@@ -271,7 +268,7 @@ def test_chatgpt_stop_delivery_wakes_the_waiting_parent(tmp_path: Path, monkeypa
 def test_clarification_stop_keeps_an_unused_grant_open(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     parent = configured(tmp_path, monkeypatch)
     output = hooks.handle({"session_id": parent, "hook_event_name": "UserPromptSubmit", "prompt": "/subagents-toolkit", "cwd": str(tmp_path)})
-    assert output is not None
+    assert output is None
     inbox = __import__("subagents_runtime.delegation",fromlist=["enable_delegation"]).enable_delegation(parent,"subagents-toolkit").inbox
 
     assert hooks.handle({"session_id": parent, "hook_event_name": "Stop", "cwd": str(tmp_path), "last_assistant_message": "done"}) is None
@@ -303,6 +300,6 @@ def test_grant_uses_the_registered_session_cwd_after_parent_changes_directory(tm
         "cwd": str(later),
     })
 
-    assert output is not None
+    assert output is None
     inbox = __import__("subagents_runtime.delegation",fromlist=["enable_delegation"]).enable_delegation(parent,"subagents-toolkit").inbox
     assert inbox.is_relative_to(original / "state")

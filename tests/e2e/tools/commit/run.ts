@@ -60,6 +60,7 @@ export async function runCommitJourney(writeTool: "Edit" | "Write" = "Edit"): Pr
         ANTHROPIC_AUTH_TOKEN: server.authToken,
         CLAUDE_CONFIG_DIR: config,
         CLAUDE_PROJECT_DIR: project,
+        HARNESS_STATE_DIR: join(root, "state"),
         DISABLE_UPDATES: "1",
         NO_PROXY: "127.0.0.1,localhost",
       }),
@@ -74,7 +75,7 @@ export async function runCommitJourney(writeTool: "Edit" | "Write" = "Edit"): Pr
       session_id: sessionId,
       transcript_path: "",
     });
-    const hookResult = await runHook(python, hook, project, payload);
+    const hookResult = await runHook(python, hook, project, payload, join(root, "state"));
     if (hookResult.code !== 2) {
       throw new Error(`commit hook returned ${hookResult.code ?? "no exit code"}; expected the handled-prompt exit code 2`);
     }
@@ -99,10 +100,12 @@ async function runHook(
   hook: string,
   cwd: string,
   payload: string,
+  state: string,
 ): Promise<{ readonly code: number | null; readonly stderr: string }> {
   return await new Promise((resolvePromise, rejectPromise) => {
     const child = spawn(python, [hook], {
       cwd,
+      env: { ...process.env, HARNESS_STATE_DIR: state },
       stdio: ["pipe", "ignore", "pipe"],
       windowsHide: true,
     });

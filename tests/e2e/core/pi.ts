@@ -75,8 +75,12 @@ export async function preparePiWorkspace(root: string, baseUrl: string, token: s
 
 export async function validatePiCli(workspace: PiWorkspace): Promise<string> {
   const version = await cliOutput(["--version"], workspace);
-  // This transport is certified against the mirrored 1.2 API, not untested future major/minor releases.
-  if (!/^1\.2\.\d+$/u.test(version.trim())) throw new Error("Pi CLI 1.2.x is required by the deterministic E2E adapter");
+  // Accept stable 1.x releases from the integration baseline onward. Required flags
+  // and real journeys check compatibility; a new minor version alone is not a failure.
+  const release = /^(\d+)\.(\d+)\.(\d+)$/u.exec(version.trim());
+  if (!release || Number(release[1]) !== 1 || Number(release[2]) < 2) {
+    throw new Error("Pi CLI >=1.2.0 and <2.0.0 (stable releases) is required by the deterministic E2E adapter");
+  }
   const help = await cliOutput(["--help"], workspace);
   const required = ["--mode", "--offline", "--approve", "--session-dir", "--session-id", "--no-mcp"];
   if (required.some((flag) => !help.includes(flag))) throw new Error("Pi CLI protocol mismatch: required headless/isolation flags are missing");
@@ -143,9 +147,9 @@ export class PiRpcClient {
     this.#child.stderr.resume();
     this.#child.stdin.on("error", () => this.#fail(new Error("Pi RPC stdin closed before submission")));
     this.#child.once("error", () => this.#fail(new Error("Pi RPC could not start the real CLI")));
-    this.#closed = new Promise((resolve) => this.#child.once("close", () => {
+    this.#closed = new Promise((resolve) => this.#child.once("close", (code, signal) => {
       clearTimeout(this.#deadline);
-      this.#failure ??= new Error("Pi RPC process exited before the expected record");
+      this.#failure ??= new Error(`Pi RPC process exited before the expected record (code=${code}, signal=${signal}, records=${this.#events.length})`);
       for (const waiter of this.#waiters) waiter.reject(this.#failure);
       this.#waiters.clear();
       resolve();

@@ -55,7 +55,7 @@ export async function runSubagentsRecoveryJourney(platform: Platform): Promise<S
 }
 
 export async function runSubagentsRootJourney(platform: Platform): Promise<SubagentsJourneyResult> {
-  return runSubagentsJourney(platform, "auto", false, true);
+  return runSubagentsJourney(platform, "interactive", false, true);
 }
 
 export async function runSubagentsJourney(platform: Platform, mode: "interactive" | "auto" = "interactive", recovery = false, alternateRoot = false, options: { shutdownBeforeResult?: boolean; stopFallback?: boolean; failedWrite?: boolean; skill?: SkillSelection } = {}): Promise<SubagentsJourneyResult> {
@@ -80,6 +80,11 @@ export async function runSubagentsJourney(platform: Platform, mode: "interactive
     const runtimeSource = join(root, "runtime", "src");
     await mkdir(projectRoot, { recursive: true });
     await cp(join(packageRoot, "runtime", "src"), runtimeSource, { recursive: true });
+    const replyResources = join(runtimeSource, "subagents_runtime", "resources", "reply-support");
+    for (const directory of ["reply-to-agent", "reply-to-agent-with-previous-message", "claude", "chatgpt", "pi"]) {
+      await cp(join(packageRoot, directory), join(replyResources, directory), { recursive: true });
+    }
+    await cp(join(harnessRoot, "harness/internal/pi-transport/transport.ts"), join(replyResources, "pi/transport.ts"));
     await cp(join(packageRoot, "subagents-toolkit"), join(root, "subagents-toolkit"), { recursive: true });
     const python = await pythonCommand(runtimeSource);
     const binRoot = await createRuntimeShim(root, python);
@@ -113,9 +118,8 @@ export async function runSubagentsJourney(platform: Platform, mode: "interactive
     }
     await initializeRepository(projectRoot);
     if (alternateRoot) {
-      await execFileAsync("git", ["-c", "user.name=Harness E2E", "-c", "user.email=harness-e2e@example.invalid", "commit", "--quiet", "--allow-empty", "-m", "fixture"], { cwd: projectRoot, windowsHide: true });
-      await execFileAsync("git", ["worktree", "add", "--quiet", "--detach", worktreeRoot, "HEAD"], { cwd: projectRoot, windowsHide: true });
-      await stagePayload(platform, packageRoot, worktreeRoot, python);
+      await mkdir(worktreeRoot, { recursive: true });
+      await initializeRepository(worktreeRoot);
     }
 
     const bridge = join(harnessRoot, "tests", "e2e", "dist", "tools", "subagents", "cli-bridge.js");
@@ -245,8 +249,8 @@ export async function runSubagentsJourney(platform: Platform, mode: "interactive
       const rows = JSON.parse(result.stdout) as [string, string][];
       if (rows.length !== 1 || rows[0]![0] !== "failed" || !rows[0]![1].includes("missing-e2e")) throw new Error("Missing skill failure was not persisted");
       const assertions = server.assertions();
-      if (assertions.inferenceRequests !== 2 || assertions.unexpectedRequests !== 0 || await countRequestFiles(join(stateRoot, "inboxes")) !== 0) throw new Error("Missing skill request count or cleanup differed");
-      return { checkpoints: ["parent-request-write", "parent-received-failure"], completedClis: ["parent"], requestFilesRemaining: 0, unexpectedRequests: 0, recoveredSessions: 0, inferenceRequests: 2 };
+      if (assertions.inferenceRequests !== 3 || assertions.unexpectedRequests !== 0 || await countRequestFiles(join(stateRoot, "inboxes")) !== 0) throw new Error("Missing skill request count or cleanup differed");
+      return { checkpoints: ["parent-inbox-enable", "parent-request-write", "parent-received-failure"], completedClis: ["parent"], requestFilesRemaining: 0, unexpectedRequests: 0, recoveredSessions: 0, inferenceRequests: 3 };
     }
     if (recovery) {
       try {
@@ -324,17 +328,17 @@ export async function runSubagentsJourney(platform: Platform, mode: "interactive
     const visible = JSON.parse(await readFile(join(cliStatusRoot,'visible.json'),'utf8')) as { parent: number; child: number };
     if (visible.parent !== 1 || visible.child !== (mode === 'interactive' ? 2 : 0)) throw new Error('Execution mode did not preserve visible-terminal behavior');
     const assertions = server.assertions();
-    const expectedCheckpoints = ["parent-request-write", ...(options.skill === "found" ? ["child-skill-receipt"] : []), "parent-waiting", ...(mode === "interactive" ? ["child-reply-armed"] : []), "child-complete", "parent-received-reply", ...(mode === "interactive" ? ["child-resume-reply-armed"] : []), "child-resume-complete"];
+    const expectedCheckpoints = ["parent-inbox-enable", "parent-request-write", ...(options.skill === "found" ? ["child-skill-receipt"] : []), "parent-waiting", ...(mode === "interactive" ? ["child-reply-armed"] : []), "child-complete", "parent-received-reply", ...(mode === "interactive" ? ["child-resume-reply-armed"] : []), "child-resume-complete"];
     const checkpoints = assertions.observations.flatMap((item) => typeof item.checkpoint === "string" ? [item.checkpoint] : []);
     const required = expectedCheckpoints.filter((item) => item !== "parent-waiting");
-    if (checkpoints.some((item) => !expectedCheckpoints.includes(item)) || required.some((item) => !checkpoints.includes(item)) || checkpoints[0] !== "parent-request-write" || checkpoints.at(-1) !== "child-resume-complete") {
+    if (checkpoints.some((item) => !expectedCheckpoints.includes(item)) || required.some((item) => !checkpoints.includes(item)) || checkpoints[0] !== "parent-inbox-enable" || checkpoints.at(-1) !== "child-resume-complete") {
       throw new Error(`subagents checkpoint contract changed: ${checkpoints.join(", ")}`);
     }
-    if (options.skill === "none" && assertions.inferenceRequests !== 5) throw new Error("No-skill inference count differed");
+    if (options.skill === "none" && assertions.inferenceRequests !== 6) throw new Error("No-skill inference count differed");
     if (options.skill === "found") {
       const receipt = JSON.parse(await readFile(join(projectRoot, SKILL_RECEIPT), "utf8"));
       if (receipt.skill !== "e2e-selected") throw new Error("Native child skill did not produce its receipt");
-      if (assertions.inferenceRequests !== 6) throw new Error("Explicit skill inference count differed");
+      if (assertions.inferenceRequests !== 7) throw new Error("Explicit skill inference count differed");
     }
     let shutdownsBeforeResult: number | undefined;
     if (shutdownBeforeResult) {
@@ -448,6 +452,7 @@ async function stagePayload(platform: Platform, packageRoot: string, projectRoot
     const toolkitRoot = join(projectRoot, ".claude", "skills", "subagents-toolkit");
     await mkdir(toolkitRoot, { recursive: true });
     await cp(join(packageRoot, "subagents-toolkit", "SKILL.md"), join(toolkitRoot, "SKILL.md"));
+    await cp(join(packageRoot, "subagents-toolkit", "scripts"), join(toolkitRoot, "scripts"), { recursive: true });
     await mkdir(join(projectRoot, ".claude"), { recursive: true });
     const settings = JSON.parse(await readFile(join(packageRoot, "claude", "settings.fragment.json"), "utf8")) as HookSettings;
     for (const groups of Object.values(settings.hooks)) {
@@ -464,6 +469,7 @@ async function stagePayload(platform: Platform, packageRoot: string, projectRoot
   const toolkitRoot = join(projectRoot, ".agents", "skills", "subagents-toolkit");
   await mkdir(join(toolkitRoot, "agents"), { recursive: true });
   await cp(join(packageRoot, "subagents-toolkit", "SKILL.md"), join(toolkitRoot, "SKILL.md"));
+  await cp(join(packageRoot, "subagents-toolkit", "scripts"), join(toolkitRoot, "scripts"), { recursive: true });
   await cp(join(packageRoot, "subagents-toolkit", "chatgpt", "openai.yaml"), join(toolkitRoot, "agents", "openai.yaml"));
   await mkdir(join(projectRoot, ".codex"), { recursive: true });
   const settings = JSON.parse(await readFile(join(packageRoot, "chatgpt", "hooks.fragment.json"), "utf8")) as HookSettings;

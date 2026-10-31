@@ -6,6 +6,12 @@ interface RemoveDirectory {
   (path: string, options: { readonly recursive: true; readonly force: true; readonly maxRetries: number; readonly retryDelay: number }): Promise<void>;
 }
 
+export function isTransientObservationError(error: unknown): boolean {
+  if (!(error instanceof Error)) return false;
+  const stderr = "stderr" in error && typeof error.stderr === "string" ? error.stderr : "";
+  return /HTTP (?:502|503|504)\b|ECONNRESET|ETIMEDOUT|Could not resolve host|Failed to connect to github\.com/iu.test(`${error.message}\n${stderr}`);
+}
+
 export async function removeDirectoryWithRetries(path: string, remove: RemoveDirectory = rm): Promise<void> {
   await remove(path, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 });
 }

@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from subagents_runtime import processes, roles, sessions
+from subagents_runtime import processes, roles, sessions, bridge_backend
 from subagents_runtime.delegation import RequestFileError, enable_delegation, parse_request_file, process_inbox
 
 
@@ -15,7 +15,7 @@ def project(tmp_path, monkeypatch):
     monkeypatch.setenv("HARNESS_STATE_DIR", str(tmp_path / "state"))
     monkeypatch.delenv("CLAUDE_CONFIG_DIR", raising=False)
     monkeypatch.delenv("PI_CODING_AGENT_DIR", raising=False)
-    monkeypatch.setattr(sessions, "_discover_delegation_endpoint", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(bridge_backend, "discover", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(sessions, "launch_configuration", lambda _: {})
     return root
 
@@ -36,6 +36,10 @@ def test_explicit_skill_launch_and_resume(project, monkeypatch, provider, mode, 
     launches = []
     def start(execution, argv, environment, cwd, visible):
         launches.append((argv, environment, cwd, visible))
+        from subagents_runtime.reply_support import _write
+        from subagents_runtime.storage import state_dir
+
+        _write(state_dir() / "runtime/reply-ready" / execution, provider.encode())
         with sessions._connect() as connection:
             connection.execute("UPDATE sessions SET provider_session_id=id WHERE id=?", (environment["HARNESS_SESSION_ID"],))
         processes.confirm_startup(execution)
@@ -69,7 +73,7 @@ def test_missing_skill_fails_before_any_launch(project, monkeypatch, provider):
     inbox = enable_delegation("parent", "subagents-toolkit").inbox
     (inbox / "work.md").write_text("---\nmode: auto\nskill: missing-audit\n---\nInspect.")
     monkeypatch.setattr(processes, "start", lambda *_a, **_kw: pytest.fail("Missing skill launched"))
-    monkeypatch.setattr(sessions, "_discover_delegation_endpoint", lambda *_a, **_kw: pytest.fail("Missing skill reached Aboard"))
+    monkeypatch.setattr(bridge_backend, "discover", lambda *_a, **_kw: pytest.fail("Missing skill reached backend selection"))
     [result] = process_inbox("parent", launch=sessions.launch_delegated)
     assert result.status == "failed"
     assert "missing-audit" in result.reason

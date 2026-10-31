@@ -31,7 +31,7 @@ still works.
 `/code-blocks on` enables frames again. The extension starts enabled on each session
 start or reload; the toggle is not persisted. Very narrow layouts omit the frame.
 
-Verified with the real Pi 1.2.0 extension loader, assistant-message component and
+Verified with the real Pi 1.2.0 and 1.4.0 extension loader, assistant-message component and
 Markdown renderer, including wrapping, themes, nested blocks, numbered copying,
 branch navigation and reload. Clipboard payload checks stub the clipboard transport;
 OS clipboard integration uses Pi's exported helper. Pi has

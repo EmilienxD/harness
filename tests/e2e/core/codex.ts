@@ -48,6 +48,21 @@ export async function prepareCodexHome(options: CodexHomeOptions): Promise<strin
     "[notice]",
     "hide_full_access_warning = true",
     "hide_world_writable_warning = true",
+    // Acknowledge optional catalog announcements, retaining the model selected
+    // by each journey. Otherwise visible workers wait for a human before hooks.
+    // Official rust-v0.162.1 models-manager/models.json upgrade pairs.
+    "[notice.model_migrations]",
+    '"gpt-5.6-luna" = "gpt-6-luna"',
+    '"gpt-5.6-terra" = "gpt-6-sol"',
+    '"gpt-5.6-sol" = "gpt-6-sol"',
+    '"gpt-5.5" = "gpt-6-sol"',
+    "[tui]",
+    "screen_reader_detection_done = true",
+    "show_tooltips = false",
+    "[tui.model_availability_nux]",
+    '"gpt-6-luna" = 4',
+    '"gpt-6-sol" = 4',
+    '"gpt-6.1-sol" = 4',
     ...(options.trustedProjects ?? []).flatMap((project) => [
       `[projects.${JSON.stringify(resolve(project).toLowerCase())}]`,
       'trust_level = "trusted"',

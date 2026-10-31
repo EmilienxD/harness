@@ -16,10 +16,10 @@ def request(payload: dict) -> dict:
     root = Path(payload["cwd"]).resolve()
     operation = payload["operation"]
     if operation == "guard":
-        # Parse once, fail closed, and use that same snapshot for the decision.
+        # Parse once and use the same tolerant policy snapshot for the decision.
         patterns = core._configuration(root)
         if os.name == "nt":
-            patterns = tuple(re.compile(pattern.pattern, re.IGNORECASE) for pattern in patterns)
+            patterns = tuple(tuple(re.compile(pattern.pattern, re.IGNORECASE) for pattern in group) for group in patterns)
         tool = payload["tool"]
         inputs = payload.get("input") or {}
         if tool == "write":

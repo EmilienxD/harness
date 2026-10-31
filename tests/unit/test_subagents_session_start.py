@@ -2,8 +2,8 @@ from pathlib import Path
 
 import pytest
 
-from subagents_runtime import hooks, roles, sessions
-from subagents_runtime.delegation import enable_delegation
+from subagents_runtime import hooks, sessions
+from subagents_runtime.delegation import enable_delegation, process_inbox
 
 
 @pytest.fixture
@@ -45,7 +45,7 @@ def assigned_inbox(session="parent"):
     ("claude", "project"), ("chatgpt", "project"),
     ("claude", "personal"), ("chatgpt", "personal"), ("claude", "claude-config"),
 ])
-def test_installed_toolkit_assigns_inbox_without_loading_registries(
+def test_installed_toolkit_does_not_assign_inbox_or_load_registries(
     project, monkeypatch, provider, scope,
 ):
     if scope == "claude-config":
@@ -68,14 +68,9 @@ def test_installed_toolkit_assigns_inbox_without_loading_registries(
 
     output = start(project, provider)
 
-    assert output is not None
-    assert output["hookSpecificOutput"]["hookEventName"] == "SessionStart"
-    # The assigned path is runtime data, not a contract on instruction wording.
-    [path] = output["hookSpecificOutput"]["additionalContext"].split("`")[1::2]
-    assert Path(path) == assigned_inbox()
-    assert assigned_inbox().is_dir()
-    assert assigned_inbox().is_relative_to(project.parent / "state")
-    assert not list(assigned_inbox().iterdir())
+    assert output is None
+    assert assigned_inbox() is None
+    assert not (project.parent / "state" / "inboxes").exists()
     with sessions._connect() as connection:
         assert connection.execute("SELECT count(*) FROM requests").fetchone() == (0,)
 
@@ -92,15 +87,15 @@ def test_missing_toolkit_does_not_assign_inbox_or_inject_context(
 
 
 @pytest.mark.parametrize("provider", ["claude", "chatgpt"])
-def test_resume_and_compaction_refresh_context_and_reuse_inbox(project, provider):
+def test_resume_and_compaction_keep_enabled_inbox_without_disclosure(project, provider):
     install_toolkit(project, provider)
-    assert start(project, provider) is not None
-    inbox = assigned_inbox()
+    assert start(project, provider) is None
+    inbox = enable_delegation("parent", "subagents-toolkit").inbox
     for source in ("resume", "compact"):
         hooks.handle({"session_id": "parent", "cwd": str(project),
                       "hook_event_name": "PreToolUse"}, provider)
         inbox.rmdir()
-        assert start(project, provider, source) is not None
+        assert start(project, provider, source) is None
         assert assigned_inbox() == inbox
         assert inbox.is_dir()
     assert list(inbox.parent.iterdir()) == [inbox]
@@ -108,13 +103,14 @@ def test_resume_and_compaction_refresh_context_and_reuse_inbox(project, provider
 
 @pytest.mark.parametrize("provider", ["claude", "chatgpt"])
 @pytest.mark.parametrize("source", ["clear", "fork"])
-def test_fresh_conversation_gets_its_own_inbox(project, monkeypatch, provider, source):
+def test_fresh_conversation_needs_separate_activation(project, monkeypatch, provider, source):
     install_toolkit(project, provider)
-    assert start(project, provider) is not None
-    original = assigned_inbox()
+    assert start(project, provider) is None
+    original = enable_delegation("parent", "subagents-toolkit").inbox
     monkeypatch.setenv("HARNESS_SESSION_ID", "parent")
-    assert start(project, provider, source, "fresh") is not None
-    assert assigned_inbox("fresh") != original
+    assert start(project, provider, source, "fresh") is None
+    assert assigned_inbox("fresh") is None
+    assert enable_delegation("fresh", "subagents-toolkit").inbox != original
     assert assigned_inbox() == original
 
 
@@ -123,8 +119,8 @@ def test_natural_language_delegation_launches_without_launcher_invocation(
     project, monkeypatch, provider,
 ):
     install_toolkit(project, provider)
-    assert start(project, provider) is not None
-    inbox = assigned_inbox()
+    assert start(project, provider) is None
+    inbox = enable_delegation("parent", "subagents-toolkit").inbox
     hooks.handle({"session_id": "parent", "cwd": str(project),
                   "hook_event_name": "UserPromptSubmit",
                   "prompt": "Run a Claude subagent to inspect the API."}, provider)
@@ -154,8 +150,36 @@ def test_natural_language_delegation_launches_without_launcher_invocation(
 @pytest.mark.parametrize("provider", ["claude", "chatgpt"])
 def test_removed_toolkit_suppresses_session_start_instructions(project, provider):
     skill = install_toolkit(project, provider)
-    assert start(project, provider) is not None
-    inbox = assigned_inbox()
+    assert start(project, provider) is None
+    inbox = enable_delegation("parent", "subagents-toolkit").inbox
     skill.unlink()
     assert start(project, provider, "resume") is None
     assert assigned_inbox() == inbox
+
+
+@pytest.mark.parametrize("provider", ["claude", "chatgpt"])
+@pytest.mark.parametrize("delegated", [False, True])
+def test_ordinary_turns_receive_no_delegation_instructions(project, monkeypatch, provider, delegated):
+    install_toolkit(project, provider)
+    assert start(project, provider) is None
+    session_id = "parent"
+    if delegated:
+        enable_delegation("parent", "subagents-toolkit")
+        (assigned_inbox() / "child.md").write_text(
+            "---\nmode: auto\n---\nExplain the configuration.", encoding="utf-8",
+        )
+        [child] = process_inbox("parent", launch=lambda *_args: "child-conversation")
+        session_id = child.child_session_id
+    monkeypatch.setattr(sessions, "launch_delegated", lambda *_args: pytest.fail("unexpected child launch"))
+
+    for source in ("startup", "resume", "compact"):
+        assert start(project, provider, source, session_id) is None
+        for event in ("UserPromptSubmit", "PreToolUse", "PostToolUse"):
+            assert hooks.handle({
+                "session_id": session_id, "cwd": str(project), "hook_event_name": event,
+                "prompt": "Explain the configuration.", "tool_name": "Read", "tool_input": {},
+            }, provider) is None
+    with sessions._connect() as connection:
+        assert connection.execute(
+            "SELECT count(*) FROM requests WHERE parent_session_id=?", (session_id,),
+        ).fetchone() == (0,)

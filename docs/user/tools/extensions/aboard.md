@@ -40,6 +40,20 @@ AFK mode accepts a successful worker result with one clean descendant commit. HI
 
 Set `aboard.sessions.interactiveResumeMode` to `reuse-terminal` in VS Code settings to submit a continuation into a matching live interactive child terminal. Its default is `fork`; if the terminal cannot be reused, Aboard uses the fork or reopen flow. Exploration is read-only and headless and cannot be taken over or resumed.
 
+## Sub-Agent execution hosting (checkout)
+
+Aboard implements the Sub-Agent runtime's neutral execution-host protocol. Initialized windows
+publish delegation-only records in `~/.harness/backends/endpoints/` in addition to their existing
+command endpoint records. Hosted agents receive `HARNESS_BRIDGE_PORT` and
+`HARNESS_BRIDGE_TOKEN`; Aboard's own lifecycle credentials remain separate environment keys.
+The existing delegation route, fleet placement, fork/reopen and live-terminal continuation behavior
+are retained. Reset and deactivation withdraw both records. Wrappers report process facts through
+the runtime's public `execution_host` API rather than accessing its database.
+
+This is checkout behavior requiring the 3.1.0 runtime and a coordinated extension release; the
+catalogue's existing immutable pins have not been updated. Auto Run's engine, restrictions and
+acceptance rules are unchanged.
+
 ## Pi sessions and restrictions
 
 The catalogue's Aboard 0.3.13 pin ships native Pi launch/configuration, session lookup/resume, preflight, lifecycle and skill adapters, UI/provider choices, managed extension assets and worktree setup. Use `--platform pi` when installing the Pi assets. Visible terminal sessions, leases, authenticated bridge messages and prompt receipts retain the same product contract. Fresh sessions let Pi assign their IDs and bind the observed startup identity; resume/fork validate explicit saved identity. Session replacement ends the old binding before the new one is attached.

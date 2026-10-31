@@ -9,7 +9,7 @@ from pathlib import Path
 import pytest
 
 from harness_cli.manifest import SupportStatus, discover
-from subagents_runtime import pi_bridge, processes, progress, roles, sessions
+from subagents_runtime import pi_bridge, processes, progress, roles, sessions, bridge_backend
 from subagents_runtime.delegation import (
     RequestFileError,
     arm_reply,
@@ -31,9 +31,9 @@ def project(tmp_path, monkeypatch):
     monkeypatch.setenv("HARNESS_STATE_DIR", str(tmp_path / "state"))
     monkeypatch.setenv("PI_CODING_AGENT_DIR", str(tmp_path / "home" / ".pi" / "agent"))
     for name in ("HARNESS_SESSION_ID", "HARNESS_EXECUTION_ID", "HARNESS_EXECUTION_MODE",
-                 "HARNESS_PROVIDER", "HARNESS_PARENT_TERMINAL_URI", "ABOARD_BRIDGE_PORT", "ABOARD_BRIDGE_TOKEN"):
+                 "HARNESS_PROVIDER", "HARNESS_PARENT_TERMINAL_URI", "HARNESS_BRIDGE_PORT", "HARNESS_BRIDGE_TOKEN"):
         monkeypatch.delenv(name, raising=False)
-    monkeypatch.setattr(sessions, "_discover_delegation_endpoint", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(bridge_backend, "discover", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(sessions, "_command_from_config", lambda _config, provider: [{"chatgpt": "codex"}.get(provider, provider)])
     authenticated_models(monkeypatch, MODELS)
     return project
@@ -67,6 +67,10 @@ def launches(monkeypatch):
 
     def start(execution_id, argv, environment, cwd, visible):
         recorded.append({"execution": execution_id, "argv": argv, "env": environment, "cwd": cwd, "visible": visible})
+        from subagents_runtime.reply_support import _write
+        from subagents_runtime.storage import state_dir
+
+        _write(state_dir() / "runtime/reply-ready" / execution_id, b"pi")
 
     monkeypatch.setattr(processes, "start", start)
     return recorded
@@ -339,14 +343,14 @@ def test_pi_watch_summarizes_native_events():
 
 
 def test_pi_children_route_through_aboard_when_it_is_running(project, monkeypatch):
-    monkeypatch.setattr(sessions, "_discover_delegation_endpoint", lambda *_args, **_kwargs: ("127.0.0.1", 4823, "token"))
+    monkeypatch.setattr(bridge_backend, "discover", lambda *_args, **_kwargs: ("127.0.0.1", 4823, "token"))
     bodies = []
 
     def urlopen(http_request, timeout):
         bodies.append(json.loads(http_request.data))
         return io.BytesIO(b'{"ok":true,"sessionId":"aboard-pi-session"}')
 
-    monkeypatch.setattr(sessions.urllib.request, "urlopen", urlopen)
+    monkeypatch.setattr(bridge_backend.urllib.request, "urlopen", urlopen)
     monkeypatch.setattr(processes, "start", lambda *_args, **_kwargs: pytest.fail("native launch used"))
     sessions.register_observed("parent", project, "pi")
 
@@ -357,18 +361,19 @@ def test_pi_children_route_through_aboard_when_it_is_running(project, monkeypatc
 
 
 class TestBridge:
-    def test_session_start_assigns_an_inbox_only_with_the_toolkit(self, project):
+    def test_session_start_never_assigns_or_discloses_an_inbox(self, project):
         plain = bridge("session_start", cwd=str(project), sessionId="plain", reason="startup")
-        assert plain["ok"] and plain["inbox"] is None and plain["instructions"] is None
+        assert plain["ok"] and "inbox" not in plain and "instructions" not in plain
 
         install_skill(project / ".pi" / "skills", "subagents-toolkit")
         started = bridge("session_start", cwd=str(project), sessionId="native", reason="startup")
         reloaded = bridge("session_start", cwd=str(project), sessionId="native", reason="reload")
 
         assert started["ok"], started
-        assert started["inbox"] and Path(started["inbox"]).is_dir() and started["instructions"]
+        assert "inbox" not in started and "instructions" not in started
         assert reloaded["harnessSessionId"] == started["harnessSessionId"]
-        assert reloaded["inbox"] == started["inbox"]
+        with sessions._connect() as connection:
+            assert connection.execute("SELECT count(*) FROM session_delegation").fetchone() == (0,)
         assert started["delegatedMode"] is None
 
     def test_new_and_fork_sessions_are_unrelated_conversations(self, project, launches, monkeypatch):
@@ -384,14 +389,20 @@ class TestBridge:
         assert forked["harnessSessionId"] == "user-fork"
         assert forked["delegatedMode"] is None
 
-    def test_delegation_skill_supplies_inbox_instructions(self, project):
+    def test_delegation_skill_requires_explicit_inbox_activation(self, project):
         sessions.register_observed("parent", project, "pi")
 
         invoked = bridge("prompt", harnessSessionId="parent", text="/skill:subagents-toolkit review the parser")
         plain = bridge("prompt", harnessSessionId="parent", text="Explain /skill:unknown-with-agent")
 
-        assert invoked["ok"] and invoked["context"]
+        assert invoked["ok"] and invoked["context"] is None
         assert plain["ok"] and plain["context"] is None
+        with sessions._connect() as connection:
+            inbox = connection.execute(
+                "SELECT inbox FROM session_delegation WHERE parent_session_id='parent'"
+            ).fetchone()
+            assert inbox is None
+            assert connection.execute("SELECT count(*) FROM requests").fetchone() == (0,)
 
     def test_inbox_scan_launches_only_published_requests_in_the_owned_inbox(self, project, launches):
         sessions.register_observed("parent", project, "pi")
@@ -416,7 +427,7 @@ class TestBridge:
     def test_resume_scans_queued_requests(self, project, launches):
         install_skill(project / ".pi" / "skills", "subagents-toolkit")
         started = bridge("session_start", cwd=str(project), sessionId="parent", reason="startup")
-        inbox = Path(started["inbox"])
+        inbox = enable_delegation(started["harnessSessionId"], "subagents-toolkit").inbox
         (inbox / "work.md").write_text("---\nmode: auto\n---\nWork.", encoding="utf-8")
 
         resumed = bridge("session_start", cwd=str(project), sessionId="parent", reason="reload")
@@ -461,6 +472,7 @@ class TestBridge:
         replied = bridge("settled", harnessSessionId=child, success=True, message="Conclusion.")
 
         assert unarmed["reported"] is False
+        assert armed["context"] is None
         assert armed["notice"] and failed["reported"] is False
         assert replied["reported"] is True
         assert request_row(interactive_child.request_id)[:2] == ("succeeded", "Conclusion.")
@@ -519,6 +531,7 @@ def test_catalogue_installs_the_pi_extension_with_shared_skills():
     assert not toolkit.selectable
     assert {entry.dest for entry in toolkit.expand("pi")} == {
         "subagents-toolkit/SKILL.md",
+        "subagents-toolkit/scripts/enable_inbox.py",
     }
     assert any(dependency.name == toolkit.name and dependency.lifecycle == "coupled"
                for dependency in tool.dependencies)
