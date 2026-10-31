@@ -6,7 +6,7 @@ const figure = (id: string, source: string) =>
 test("conversion failure retries locally while other diagrams and authored controls remain usable", async ({
   page,
 }) => {
-  const savedColors: { backgroundColor: string; strokeColor: string }[] = [];
+  const savedColors: { type: string; backgroundColor: string; strokeColor: string }[] = [];
   const session = {
     id: "failure-session",
     provider: "chatgpt",
@@ -93,7 +93,16 @@ test("conversion failure retries locally while other diagrams and authored contr
   if (await valid.getByRole("button", { name: "Retry diagram", exact: true }).isVisible())
     await valid.getByRole("button", { name: "Retry diagram", exact: true }).click();
   await expect(valid.locator("canvas").first()).toBeVisible();
-  await expect.poll(() => savedColors.some((element) => element.backgroundColor === "#e7f0ff")).toBe(true);
+  await expect
+    .poll(() =>
+      savedColors.some(
+        (element) =>
+          element.type === "rectangle" &&
+          element.backgroundColor === "transparent" &&
+          element.strokeColor === "#1e1e1e",
+      ),
+    )
+    .toBe(true);
   expect(
     savedColors.some((element) => element.backgroundColor === "#dcfce7" && element.strokeColor === "#16a34a"),
   ).toBe(true);

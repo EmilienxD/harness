@@ -17,15 +17,6 @@ import { copyScene, type DiagramRecord, type DiagramScene } from "./diagram-scen
 
 const normalizeBreaks = (text: string) => text.replace(/<br\s*\/?\s*>/gi, "\n").replace(/\\n/g, "\n");
 function normalizeSkeleton(element: ExcalidrawElementSkeleton): ExcalidrawElementSkeleton {
-  // Supply defaults before materialization, while absent and explicitly authored colors are distinguishable.
-  if (["rectangle", "ellipse", "diamond"].includes(element.type)) {
-    element = {
-      ...element,
-      backgroundColor: element.backgroundColor ?? "#e7f0ff",
-      strokeColor: element.strokeColor ?? "#4263eb",
-      fillStyle: element.fillStyle ?? "solid",
-    };
-  }
   if (element.type === "text") return { ...element, text: normalizeBreaks(element.text) };
   if ("label" in element && element.label) {
     const label = { ...element.label, text: normalizeBreaks(element.label.text) };
