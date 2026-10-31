@@ -36,14 +36,6 @@
   height: 420px;
   min-height: 240px;
 }
-.diagram-canvas.is-viewing .excalidraw {
-  pointer-events: none;
-}
-.diagram-scroll-surface {
-  position: absolute;
-  inset: 0;
-  touch-action: pan-y;
-}
 .diagram-status,
 .diagram-error {
   margin: 0 !important;

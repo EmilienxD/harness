@@ -213,7 +213,7 @@ export default function DiagramEditor({
               This diagram is an image. You can draw over it; its nodes cannot be edited individually.
             </p>
           )}
-          <div className={`diagram-canvas ${editing && !readOnly ? "is-editing" : "is-viewing"}`}>
+          <div className="diagram-canvas">
             {!hidden && (
               <Excalidraw
                 key={fullscreen ? "fullscreen" : "inline"}
@@ -244,7 +244,6 @@ export default function DiagramEditor({
                 }}
               />
             )}
-            {(!editing || readOnly) && <div className="diagram-scroll-surface" aria-hidden="true" />}
           </div>
         </>
       )}
