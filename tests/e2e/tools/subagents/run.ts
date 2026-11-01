@@ -115,22 +115,25 @@ export async function runSubagentsJourney(platform: Platform, mode: "interactive
     if (alternateRoot) {
       await mkdir(worktreeRoot, { recursive: true });
       await initializeRepository(worktreeRoot);
-      await execFileAsync(python, ["-c", [
-        "from pathlib import Path",
-        "from types import SimpleNamespace",
-        "from subagents_runtime import sessions, backends",
-        "root = Path.cwd()",
-        "before = set(root.rglob('*'))",
-        "def forbidden(*args): raise AssertionError('backend selected')",
-        "backends.select_backend = forbidden",
-        `request = SimpleNamespace(provider='${platform}', mode='interactive', resume=False, child_skill=None)`,
-        "try:",
-        " sessions.launch_delegated(request, 'missing-integration', 1, root)",
-        "except sessions.SessionError:",
-        " pass",
-        "else: raise AssertionError('missing integration accepted')",
-        "assert before == set(root.rglob('*'))",
-      ].join("\n")], { cwd: worktreeRoot, env: { ...process.env, PYTHONPATH: runtimeSource, CLAUDE_CONFIG_DIR: join(root, 'missing-claude-home'), CODEX_HOME: join(root, 'missing-codex-home') }, windowsHide: true, timeout: 10_000 });
+      for (const missingRoot of [worktreeRoot, join(projectRoot, "scratch")]) {
+        await mkdir(missingRoot, { recursive: true });
+        await execFileAsync(python, ["-c", [
+          "from pathlib import Path",
+          "from types import SimpleNamespace",
+          "from subagents_runtime import sessions, backends",
+          "root = Path.cwd()",
+          "before = set(root.rglob('*'))",
+          "def forbidden(*args): raise AssertionError('backend selected')",
+          "backends.select_backend = forbidden",
+          `request = SimpleNamespace(provider='${platform}', mode='interactive', resume=False, child_skill=None)`,
+          "try:",
+          " sessions.launch_delegated(request, 'missing-integration', 1, root)",
+          "except sessions.SessionError:",
+          " pass",
+          "else: raise AssertionError('missing integration accepted')",
+          "assert before == set(root.rglob('*'))",
+        ].join("\n")], { cwd: missingRoot, env: { ...process.env, PYTHONPATH: runtimeSource, CLAUDE_CONFIG_DIR: join(root, 'missing-claude-home'), CODEX_HOME: join(root, 'missing-codex-home') }, windowsHide: true, timeout: 10_000 });
+      }
       await stagePayload(platform, packageRoot, worktreeRoot, python);
     }
 

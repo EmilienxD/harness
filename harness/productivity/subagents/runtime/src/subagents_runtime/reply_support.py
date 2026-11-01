@@ -36,21 +36,26 @@ def _settings(path: Path) -> dict:
 
 
 def available(cwd: Path, provider: str) -> bool:
-    from subagents_runtime.roles import find_skill, project_directories
-
-    names = ["reply-to-agent"] if provider == "pi" else ["reply-to-agent", "reply-to-agent-with-previous-message"]
-    if not all(find_skill(cwd, provider, name) for name in names):
-        return False
     if provider == "pi":
         from subagents_runtime.roles import pi_package_skill
 
         return pi_package_skill(cwd, "reply-to-agent", require_extensions=True) is not None
     home = Path(os.environ.get("CLAUDE_CONFIG_DIR", str(Path.home() / ".claude"))) if provider == "claude" else Path(os.environ.get("CODEX_HOME", str(Path.home() / ".codex")))
-    paths = [home / ("settings.json" if provider == "claude" else "hooks.json")]
-    for root in reversed(list(project_directories(cwd))):
-        paths.append(root / (".claude/settings.json" if provider == "claude" else ".codex/hooks.json"))
-        if provider == "claude":
-            paths.append(root / ".claude/settings.local.json")
+    # Integration prerequisites belong to this launch root or user scope. Native skill
+    # discovery may walk ancestors, but that does not establish hooks at this cwd.
+    skill_roots = (
+        cwd / (".claude/skills" if provider == "claude" else ".agents/skills"),
+        (home if provider == "claude" else Path.home() / ".agents") / "skills",
+    )
+    if not all(any((root / name / "SKILL.md").is_file() for root in skill_roots)
+               for name in ("reply-to-agent", "reply-to-agent-with-previous-message")):
+        return False
+    paths = [
+        home / ("settings.json" if provider == "claude" else "hooks.json"),
+        cwd / (".claude/settings.json" if provider == "claude" else ".codex/hooks.json"),
+    ]
+    if provider == "claude":
+        paths.append(cwd / ".claude/settings.local.json")
     disabled = False
     events: set[str] = set()
     for path in paths:

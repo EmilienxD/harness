@@ -179,12 +179,15 @@ worker policy remains entirely on that side; no Auto Run engine change is needed
 checkout requires coordinated runtime and extension publication: the catalogue's immutable runtime
 and VSIX pins are unchanged and do not yet ship this refactor.
 
-## Interactive integration prerequisites (3.1.3 checkout)
+## Interactive integration prerequisites (3.1.4 checkout)
 
 Only the Harness installer installs skills, hooks and extensions. Interactive delegation checks for
 installed reply skills and provider integration before selecting an execution backend, including on
 resume and fork. It never provisions or repairs provider resources. Install `subagents` in the target
-root (or use an applicable user-scope installation) before launching an interactive child. Missing
+root (or use an applicable user-scope installation) before launching an interactive child. An
+installation in a parent directory does not satisfy this check: launching in `scratch/` requires
+integration at that exact root or in user scope, even if native skill discovery finds parent skills.
+This applies equally to Claude Code, ChatGPT, and Pi, including resume and fork. Missing
 integration fails the request without starting a child and reports the problem.
 
 The command uses the requested provider (`claude`, `chatgpt`, or `pi`) and actual destination root.

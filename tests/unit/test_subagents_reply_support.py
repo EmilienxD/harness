@@ -108,6 +108,36 @@ def test_disabled_pi_resources_are_rejected(project):
 
 
 @pytest.mark.parametrize("provider", ["claude", "chatgpt", "pi"])
+@pytest.mark.parametrize("resume", [False, True])
+def test_parent_installation_does_not_authorize_nested_root(project, monkeypatch, provider, resume):
+    from types import SimpleNamespace
+    from subagents_runtime import backends
+
+    install(project, provider)
+    (project / ".git").mkdir()
+    nested = project / "scratch"
+    nested.mkdir()
+    before = {p.relative_to(project): p.read_bytes() for p in project.rglob("*") if p.is_file()}
+    monkeypatch.setattr(backends, "select_backend", lambda *args: pytest.fail("backend selected"))
+    request = SimpleNamespace(provider=provider, mode="interactive", resume=resume, child_skill=None)
+    with pytest.raises(sessions.SessionError):
+        sessions.launch_delegated(request, "request", 1, nested)
+    assert before == {p.relative_to(project): p.read_bytes() for p in project.rglob("*") if p.is_file()}
+    assert list(nested.iterdir()) == []
+
+
+@pytest.mark.parametrize("provider", ["claude", "chatgpt"])
+def test_local_skills_do_not_borrow_parent_hooks(project, provider):
+    install(project, provider)
+    nested = project / "scratch"
+    nested.mkdir()
+    install(nested, provider)
+    (nested / (".claude/settings.json" if provider == "claude" else ".codex/hooks.json")).unlink()
+    with pytest.raises(sessions.SessionError):
+        reply_support.validate(nested, provider)
+
+
+@pytest.mark.parametrize("provider", ["claude", "chatgpt", "pi"])
 def test_missing_integration_never_selects_backend(project, monkeypatch, provider):
     from subagents_runtime import backends
     from types import SimpleNamespace
