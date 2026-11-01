@@ -16,7 +16,7 @@ export interface ReopenQuickPickItem {
 export interface ReopenCommandHost {
   registerCommand(command: string, callback: (...args: readonly unknown[]) => unknown): Disposable;
   /** Returns the chosen item, or undefined when the user dismissed the picker. */
-  pick(items: readonly ReopenQuickPickItem[], placeholder: string): Promise<ReopenQuickPickItem | undefined>;
+  pick(items: readonly ReopenQuickPickItem[], placeholder: string, load?: (publish: (items: readonly ReopenQuickPickItem[]) => void, signal: AbortSignal) => Promise<void>): Promise<ReopenQuickPickItem | undefined>;
   info(message: string): void;
   warning(message: string): void;
   error(message: string): void;
@@ -33,7 +33,11 @@ export function renderReopenItems(
     return {
       label,
       description: [agentPlatformName(candidate.platform), candidate.cwd === undefined ? "" : basename(candidate.cwd.replaceAll("\\", "/")), described].filter(Boolean).join(" · "),
-      detail: [detailFor(option, now), candidate.title !== undefined && candidate.title !== label ? candidate.title : ""].filter(Boolean).join(" · "),
+      detail: [
+        detailFor(option, now),
+        candidate.cwd,
+        candidate.title !== undefined && candidate.title !== label ? candidate.title : "",
+      ].filter(Boolean).join(" · "),
       option,
     };
   });
@@ -55,11 +59,12 @@ function detailFor(option: ReopenOption, now: Date): string {
   if (!option.resumable) {
     return option.reason === "inspection-failed"
       ? `Cannot inspect this conversation; ${option.diagnostic ?? "unknown platform error"}${chrome}`
-      : `Cannot be reopened; the selected agent platform no longer has this conversation (ended ${age(candidate.at, now)})${chrome}`;
+      : `Conversation unavailable · Last active ${age(candidate.at, now)}${chrome}`;
   }
   switch (candidate.origin) {
-    case "live": return `Running now; opens its terminal${chrome}`;
-    case "ended": return `Ended ${age(candidate.at, now)}${chrome}`;
+    case "live": return `Open in Aboard · Focus existing terminal${chrome}`;
+    case "native": return `Last active ${age(candidate.at, now)} · Native history · May be open outside Aboard${chrome}`;
+    case "ended": return `Last active ${age(candidate.at, now)} · Aboard history · Resume conversation${chrome}`;
   }
 }
 
@@ -77,18 +82,47 @@ export function age(at: string, now: Date): string {
 
 export function registerReopenCommand(host: ReopenCommandHost, reopen: ReopenCoordinator): Disposable {
   return host.registerCommand("aboard.reopenSession", async () => {
-    let items: readonly ReopenQuickPickItem[];
-    try {
-      items = renderReopenItems(await reopen.list());
-    } catch (error) {
-      host.error(error instanceof Error ? error.message : "Unable to list aboard sessions");
-      return;
-    }
-    if (items.length === 0) {
-      host.info("aboard has no recorded sessions to reopen yet.");
-      return;
-    }
-    const chosen = await host.pick(items, "Reopen an aboard session");
+    const chosen = await host.pick([], "Reopen a session from this project or its Git worktrees", async (publish, signal) => {
+      let pending: readonly ReopenOption[] | undefined;
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      let published = false;
+      const cancel = () => {
+        if (timer !== undefined) clearTimeout(timer);
+        timer = undefined;
+        pending = undefined;
+      };
+      const flush = () => {
+        const options = pending;
+        cancel();
+        if (options !== undefined && !signal.aborted) publish(renderReopenItems(options));
+      };
+      const update = (options: readonly ReopenOption[]) => {
+        if (signal.aborted) return;
+        // Deliver the first useful rows immediately. Thereafter render only the newest
+        // snapshot once per interval, not every discovery batch over the extension bridge.
+        if (!published) {
+          if (options.length === 0) return;
+          published = true;
+          publish(renderReopenItems(options));
+          return;
+        }
+        pending = options;
+        if (timer === undefined) timer = setTimeout(flush, 150);
+      };
+      signal.addEventListener("abort", cancel, { once: true });
+      try {
+        if (signal.aborted) return;
+        const items = await reopen.list(update, signal);
+        pending = items;
+        flush(); // Always deliver the complete final list before clearing the loading indicator.
+      } catch (error) {
+        flush();
+        if (!signal.aborted) host.error(error instanceof Error ? error.message : "Unable to list sessions");
+      } finally {
+        signal.removeEventListener("abort", cancel);
+        cancel();
+      }
+    });
     if (chosen === undefined) return;
     if (!chosen.option.resumable) {
       host.warning(chosen.option.reason === "inspection-failed"

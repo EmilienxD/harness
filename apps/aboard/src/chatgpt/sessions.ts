@@ -1,3 +1,4 @@
+import { SessionListConnection } from "./session-list-connection.js";
 import { spawn } from "node:child_process";
 import { createInterface } from "node:readline";
 
@@ -29,9 +30,48 @@ export class ChatGptSessionProbeError extends Error {
 
 export class ChatGptSessionProbe {
   readonly #exchange: ChatGptAppServerExchange;
+  readonly #customExchange: boolean;
 
   public constructor(options: { readonly exchange?: ChatGptAppServerExchange; readonly timeoutMs?: number } = {}) {
+    this.#customExchange = options.exchange !== undefined;
     this.#exchange = options.exchange ?? ((request) => exchangeWithAppServer(request, options.timeoutMs));
+  }
+
+  /** Discover saved interactive conversations without loading or resuming them. */
+  public async list(cwd: string, command: readonly string[] = DEFAULT_CHATGPT_COMMAND, publish?: (page: readonly { sessionId: SessionId; cwd: string; at: string; title?: string }[]) => void, signal?: AbortSignal): Promise<readonly { sessionId: SessionId; cwd: string; at: string; title?: string }[]> {
+    const sessions: { sessionId: SessionId; cwd: string; at: string; title?: string }[] = [];
+    let cursor: string | undefined;
+    const seen = new Set<string>();
+    let indexedOnly = true;
+    const connection = this.#customExchange ? undefined : new SessionListConnection(command, cwd, signal);
+    const exchange = connection ? connection.exchange.bind(connection) : this.#exchange;
+    try { for (;;) {
+      if (signal?.aborted) return sessions;
+      const start = sessions.length;
+      const result = record(await exchange({ command, cwd, method: "thread/list", params: {
+        cwd, limit: 25, sortKey: "updated_at", useStateDbOnly: indexedOnly, sourceKinds: ["cli", "vscode", "appServer"],
+        ...(cursor === undefined ? {} : { cursor }),
+      } }));
+      if (!Array.isArray(result.data)) throw new Error("Codex returned an invalid conversation list");
+      // Match the native picker: an empty index may need the store's scan-and-repair fallback.
+      if (indexedOnly && cursor === undefined && result.data.length === 0 && typeof result.nextCursor !== "string") {
+        indexedOnly = false;
+        continue;
+      }
+      for (const value of result.data) {
+        const thread = record(value);
+        if (typeof thread.id !== "string" || typeof thread.cwd !== "string" || typeof thread.updatedAt !== "number" || thread.ephemeral === true) continue;
+        const date = new Date(thread.updatedAt * 1000);
+        if (!Number.isFinite(date.getTime())) continue;
+        const title = typeof thread.name === "string" && thread.name.trim() ? thread.name : typeof thread.preview === "string" ? thread.preview : undefined;
+        sessions.push({ sessionId: thread.id as SessionId, cwd: thread.cwd, at: date.toISOString(), ...(title ? { title } : {}) });
+      }
+      publish?.(sessions.slice(start));
+      if (typeof result.nextCursor !== "string") return sessions;
+      if (seen.has(result.nextCursor)) throw new Error("Codex repeated a conversation cursor");
+      cursor = result.nextCursor;
+      seen.add(cursor);
+    } } finally { connection?.dispose(); }
   }
 
   public async inspect(

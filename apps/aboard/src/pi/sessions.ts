@@ -22,7 +22,7 @@ export async function piSessionDirectory(cwd: string, command: readonly string[]
 export interface PiSession { readonly path: string; readonly title?: string; }
 
 /** Pi 1.2 persists expanded skills; mirror its native parseSkillBlock display form. */
-function userInput(text: string): string {
+export function userInput(text: string): string {
   const skill = text.match(/^<skill name="([^"]+)" location="[^"]+">\r?\n[\s\S]*?\r?\n<\/skill>(?:\r?\n\r?\n([\s\S]+))?$/u);
   return skill === null ? text : `/skill:${skill[1]}${skill[2]?.trim() ? ` ${skill[2].trim()}` : ""}`;
 }

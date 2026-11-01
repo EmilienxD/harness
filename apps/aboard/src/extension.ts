@@ -59,8 +59,10 @@ import { ActivityRecorder } from "./runtime/activity-recorder.js";
 import { isInteractiveLaunch, shouldRecordEndedSession, type AgentOutcome } from "./domain/activity.js";
 import { completedCount } from "./domain/run-plan.js";
 import { isLiveSession } from "./vscode/fleet.js";
+import { discoverNativeSessions } from "./platform/native-sessions.js";
 import { ReopenCoordinator, describeReopenOutcome } from "./platform/reopen.js";
-import { registerReopenCommand, reopenItemsForQuery } from "./vscode/reopen.js";
+import { registerReopenCommand } from "./vscode/reopen.js";
+import { pickReopenSession } from "./vscode/reopen-picker.js";
 import { combineHandlers } from "./bridge/router.js";
 import { DelegationCoordinator, type DelegationConfigurationSource } from "./bridge/delegation.js";
 import { WorkerHookService, createWorkerHookRoutes } from "./bridge/worker-hooks.js";
@@ -731,6 +733,19 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
   });
   activeAutoRun = autoRun;
   const reopen = new ReopenCoordinator({
+    allocateAgentId: () => agentIdCounter.next(),
+    discover: (publish, signal) => discoverNativeSessions({
+      ...(publish ? { publish } : {}),
+      ...(signal ? { signal } : {}),
+      cwd: workspaceRoot,
+      command: async (platform, cwd) => {
+        const configured = await launchFile.getForWorktree(platform, "interactive", cwd);
+        const settings = configured.settings;
+        return typeof settings === "object" && settings !== null && "declaredCommand" in settings
+          ? (settings as { readonly declaredCommand?: readonly string[] }).declaredCommand : undefined;
+      },
+      log: (message) => output.appendLine(message),
+    }),
     activity: { entries: () => activity.store() },
     fleet,
     terminals: {
@@ -1183,35 +1198,13 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
     registerReopenCommand({
       registerCommand: (command, callback) => commands.registerCommand(command, async (...args) => {
         if (!requireInitialized()) return;
-        await refreshActivityTitles();
         return callback(...args);
       }),
       // `matchOnDetail` so "ended", or an age, filters the list, which is how a
       // user with a long history finds the one they mean.
-      pick: async (items, placeHolder) => {
-        const picker = window.createQuickPick<(typeof items)[number]>();
-        picker.placeholder = placeHolder;
-        picker.matchOnDescription = true;
-        picker.matchOnDetail = true;
-        picker.items = [...items];
-        return new Promise<(typeof items)[number] | undefined>((resolve) => {
-          const subscriptions = [
-            picker.onDidChangeValue((value) => {
-              picker.items = [...reopenItemsForQuery(items, value)];
-            }),
-            picker.onDidAccept(() => {
-              const chosen = picker.selectedItems[0] ?? picker.activeItems[0];
-              if (chosen !== undefined) { resolve(chosen); picker.hide(); }
-            }),
-            picker.onDidHide(() => {
-              resolve(undefined);
-              for (const subscription of subscriptions) subscription.dispose();
-              picker.dispose();
-            }),
-          ];
-          picker.show();
-        });
-      },
+      pick: (items, placeholder, load) => pickReopenSession(
+        window.createQuickPick(), items, placeholder, load, (message) => output.appendLine(message),
+      ),
       info: (message) => { void window.showInformationMessage(message); },
       warning: (message) => { void window.showWarningMessage(message); },
       error: (message) => { void window.showErrorMessage(message); },

@@ -233,7 +233,9 @@ export type ReopenOrigin =
   /** Still running with an open terminal: reopening means focusing it. */
   | "live"
   /** Gone from the fleet; the activity store is the only record it existed. */
-  | "ended";
+  | "ended"
+  /** Discovered from native history; Aboard does not know whether another process has it open. */
+  | "native";
 
 export interface ReopenCandidate {
   readonly executionMode?: import("./contracts.js").ExecutionMode;
