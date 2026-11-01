@@ -4,6 +4,8 @@ from pathlib import Path
 
 import pytest
 
+pytestmark = pytest.mark.usefixtures("loaded_subagents_integration")
+
 from subagents_runtime import processes, sessions, bridge_backend
 from subagents_runtime.delegation import claim_parent_delivery, enable_delegation, process_inbox
 

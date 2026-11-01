@@ -114,6 +114,24 @@ export async function runPiSubagentsJourney(route: Route, options: {
       ].join("\n"));
     }
     const python = join(root, ".venv", process.platform === "win32" ? "Scripts/python.exe" : "bin/python");
+    if (options.alternateRoot && !options.pinnedRuntimes) {
+      await execFileAsync(python, ["-c", [
+        "from pathlib import Path",
+        "from types import SimpleNamespace",
+        "from subagents_runtime import sessions, backends",
+        "root = Path.cwd()",
+        "before = {p.relative_to(root): p.read_bytes() for p in root.rglob('*') if p.is_file()}",
+        "def forbidden(*args): raise AssertionError('backend selected')",
+        "backends.select_backend = forbidden",
+        "request = SimpleNamespace(provider='pi', mode='interactive', resume=False, child_skill=None)",
+        "try:",
+        " sessions.launch_delegated(request, 'missing-integration', 1, root)",
+        "except sessions.SessionError:",
+        " pass",
+        "else: raise AssertionError('missing integration accepted')",
+        "assert before == {p.relative_to(root): p.read_bytes() for p in root.rglob('*') if p.is_file()}",
+      ].join("\n")], { cwd: unrelated, env: { ...env, PYTHONPATH: join(root, "harness/productivity/subagents/runtime/src") }, windowsHide: true, timeout: 10_000 });
+    }
     const bin = join(fixture.root, "uv-bin");
     await mkdir(bin);
     // Install a real isolated uv tool, optionally using the shipped source pin.
@@ -122,6 +140,9 @@ export async function runPiSubagentsJourney(route: Route, options: {
     env[pathKey] = `${bin}${delimiter}${env[pathKey] ?? ""}`;
     const packages = ["subagents", ...(options.fullStack ? ["grill-me-in-cloud", "command-guard", "on-read-reminder", "on-edit-reminder", "no-new-documents", "prefer-fewer-comments", "mid-prompt-skills"] : [])];
     await runFixtureInstaller(fixture.workspace, "install", packages, { scope: "project", pinnedRuntimes: options.pinnedRuntimes ?? true });
+    if (options.alternateRoot) {
+      await runFixtureInstaller({ ...fixture.workspace, projectRoot: unrelated }, "install", ["subagents"], { scope: "project", pinnedRuntimes: options.pinnedRuntimes ?? true });
+    }
     await readFile(join(project, ".pi", "skills", "subagents-toolkit", "scripts", "enable_inbox.py"));
     if (options.skill) {
       const selectedRoot = join(project, ".pi", "skills", "e2e-selected");

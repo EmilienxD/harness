@@ -581,9 +581,9 @@ def launch_delegated(request, request_id: str, agent_number: int, cwd: Path) -> 
         from subagents_runtime.codex_trust import trust_worktree
         trust_worktree(cwd)
     if request.mode == "interactive":
-        from subagents_runtime.reply_support import prepare
+        from subagents_runtime.reply_support import validate
 
-        prepare(cwd, request.provider)
+        validate(cwd, request.provider)
     child_id = select_backend(request, cwd).launch(request, request_id, agent_number, cwd)
     # The integration acknowledges readiness asynchronously. Slow startup or
     # compaction is not evidence that reply support is unavailable.

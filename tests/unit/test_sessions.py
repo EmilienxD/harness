@@ -7,6 +7,8 @@ from pathlib import Path
 
 import pytest
 
+pytestmark = pytest.mark.usefixtures("loaded_subagents_integration")
+
 from subagents_runtime import sessions, bridge_backend
 from subagents_runtime.cli import build_parser
 

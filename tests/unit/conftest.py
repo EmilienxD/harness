@@ -6,6 +6,14 @@ import tarfile
 from harness_cli import host_actions, pi_packages
 
 
+@pytest.fixture
+def loaded_subagents_integration(monkeypatch):
+    """Launch/protocol tests isolate prerequisites, covered in test_subagents_reply_support."""
+    from subagents_runtime import reply_support
+
+    monkeypatch.setattr(reply_support, "available", lambda *_: True)
+
+
 @pytest.fixture(autouse=True)
 def forget_cached_host_products():
     """Keep one test's host inventory from answering another test's probe."""

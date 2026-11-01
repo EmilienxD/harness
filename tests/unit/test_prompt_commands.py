@@ -6,6 +6,8 @@ from difflib import SequenceMatcher
 
 import pytest
 
+pytestmark = pytest.mark.usefixtures("loaded_subagents_integration")
+
 from subagents_runtime import sessions
 from subagents_runtime.delegation import enable_delegation, process_inbox
 from subagents_runtime.prompt_commands import BUILTIN_COMMANDS, sanitize_prompt_commands
