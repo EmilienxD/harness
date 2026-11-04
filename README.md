@@ -792,7 +792,7 @@ The access cookie is marked `Secure` whenever the request arrives over HTTPS, so
 
 Maintain usage, provider support, implementation decisions and acceptance limits in the relevant [tool guide](docs/user/index.md). Shared installation roots, receipt ownership and dependency packaging belong in [Configuration](docs/user/configuration.md#installation-roots-and-ownership). A proposed port remains identified as proposed in its tool guide.
 
-[Pi's official reference mirror](docs/PI-REFERENCES/README.md), alongside the Claude Code and ChatGPT mirrors, supplies upstream API evidence. The mirrors track upstream and are refreshed by the daily/manual documentation workflow; a refresh does not certify another runtime version. Tool guides retain their own tested baseline and verification boundary.
+[Pi's official reference mirror](docs/PI-REFERENCES/README.md), alongside the Claude Code and ChatGPT mirrors, supplies upstream API evidence. The mirrors track upstream and are refreshed by the manual documentation workflow; a refresh does not certify another runtime version. Tool guides retain their own tested baseline and verification boundary. See [CI usage and releases](docs/user/ci-usage.md) for the on-demand checks and free-account budget.
 
 Refresh all provider reference sets locally:
 
@@ -814,10 +814,11 @@ To try an unpushed checkout against another project, use `--local` before the
 installer subcommand (or omit the subcommand for the interactive menu):
 
 ```powershell
-$checkout = "C:\Users\emb\Desktop\dev\projects\harness"
-uvx --no-cache --from "$checkout" harness --local "$checkout" --root "C:\Users\emb\dev\unloopedit"
+$checkout = (Get-Location).Path # Run from the Harness checkout.
+$project = "C:\path\to\your-project"
+uvx --no-cache --from "$checkout" harness --local "$checkout" --root "$project"
 # Non-interactive installation:
-uvx --no-cache --from "$checkout" harness --local "$checkout" install report-gotchas subagents --root "C:\Users\emb\dev\unloopedit"
+uvx --no-cache --from "$checkout" harness --local "$checkout" install report-gotchas subagents --root "$project"
 ```
 
 `--local` reads the checkout's catalogue and installs its Python runtime tools
@@ -825,7 +826,7 @@ from local directories, including uncommitted changes. Without it, runtime tools
 use the GitHub commits pinned in the manifests. `--no-cache` rebuilds the installer
 from the current checkout; local runtime installations also bypass the build cache.
 Host tools are installed for your user even when the selected scope is Project.
-Aboard still uses its published VSIX; see its README for extension development.
+Aboard builds from `apps/aboard` with `--local`; see its README for extension development.
 The task-free subagent requests require `--local` until a release refreshes the
 `subagents` runtime Git pin to include this runtime.
 

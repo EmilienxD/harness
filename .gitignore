@@ -4,6 +4,7 @@ __pycache__/
 .env
 .env.*
 !.env.example
+.harness/config.local.json
 .mypy_cache/
 dist/
 build/

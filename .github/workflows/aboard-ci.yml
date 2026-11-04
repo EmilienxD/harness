@@ -1,15 +1,9 @@
 name: Aboard CI
 
 on:
-  pull_request:
-    paths:
-      - "apps/aboard/**"
-      - ".github/workflows/aboard-ci.yml"
-  push:
-    branches: [main]
-    paths:
-      - "apps/aboard/**"
-      - ".github/workflows/aboard-ci.yml"
+  workflow_dispatch:
+
+# Release Aboard still runs its tests before publishing; extra checks are on demand.
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}

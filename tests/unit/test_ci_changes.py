@@ -96,12 +96,12 @@ def test_missing_push_history_runs_checks(repository, before):
     assert all(ci_changes.select_jobs(paths).values())
 
 
-@pytest.mark.parametrize("event_name", ["schedule", "workflow_dispatch"])
-def test_periodic_and_manual_runs_emit_full_coverage(tmp_path, monkeypatch, event_name):
+@pytest.mark.parametrize("full", [True, "true"])
+def test_explicit_full_run_emits_full_matrix(tmp_path, monkeypatch, full):
     event_path = tmp_path / "event.json"
-    event_path.write_text("{}", encoding="utf-8")
+    event_path.write_text(json.dumps({"inputs": {"full": full}}), encoding="utf-8")
     output_path = tmp_path / "outputs"
-    monkeypatch.setenv("GITHUB_EVENT_NAME", event_name)
+    monkeypatch.setenv("GITHUB_EVENT_NAME", "workflow_dispatch")
     monkeypatch.setenv("GITHUB_EVENT_PATH", str(event_path))
     monkeypatch.setenv("GITHUB_OUTPUT", str(output_path))
 
@@ -114,8 +114,20 @@ def test_periodic_and_manual_runs_emit_full_coverage(tmp_path, monkeypatch, even
     assert set(matrix["python"]) == {"3.11", "3.13"}
 
 
-def test_pr_keeps_minimum_python_and_windows_coverage():
+@pytest.mark.parametrize("inputs", [{}, {"full": False}, {"full": "false"}])
+def test_default_manual_run_keeps_checks_on_linux(tmp_path, monkeypatch, inputs):
+    event_path = tmp_path / "event.json"
+    event_path.write_text(json.dumps({"inputs": inputs}), encoding="utf-8")
+    output_path = tmp_path / "outputs"
+    monkeypatch.setenv("GITHUB_EVENT_NAME", "workflow_dispatch")
+    monkeypatch.setenv("GITHUB_EVENT_PATH", str(event_path))
+    monkeypatch.setenv("GITHUB_OUTPUT", str(output_path))
+
+    ci_changes.main()
+
+    outputs = dict(line.split("=", 1) for line in output_path.read_text().splitlines())
+    assert all(outputs[name] == "true" for name in ci_changes.JOBS)
+    assert json.loads(outputs["python_matrix"]) == ci_changes.python_matrix(False)
     assert ci_changes.python_matrix(False) == {"include": [
         {"os": "ubuntu-latest", "python": "3.11"},
-        {"os": "windows-latest", "python": "3.13"},
     ]}

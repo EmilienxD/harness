@@ -1,12 +1,14 @@
 name: Harness CI
 
 on:
-  pull_request:
-  push:
-    branches: [main, dev]
   workflow_dispatch:
-  schedule:
-    - cron: "0 7 * * 1" # Weekly full Python compatibility matrix.
+    inputs:
+      full:
+        description: Run Windows compatibility and real-CLI E2E checks (expensive)
+        type: boolean
+        default: false
+
+# Keep checks on demand to reserve the private-repository free allowance for releases.
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
@@ -84,7 +86,7 @@ jobs:
   shared-e2e:
     name: Shared E2E / ${{ matrix.os }}
     needs: changes
-    if: needs.changes.outputs.shared_e2e == 'true'
+    if: inputs.full && needs.changes.outputs.shared_e2e == 'true'
     runs-on: ${{ matrix.os }}
     timeout-minutes: 30
     strategy:

@@ -102,6 +102,8 @@ For Aboard commands, work from `apps/aboard/` and follow its local `AGENTS.md`.
 
 ## Tests
 
+- Generate authentication values inside isolated test fixtures. Production env files and private
+  user/project configuration are not test inputs; never copy their values into source or fixtures.
 - Run `uv run pytest` after catalogue or installer changes; the suite covers reconciliation and
   receipt-driven removal.
 - Use the `harness-e2e` skill for work under `tests/e2e/` or `apps/aboard/test/e2e/`.

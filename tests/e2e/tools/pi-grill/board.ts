@@ -1,10 +1,10 @@
 import { createServer } from "node:http";
-import { randomUUID } from "node:crypto";
+import { randomInt, randomUUID } from "node:crypto";
 import type { AddressInfo } from "node:net";
 
 /** Hosted transport fault fixture. Real app/database/storage acceptance uses the same journey CLI. */
 export async function startGrillBoard() {
-  const code = "9110";
+  const code = randomInt(10_000).toString().padStart(4, "0");
   const publications = new Map<string, any>();
   const rounds = new Map<string, any>();
   const sessions = new Map<string, any>();

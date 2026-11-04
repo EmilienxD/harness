@@ -19,7 +19,7 @@ CI_INPUTS = {
 
 
 def select_jobs(paths: list[str] | None) -> dict[str, bool]:
-    # Missing history and scheduled/manual runs must never silently skip coverage.
+    # Missing history and manual runs select every applicable check.
     if paths is None or any(path in CI_INPUTS for path in paths):
         return dict.fromkeys(JOBS, True)
 
@@ -79,7 +79,6 @@ def python_matrix(full: bool) -> dict:
         return {"os": ["ubuntu-latest", "windows-latest"], "python": ["3.11", "3.13"]}
     return {"include": [
         {"os": "ubuntu-latest", "python": "3.11"},
-        {"os": "windows-latest", "python": "3.13"},
     ]}
 
 
@@ -87,7 +86,7 @@ def main() -> None:
     event_name = os.environ["GITHUB_EVENT_NAME"]
     event = json.loads(Path(os.environ["GITHUB_EVENT_PATH"]).read_text(encoding="utf-8"))
     jobs = select_jobs(changed_paths(event_name, event, Path.cwd()))
-    matrix = python_matrix(event_name in {"schedule", "workflow_dispatch"})
+    matrix = python_matrix(event.get("inputs", {}).get("full") in {True, "true"})
     with Path(os.environ["GITHUB_OUTPUT"]).open("a", encoding="utf-8") as output:
         for name, enabled in jobs.items():
             output.write(f"{name}={str(enabled).lower()}\n")

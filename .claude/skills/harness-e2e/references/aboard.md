@@ -21,7 +21,7 @@ Keep Aboard markers, GitHub orchestration, VS Code behavior, and canonical fixtu
 
 ## Runtime
 
-- ABOARD_E2E_ROOT defaults to C:\Users\emb\dev\harness-e2e-runtime.
+- ABOARD_E2E_ROOT defaults to `aboard-e2e-runtime` under the OS temporary directory.
 - ABOARD_E2E_REPOSITORY defaults to EmilienxD/harness-e2e.
 - The verified checkout is <runtime root>\repository.
 - Claude state is <runtime root>\claude-config.

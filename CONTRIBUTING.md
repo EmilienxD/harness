@@ -66,6 +66,19 @@ reserve `requires` for executables expected on `PATH`.
 
 ## Tests and pull requests
 
+Generate authentication values inside isolated test fixtures. Use explicit dummy
+values for tests that reject a request before authentication; production env files
+and private user/project configuration are not test inputs.
+
+Enable this checkout's local credential check with
+`uv run python scripts/check_local_secrets.py --install-hook`. Before each commit it compares the
+Git index against sensitive values in local production env files at the root or
+under `apps/*/`, plus `.harness/config.local.json`. Matches block the commit and
+report filenames without printing credentials. Run `uv run python
+scripts/check_local_secrets.py` to check tracked and non-ignored working files.
+This comparison supplements secret scanning; it cannot identify credentials that
+are absent from these local settings or prevent someone from bypassing Git hooks.
+
 Prefer a focused behavioral test at the public boundary of the change, then run the relevant full
 suite. Catalogue or installer changes require `uv run pytest`. Shared E2E changes require the TypeScript
 check, focused journey, and `npm test`. Aboard changes require its check, unit tests, package build, and
