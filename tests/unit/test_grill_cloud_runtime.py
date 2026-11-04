@@ -610,7 +610,13 @@ def test_pi_followup_preparation_is_silent_and_publication_reports_question_coun
         def request(self, method, path, body=None, idempotency_key=None):
             if path == "/api/v1/capabilities":
                 return {"providers": ["pi"], "pi_relay": 1}
-            return super().request(method, path, body, idempotency_key)
+            result = super().request(method, path, body, idempotency_key)
+            if path.endswith("/commit"):
+                result["round_id"] = "round-id"
+            return result
+
+        def session(self, provider, session_id):
+            return {"session": {"provider_session_id": session_id}, "rounds": [{"id": "round-id", "status": "active"}]}
 
     project = tmp_path / "project"
     project.mkdir()
@@ -630,8 +636,63 @@ def test_pi_followup_preparation_is_silent_and_publication_reports_question_coun
     assert published["ok"]
     assert published["published"]["question_count"] == 1
     assert published["source"] != initial["source"]
-    followup = grill_cloud_pi.handle(request)
+    followup = grill_cloud_pi.handle(request | {"confirmedRoundIds": ["round-id"]})
     assert followup["ok"] and not followup["message"]
+
+
+def test_pi_retry_confirmation_survives_consumed_outbox_and_process_restart(tmp_path, monkeypatch):
+    import grill_cloud_pi
+
+    class PiBoard(HostedBoard):
+        origin = "https://grill.test"
+        code = "1234"
+        status = "active"
+
+        def request(self, method, path, body=None, idempotency_key=None):
+            if path == "/api/v1/capabilities":
+                return {"providers": ["pi"], "pi_relay": 1}
+            result = super().request(method, path, body, idempotency_key)
+            if path.endswith("/commit"):
+                result["round_id"] = "recovered-round"
+            return result
+
+        def session(self, provider, session_id):
+            return {"session": {"provider_session_id": session_id}, "rounds": [{"id": "recovered-round", "status": self.status}]}
+
+    project = tmp_path / "project"
+    project.mkdir()
+    board = PiBoard()
+    root = tmp_path / "runtime"
+    monkeypatch.setattr(grill_cloud_pi.PiInterviewRuntime, "from_environment", lambda **kwargs: grill_cloud_pi.PiInterviewRuntime(root, board))
+    request = {"version": 1, "operation": "prepare", "cwd": str(project), "sessionId": "session",
+               "sessionFile": str(tmp_path / "session.jsonl"), "anchor": "publication-tool", "branchIds": ["start", "publication-tool"]}
+    initial = grill_cloud_pi.handle(request)
+    Path(initial["source"]).write_text(json.dumps(round_data()), encoding="utf-8")
+    board.fail = True
+    assert not grill_cloud_pi.handle(request | {"operation": "publish"})["ok"]
+    board.fail = False
+    retried = grill_cloud_pi.handle(request)
+    assert retried["published"]["round_id"] == "recovered-round"
+    assert not list((root / "outbox").rglob("publication.json"))
+    mutations = len(board.requests)
+
+    # The confirmation receipt was left on another leaf, but its originating tool is still an ancestor.
+    navigated = request | {"anchor": "new-leaf", "branchIds": ["start", "publication-tool", "new-leaf"]}
+    recovered = grill_cloud_pi.handle(navigated)
+    assert recovered["published"] == retried["published"]
+    assert len(board.requests) == mutations
+    confirmed = grill_cloud_pi.handle(navigated | {"confirmedRoundIds": ["recovered-round"]})
+    assert confirmed["published"] == retried["published"]
+    assert not confirmed["message"]
+
+    # Neither unrelated branches, files, native sessions, nor boards may inherit the receipt.
+    for change in [{"branchIds": ["new-leaf"]}, {"sessionFile": "other.jsonl"}, {"sessionId": "fork"}]:
+        assert grill_cloud_pi.handle(navigated | change)["published"] is None
+    board.origin = "https://other.test"
+    assert grill_cloud_pi.handle(navigated)["published"] is None
+    board.origin = "https://grill.test"
+    board.status = "superseded"
+    assert grill_cloud_pi.handle(navigated)["published"] is None
 
 
 def test_queued_rounds_retry_on_the_next_user_message_not_on_every_tool_call(tmp_path):

@@ -43,6 +43,7 @@ export async function runPiGrill(options: { scope: "project" | "user"; mode?: "r
     const user = users.at(-1);
     if (!user) reject("unknown grilling route");
     const userText = contentText(user!.content);
+    if (userText.includes("[E2E:publication-confirmation]")) return { scenario: "pi-grill", checkpoint: "confirmation-turn", output: { type: "message", id: "msg_grill_confirmation", role: "assistant", status: "completed", content: [{ type: "output_text", text: "Fixture complete.", annotations: [] }] } };
     const start = request.input.indexOf(user!);
     const history = request.input.slice(start + 1);
     const calls = history.filter((item) => item.type === "function_call");
@@ -98,6 +99,7 @@ export async function runPiGrill(options: { scope: "project" | "user"; mode?: "r
       pi.registerCommand("e2e-grill-reload", { handler: async (_args, ctx) => { await ctx.reload(); } });
       pi.registerCommand("e2e-grill-name", { handler: () => pi.setSessionName("Harness Pi grill E2E") });
       pi.registerCommand("e2e-grill-tree", { handler: async (_args, ctx) => { const first = ctx.sessionManager.getEntries().find(e => e.type === "custom" && e.customType === "harness-grill-cloud-v1" && e.data.phase === "start"); await ctx.navigateTree(first.id, { summarize: false }); } });
+      pi.registerCommand("e2e-grill-recovered-tree", { handler: async (_args, ctx) => { const tool = ctx.sessionManager.getBranch().filter(e => e.type === "message" && e.message.role === "toolResult").at(-1); await ctx.navigateTree(tool.id, { summarize: false }); } });
       pi.registerCommand("e2e-grill-new", { handler: async (_args, ctx) => { await ctx.newSession(); } });
       pi.registerCommand("e2e-grill-fork", { handler: async (_args, ctx) => { const user = ctx.sessionManager.getEntries().find(e => e.type === "message" && e.message.role === "user"); await ctx.fork(user.id, { position: "at" }); } });
     }`);
@@ -125,18 +127,31 @@ export async function runPiGrill(options: { scope: "project" | "user"; mode?: "r
       const recovered = await api(`sessions/pi/${sessionId}`);
       assert.equal(recovered.rounds.length, 1);
       assert.equal(fixture.assertions().inferenceRequests, 5);
+      // Navigate behind the successful retry receipt, then restart before the model sees confirmation.
+      assert.equal((await rpc.prompt("/e2e-grill-recovered-tree")).status, "handled");
+      assert.equal((await rpc.prompt("/e2e-grill-reload")).status, "handled");
+      const confirmationTurn = `${marker} [E2E:publication-confirmation]`;
+      assert.equal((await rpc.prompt(confirmationTurn)).status, "success");
+      const confirmationMessages = ((await rpc.request("get_messages")).data as any).messages.filter((message: any) => message.role === "custom" && message.customType === "harness-grill-context" && message.details?.publicationRoundId === recovered.rounds[0].id);
+      assert.equal(confirmationMessages.length, 1);
+      assert.equal((await api(`sessions/pi/${sessionId}`)).rounds.length, 1);
+      assert.equal((await rpc.prompt("/e2e-grill-reload")).status, "handled");
+      assert.equal((await rpc.prompt(confirmationTurn)).status, "success");
+      const repeatedMessages = ((await rpc.request("get_messages")).data as any).messages.filter((message: any) => message.role === "custom" && message.customType === "harness-grill-context" && message.details?.publicationRoundId === recovered.rounds[0].id);
+      assert.equal(repeatedMessages.length, 1);
+      assert.equal(fixture.assertions().inferenceRequests, 7);
       // Queue another publication, then abandon its ancestry before the service returns.
       board.setFailCommit(true);
       assert.equal((await rpc.prompt(`/grill-me-in-cloud ${marker} [E2E:queued-branch]`)).status, "success");
-      assert.equal(fixture.assertions().inferenceRequests, 8);
+      assert.equal(fixture.assertions().inferenceRequests, 10);
       board.setFailCommit(false);
       assert.equal((await rpc.prompt("/e2e-grill-tree")).status, "handled");
       assert.equal((await rpc.prompt("/e2e-grill-reload")).status, "handled");
       const abandoned = await api(`sessions/pi/${sessionId}`);
       assert.equal(abandoned.rounds.length, 1);
-      assert.equal(fixture.assertions().inferenceRequests, 8);
+      assert.equal(fixture.assertions().inferenceRequests, 10);
     }
-    const offset = options.faults && board ? 8 : 0;
+    const offset = options.faults && board ? 10 : 0;
     const run = options.mode === "json" ? await fixture.runJson({ sessionId, prompt: `/skill:grill-me-in-cloud ${marker}` }) : await rpc.prompt(`/grill-me-in-cloud ${marker}`);
     assert.equal(run.status, "success");
     assert.equal(fixture.assertions().inferenceRequests, 3 + offset);

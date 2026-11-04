@@ -646,8 +646,12 @@ class InterviewRuntime:
                     self.client.upload(target, publication_path.parent / asset["file"], asset["media_type"])
         result = self.client.request("POST", f"/api/v1/publications/{publication['id']}/commit", {}, key)
         result["question_count"] = len(staged["payload"]["questions"])
+        self._record_publication(staged, result)
         shutil.rmtree(publication_path.parent)
         return result
+
+    def _record_publication(self, staged: dict, result: dict) -> None:
+        """Let provider adapters persist confirmation before queued work is removed."""
 
     def retry_pending(self, provider: str, session: str) -> list[dict]:
         return [self._publish_staged(path) for path in self._outboxes(provider, session)]
