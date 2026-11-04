@@ -35,6 +35,14 @@ Run `/commit --dry` to inspect the proposed commit, then `/commit Fix empty-cart
 
 ## Implementation and verification
 
+Version 1.8.3 keeps ordinary shell commands and edits running when ownership
+snapshots encounter linked paths, unreadable files, or other attribution limits.
+The failed snapshot produces uncertain ownership; a later `/commit` refuses to
+stage or commit and asks for manual review and commit. Installing `commit`
+registers automatic tool hooks to collect ownership before `/commit` is invoked.
+Real Git regression tests cover dirty files beneath directory links, failures
+before and after tools, and preservation of the index and HEAD on refusal.
+
 Version 1.8.0 shares SHA-256 file ownership, Git baseline and index checks across all three
 providers. Claude Code now observes `PreToolUse`, `PostToolUse` and `PostToolUseFailure` for
 native writes, edits, notebook edits and shell tools; the transcript supplies optional AI
