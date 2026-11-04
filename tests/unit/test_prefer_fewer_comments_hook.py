@@ -55,6 +55,37 @@ def findings_for(path, text):
     return hook.findings(text, hook.every_line(text), family, dict(hook.DEFAULT_LIMITS))
 
 
+@pytest.mark.parametrize("explicit_workdir", [False, True])
+def test_codex_session_limits_and_exemptions_use_tool_relative_paths(tmp_path, monkeypatch, explicit_workdir):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(sys, "argv", [str(HOOK_DIR / "prefer_fewer_comments_hook.py"), "--chatgpt"])
+    child = tmp_path / "child"
+    child.mkdir()
+    monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(child))
+    policy = tmp_path / ".harness/guards/prefer-fewer-comments.toml"
+    policy.parent.mkdir(parents=True)
+    policy.write_text('version=1\n[limits]\nmax_comment_lines=0\n[[rules]]\npatterns=["child/exempt.py"]\nexempt=true\n')
+    for filename, expected in [("target.py", True), ("exempt.py", False)]:
+        event = write(filename, "# short\nvalue = 1\n", cwd=str(tmp_path if explicit_workdir else child))
+        if explicit_workdir:
+            event["tool_input"]["workdir"] = "child"
+        code, output = run_hook(event, session=filename)
+        assert code == 0
+        assert (output is not None) is expected
+
+
+def test_codex_comment_limits_do_not_search_ancestor_policy(tmp_path, monkeypatch):
+    policy = tmp_path / ".harness/guards/prefer-fewer-comments.toml"
+    policy.parent.mkdir(parents=True)
+    policy.write_text('version=1\n[limits]\nmax_comment_lines=0\n')
+    child = tmp_path / "child"
+    child.mkdir()
+    monkeypatch.chdir(child)
+    monkeypatch.delenv("CLAUDE_PROJECT_DIR", raising=False)
+    monkeypatch.setattr(sys, "argv", ["hook", "--chatgpt"])
+    assert run_hook(write("a.py", "# short\nvalue = 1\n", cwd=str(child))) == (0, None)
+
+
 def test_short_comment_is_within_budget():
     assert not findings_for("a.py", "# retry once: the API 502s on cold start\nrun()\n")
 
@@ -262,7 +293,9 @@ def test_repeat_within_the_interval_is_throttled():
     assert (first_code, second_code) == (0, 0)
 
 
-def test_rules_file_overrides_the_budget_and_exempts_paths(tmp_path):
+def test_rules_file_overrides_the_budget_and_exempts_paths(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("CLAUDE_PROJECT_DIR", raising=False)
     (tmp_path / ".harness" / "guards").mkdir(parents=True)
     (tmp_path / ".harness" / "guards" / hook.RULES_NAME).write_text(
         'version=1\n[limits]\nmax_comment_lines=5\n[[rules]]\npatterns=["docs/"]\nexempt=true\n',

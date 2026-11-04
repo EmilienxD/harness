@@ -24,6 +24,8 @@ Native writes follow Pi's `@`, tilde, file URL, Unicode-space and Windows shell-
 
 Review the draft, then run `/approve-doc-draft docs/arch/plan.md` or `/reject-doc-draft docs/arch/plan.md` in Claude Code or Pi; use `$approve-doc-draft` or `$reject-doc-draft` in ChatGPT. With no path, these commands list drafts; a directory handles its pending drafts together. Quote paths containing spaces. Approval never overwrites an existing target. To request changes, tell the agent what to revise in the draft.
 
+Project policies, draft storage, and approve/reject commands use the directory where the session started. Codex uses the hook process directory; Claude uses `CLAUDE_PROJECT_DIR`. Relative creation targets use the tool's working directory. For a call from `client/`, `docs/new.md` maps to the session's `.harness/doc-drafts/client/docs/new.md`; the denial supplies its absolute destination so the tool directory cannot redirect the draft. Ancestor policies are not searched.
+
 ## When to use it
 
 Use this when creating documents should involve a human review, while routine edits to existing documents can proceed. The protected paths control where the draft flow applies; paths outside them follow normal provider behavior.

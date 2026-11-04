@@ -31,14 +31,15 @@ const catalog = createHash("sha256").update("shared-path-guards:v1").digest("hex
 const marker = "[E2E:shared-path-guards]";
 const guide = "Follow the conventions for this project.\n".repeat(350);
 
-function steps(provider: Provider): Step[] {
+function steps(provider: Provider, childTools = false): Step[] {
   const ps = process.platform === "win32" && provider !== "claude";
-  const read = (path: string) => ps ? `Get-Content -Raw '${path}'` : `cat '${path}'`;
-  const write = (path: string) => ps ? `Set-Content -LiteralPath '${path}' -Value after` : `printf 'after\\n' > '${path}'`;
+  const prefix = childTools ? "../" : "";
+  const read = (path: string) => ps ? `Get-Content -Raw '${prefix}${path}'` : `cat '${prefix}${path}'`;
+  const write = (path: string) => ps ? `Set-Content -LiteralPath '${prefix}${path}' -Value after` : `printf 'after\\n' > '${prefix}${path}'`;
   return [
     { name: "shell-read-reminder", tool: "shell", command: read("trigger.txt"), guidance: "read-guide.md" },
-    { name: "partial-guidance", tool: "shell", command: ps ? "Get-Content -TotalCount 1 guide.md" : "head -n 1 guide.md" },
-    { name: "shell-write-denied", tool: "shell", command: provider === "chatgpt" ? `cd sub; ${write("../blocked.txt")}` : write("blocked.txt"), denied: true },
+    { name: "partial-guidance", tool: "shell", command: ps ? `Get-Content -TotalCount 1 ${prefix}guide.md` : `head -n 1 ${prefix}guide.md` },
+    { name: "shell-write-denied", tool: "shell", command: provider === "chatgpt" && !childTools ? `cd sub; ${write("../blocked.txt")}` : write("blocked.txt"), denied: true },
     { name: "native-write-denied", tool: "write", path: "blocked-native.txt", content: "after\n", denied: true },
     { name: "complete-shell-guidance", tool: "shell", command: read("guide.md") },
     { name: "shell-write-authorized", tool: "shell", command: write("blocked.txt") },
@@ -69,7 +70,7 @@ async function stage(workspace: Awaited<ReturnType<typeof preparePiWorkspace>>, 
 async function verify(project: string, plan: Step[], completed: number, context: unknown) {
   const step = plan[completed - 1];
   if (!step) return;
-  if (step.denied) {
+  if (step.name === "shell-write-denied" || step.name === "native-write-denied") {
     await assert.rejects(access(join(project, "blocked.txt")));
     await assert.rejects(access(join(project, "blocked-native.txt")));
     await assert.rejects(access(join(project, "sibling.txt")));
@@ -104,17 +105,32 @@ export async function runSharedPiGuards() {
   } finally { await fixture.close(); }
 }
 
-export async function runSharedLocalGuards(provider: "claude" | "chatgpt") {
+export async function runSharedLocalGuards(provider: "claude" | "chatgpt", childTools = false) {
   if (provider === "claude") await validateClaudeCli(); else await validateCodexCli();
   const root = await canonicalMkdtemp(join(tmpdir(), "harness-shared-path-guards-"));
   let anthropic: Awaited<ReturnType<typeof startFakeAnthropicServer>> | undefined;
   let openai: Awaited<ReturnType<typeof startFakeOpenAiServer>> | undefined;
-  const plan = steps(provider);
+  const plan = steps(provider, childTools);
+  const installed = childTools ? [...packages, "command-guard", "no-new-documents", "prefer-fewer-comments"] : packages;
   try {
     // Reuse the allowlisted, external installer workspace; no Pi CLI is launched here.
     const workspace = await preparePiWorkspace(root, "http://127.0.0.1:1/v1", "unused-fixture-key");
     const project = workspace.projectRoot;
     await stage(workspace, provider);
+    if (childTools) {
+      assert.equal(provider, "chatgpt");
+      await runFixtureInstaller(workspace, "install", installed, { platform: provider });
+      const guards = join(project, ".harness/guards");
+      await mkdir(join(project, "sub/docs"));
+      await writeFile(join(guards, "command-guard.toml"), 'version=1\n[[rules]]\npatterns=["session-denied"]\nreason="Fixture command denied"\n');
+      await writeFile(join(guards, "no-new-documents.toml"), 'version=1\nprotected=["sub/docs/**"]\n');
+      await writeFile(join(guards, "prefer-fewer-comments.toml"), 'version=1\n[limits]\nmax_comment_lines=0\n');
+      plan.push(
+        { name: "session-command-denied", tool: "shell", command: `node -e "require('node:fs').writeFileSync('session-denied.txt','unexpected')"`, denied: true },
+        { name: "session-document-denied", tool: "shell", command: process.platform === "win32" ? "Set-Content -LiteralPath docs/proposal.md -Value proposal" : "printf proposal > docs/proposal.md", denied: true, guidance: join(project, ".harness/doc-drafts/sub/docs/proposal.md").replaceAll("\\", "/") },
+        { name: "session-comment-reminder", tool: "shell", command: process.platform === "win32" ? "Set-Content -LiteralPath sample.py -Value @('# short','value = 1')" : "printf '# short\\nvalue = 1\\n' > sample.py", guidance: "sub/sample.py" },
+      );
+    }
     await initializeRepository(project);
     if (provider === "claude") {
       anthropic = await startFakeAnthropicServer({ repoRoot: project, scenarioCatalogHash: catalog, parseRequest: parseAnthropicMessagesRequest,
@@ -146,12 +162,21 @@ export async function runSharedLocalGuards(provider: "claude" | "chatgpt") {
         if (!request.input.some(item => item.role === "user" && JSON.stringify(item.content).includes(marker))) throw new OpenAiProtocolError("$.input", "unknown guard scenario");
         const completed = guardProgress(request.input, plan.length, "chatgpt");
         await verify(project, plan, completed, request.input);
+        if (childTools) {
+          await assert.rejects(access(join(project, "sub/session-denied.txt")));
+          await assert.rejects(access(join(project, "sub/docs/proposal.md")));
+          if (completed === plan.length) {
+            assert.equal((await readFile(join(project, "sub/sample.py"), "utf8")).replaceAll("\r\n", "\n"), "# short\nvalue = 1\n");
+            await access(join(project, ".harness/doc-drafts/.gitignore"));
+            await assert.rejects(access(join(project, "sub/.harness/doc-drafts")));
+          }
+        }
         const step = plan[completed];
         if (!step) return { scenario: "shared-path-guards", checkpoint: "complete", output: { type: "message", id: "msg_shared_done", role: "assistant", status: "completed", content: [{ type: "output_text", text: "Fixture complete.", annotations: [] }] } };
         // A protected second path must deny the entire patch, including its first path.
         const extra = step.path === "blocked-native.txt" ? "*** Add File: sibling.txt\n+after\n" : "";
         const args = step.tool === "write" ? `*** Begin Patch\n${extra}*** Add File: ${step.path}\n+${step.content!.trimEnd()}\n*** End Patch` : {
-          cmd: step.command, yield_time_ms: 10_000, max_output_tokens: 12000,
+          cmd: step.command, ...(childTools ? { workdir: join(project, "sub") } : {}), yield_time_ms: 10_000, max_output_tokens: 12000,
         };
         if (step.tool === "read") throw new OpenAiProtocolError("$.tools", "Codex native read step must use shell adapter");
         const id = `shared_${completed}`;
@@ -179,7 +204,7 @@ export async function runSharedLocalGuards(provider: "claude" | "chatgpt") {
       assert.equal(openai.assertions().unexpectedRequests, 0);
       assert.equal(await readFile(join(project, "sibling.txt"), "utf8"), "after\n");
     }
-    await runFixtureInstaller(workspace, "uninstall", packages, { platform: provider });
+    await runFixtureInstaller(workspace, "uninstall", installed, { platform: provider });
     await assert.rejects(access(join(project, provider === "claude" ? ".claude" : ".codex", "hooks", "path_guard_common.py")));
   } finally {
     await anthropic?.close(); await openai?.close();

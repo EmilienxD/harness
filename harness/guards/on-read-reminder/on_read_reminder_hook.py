@@ -128,7 +128,7 @@ def parse_rules(path: Path) -> tuple[list[Rule], list[int]]:
 
 def project_root() -> Path:
     """The project being worked on: CLAUDE_PROJECT_DIR, else the cwd."""
-    root = os.environ.get("CLAUDE_PROJECT_DIR")
+    root = os.environ.get("CLAUDE_PROJECT_DIR") if PROVIDER == "claude" else None
     return Path(root) if root else Path.cwd()
 
 
@@ -192,7 +192,7 @@ def main() -> int:
     if not isinstance(tool_input, dict):
         return 0
 
-    root = project_root() if PROVIDER == "claude" and os.environ.get("CLAUDE_PROJECT_DIR") else Path(event.get("cwd") or project_root())
+    root = project_root().resolve()
     # Keep policy lookup at the project root while shell paths follow the call's cwd.
     tool_input = dict(tool_input)
     if event.get("cwd"):

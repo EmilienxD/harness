@@ -1,5 +1,5 @@
 name = "no-new-documents"
-version = "3.3.0"
+version = "3.3.1"
 description = "Cross-platform guard that routes new files in configured documentation directories through user-approved drafts"
 docs = "https://github.com/EmilienxD/harness/blob/main/README.md#hooks"
 

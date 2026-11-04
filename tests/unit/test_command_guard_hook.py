@@ -1,6 +1,7 @@
 """Behavior tests for the cross-platform command-guard hook."""
 
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -17,13 +18,15 @@ ROOT = Path(__file__).resolve().parents[2]
 HOOK = ROOT / "harness/guards/command-guard/command_guard_hook.py"
 
 
-def run_payload(payload, *, hook_path=HOOK, raw=None) -> tuple[int, dict | None, str]:
+def run_payload(payload, *, hook_path=HOOK, raw=None, cwd=None, env=None, arguments=()) -> tuple[int, dict | None, str]:
     result = subprocess.run(
-        [sys.executable, str(hook_path)],
+        [sys.executable, str(hook_path), *arguments],
         input=raw if raw is not None else json.dumps(payload),
         text=True,
         capture_output=True,
         check=False,
+        cwd=cwd,
+        env=env,
     )
     stdout = result.stdout.strip()
     return result.returncode, json.loads(stdout) if stdout else None, result.stderr
@@ -268,10 +271,58 @@ def test_project_toml_adds_rules_after_the_installed_policy(tmp_path):
     code, output, stderr = run_payload({
         "cwd": str(tmp_path),
         "tool_input": {"command": "forbidden-local-command"},
-    })
+    }, cwd=tmp_path)
 
     assert (code, stderr) == (0, "")
     assert output["hookSpecificOutput"]["permissionDecisionReason"].endswith("project policy.")
+
+
+@pytest.mark.parametrize("platform", ["claude", "chatgpt"])
+@pytest.mark.parametrize("location", ["child", "outside"])
+@pytest.mark.parametrize("command", ["echo harmless", "forbidden-at-start"])
+def test_installed_hook_uses_session_start_directory(tmp_path, platform, location, command):
+    project = tmp_path / "project"
+    current = project / "child" if location == "child" else tmp_path / "outside"
+    current.mkdir(parents=True)
+    target = Target.for_project(project, platform)
+    tool = discover()["command-guard"]
+    CatalogueInstaller({tool.name: tool}, target, ReceiptStore.load(tmp_path / "receipts.json")).reconcile({tool.name})
+    policy = project / ".harness/guards/command-guard.toml"
+    policy.write_text('version=1\n[[rules]]\nreason="session start policy"\npatterns=["forbidden-at-start"]\n', encoding="utf-8")
+    other_policy = current / ".harness/guards/command-guard.toml"
+    other_policy.parent.mkdir(parents=True)
+    other_policy.write_text('version=1\n[[rules]]\nreason="current directory policy"\npatterns=["echo harmless"]\n', encoding="utf-8")
+    # Claude's hook process may follow its changing cwd. Codex's stays at launch cwd.
+    environment = {**os.environ, "CLAUDE_PROJECT_DIR": str(project if platform == "claude" else current)}
+    code, output, stderr = run_payload({
+        "cwd": str(current), "tool_input": {"command": command, "cwd": str(current)},
+    }, hook_path=target.install_root / "hooks/command_guard_hook.py",
+        cwd=current if platform == "claude" else project, env=environment, arguments=(f"--{platform}",))
+    assert (code, stderr) == (0, "")
+    if command == "echo harmless":
+        assert output is None
+    else:
+        assert output["hookSpecificOutput"]["permissionDecisionReason"].endswith("session start policy.")
+
+
+@pytest.mark.parametrize("policy_contents", [None, "invalid policy"])
+def test_codex_does_not_substitute_current_directory_policy_for_start_policy(tmp_path, policy_contents):
+    project = tmp_path / "project"
+    child = project / "child"
+    child.mkdir(parents=True)
+    hook = tmp_path / HOOK.name
+    shutil.copy2(HOOK, hook)
+    if policy_contents is not None:
+        policy = project / ".harness/guards/command-guard.toml"
+        policy.parent.mkdir(parents=True)
+        policy.write_text(policy_contents, encoding="utf-8")
+    child_policy = child / ".harness/guards/command-guard.toml"
+    child_policy.parent.mkdir(parents=True)
+    child_policy.write_text('version=1\n[[rules]]\nreason="unrelated"\npatterns=["never-match"]\n', encoding="utf-8")
+    code, output, stderr = run_payload({"cwd": str(child), "tool_input": {"command": "echo harmless"}},
+        hook_path=hook, cwd=project, arguments=("--chatgpt",))
+    assert (code, stderr) == (0, "")
+    assert "policy could not be loaded safely" in output["hookSpecificOutput"]["permissionDecisionReason"]
 
 
 def test_shared_policy_survives_until_both_provider_installations_are_removed(tmp_path):

@@ -623,8 +623,8 @@ def rules_sources(root: Path) -> list[Path]:
 
 
 def project_root(event: dict[str, Any]) -> Path:
-    root = os.environ.get("CLAUDE_PROJECT_DIR") or event.get("cwd")
-    return Path(str(root)) if root else Path.cwd()
+    root = os.environ.get("CLAUDE_PROJECT_DIR") if "--chatgpt" not in sys.argv else None
+    return Path(root).resolve() if root else Path.cwd().resolve()
 
 
 def normalise(path_text: str, root: Path) -> str:
@@ -765,6 +765,8 @@ def main() -> int:
         return 0
 
     root = project_root(event)
+    tool_input = event["tool_input"]
+    tool_cwd = root / (tool_input.get("workdir") or tool_input.get("cwd") or event.get("cwd") or ".")
     limits = dict(DEFAULT_LIMITS)
     patterns: list[tuple[bool, re.Pattern[str]]] = []
     for source in rules_sources(root):
@@ -781,7 +783,7 @@ def main() -> int:
         family = family_for(path)
         if family is None or not added:
             continue
-        relative = normalise(path, root)
+        relative = normalise(str(tool_cwd / path), root)
         if exempt(patterns, relative):
             continue
         last = reminded.get(relative)

@@ -18,6 +18,10 @@ The agent asks the current frontier of decisions, with options and recommendatio
 
 Claude/ChatGPT use hooks; Pi uses an extension and Python publisher, with no Aboard prerequisite. Install with `harness install grill-me-in-cloud --platform pi`, then reload Pi. Pi 1.2.0 is the verified runtime. The hosted app needs the Pi provider migration and current server; older deployments stop the invocation before inference with an upgrade diagnostic.
 
+Claude/Codex hooks select project configuration and board identity from the session start directory (`CLAUDE_PROJECT_DIR` for Claude, the hook process directory for Codex). A tool working in a child directory cannot switch the board URL or access code. Ancestor configuration is not searched.
+
+The 2.8.7 checkout passes `npm run test:grill-session-directory` from `tests/e2e/` on Windows: an installed real Codex hook publishes a native shell-authored round from a child tool directory despite conflicting child configuration. An authenticated loopback board fixture verifies the round, session project identity, one prepare/commit and two inference requests. This checks local hook and HTTP integration; hosted service acceptance remains separate below.
+
 Board connection can be configured in Harness config under `grill`; workspace-local `.harness/config.local.json` is ignored by project installs and can hold the URL and code. Drafts, round assets, and Pi's delivery journal live outside the project. The relay advertises the exact session and accepts answers when Pi is idle. Delivery is confirmed only after that session's saved JSONL contains the correlated user message. Reload/resume recover accepted answers without submitting them again. A second process resuming the same session cannot take over a live relay.
 
 An outage or expired delivery preserves the saved answers: reconnect and send a newly reviewed prompt, or copy it into the session. Forked sessions need their own explicit invocation, and tree navigation invalidates the previous branch's relay. Background relay retries run silently. Published rounds are announced as `Round n with m questions available at <url>`.

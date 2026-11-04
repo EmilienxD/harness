@@ -76,6 +76,63 @@ def write_draft(root: Path, target: str, content: str = "# Draft\n") -> Path:
     return draft
 
 
+@pytest.mark.parametrize("tool,tool_input", [
+    ("Write", {"file_path": "docs/new.md", "content": "x"}),
+    ("apply_patch", {"command": "*** Add File: docs/new.md\n+x"}),
+    ("Bash", {"command": "printf x > docs/new.md"}),
+    ("PowerShell", {"command": "Set-Content -Path docs/new.md -Value x"}),
+    ("Bash", {"command": "cp source.md docs/"}),
+])
+@pytest.mark.parametrize("explicit_workdir", [False, True])
+def test_codex_child_tool_keeps_session_policy_and_drafts(tmp_path, tool, tool_input, explicit_workdir):
+    hook = staged_hook(tmp_path, 'version=1\nprotected=["child/docs/**"]\n')
+    child = tmp_path / "child"
+    (child / "docs").mkdir(parents=True)
+    env = isolated_env(tmp_path)
+    env["CLAUDE_PROJECT_DIR"] = str(child)
+    payload = pre_tool(tool, dict(tool_input), tmp_path if explicit_workdir else child)
+    if explicit_workdir:
+        payload["tool_input"]["workdir"] = "child"
+
+    code, output, stderr = run_hook(payload, tmp_path, hook, env, "chatgpt")
+
+    assert (code, stderr) == (0, "")
+    assert output["hookSpecificOutput"]["permissionDecision"] == "deny"
+    target_name = "source.md" if tool_input.get("command") == "cp source.md docs/" else "new.md"
+    draft_path = tmp_path / ".harness/doc-drafts/child/docs" / target_name
+    assert draft_path.as_posix() in output["hookSpecificOutput"]["permissionDecisionReason"]
+    assert (tmp_path / ".harness/doc-drafts/.gitignore").is_file()
+    assert not (child / ".harness/doc-drafts").exists()
+    assert not (child / "docs/new.md").exists()
+
+
+def test_codex_draft_approval_uses_session_directory(tmp_path):
+    child = tmp_path / "child"
+    child.mkdir()
+    draft = write_draft(tmp_path, "docs/new.md", "approved bytes\n")
+
+    code, output, stderr = run_hook(
+        prompt("$approve-doc-draft docs/new.md", child), tmp_path,
+        env=isolated_env(tmp_path), provider="chatgpt",
+    )
+
+    assert (code, stderr) == (0, "")
+    assert output["decision"] == "block"
+    assert (tmp_path / "docs/new.md").read_text() == "approved bytes\n"
+    assert not draft.exists()
+    assert not (child / "docs/new.md").exists()
+
+
+def test_codex_does_not_load_policy_from_above_session_directory(tmp_path):
+    hook = staged_hook(tmp_path, 'version=1\nprotected=["*.private"]\n')
+    child = tmp_path / "child"
+    child.mkdir()
+    assert run_hook(
+        pre_tool("Write", {"file_path": "new.private", "content": "x"}, child),
+        child, hook, isolated_env(tmp_path), "chatgpt",
+    ) == (0, None, "")
+
+
 def test_write_cannot_create_a_document_in_a_nested_docs_directory(tmp_path):
     staged_hook(tmp_path, 'version=1\nprotected=["**/docs/**"]\n')
     intended = tmp_path / "packages" / "api" / "docs" / "design.md"
