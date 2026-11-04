@@ -6,7 +6,7 @@ import { extractAuthoredDiagrams } from "./grill-diagrams";
 import { diagramChanged, summarizeDiagram } from "./diagram-feedback";
 import type { DiagramScene } from "./diagram-scene";
 
-export const DEFAULT_GRILL_URL = "https://grill-me-in-cloud.vercel.app";
+export { canonicalSessionUrl, DEFAULT_GRILL_URL } from "./grill-url";
 export const BUCKET = "grill-assets";
 export const json = (body: unknown, status = 200, headers?: HeadersInit) => {
   const responseHeaders = new Headers(headers);
@@ -30,13 +30,6 @@ export function fingerprint(value: unknown): string {
 
 export function validatePublication(value: unknown) {
   return publicationSchema.safeParse(value);
-}
-
-export function canonicalSessionUrl(provider: string, sessionId: string, requestOrigin?: string): string {
-  const origin = process.env["HARNESS_GRILL_URL"] || requestOrigin || DEFAULT_GRILL_URL;
-  const parsed = new URL(origin);
-  if (parsed.origin !== origin) throw new Error("HARNESS_GRILL_URL must be an origin without a trailing slash");
-  return `${origin}/?session=${encodeURIComponent(`${provider}:${sessionId}`)}`;
 }
 
 export async function getRound(roundId: string) {
