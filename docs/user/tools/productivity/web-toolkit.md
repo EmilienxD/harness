@@ -9,6 +9,8 @@ harness install web-toolkit-native --platform pi
 
 The first installs only the skill; the second installs only native `web_search` and `web_fetch` tools. Either package can be installed, upgraded, or removed independently, and both may coexist. Both use the same pinned CLI on demand. For Claude Code or ChatGPT, use `web-toolkit` with the corresponding `--platform`; see [installation and scope](../../getting-started.md).
 
+Installing with Harness's `--local <harness-checkout>` uses that checkout's Web Toolkit runtime for both the skill and native tools. Keep the checkout available while using them; see [local installation behavior](../../configuration.md#installation-roots-and-ownership).
+
 Pi installations of `web-toolkit` through 1.4.0 contained native tools. Upgrading `web-toolkit` to 1.5.0 replaces those tools with the skill. To keep only native tools, run `harness uninstall web-toolkit --platform pi`, then `harness install web-toolkit-native --platform pi`, using the same scope and project root as the original installation.
 
 `web-toolkit search "<query>"` prints up to 10 result titles, URLs, and snippets; `site:` and `-site:` operators in the query are enforced as domain filters. `web-toolkit fetch <url>` prints a page as Markdown, a PDF as per-page text, and other text formats unchanged. Pages over 10,000 characters print their beginning and an outline of later headings with line numbers, and save the full text under `~/.harness/web-toolkit/pages/` for the agent to read or grep; saved pages are removed after a day. Neither command takes options.

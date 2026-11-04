@@ -73,6 +73,10 @@ Harness owns selected payloads, dependency reconciliation, starter preservation 
 
 Upgrades verify installed host products against their catalogue pins: Python tools use their source repository, commit and subdirectory; npm tools and VS Code extensions use their exact versions. A product that is present at another revision is repaired even when its catalogue receipt already has the current package version. Presence checks for ownership and removal remain independent of the pinned revision.
 
+For checkout development, pass `--local <harness-checkout>` before the installer command. Harness reads that checkout's catalogue and payloads, installs its Python runtimes from local directories, and builds Aboard from `apps/aboard` instead of downloading the pinned release. Aboard builds run `npm ci` and `npm run package`; Node.js, npm, and dependency download access are required. Local Aboard receipts record the source directory and build-input fingerprint so edits at the same extension version trigger a rebuild. Planning and `--dry-run` do not build or install Aboard.
+
+Local Web Toolkit skills and native Pi tools invoke the runtime in the selected checkout through a local file URI. Keep that checkout available while using them. Their receipt versions include a local payload fingerprint so switching between local and published sources reconciles the installed commands. Third-party npm tools and upstream skill bridges retain their declared external sources because their implementation is outside the Harness checkout.
+
 Pi's agent directory defaults to `~/.pi/agent`; `PI_CODING_AGENT_DIR` selects another directory. It changes Pi resources, while `HARNESS_STATE_DIR` changes Harness state. The resolved agent directory is part of user receipt identity: changing it selects a separate installation rather than redirecting removal of the original. A user receipt remains separate from a project rooted in the same directory.
 
 | Resource | Project scope | Pi user scope |

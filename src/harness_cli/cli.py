@@ -471,7 +471,7 @@ def build_parser() -> argparse.ArgumentParser:
         description="Install and reconcile the Harness catalogue.",
     )
     parser.add_argument("--version", action="version", version=f"harness {__version__}")
-    parser.add_argument("--local", type=Path, help="use a local Harness checkout and its Python runtimes")
+    parser.add_argument("--local", type=Path, help="use a local Harness checkout, runtimes, and Aboard build")
     parser.add_argument("--root", type=Path, help="project root (default: current directory)")
     commands = parser.add_subparsers(dest="command")
     install = commands.add_parser(

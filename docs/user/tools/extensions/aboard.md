@@ -6,6 +6,8 @@ Platforms: **Claude Code, ChatGPT, Pi**. Install with `harness install aboard`; 
 
 Select `aboard` in the Harness catalogue or run `harness install aboard`. Harness verifies and installs a pinned VSIX plus required worker assets. The coupled `auto` bridge is installed with Aboard; `issue-readers` is a reusable dependency. Initialize a project once in VS Code, then choose **Run Agent**, **Run Claude Code**, or **Run Codex** in the Aboard panel.
 
+Use `harness --local <harness-checkout> install aboard` to build and install the checkout's extension version. Local upgrades also rebuild when Aboard's build inputs change without a version bump. See [local installation behavior](../../configuration.md#installation-roots-and-ownership) for build requirements and source ownership.
+
 Project launch settings live in `.harness/config.json`; `{ "version": 1 }` is valid and omitted values use defaults. Aboard project settings live in `.abd/settings.json`, with `aboard.*` VS Code settings supplying user or profile defaults. New launches read current launch settings; existing terminals retain theirs.
 
 Auto Run forecasts a queue of labelled GitHub issues. Review the panel forecast or run `/auto --dry` in an Aboard-launched Claude session (`$auto --dry` in ChatGPT). Start from the panel or use `/auto` (`$auto` in ChatGPT). Aboard coordinates issue branches and a RUN branch, with visible workers and recoverable state. Its final pull request remains open for review unless configured automatic merging succeeds. The [Aboard README](https://github.com/EmilienxD/harness/blob/main/apps/aboard/README.md) has the full settings reference for repository collaborators.
