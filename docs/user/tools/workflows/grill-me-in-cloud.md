@@ -62,6 +62,14 @@ the active ancestry; a queued round on an abandoned branch is preserved without 
 Unrelated sessions do not resolve configuration or poll the board. Titles come from
 `pi.getSessionName()` and identity from the native session manager, never a model-provider name.
 
+Package 2.8.6 saves Pi publication confirmations before removing successful queued work. Resume
+and tree navigation recover a confirmation only when its originating tool remains in the selected
+session's ancestry and the same board still reports that round as active. The next user turn receives
+the confirmation as additional extension context; user messages, questions, and reviewed answer prompts
+are preserved. A confirmation already present in a tool result or extension message on that branch is
+not repeated. Forked sessions and abandoned publication branches cannot inherit it. Recovery also
+restores the relay's round binding without publishing another round.
+
 The relay uses the public extension API in TUI, JSON and RPC. The installed
 `agent-session.js` was inspected alongside the mirrored [extension API](https://github.com/EmilienxD/harness/blob/main/docs/PI-REFERENCES/docs/extensions.md)
 and [session format](https://github.com/EmilienxD/harness/blob/main/docs/PI-REFERENCES/docs/session-format.md): `message_end` handlers execute

@@ -10,22 +10,32 @@ export default function (pi: any) {
   let controller = new AbortController();
   let relay: GrillRelay | undefined;
   let source: string | undefined;
-  let pendingContext = "";
   let needsLocations = false;
   const active = (ctx: any) => ctx.sessionManager.getBranch().filter((entry: any) => entry.type === "custom" && entry.customType === RECEIPT && ["start", "stop"].includes(entry.data?.phase) && entry.data.sessionId === ctx.sessionManager.getSessionId()).at(-1)?.data.phase === "start";
-  const stop = () => { controller.abort(); controller = new AbortController(); relay?.stop(); relay = undefined; source = undefined; pendingContext = ""; needsLocations = false; };
-  const request = async (operation: string, ctx: any, initial = false) => {
+  const stop = () => { controller.abort(); controller = new AbortController(); relay?.stop(); relay = undefined; source = undefined; needsLocations = false; };
+  const request = async (operation: string, ctx: any, initial = false, toolCallId?: string) => {
     const signal = controller.signal;
+    const branch = ctx.sessionManager.getBranch();
+    const confirmedRoundIds = branch.flatMap((entry: any) => {
+      if (entry.type === "custom_message" && entry.customType === "harness-grill-context" && entry.details?.publicationRoundId) return [entry.details.publicationRoundId];
+      if (entry.type === "custom" && entry.customType === RECEIPT && entry.data?.sessionId === ctx.sessionManager.getSessionId() && entry.data.toolCallId &&
+          branch.some((item: any) => item.type === "message" && item.message?.role === "toolResult" && item.message.toolCallId === entry.data.toolCallId)) return [entry.data.roundId];
+      return [];
+    });
     const result = await requestPython({ version: 1, operation, initial, cwd: ctx.cwd,
       sessionId: ctx.sessionManager.getSessionId(), title: pi.getSessionName() ?? "",
       sessionFile: ctx.sessionManager.getSessionFile(), anchor: ctx.sessionManager.getLeafId(),
-      branchIds: ctx.sessionManager.getBranch().map((entry: any) => entry.id),
+      branchIds: branch.map((entry: any) => entry.id), confirmedRoundIds,
     }, signal, join(support, "grill_cloud_pi.py"), 120_000);
     if (signal.aborted) throw new Error("Pi grill cancelled");
     if (typeof result.ok !== "boolean" || typeof result.message !== "string") throw new Error("Pi grill protocol mismatch");
     if (typeof result.source === "string") source = result.source;
     if (result.ok) {
-      if (result.published) pi.appendEntry(RECEIPT, { phase: "round", roundId: result.published.round_id, sessionId: ctx.sessionManager.getSessionId() });
+      const lastRound = branch.filter((entry: any) => entry.type === "custom" && entry.customType === RECEIPT && entry.data?.phase === "round").at(-1);
+      if (result.published && lastRound?.data.roundId !== result.published.round_id) pi.appendEntry(RECEIPT, {
+        phase: "round", roundId: result.published.round_id, publication: result.published,
+        sessionId: ctx.sessionManager.getSessionId(), ...(toolCallId ? { toolCallId } : {}),
+      });
       if (!relay) {
         try { relay = new GrillRelay(pi, ctx, result.relay); relay.wake(); }
         catch { /* Retry relay initialization on the next operation. */ }
@@ -37,7 +47,7 @@ export default function (pi: any) {
   pi.on("session_start", async (_event: any, ctx: any) => {
     stop();
     if (active(ctx)) {
-      try { const result = await request("prepare", ctx); if (result.ok) pendingContext = result.message; }
+      try { await request("prepare", ctx); }
       catch { /* Preparation retries before the next user turn. */ }
     }
   });
@@ -59,7 +69,6 @@ export default function (pi: any) {
     }
     try {
       const result = await request("prepare", ctx, true);
-      pendingContext = "";
       needsLocations = false;
       if (!result.ok) { ctx.ui.notify(result.message, "error"); return { action: "handled" }; }
       pi.appendEntry(RECEIPT, { phase: "start", sessionId: ctx.sessionManager.getSessionId() });
@@ -73,15 +82,14 @@ export default function (pi: any) {
     try {
       const result = await request("prepare", ctx, needsLocations);
       if (result.ok) needsLocations = false;
-      const content = [pendingContext, result.message].filter(Boolean).join("\n");
-      pendingContext = "";
-      if (content) return { message: { customType: "harness-grill-context", content, display: false } };
+      if (result.message) return { message: { customType: "harness-grill-context", content: result.message, display: false,
+        details: result.published ? { publicationRoundId: result.published.round_id } : undefined } };
     } catch { return { message: { customType: "harness-grill-context", content: "Pi grill preparation failed.", display: false } }; }
   });
   pi.on("tool_result", async (event: any, ctx: any) => {
     if (event.isError || !active(ctx) || !source || !existsSync(source)) return;
     try {
-      const result = await request("publish", ctx);
+      const result = await request("publish", ctx, false, event.toolCallId);
       return { content: [...event.content, { type: "text", text: result.message }], structuredContent: event.structuredContent };
     } catch { return { content: [...event.content, { type: "text", text: "Pi grill publication failed." }], structuredContent: event.structuredContent }; }
   });

@@ -8,6 +8,8 @@ from pathlib import Path
 
 import pytest
 
+pytestmark = pytest.mark.usefixtures("loaded_subagents_integration")
+
 from harness_cli.manifest import SupportStatus, discover
 from subagents_runtime import pi_bridge, processes, progress, roles, sessions, bridge_backend
 from subagents_runtime.delegation import (

@@ -80,11 +80,6 @@ export async function runSubagentsJourney(platform: Platform, mode: "interactive
     const runtimeSource = join(root, "runtime", "src");
     await mkdir(projectRoot, { recursive: true });
     await cp(join(packageRoot, "runtime", "src"), runtimeSource, { recursive: true });
-    const replyResources = join(runtimeSource, "subagents_runtime", "resources", "reply-support");
-    for (const directory of ["reply-to-agent", "reply-to-agent-with-previous-message", "claude", "chatgpt", "pi"]) {
-      await cp(join(packageRoot, directory), join(replyResources, directory), { recursive: true });
-    }
-    await cp(join(harnessRoot, "harness/internal/pi-transport/transport.ts"), join(replyResources, "pi/transport.ts"));
     await cp(join(packageRoot, "subagents-toolkit"), join(root, "subagents-toolkit"), { recursive: true });
     const python = await pythonCommand(runtimeSource);
     const binRoot = await createRuntimeShim(root, python);
@@ -120,6 +115,26 @@ export async function runSubagentsJourney(platform: Platform, mode: "interactive
     if (alternateRoot) {
       await mkdir(worktreeRoot, { recursive: true });
       await initializeRepository(worktreeRoot);
+      for (const missingRoot of [worktreeRoot, join(projectRoot, "scratch")]) {
+        await mkdir(missingRoot, { recursive: true });
+        await execFileAsync(python, ["-c", [
+          "from pathlib import Path",
+          "from types import SimpleNamespace",
+          "from subagents_runtime import sessions, backends",
+          "root = Path.cwd()",
+          "before = set(root.rglob('*'))",
+          "def forbidden(*args): raise AssertionError('backend selected')",
+          "backends.select_backend = forbidden",
+          `request = SimpleNamespace(provider='${platform}', mode='interactive', resume=False, child_skill=None)`,
+          "try:",
+          " sessions.launch_delegated(request, 'missing-integration', 1, root)",
+          "except sessions.SessionError:",
+          " pass",
+          "else: raise AssertionError('missing integration accepted')",
+          "assert before == set(root.rglob('*'))",
+        ].join("\n")], { cwd: missingRoot, env: { ...process.env, PYTHONPATH: runtimeSource, CLAUDE_CONFIG_DIR: join(root, 'missing-claude-home'), CODEX_HOME: join(root, 'missing-codex-home') }, windowsHide: true, timeout: 10_000 });
+      }
+      await stagePayload(platform, packageRoot, worktreeRoot, python);
     }
 
     const bridge = join(harnessRoot, "tests", "e2e", "dist", "tools", "subagents", "cli-bridge.js");
@@ -448,6 +463,11 @@ interface HookSettings {
 }
 
 async function stagePayload(platform: Platform, packageRoot: string, projectRoot: string, python: string): Promise<void> {
+  const skills = join(projectRoot, platform === "claude" ? ".claude" : ".agents", "skills");
+  for (const name of ["reply-to-agent", "reply-to-agent-with-previous-message"]) {
+    await mkdir(join(skills, name), { recursive: true });
+    await cp(join(packageRoot, name, "SKILL.md"), join(skills, name, "SKILL.md"));
+  }
   if (platform === "claude") {
     const toolkitRoot = join(projectRoot, ".claude", "skills", "subagents-toolkit");
     await mkdir(toolkitRoot, { recursive: true });

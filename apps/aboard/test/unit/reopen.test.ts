@@ -68,9 +68,9 @@ test("conversation inspection failures remain actionable instead of looking like
   });
 
   const option = (await coordinator.list())[0];
-  assert.equal(option?.resumable, false);
-  assert.equal(option?.reason, "inspection-failed");
-  assert.match(option?.diagnostic ?? "", /failed to decode rollout/u);
+  // Listing uses display metadata; inspection is deferred until selection.
+  assert.equal(option?.resumable, true);
+  assert.equal(option?.reason, undefined);
   const outcome = await coordinator.reopenLatest();
   assert.equal(outcome.action, "unresumable");
   assert.match(describeReopenOutcome(outcome), /failed to decode rollout/u);

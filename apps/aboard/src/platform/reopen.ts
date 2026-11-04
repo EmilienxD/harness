@@ -1,4 +1,6 @@
 
+import type { NativeSession } from "./native-sessions.js";
+import type { IsoTimestamp } from "../domain/contracts.js";
 import type { InteractiveLaunchHandles, ReopenTarget } from "../bridge/delegation.js";
 import { type AgentId, type AgentPlatformId, type AgentType, type SessionId, type TerminalId } from "../domain/contracts.js";
 import type { FleetRegistry } from "../domain/fleet.js";
@@ -44,6 +46,8 @@ export interface ReopenTerminals {
 }
 
 export interface ReopenCoordinatorOptions {
+  readonly discover?: (publish?: (sessions: readonly NativeSession[]) => void, signal?: AbortSignal) => Promise<readonly NativeSession[]>;
+  readonly allocateAgentId?: () => AgentId;
   readonly activity: ReopenActivitySource;
   readonly fleet: FleetRegistry;
   readonly terminals: ReopenTerminals;
@@ -65,13 +69,35 @@ const TYPE_SELECTORS: Readonly<Record<string, AgentType>> = {
 export class ReopenCoordinator {
   public constructor(private readonly options: ReopenCoordinatorOptions) {}
 
-  public async list(): Promise<readonly ReopenOption[]> {
-    const candidates = reopenCandidates(
+  public async list(publish?: (options: readonly ReopenOption[]) => void, signal?: AbortSignal): Promise<readonly ReopenOption[]> {
+    const recorded = reopenCandidates(
       this.options.activity.entries(),
       this.options.fleet.list(),
       (terminalId) => this.options.terminals.isOpen(terminalId),
     );
-    const inspected = await Promise.all(candidates.map(async (candidate): Promise<ReopenOption | undefined> => {
+    const candidates = [...recorded];
+    const indices = new Map(candidates.map((candidate, index) => [`${candidate.platform}:${candidate.sessionId}`, index]));
+    const snapshot = (): readonly ReopenOption[] => [...candidates].sort((a, b) => b.at.localeCompare(a.at)).map((candidate) => ({ candidate, resumable: true }));
+    const merge = (sessions: readonly NativeSession[]) => {
+      for (const native of sessions) {
+        const key = `${native.platform}:${native.sessionId}`;
+        const index = indices.get(key);
+        if (index !== undefined) {
+          const candidate = candidates[index]!;
+          candidates[index] = { ...candidate, at: native.at as IsoTimestamp, ...(native.title ? { title: native.title } : {}) };
+        } else {
+          indices.set(key, candidates.length);
+          candidates.push({ ...native, at: native.at as IsoTimestamp, agentId: `native:${native.platform}:${native.sessionId}` as AgentId, type: "interactive", origin: "native", description: native.platform });
+        }
+      }
+      if (!signal?.aborted) publish?.(snapshot());
+    };
+    publish?.(snapshot());
+    merge(await this.options.discover?.(merge, signal) ?? []);
+    if (signal?.aborted) return snapshot();
+    candidates.sort((a, b) => b.at.localeCompare(a.at));
+    const inspect = async (candidate: ReopenCandidate): Promise<ReopenOption | undefined> => {
+      if (candidate.origin !== "live") return { candidate, resumable: true };
       try {
         const resumable = await this.options.isResumable(candidate.platform, candidate.sessionId, candidate.cwd, candidate.type);
         // An open provider terminal can still be an empty TUI or contain only local commands.
@@ -85,7 +111,12 @@ export class ReopenCoordinator {
           diagnostic: error instanceof Error ? error.message : "The selected agent platform could not inspect the conversation",
         };
       }
-    }));
+    };
+    // A native catalogue may contain hundreds of sessions. Bound provider processes and disk reads.
+    const inspected: (ReopenOption | undefined)[] = [];
+    for (let offset = 0; offset < candidates.length; offset += 4) {
+      inspected.push(...await Promise.all(candidates.slice(offset, offset + 4).map(inspect)));
+    }
     return inspected.filter((option): option is ReopenOption => option !== undefined);
   }
 
@@ -115,7 +146,7 @@ export class ReopenCoordinator {
       preserveSessionModel: true,
       executionMode: "interactive",
       platform: candidate.platform,
-      agentId: candidate.agentId,
+      agentId: candidate.origin === "native" ? this.options.allocateAgentId?.() ?? candidate.agentId : candidate.agentId,
       type: candidate.type,
       sessionId: candidate.sessionId,
       ...(candidate.title === undefined ? {} : { title: candidate.title }),

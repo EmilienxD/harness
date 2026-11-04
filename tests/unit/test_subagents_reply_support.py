@@ -1,5 +1,6 @@
-"""Reply integration preparation and readiness, independent of model inference."""
+"""Interactive prerequisites never provision provider resources."""
 import json
+from pathlib import Path
 
 import pytest
 
@@ -11,91 +12,137 @@ def project(tmp_path, monkeypatch):
     monkeypatch.setenv("HARNESS_STATE_DIR", str(tmp_path / "state"))
     monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "claude-home"))
     monkeypatch.setenv("CODEX_HOME", str(tmp_path / "codex-home"))
+    monkeypatch.setenv("PI_CODING_AGENT_DIR", str(tmp_path / "pi-home"))
     root = tmp_path / "project"
     root.mkdir()
     return root
 
 
-@pytest.mark.parametrize("provider,directory", [("claude", ".claude"), ("chatgpt", ".agents"), ("pi", ".pi")])
-def test_preparation_is_repeatable_and_supplies_reply_resources(project, provider, directory):
-    reply_support.prepare(project, provider)
-    skill = project / directory / "skills/reply-to-agent/SKILL.md"
-    assert skill.is_file()
+def install(root, provider):
+    """Stage installer-shaped payloads; the runtime must only read them."""
+    base = root / {"claude": ".claude", "chatgpt": ".agents", "pi": ".pi"}[provider]
+    if provider == "pi":
+        package = base / "npm/node_modules/harness-pi-subagents"
+        skill = package / "skills/reply-to-agent/SKILL.md"
+        skill.parent.mkdir(parents=True)
+        skill.write_text("installed")
+        (package / "extensions").mkdir()
+        (package / "extensions/index.ts").write_text("installed")
+        (package / "package.json").write_text(json.dumps({"pi": {"skills": ["skills/reply-to-agent"], "extensions": ["extensions/index.ts"]}}))
+        (base / "settings.json").write_text(json.dumps({"packages": ["npm:harness-pi-subagents@file:fixture.tgz"]}))
+    else:
+        for name in ("reply-to-agent", "reply-to-agent-with-previous-message"):
+            skill = base / "skills" / name / "SKILL.md"
+            skill.parent.mkdir(parents=True)
+            skill.write_text("installed")
+        source = Path(__file__).resolve().parents[2] / "harness/productivity/subagents" / provider
+        fragment = source / ("settings.fragment.json" if provider == "claude" else "hooks.fragment.json")
+        target = root / (".claude/settings.json" if provider == "claude" else ".codex/hooks.json")
+        target.parent.mkdir(exist_ok=True)
+        target.write_bytes(fragment.read_bytes())
+
+
+@pytest.mark.parametrize("provider", ["claude", "chatgpt", "pi"])
+def test_missing_integration_fails_without_writes(project, provider):
+    with pytest.raises(sessions.SessionError):
+        reply_support.validate(project, provider)
+    assert list(project.iterdir()) == []
+
+
+@pytest.mark.parametrize("provider", ["claude", "chatgpt", "pi"])
+def test_installed_integration_is_read_only_and_acknowledged(project, monkeypatch, provider):
+    install(project, provider)
     before = {p.relative_to(project): p.read_bytes() for p in project.rglob("*") if p.is_file()}
-    reply_support.prepare(project, provider)
+    reply_support.validate(project, provider)
+    monkeypatch.setenv("HARNESS_EXECUTION_ID", "execution")
+    monkeypatch.setenv("HARNESS_EXECUTION_MODE", "interactive")
+    reply_support.acknowledge(project, provider)
+    assert reply_support.is_ready("execution", provider)
     assert before == {p.relative_to(project): p.read_bytes() for p in project.rglob("*") if p.is_file()}
+    if provider == "pi":
+        assert not (project / ".pi/skills").exists()
 
 
-@pytest.mark.parametrize("provider,path", [("claude", ".claude/settings.json"), ("chatgpt", ".codex/hooks.json")])
-def test_preserves_unrelated_settings_and_hooks(project, provider, path):
-    target = project / path
-    target.parent.mkdir()
-    existing = {"permissions": {"deny": ["Write"]}, "hooks": {"Stop": [{"hooks": [{"command": "unrelated"}]}]}}
-    target.write_text(json.dumps(existing))
-    reply_support.prepare(project, provider)
-    actual = json.loads(target.read_text())
-    assert actual["permissions"] == existing["permissions"]
-    assert actual["hooks"]["Stop"][0] == existing["hooks"]["Stop"][0]
+@pytest.mark.parametrize("provider", ["claude", "chatgpt", "pi"])
+def test_skill_without_integration_is_insufficient(project, provider):
+    install(project, provider)
+    settings = project / {"claude": ".claude/settings.json", "chatgpt": ".codex/hooks.json", "pi": ".pi/settings.json"}[provider]
+    settings.write_text("{}")
+    with pytest.raises(sessions.SessionError):
+        reply_support.validate(project, provider)
 
 
-def test_inherited_hook_registration_is_not_duplicated(project, monkeypatch):
-    home = project.parent / "claude-home"
+@pytest.mark.parametrize("provider", ["claude", "chatgpt", "pi"])
+def test_user_scope_integration_is_accepted(project, monkeypatch, provider):
+    home = project.parent / "home"
     home.mkdir()
-    inherited = {"hooks": {"Stop": [{"hooks": [{"command": "harness-subagents-hook"}]}]}}
-    (home / "settings.json").write_text(json.dumps(inherited))
-    reply_support.prepare(project, "claude")
-    actual = json.loads((project / ".claude/settings.json").read_text())
-    assert actual["hooks"]["Stop"] == []
+    install(home, provider)
+    if provider == "pi":
+        monkeypatch.setenv("PI_CODING_AGENT_DIR", str(home / ".pi"))
+    elif provider == "claude":
+        monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(home / ".claude"))
+    else:
+        monkeypatch.setattr(Path, "home", classmethod(lambda cls: home))
+        monkeypatch.setenv("CODEX_HOME", str(home / ".codex"))
+    reply_support.validate(project, provider)
+    assert list(project.iterdir()) == []
 
 
-def test_conflicting_skill_is_not_overwritten(project):
-    path = project / ".claude/skills/reply-to-agent/SKILL.md"
-    path.parent.mkdir(parents=True)
-    path.write_bytes(b"user-owned")
-    with pytest.raises(sessions.SessionError, match="Conflicting reply support"):
-        reply_support.prepare(project, "claude")
-    assert path.read_bytes() == b"user-owned"
-    assert not (project / ".claude/settings.json").exists()
+@pytest.mark.parametrize("provider", ["claude", "chatgpt"])
+def test_disabled_hooks_are_rejected(project, provider):
+    install(project, provider)
+    settings = project / (".claude/settings.json" if provider == "claude" else ".codex/hooks.json")
+    value = json.loads(settings.read_text())
+    value["disableAllHooks"] = True
+    settings.write_text(json.dumps(value))
+    with pytest.raises(sessions.SessionError):
+        reply_support.validate(project, provider)
 
 
-def test_readiness_requires_loaded_integration_and_skills(project, monkeypatch):
-    monkeypatch.setenv("HARNESS_EXECUTION_ID", "execution")
-    monkeypatch.setenv("HARNESS_EXECUTION_MODE", "interactive")
-    marker = reply_support.state_dir() / "runtime/reply-ready/execution"
-    reply_support.acknowledge(project, "claude")
-    assert not marker.exists()
-    reply_support.prepare(project, "claude")
-    assert not marker.exists()
-    reply_support.acknowledge(project, "claude")
-    assert reply_support.is_ready("execution", "claude")
-    assert marker.read_text() == "claude"
+def test_disabled_pi_resources_are_rejected(project):
+    install(project, "pi")
+    settings = project / ".pi/settings.json"
+    settings.write_text(json.dumps({"packages": [{"source": "npm:harness-pi-subagents@file:fixture.tgz", "extensions": []}]}))
+    with pytest.raises(sessions.SessionError):
+        reply_support.validate(project, "pi")
 
 
-def test_pending_readiness_keeps_request_and_process_active(project, monkeypatch):
-    from subagents_runtime import processes
-    from subagents_runtime.delegation import enable_delegation, process_inbox
+@pytest.mark.parametrize("provider", ["claude", "chatgpt", "pi"])
+@pytest.mark.parametrize("resume", [False, True])
+def test_parent_installation_does_not_authorize_nested_root(project, monkeypatch, provider, resume):
+    from types import SimpleNamespace
+    from subagents_runtime import backends
 
-    sessions.register_observed("parent", project, "claude")
-    inbox = enable_delegation("parent", "subagents-toolkit").inbox
-    (inbox / "child.md").write_text("---\nmode: interactive\n---\nWork.")
-    monkeypatch.setattr(processes, "start", lambda execution, *args, **kwargs: processes.confirm_startup(execution))
-    [result] = process_inbox("parent", launch=sessions.launch_delegated)
-    assert result.status == "launched"
-    with sessions._connect() as db:
-        request = db.execute("SELECT state,reason,delivery_id FROM requests WHERE id=?", (result.request_id,)).fetchone()
-        execution = db.execute("SELECT state FROM executions WHERE request_id=?", (result.request_id,)).fetchone()
-    assert request[0] == "pending"
-    assert request[1] is None
-    assert request[2] is None
-    assert execution[0] == "running"
-    assert processes.live_executions(result.child_session_id)
+    install(project, provider)
+    (project / ".git").mkdir()
+    nested = project / "scratch"
+    nested.mkdir()
+    before = {p.relative_to(project): p.read_bytes() for p in project.rglob("*") if p.is_file()}
+    monkeypatch.setattr(backends, "select_backend", lambda *args: pytest.fail("backend selected"))
+    request = SimpleNamespace(provider=provider, mode="interactive", resume=resume, child_skill=None)
+    with pytest.raises(sessions.SessionError):
+        sessions.launch_delegated(request, "request", 1, nested)
+    assert before == {p.relative_to(project): p.read_bytes() for p in project.rglob("*") if p.is_file()}
+    assert list(nested.iterdir()) == []
 
 
-def test_missing_readiness_can_arrive_later(project, monkeypatch):
-    assert not reply_support.is_ready("execution", "claude")
-    monkeypatch.setenv("HARNESS_EXECUTION_ID", "execution")
-    monkeypatch.setenv("HARNESS_EXECUTION_MODE", "interactive")
-    reply_support.prepare(project, "claude")
-    reply_support.acknowledge(project, "claude")
-    assert reply_support.is_ready("execution", "claude")
-    assert not reply_support.is_ready("execution", "pi")
+@pytest.mark.parametrize("provider", ["claude", "chatgpt"])
+def test_local_skills_do_not_borrow_parent_hooks(project, provider):
+    install(project, provider)
+    nested = project / "scratch"
+    nested.mkdir()
+    install(nested, provider)
+    (nested / (".claude/settings.json" if provider == "claude" else ".codex/hooks.json")).unlink()
+    with pytest.raises(sessions.SessionError):
+        reply_support.validate(nested, provider)
+
+
+@pytest.mark.parametrize("provider", ["claude", "chatgpt", "pi"])
+def test_missing_integration_never_selects_backend(project, monkeypatch, provider):
+    from subagents_runtime import backends
+    from types import SimpleNamespace
+    monkeypatch.setattr(backends, "select_backend", lambda *args: pytest.fail("backend selected"))
+    request = SimpleNamespace(provider=provider, mode="interactive", resume=False, child_skill=None)
+    with pytest.raises(sessions.SessionError):
+        sessions.launch_delegated(request, "request", 1, project)
+    assert list(project.iterdir()) == []

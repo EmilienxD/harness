@@ -2,6 +2,8 @@ import os
 import subprocess
 
 import pytest
+
+pytestmark = pytest.mark.usefixtures("loaded_subagents_integration")
 from subagents_runtime import sessions, bridge_backend
 from subagents_runtime.delegation import enable_delegation, process_inbox
 from subagents_runtime.hooks import handle

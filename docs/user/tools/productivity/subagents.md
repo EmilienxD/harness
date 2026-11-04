@@ -179,24 +179,35 @@ worker policy remains entirely on that side; no Auto Run engine change is needed
 checkout requires coordinated runtime and extension publication: the catalogue's immutable runtime
 and VSIX pins are unchanged and do not yet ship this refactor.
 
-## Interactive reply preparation (3.1.1 checkout)
+## Interactive integration prerequisites (3.1.4 checkout)
 
-Interactive delegation prepares project-local reply skills and provider integration before selecting
-an execution backend, including on resume and fork. The runtime distribution bundles the canonical
-reply skills, Claude/Codex hook fragments, and Pi extension/transport. A destination project does not
-need a prior Subagents installation. Existing matching hook registrations and installed Pi packages
-are reused; unrelated configuration, permissions and instruction files are retained. Conflicting
-reply payloads are refused rather than overwritten. Generated support remains in the destination
-project for later continuations; it is not a temporary configuration directory or an Aboard asset.
+Only the Harness installer installs skills, hooks and extensions. Interactive delegation checks for
+installed reply skills and provider integration before selecting an execution backend, including on
+resume and fork. It never provisions or repairs provider resources. Install `subagents` in the target
+root (or use an applicable user-scope installation) before launching an interactive child. An
+installation in a parent directory does not satisfy this check: launching in `scratch/` requires
+integration at that exact root or in user scope, even if native skill discovery finds parent skills.
+This applies equally to Claude Code, ChatGPT, and Pi, including resume and fork. Missing
+integration fails the request without starting a child and reports the problem.
+
+The command uses the requested provider (`claude`, `chatgpt`, or `pi`) and actual destination root.
+Pi reply skills remain inside the native npm package, without a duplicate under `.pi/skills`.
+Claude/Codex checks cover conventional installed skill directories and hook JSON registrations;
+Pi checks cover declared native npm resources without per-package resource filters; filtered
+packages are conservatively rejected rather than presumed active. Custom plugin/configuration
+locations outside these checks are not certified. Native trust and authorization remain prerequisites, and the loaded
+integration acknowledges readiness separately from preflight. Existing loose resources from the
+3.1.1/3.1.2 runtime are not automatically deleted. The runtime distribution no longer bundles reply
+payloads for installation. These changes require runtime publication before remote installs include them.
 
 The loaded integration acknowledges reply readiness separately from provider process startup.
-In the 3.1.2 checkout, the 15-second startup wait bounds only the launching call: without confirmation,
+Since the 3.1.2 checkout, the 15-second startup wait bounds only the launching call: without confirmation,
 both automatic and interactive requests remain uncertain and active while the existing execution is
 monitored. Later native startup confirmation restores pending/running state. Reply readiness is
 acknowledged asynchronously, without a separate 30-second blocking wait or silence-based cancellation.
 Compaction and slow initialization can therefore exceed either former deadline without failing the
 request. Process errors, exits and explicit cancellation still settle requests; lack of activity alone
-does not. Provider trust and hook authorization remain native prerequisites; preparation does not grant
+does not. Provider trust and hook authorization remain native prerequisites; validation does not grant
 either. Live-terminal reuse requires the original process to have acknowledged reply support; older
 terminals must be reopened. These changes require runtime publication before remote installs include them.
 A subprocess regression covers delayed startup in both modes, including an interactive child silent for
@@ -206,9 +217,10 @@ The delayed subprocess is a provider stand-in, not a real-provider compaction re
 Ordinary answers still do not complete interactive requests. Both explicit reply actions retain their
 existing semantics, including no inference for sending the previous successful answer.
 
-Real headless Claude and Codex journeys against fake APIs reproduce the old failure with an unrelated
-Git root lacking reply support, then verify successful delivery and continuation with the prepared
-integration. Pi's checkout-runtime RPC journey covers an unrelated root without Subagents, previous-message
+Real headless Claude and Codex journeys against fake APIs check rejection in an unrelated Git root
+lacking integration without selecting a backend or changing destination files, then stage installed
+integration and verify successful delivery and continuation. Pi's checkout-runtime RPC journey
+installs Subagents explicitly in its unrelated root before launching, covering previous-message
 delivery with zero additional inference, one acknowledged parent delivery, and another successful child
 turn afterward (six total inference requests). E2E type checks and Aboard's consuming adapter unit checks
 also pass. These checks do not certify the visible TUI, Aboard-hosted real-CLI launches, POSIX, or the

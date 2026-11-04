@@ -109,10 +109,31 @@ saved model and effort instead of applying the current launch profile's model an
 The Fleet shows live sessions. Recent Activity keeps completed work available for inspection and supported reopen flows.
 
 Focusing a live interactive session reveals its existing terminal. Background sessions have no terminal.
-Reopening an ended session preserves its provider, working directory, and conversation, and opens an
-interactive terminal ready for you to type. Paste a recorded session's full UUID into the existing
-Reopen picker to select it directly; UUIDs are not displayed in its rows. If that conversation is
-no longer available, its activity remains visible but cannot be reopened.
+**Reopen Session** combines Aboard's tracked conversations with native Claude Code, Codex, and Pi
+history, including sessions started outside Aboard. The picker opens immediately and adds rows as
+provider metadata arrives; a loading indicator remains until discovery finishes. Each opening reads
+native history again, without a persistent Aboard history index. Claude uses bounded head/tail reads,
+Pi streams each distinct storage directory once with bounded concurrency, and Codex uses paginated
+indexed metadata over a reusable app-server connection. Full conversation inspection runs only after
+selection (live Aboard sessions may also be checked to omit empty terminals). Closing the picker
+cancels pending discovery. When
+Git is available, discovery includes the main checkout and all existing registered worktrees of the
+repository, even when this window opens a linked worktree. Without Git, discovery uses the current
+project folder. Unrelated projects are excluded; a missing worktree is not recreated.
+
+Picker rows show the conversation title, provider, checkout folder, full checkout path, and last
+activity. They distinguish an open Aboard terminal (focus), Aboard history (resume), and native history
+(resume, but it may still be open outside Aboard). Native history is not evidence that the original
+process has stopped; close any other instance before continuing the same conversation. Provider
+history failures are reported in **Output → aboard** without hiding other providers' sessions.
+
+Reopening preserves the provider, working directory, and conversation, and opens an interactive
+terminal ready for you to type. An untracked native conversation receives a new Aboard identity and
+an interactive launch profile; Aboard does not reconstruct Auto Run ownership or original permissions
+from its transcript. Paste a session's full UUID into the Reopen picker to select it directly; UUIDs
+are not displayed in its rows. If a recorded conversation is no longer available, its activity remains
+visible but cannot be reopened. Clearing Recent Activity removes Aboard's records, not native history,
+so discoverable conversations can still appear in Reopen.
 
 Interactive sessions and manual subagents have separate launch profiles and inherit native model and
 effort defaults. New manual subagents use the general delegation profile with an optional explicit skill.
