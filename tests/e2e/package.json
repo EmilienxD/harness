@@ -3,6 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
+    "test:grill-session-directory": "esbuild test/grill-session-directory.test.ts --bundle --platform=node --format=cjs --target=node22 --outfile=dist/test/grill-session-directory.test.js && node --test dist/test/grill-session-directory.test.js",
     "test:path-guards": "esbuild test/path-guards.test.ts --bundle --platform=node --format=cjs --target=node22 --outfile=dist/test/path-guards.test.js && node --test dist/test/path-guards.test.js",
     "test:pi-environment-context": "esbuild test/pi-environment-context.test.ts --bundle --platform=node --format=cjs --target=node22 --outfile=dist/test/pi-environment-context.test.js && node --test dist/test/pi-environment-context.test.js",
     "test:pi-file-mentions": "esbuild test/pi-file-mentions.test.ts --bundle --platform=node --format=cjs --target=node22 --outfile=dist/test/pi-file-mentions.test.js && node --test dist/test/pi-file-mentions.test.js",

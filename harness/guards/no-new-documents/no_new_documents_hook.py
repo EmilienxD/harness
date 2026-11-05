@@ -106,9 +106,9 @@ def _root(payload: dict[str, Any]) -> Path:
     project = os.environ.get("CLAUDE_PROJECT_DIR") if PROVIDER == CLAUDE else None
     if project:
         return Path(project).resolve()
-    cwd = payload.get("cwd")
-    if isinstance(cwd, str) and cwd:
-        return Path(cwd).resolve()
+    # Codex runs hooks in the session directory; event cwd can be a tool workdir.
+    if PROVIDER == PI and isinstance(payload.get("cwd"), str) and payload["cwd"]:
+        return Path(payload["cwd"]).resolve()
     return Path.cwd().resolve()
 
 
@@ -240,8 +240,10 @@ def _prepare_drafts(root: Path) -> None:
         pass
 
 
-def draft_guidance(path: str, root: Path, provider: str) -> str:
+def draft_guidance(path: str, root: Path, provider: str, *, tool_cwd: Path | None = None) -> str:
     draft = f"{DRAFTS_DIR.as_posix()}/{path}"
+    if tool_cwd is not None and tool_cwd.resolve() != root:
+        draft = (root / draft).as_posix()
     try:
         _prepare_drafts(root)
     except (OSError, ValueError):
@@ -263,8 +265,8 @@ def draft_guidance(path: str, root: Path, provider: str) -> str:
     )
 
 
-def _deny(path: str, root: Path) -> None:
-    _deny_reason(draft_guidance(path, root, PROVIDER))
+def _deny(path: str, root: Path, tool_cwd: Path) -> None:
+    _deny_reason(draft_guidance(path, root, PROVIDER, tool_cwd=tool_cwd))
 
 
 def _deny_reason(reason: str) -> None:
@@ -318,6 +320,7 @@ def guard_tool(payload: dict[str, Any]) -> int:
     if not isinstance(tool_name, str):
         raise ValueError("file action must contain a tool name")
     root = _root(payload)
+    tool_cwd = root / (tool_input.get("workdir") or tool_input.get("cwd") or payload.get("cwd") or ".")
     candidates: list[str] = []
     if tool_name == "Write":
         file_path = tool_input.get("file_path")
@@ -333,13 +336,13 @@ def guard_tool(payload: dict[str, Any]) -> int:
         command = tool_input.get("command")
         if not isinstance(command, str):
             raise ValueError("shell input must contain a command")
-        candidates.extend(_shell_candidates(command, root))
+        candidates.extend(_shell_candidates(command, tool_cwd))
     if not candidates:
         return 0
     patterns = _configuration(root)
-    path = new_document(candidates, root, patterns)
+    path = new_document([str(tool_cwd / candidate) for candidate in candidates], root, patterns)
     if path is not None:
-        _deny(path, root)
+        _deny(path, root, tool_cwd)
     return 0
 
 

@@ -50,6 +50,35 @@ def test_stop_wait_uses_the_provider_neutral_session_setting(tmp_path: Path, mon
     assert hooks._stop_wait_seconds(tmp_path) == 5400
 
 
+@pytest.mark.parametrize("provider", ["claude", "chatgpt"])
+@pytest.mark.parametrize("implementer", [False, True])
+def test_stop_wait_keeps_saved_session_directory(tmp_path, monkeypatch, provider, implementer):
+    from subagents_runtime import loop
+    project = tmp_path / "project"
+    child = project / "child"
+    child.mkdir(parents=True)
+    config = project / ".harness/config.json"
+    config.parent.mkdir()
+    config.write_text('{"version":1,"session":{"stopWaitHours":0.25}}')
+    monkeypatch.setenv("HARNESS_STATE_DIR", str(tmp_path / "state"))
+    monkeypatch.delenv("HARNESS_SESSION_ID", raising=False)
+    monkeypatch.delenv("HARNESS_EXECUTION_ID", raising=False)
+    monkeypatch.chdir(project)
+    hooks.handle({"session_id": "stable", "hook_event_name": "SessionStart", "cwd": str(project)}, provider)
+    # Saved identity remains authoritative even if the process directory changes later.
+    monkeypatch.chdir(child)
+    timeouts = []
+    monkeypatch.setattr(loop, "is_implementer", lambda _: implementer)
+    monkeypatch.setattr(loop, "report_and_wait", lambda *args, timeout_seconds: timeouts.append(timeout_seconds))
+    monkeypatch.setattr(hooks, "wait_parent_delivery", lambda *args, timeout_seconds: timeouts.append(timeout_seconds))
+
+    hooks.handle({"session_id": "stable", "hook_event_name": "Stop", "cwd": str(child),
+                  "last_assistant_message": "Done."}, provider)
+
+    assert timeouts == [900]
+    assert hooks._role_directory("stable") == project.resolve()
+
+
 @pytest.mark.parametrize("launcher", [
     "subagents-toolkit",
 ])

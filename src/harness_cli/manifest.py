@@ -8,8 +8,8 @@ import tomllib
 from dataclasses import dataclass, field, replace
 from enum import Enum
 from pathlib import Path
-from urllib.parse import parse_qs, urlsplit
 
+from harness_cli.local_sources import PayloadOverrides, extension_fingerprint, runtime_path
 from harness_cli.platforms import DESTINATION_ROOTS, Platform
 
 
@@ -99,6 +99,7 @@ class Tool:
     docs: str | None = None
     dependencies: tuple[PackageDependency, ...] = ()
     actions: tuple[HostAction, ...] = ()
+    local_payloads: PayloadOverrides | None = field(default=None, repr=False, compare=False)
 
     def resolve(self, spec: FileSpec) -> Path:
         source = self.root / spec.src
@@ -152,7 +153,8 @@ class Tool:
                         f"{self.name}: multiple payloads target {spec.root}:{dest} on {selected.value}"
                     )
                 seen.add(key)
-                out.append(ExpandedFile(child, dest, spec.root, spec.executable, spec.starter))
+                source = self.local_payloads.sources.get(child, child) if self.local_payloads else child
+                out.append(ExpandedFile(source, dest, spec.root, spec.executable, spec.starter))
         return out
 
 
@@ -270,6 +272,10 @@ def _parse_actions(data: dict, manifest_path: Path) -> tuple[HostAction, ...]:
             ):
                 raise ManifestError(f"{manifest_path}: npm-tool action requires an exact version")
         else:
+            if "local_source" in entry:
+                if not isinstance(entry["local_source"], str):
+                    raise ManifestError(f"{manifest_path}: local_source must be a checkout-relative path")
+                _safe_relative(entry["local_source"], manifest_path, "local extension source")
             required_strings = ("url", "sha256", "extension_id")
             if not all(isinstance(entry.get(key), str) and entry[key] for key in required_strings):
                 raise ManifestError(
@@ -445,15 +451,35 @@ def discover(root: Path | None = None, *, local: Path | None = None) -> dict[str
                 if action.type == "uv-tool" and source.startswith(
                     "git+https://github.com/EmilienxD/harness@"
                 ):
-                    subdirectory = parse_qs(urlsplit(source).fragment).get("subdirectory", [])
-                    if len(subdirectory) != 1:
-                        raise ManifestError(f"{tool.name}: local runtime requires a subdirectory")
-                    runtime = (checkout / subdirectory[0]).resolve()
-                    if checkout not in runtime.parents or not (runtime / "pyproject.toml").is_file():
-                        raise ManifestError(f"{tool.name}: invalid local runtime: {runtime}")
+                    try:
+                        runtime = runtime_path(checkout, source)
+                    except ValueError as exc:
+                        raise ManifestError(f"{tool.name}: {exc}") from exc
                     action = replace(action, data={**action.data, "source": str(runtime)})
+                elif action.type == "vscode-extension" and action.data.get("local_source"):
+                    extension = (checkout / str(action.data["local_source"])).resolve()
+                    if checkout not in extension.parents or not (extension / "package.json").is_file():
+                        raise ManifestError(f"{tool.name}: invalid local extension source: {extension}")
+                    package = json.loads((extension / "package.json").read_text(encoding="utf-8"))
+                    identity = f"{package.get('publisher')}.{package.get('name')}"
+                    if identity != action.data["extension_id"] or not isinstance(package.get("version"), str):
+                        raise ManifestError(f"{tool.name}: local extension identity/version does not match the action")
+                    action = replace(action, data={
+                        "extension_id": identity, "source": str(extension),
+                        "version": package["version"], "fingerprint": extension_fingerprint(extension),
+                    })
                 actions.append(action)
             tool = replace(tool, actions=tuple(actions))
+            overrides = PayloadOverrides()
+            try:
+                for platform in Platform:
+                    for scope in ("project", "user"):
+                        for payload in tool.expand(platform, scope):
+                            overrides.add(payload.source, tool.root, checkout)
+            except ValueError as exc:
+                raise ManifestError(f"{tool.name}: {exc}") from exc
+            if overrides.sources:
+                tool = replace(tool, local_payloads=overrides, version=f"{tool.version}+local.{overrides.digest.hexdigest()[:16]}")
         if tool.name in found:
             first = found[tool.name].root
             raise ManifestError(

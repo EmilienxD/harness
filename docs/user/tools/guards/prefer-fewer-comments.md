@@ -24,6 +24,8 @@ exempt = true
 
 Each limit is optional. Ordered path rules can set `exempt = true` and a later, narrower `exempt = false` to include a path again. User rules precede project rules; edited starter files survive upgrades.
 
+For Claude/Codex, project budgets and exemptions load from the session start directory: `CLAUDE_PROJECT_DIR` for Claude, the hook process directory for Codex. Relative tool targets resolve from their actual working directory before matching project-relative exemptions and cooldown entries. Policies in ancestor directories are not searched.
+
 ## Pi
 
 Install with `harness install prefer-fewer-comments --platform pi`, then run `/reload` and approve the project resources. The shipped defaults are active immediately. Project policy uses `.harness/guards/prefer-fewer-comments.toml`. A user installation puts its starter in the effective Pi agent directory at `harness/prefer-fewer-comments.toml`; shared `~/.harness/guards/prefer-fewer-comments.toml` and project overrides take precedence. Pi requires uv or Python 3.11+.

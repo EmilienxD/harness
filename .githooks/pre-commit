@@ -1,0 +1,2 @@
+#!/bin/sh
+exec uv run --no-sync python scripts/check_local_secrets.py --staged

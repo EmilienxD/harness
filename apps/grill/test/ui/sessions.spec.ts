@@ -58,8 +58,11 @@ async function settle(page: Page) {
 
 async function board(page: Page, initial = [session("a"), session("b")]) {
   let sessions = initial;
+  let revision = 0;
   await page.route("**/api/v1/**", async (route) => {
     const path = new URL(route.request().url()).pathname.replace("/api/v1/", "");
+    // These race fixtures deliberately change on every poll to exercise in-flight responses.
+    if (path === "changes") return route.fulfill({ json: { content: String(++revision), presence: "online" } });
     if (path === "sessions") return route.fulfill({ json: { sessions } });
     if (path.startsWith("sessions/chatgpt/")) {
       const id = path.split("/")[2];
@@ -228,5 +231,118 @@ test("deleting another session keeps the current selection", async ({ page }) =>
   await remove(page, "a");
   await expect(page.getByRole("heading", { name: "Question for b" })).toBeVisible();
   await expect(page).toHaveURL(/session=chatgpt%3Ab/);
+  await expect(page.locator(".banner")).toHaveCount(0);
+});
+
+test("unchanged revisions avoid content reads; remote answers update without resetting authored controls", async ({
+  page,
+}) => {
+  await board(page, [session("a")]);
+  let content = "1";
+  let checks = 0;
+  let fullReads = 0;
+  let stateReads = 0;
+  let listReads = 0;
+  await page.route("**/api/v1/changes", (route) => {
+    checks += 1;
+    return route.fulfill({ json: { content, presence: "online" } });
+  });
+  await page.route("**/api/v1/sessions", (route) => {
+    listReads += 1;
+    return route.fulfill({ json: { sessions: [session("a")] } });
+  });
+  await page.route("**/api/v1/rounds/round-a", (route) => {
+    if (route.request().headers()["x-grill-content"] === "cached") {
+      stateReads += 1;
+      return route.fulfill({
+        json: {
+          round: {
+            id: "round-a",
+            status: "active",
+            prompt_snapshots: [],
+            answers:
+              content === "1"
+                ? []
+                : [
+                    {
+                      question_id: "Q1",
+                      selected_option: "A",
+                      note: "A remote answer",
+                      state: "queued",
+                      updated_at: "2026-11-05T12:00:00Z",
+                      queued_at: "2026-11-05T12:00:00Z",
+                    },
+                  ],
+          },
+        },
+      });
+    }
+    fullReads += 1;
+    const authored = round("a");
+    authored.payload.questions[0]!.explanation_html =
+      '<label>Preview setting<input aria-label="Preview setting"></label>';
+    return route.fulfill({ json: { round: authored } });
+  });
+  await page.goto("/?session=chatgpt%3Aa");
+  await expect(page.getByRole("heading", { name: "Question for a" })).toBeVisible();
+  await page.getByRole("textbox", { name: "Preview setting" }).fill("Keep this setting");
+  await expect.poll(() => checks, { timeout: 10_000 }).toBeGreaterThanOrEqual(3);
+  expect(fullReads).toBe(1);
+  expect(stateReads).toBe(1);
+  expect(listReads).toBe(2);
+  content = "2";
+  await expect(page.getByRole("textbox", { name: "Add context or write your own answer" })).toHaveValue(
+    "A remote answer",
+  );
+  await expect(page.getByRole("textbox", { name: "Preview setting" })).toHaveValue("Keep this setting");
+  expect(fullReads).toBe(1);
+  expect(stateReads).toBe(2);
+});
+
+test("hidden boards stop checking and refresh immediately on return", async ({ page }) => {
+  await board(page, [session("a")]);
+  let checks = 0;
+  await page.route("**/api/v1/changes", (route) => {
+    checks += 1;
+    return route.fulfill({ json: { content: "1", presence: "online" } });
+  });
+  await page.goto("/?session=chatgpt%3Aa");
+  await expect(page.getByRole("heading", { name: "Question for a" })).toBeVisible();
+  await expect.poll(() => checks).toBeGreaterThanOrEqual(1);
+  await page.evaluate(() => {
+    Object.defineProperty(document, "hidden", { configurable: true, value: true });
+    document.dispatchEvent(new Event("visibilitychange"));
+  });
+  const paused = checks;
+  await page.waitForTimeout(4_500);
+  expect(checks).toBe(paused);
+  await page.evaluate(() => {
+    Reflect.deleteProperty(document, "hidden");
+    document.dispatchEvent(new Event("visibilitychange"));
+  });
+  await expect.poll(() => checks, { timeout: 1_000 }).toBe(paused + 1);
+});
+
+test("a failed session switch retries even when the database revision stays unchanged", async ({ page }) => {
+  await board(page);
+  let checks = 0;
+  await page.route("**/api/v1/changes", (route) => {
+    checks += 1;
+    return route.fulfill({ json: { content: "1", presence: "online" } });
+  });
+  await page.goto("/?session=chatgpt%3Aa");
+  await expect(page.getByRole("heading", { name: "Question for a" })).toBeVisible();
+  await expect.poll(() => checks).toBeGreaterThanOrEqual(1);
+  await page.route(
+    "**/api/v1/sessions/chatgpt/b",
+    (route) =>
+      route.fulfill({
+        status: 503,
+        json: { error: { code: "database_error", message: "Temporary session failure" } },
+      }),
+    { times: 1 },
+  );
+  await choose(page, "b");
+  await expect(page.getByRole("heading", { name: "Question for b" })).toBeVisible({ timeout: 10_000 });
   await expect(page.locator(".banner")).toHaveCount(0);
 });

@@ -42,7 +42,7 @@ Install for local ChatGPT with `harness install on-edit-block --platform chatgpt
 
 Successful read results must cover the guidance's complete current contents. Claude native read ranges accumulate; complete simple shell reads can satisfy guidance on both providers. Failed, truncated or partial shell reads do not unlock edits, and transcript read attempts alone do not count. A denial only authorizes a retry for guidance actually included in full; oversized guidance must be read separately. Evidence is scoped to provider, project and session, and is recorded while the hooks are active.
 
-ChatGPT shell coverage uses the session directory and explicit `cd` commands. The tested Codex CLI does not expose per-call `exec_command.workdir` overrides to hooks; relative paths under such overrides cannot be resolved reliably. Use absolute paths or an explicit `cd` for those calls.
+Project rules and required guidance resolve from the directory where the session started. Codex uses the hook process directory; Claude uses `CLAUDE_PROJECT_DIR`. Relative tool targets use the call's working directory, including `exec_command.workdir` and recognized shell `cd` commands. Starting in a child directory does not load policies from ancestors.
 
 ## Implementation and verification
 

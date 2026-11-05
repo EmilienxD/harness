@@ -56,6 +56,15 @@ class Ownership:
             return None
 
     def snapshot(self, request: dict, root: str) -> dict:
+        # Tracking is bookkeeping, not permission to run a tool. Preserve a
+        # failed snapshot so observation refuses ownership instead of blocking
+        # ordinary work or treating the unobserved paths as unchanged.
+        try:
+            return self._snapshot(request, root)
+        except (OSError, ValueError, RuntimeError) as exc:
+            return {"repo": root, "uncertain": f"Commit attribution unavailable: {exc}"}
+
+    def _snapshot(self, request: dict, root: str) -> dict:
         # Only shell operations need a whole dirty-tree inventory. Native calls are
         # scoped to the exact resolved path and compose with other tool overrides.
         paths = self.dirty(root)
@@ -94,9 +103,13 @@ class Ownership:
 
     def observe(self, request: dict, root: str) -> dict:
         before = request.get("before")
-        after = self.snapshot(request, root)
         if not isinstance(before, dict) or before.get("repo") != root:
             return {"receipts": [{"kind": "uncertain", "reason": "Pre-tool snapshot unavailable"}]}
+        if before.get("uncertain"):
+            return {"receipts": [{"kind": "uncertain", "reason": before["uncertain"]}]}
+        after = self.snapshot(request, root)
+        if after.get("uncertain"):
+            return {"receipts": [{"kind": "uncertain", "reason": after["uncertain"]}]}
         if request.get("tool") == "write" and not request.get("isError") and after.get("target"):
             observed = after["paths"].get(after["target"], [])
             if not request.get("expectedDigest") or len(observed) < 2 or observed[1] != request["expectedDigest"]:

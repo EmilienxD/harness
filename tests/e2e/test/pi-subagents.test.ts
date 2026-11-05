@@ -9,8 +9,8 @@ test("pi-subagents rejects unknown histories at its fake API", () => {
 });
 
 test("combined live acceptance rejects remote services before creating a fixture", async () => {
-  await assert.rejects(runPiSubagentsJourney("auto", { fullStack: true, localBoard: { origin: "https://grill.example.test", code: "9110" } }), /loopback/u);
-  await assert.rejects(runPiSubagentsJourney("auto", { localBoard: { origin: "http://127.0.0.1:18080", code: "9110" } }), /loopback/u);
+  await assert.rejects(runPiSubagentsJourney("auto", { fullStack: true, localBoard: { origin: "https://grill.example.test", code: "unused-test-code" } }), /loopback/u);
+  await assert.rejects(runPiSubagentsJourney("auto", { localBoard: { origin: "http://127.0.0.1:18080", code: "unused-test-code" } }), /loopback/u);
 });
 
 for (const route of ["auto", "interactive"] as const) {

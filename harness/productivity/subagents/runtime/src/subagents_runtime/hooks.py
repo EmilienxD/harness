@@ -334,7 +334,7 @@ def handle(
                 return None
             feedback = loop.report_and_wait(
                 session_id, message, payload.get("transcript_path"), selected_provider,
-                timeout_seconds=_stop_wait_seconds(cwd),
+                timeout_seconds=_stop_wait_seconds(_role_directory(session_id)),
             )
             if feedback is None:
                 return None
@@ -367,9 +367,7 @@ def handle(
         if event == "Stop":
             delivery = wait_parent_delivery(
                 session_id,
-                timeout_seconds=_stop_wait_seconds(
-                    Path(payload.get("cwd") or Path.cwd())
-                ),
+                timeout_seconds=_stop_wait_seconds(_role_directory(session_id)),
             )
             if delivery is not None:
                 if selected_provider == "claude":

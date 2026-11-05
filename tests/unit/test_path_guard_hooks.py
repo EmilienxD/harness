@@ -21,10 +21,10 @@ HOOK_PATHS = {
 EDIT_GUARDS = ("on-edit-block", "on-edit-reminder")
 
 
-def run_hook(name: str, payload: object, project: Path) -> tuple[int, dict | None, str]:
+def run_hook(name: str, payload: object, project: Path, provider: str = "claude") -> tuple[int, dict | None, str]:
     project.mkdir(parents=True, exist_ok=True)
     result = subprocess.run(
-        [sys.executable, str(HOOK_PATHS[name])],
+        [sys.executable, str(HOOK_PATHS[name]), f"--{provider}"],
         cwd=project,
         input=json.dumps(payload),
         text=True,
@@ -59,6 +59,55 @@ def path_event(name: str, path: str, **extra: object) -> dict:
     }
     event.update(extra)
     return event
+
+
+@pytest.mark.parametrize("name", HOOK_PATHS)
+@pytest.mark.parametrize("native", [False, True])
+@pytest.mark.parametrize("explicit_workdir", [False, True])
+def test_codex_session_policy_matches_tool_relative_targets(name, native, explicit_workdir, tmp_path):
+    configure(tmp_path, name,
+              'version=1\n[[rules]]\npatterns=["child/src/**"]\nrequire=["GUIDE.md"]\n',
+              {"GUIDE.md": "guidance\n", "child/src/target.py": "value = 1\n"})
+    event = path_event(name, "src/target.py", cwd=str(tmp_path / "child"))
+    if native:
+        if name != "on-read-reminder":
+            event.update(tool_name="apply_patch", tool_input={"command": "*** Update File: src/target.py\n@@\n-value = 1\n+value = 2"})
+    else:
+        command = "cat src/target.py" if name == "on-read-reminder" else "printf x > src/target.py"
+        event.update(tool_name="Bash", tool_input={"command": command})
+    if explicit_workdir:
+        event["cwd"] = str(tmp_path)
+        event["tool_input"]["workdir"] = "child"
+    event["tool_response"] = {"exit_code": 0}
+
+    code, output, stderr = run_hook(name, event, tmp_path, "chatgpt")
+
+    assert (code, stderr) == (0, "")
+    assert output is not None
+    assert output["hookSpecificOutput"]["hookEventName"] == event["hook_event_name"]
+    if name == "on-edit-block":
+        assert output["hookSpecificOutput"]["permissionDecision"] == "deny"
+
+
+@pytest.mark.parametrize("name", HOOK_PATHS)
+def test_codex_path_guards_do_not_search_above_session_directory(name, tmp_path):
+    configure(tmp_path, name, 'version=1\n[[rules]]\npatterns=["*.py"]\nrequire=["GUIDE.md"]\n',
+              {"GUIDE.md": "ancestor guidance\n", "child/target.py": "x\n"})
+    child = tmp_path / "child"
+    event = path_event(name, "target.py", cwd=str(child), tool_response={"exit_code": 0})
+    assert run_hook(name, event, child, "chatgpt") == (0, None, "")
+
+
+@pytest.mark.parametrize("name", EDIT_GUARDS)
+def test_codex_child_read_evidence_satisfies_session_requirements(name, tmp_path):
+    configure(tmp_path, name, 'version=1\n[[rules]]\npatterns=["child/src/**"]\nrequire=["child/GUIDE.md"]\n',
+              {"child/GUIDE.md": "guidance\n", "child/src/target.py": "x\n"})
+    common_fields = {"session_id": "child-read", "cwd": str(tmp_path / "child")}
+    read = dict(common_fields, hook_event_name="PostToolUse", tool_name="Bash",
+                tool_input={"command": "cat GUIDE.md"}, tool_response={"stdout": "guidance\n", "exit_code": 0})
+    assert run_hook(name, read, tmp_path, "chatgpt") == (0, None, "")
+    edit = path_event(name, "src/target.py", **common_fields, tool_response={"exit_code": 0})
+    assert run_hook(name, edit, tmp_path, "chatgpt") == (0, None, "")
 
 
 @pytest.mark.parametrize("name", HOOK_PATHS)

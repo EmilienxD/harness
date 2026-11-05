@@ -16,4 +16,6 @@ test("guard scenarios reject unexpected and incomplete histories with redacted d
 });
 
 for (const provider of ["claude", "chatgpt"] as const) test(`real ${provider} shared guards cover native tools, shell reads and shell writes`, { timeout: 120_000 }, () => runSharedLocalGuards(provider));
+
+test("real Codex keeps session policies while shell tools run in a child directory", { timeout: 120_000 }, () => runSharedLocalGuards("chatgpt", true));
 test("real Pi RPC shared guards cover native tools and PowerShell/Bash through fake OpenAI", { timeout: 120_000 }, runSharedPiGuards);

@@ -4,3 +4,8 @@
 docs/site/**
 docs/CHATGPT-REFERENCES/**
 docs/CLAUDE-REFERENCES/**
+# Reference publishing must exclude local environment files inside docs/.
+**/.env
+**/.env.*
+!**/.env.example
+**/.vercel/**

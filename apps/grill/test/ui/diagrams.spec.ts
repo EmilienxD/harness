@@ -53,6 +53,7 @@ test("conversion failure retries locally while other diagrams and authored contr
   };
   await page.route("**/api/v1/**", (route) => {
     const path = new URL(route.request().url()).pathname;
+    if (path === "/api/v1/changes") return route.fulfill({ json: { content: "1", presence: "online" } });
     if (path === "/api/v1/sessions") return route.fulfill({ json: { sessions: [session] } });
     if (path === "/api/v1/sessions/chatgpt/failure-session")
       return route.fulfill({

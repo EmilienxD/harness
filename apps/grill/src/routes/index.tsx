@@ -74,6 +74,8 @@ type SessionDetail = {
   } | null;
 };
 
+type BoardRevision = { content: string; presence: string };
+
 class ApiError extends Error {
   public constructor(
     message: string,
@@ -327,9 +329,11 @@ function GrillBoard() {
   // Identity changes immediately on navigation, before an old request can publish its result.
   const selection = useRef({ key: selected });
   const loadingSelection = useRef<typeof selection.current | null>(null);
+  const loadedSelection = useRef<typeof selection.current | null>(null);
   const sessionListRequest = useRef(0);
   const sessionList = useRef(sessions);
   const deleting = useRef(new Set<string>());
+  const revision = useRef<BoardRevision | null>(null);
 
   useEffect(() => {
     setRailOpen(window.matchMedia("(min-width: 901px)").matches);
@@ -352,33 +356,36 @@ function GrillBoard() {
     const request = ++sessionListRequest.current;
     try {
       const result = await api<{ sessions: SessionSummary[] }>("sessions");
-      if (request !== sessionListRequest.current) return;
+      if (request !== sessionListRequest.current) return false;
       setAuthorized(true);
       sessionList.current = result.sessions;
       setSessions(result.sessions);
       setError("");
       const first = preferredSession(result.sessions);
       if (!selection.current.key && first) selectSession(`${first.provider}:${first.provider_session_id}`);
+      return true;
     } catch (cause) {
-      if (request !== sessionListRequest.current) return;
+      if (request !== sessionListRequest.current) return false;
       if ((cause as ApiError).code === "unauthorized") setAuthorized(false);
       else setError((cause as Error).message);
+      return false;
     }
   }, [selectSession]);
 
   const loadSelected = useCallback(async () => {
     const current = selection.current;
     const key = current.key;
-    if (!key || deleting.current.has(key) || loadingSelection.current === current) return;
+    if (!key || deleting.current.has(key)) return true;
+    if (loadingSelection.current === current) return false;
     loadingSelection.current = current;
     const isCurrent = () => selection.current === current && !deleting.current.has(key);
     const separator = key.indexOf(":");
     try {
-      if (separator < 1) return;
+      if (separator < 1) return false;
       const next = await api<SessionDetail>(
         `sessions/${encodeURIComponent(key.slice(0, separator))}/${encodeURIComponent(key.slice(separator + 1))}`,
       );
-      if (!isCurrent()) return;
+      if (!isCurrent()) return false;
       const generation = writes.current.generation;
       const loaded: Round[] = [];
       // Superseded rounds are frozen, so only refetch the round that can still change.
@@ -388,20 +395,27 @@ function GrillBoard() {
           loaded.push(cached);
           continue;
         }
-        const { round } = await api<{ round: Round }>(`rounds/${summary.id}`);
-        if (!isCurrent()) return;
-        cache.current.set(summary.id, round);
-        loaded.push(round);
+        // Authored content is immutable even while answers and delivery state change.
+        const { round } = await api<{ round: Round }>(`rounds/${summary.id}`, {
+          headers: cached ? { "X-Grill-Content": "cached" } : {},
+        });
+        if (!isCurrent()) return false;
+        const merged = cached ? { ...cached, ...round } : round;
+        cache.current.set(summary.id, merged);
+        loaded.push(merged);
       }
-      if (!isCurrent()) return;
+      if (!isCurrent()) return false;
       // Publish the detail and its questions together, only for the current selection.
       setDetail(next);
       const overlapped = writes.current.pending > 0 || writes.current.generation !== generation;
       setRounds((rounds) =>
         overlapped ? loaded.map((round) => rounds.find((item) => item.id === round.id) ?? round) : loaded,
       );
+      if (!overlapped) loadedSelection.current = current;
+      return !overlapped;
     } catch (cause) {
       if (isCurrent()) setError((cause as Error).message);
+      return false;
     } finally {
       if (loadingSelection.current === current) loadingSelection.current = null;
       if (isCurrent()) setSwitching(false);
@@ -417,17 +431,52 @@ function GrillBoard() {
   useEffect(() => {
     if (!authorized) return;
     let live = true;
-    let timer: number;
+    let timer: number | undefined;
+    let checking = false;
+    let failures = 0;
     const poll = async () => {
-      await loadSessions();
-      if (!live) return;
-      await loadSelected();
-      if (live) timer = window.setTimeout(() => void poll(), 1_000);
+      if (!live || document.hidden || checking) return;
+      checking = true;
+      try {
+        const next = await api<BoardRevision>("changes");
+        if (!live || document.hidden) return;
+        const previous = revision.current;
+        const changed = !previous || next.content !== previous.content || next.presence !== previous.presence;
+        // A failed navigation must retry even when the database has not changed.
+        if (changed || (selection.current.key && loadedSelection.current !== selection.current)) {
+          const listed = !changed || (await loadSessions());
+          if (!live || document.hidden) return;
+          const loaded = listed && (await loadSelected());
+          if (loaded) {
+            revision.current = next;
+            failures = 0;
+          } else failures += 1;
+        } else {
+          setError("");
+          failures = 0;
+        }
+      } catch (cause) {
+        if (!live) return;
+        if ((cause as ApiError).code === "unauthorized") setAuthorized(false);
+        else setError((cause as Error).message);
+        failures += 1;
+      } finally {
+        checking = false;
+        // One constant-size database response per two seconds; no reads while hidden.
+        if (live && !document.hidden)
+          timer = window.setTimeout(() => void poll(), Math.min(30_000, 2_000 * 2 ** failures));
+      }
     };
-    timer = window.setTimeout(() => void poll(), 1_000);
+    const wake = () => {
+      window.clearTimeout(timer);
+      if (!document.hidden) void poll();
+    };
+    timer = window.setTimeout(() => void poll(), 2_000);
+    document.addEventListener("visibilitychange", wake);
     return () => {
       live = false;
       window.clearTimeout(timer);
+      document.removeEventListener("visibilitychange", wake);
     };
   }, [authorized, loadSessions, loadSelected]);
 
@@ -601,9 +650,13 @@ function GrillBoard() {
   );
 
   const reloadRound = useCallback(async (id: string) => {
-    const result = await api<{ round: Round }>(`rounds/${id}`);
-    cache.current.set(id, result.round);
-    setRounds((current) => current.map((item) => (item.id === id ? result.round : item)));
+    const cached = cache.current.get(id);
+    const { round } = await api<{ round: Round }>(`rounds/${id}`, {
+      headers: cached ? { "X-Grill-Content": "cached" } : {},
+    });
+    const merged = cached ? { ...cached, ...round } : round;
+    cache.current.set(id, merged);
+    setRounds((current) => current.map((item) => (item.id === id ? merged : item)));
   }, []);
 
   const saveAnswer = useCallback<SaveAnswer>(async (roundId, questionId, body, keepalive) => {
@@ -649,7 +702,15 @@ function GrillBoard() {
         )}
       </div>
     );
-  if (!authorized) return <CodeGate failure={error} onSuccess={loadSessions} />;
+  if (!authorized)
+    return (
+      <CodeGate
+        failure={error}
+        onSuccess={async () => {
+          await loadSessions();
+        }}
+      />
+    );
 
   const online = Boolean(detail?.aboard);
   const saveState = [...saveStates.values()].includes("saving") ? "saving" : saveStates.size ? "saved" : null;

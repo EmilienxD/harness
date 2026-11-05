@@ -1,5 +1,6 @@
 """Real Git regressions for the shared Claude/ChatGPT ownership contract."""
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -182,3 +183,94 @@ def test_unknown_shell_targets_stop(session, capsys):
     assert "literal write targets" in commit((repo, root, payload), capsys)
     assert git(repo, "rev-parse", "HEAD") == before
     assert git(repo, "diff", "--cached") == ""
+
+
+def link_directory(alias, target):
+    if os.name == "nt":
+        subprocess.run(["cmd", "/c", "mklink", "/J", str(alias), str(target)],
+                       capture_output=True, check=True)
+    else:
+        alias.symlink_to(target, target_is_directory=True)
+
+
+@pytest.mark.parametrize("tool", ["Bash", "apply_patch"])
+@pytest.mark.parametrize("link_at", ["pre", "post"])
+def test_linked_dirty_file_allows_tools_but_stops_commit(session, capsys, monkeypatch, tool, link_at):
+    repo, root, payload = session
+    source, alias = repo / "source", repo / "alias"
+    for directory in [source, alias]:
+        directory.mkdir()
+        (directory / "skill.md").write_text("before\n")
+    git(repo, "add", "source", "alias")
+    git(repo, "commit", "-qm", "track both paths")
+    # Retain verified writes too: uncertainty must prevent a partial commit.
+    write(session)
+    initial = (git(repo, "rev-parse", "HEAD"), git(repo, "diff", "--cached"))
+    payload = {**payload, "tool_name": tool, "tool_input": {"command": "git status" if tool == "Bash" else
+        "*** Begin Patch\n*** Update File: other.txt\n@@\n-before\n+tool edit\n*** End Patch"}}
+
+    def make_link():
+        (alias / "skill.md").unlink()
+        alias.rmdir()
+        link_directory(alias, source)
+        (source / "skill.md").write_text("changed\n")
+        assert "alias/skill.md" in hook._ownership().dirty(str(repo))
+
+    def event(name):
+        monkeypatch.setattr(hook, "HOOK_EVENT", name)
+        with pytest.raises(SystemExit) as stopped:
+            hook.guarded_main(hook.PRODUCT[hook.PROVIDER], lambda: hook.chatgpt_main({
+                **payload, "hook_event_name": name,
+            }))
+        assert stopped.value.code == 0
+        captured = capsys.readouterr()
+        assert not captured.out and not captured.err
+
+    try:
+        if link_at == "pre":
+            make_link()
+        event("PreToolUse")
+        if link_at == "post":
+            make_link()
+        if tool == "apply_patch":
+            (repo / "other.txt").write_text("tool edit\n")
+        event("PostToolUse")
+        assert not list((root / "pending").glob("*.json"))
+        paths, uncertain, _ = hook._ownership().owned(hook._ownership_records(root))
+        assert set(paths) == {"owned.txt"}
+        assert uncertain
+        assert "Linked commit targets are unsupported" in commit(session, capsys)
+        assert (git(repo, "rev-parse", "HEAD"), git(repo, "diff", "--cached")) == initial
+    finally:
+        # Remove only the directory link, leaving its target for pytest cleanup.
+        if alias.is_symlink():
+            alias.unlink()
+        elif os.name == "nt" and alias.exists() and alias.resolve() == source:
+            alias.rmdir()
+
+
+@pytest.mark.parametrize("failure_at", ["pre", "post"])
+@pytest.mark.parametrize("failure", [PermissionError("Unreadable target"), ValueError("Git attribution path limit")])
+def test_snapshot_failure_preserves_uncertainty(session, capsys, monkeypatch, failure_at, failure):
+    from commit_ownership import Ownership
+
+    repo, root, payload = session
+    write(session)
+    initial = (git(repo, "rev-parse", "HEAD"), git(repo, "diff", "--cached"))
+
+    def fail(*args):
+        raise failure
+
+    with monkeypatch.context() as patch:
+        if failure_at == "pre":
+            patch.setattr(Ownership, "fingerprint", fail)
+        hook._record_pre(payload, str(repo), root)
+    (repo / "owned.txt").write_text("later edit\n")
+    with monkeypatch.context() as patch:
+        if failure_at == "post":
+            patch.setattr(Ownership, "fingerprint", fail)
+        hook._record_post(payload, str(repo), root)
+
+    assert not list((root / "pending").glob("*.json"))
+    assert "Commit attribution unavailable" in commit(session, capsys)
+    assert (git(repo, "rev-parse", "HEAD"), git(repo, "diff", "--cached")) == initial

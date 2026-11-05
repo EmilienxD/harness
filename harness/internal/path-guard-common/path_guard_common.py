@@ -148,25 +148,25 @@ def shell_read_matches(command: str, output: str, content: str) -> bool:
 
 
 def edit_paths(tool: str, args: dict, root: Path) -> list[str]:
+    cwd = root / (args.get("workdir") or args.get("cwd") or ".")
     if tool in {"Bash", "bash", "powershell", "exec_command"}:
-        cwd = root / (args.get("workdir") or args.get("cwd") or ".")
         return shell_paths(args.get("command", args.get("cmd", "")), root, writing=True, cwd=cwd)
     if tool == "apply_patch":
         patch = args.get("command", args.get("patch", ""))
         if not isinstance(patch, str):
             return []
-        return list(dict.fromkeys(match.group(1) for match in re.finditer(
+        return list(dict.fromkeys(str(cwd / match.group(1)) for match in re.finditer(
             r"^\*\*\* (?:Add File|Update File|Delete File|Move to): (.+)$", patch, re.M)))
     path = args.get("file_path", args.get("path"))
-    return [path] if tool in {"Write", "Edit", "MultiEdit", "write", "edit"} and isinstance(path, str) else []
+    return [str(cwd / path)] if tool in {"Write", "Edit", "MultiEdit", "write", "edit"} and isinstance(path, str) else []
 
 
 def read_paths(tool: str, args: dict, root: Path) -> list[str]:
+    cwd = root / (args.get("workdir") or args.get("cwd") or ".")
     if tool in {"Bash", "bash", "powershell", "exec_command"}:
-        cwd = root / (args.get("workdir") or args.get("cwd") or ".")
         return shell_paths(args.get("command", args.get("cmd", "")), root, cwd=cwd)
     path = args.get("file_path", args.get("path", args.get("filePath")))
-    return [path] if tool in {"Read", "read", "read_file", "view"} and isinstance(path, str) else []
+    return [str(cwd / path)] if tool in {"Read", "read", "read_file", "view"} and isinstance(path, str) else []
 
 
 def successful(response) -> bool:

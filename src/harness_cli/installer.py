@@ -857,12 +857,18 @@ class CatalogueInstaller:
                 changes.append(Change("update", item.tool.name, "missing or outdated host product"))
         return resolved, changes
 
-    @staticmethod
-    def _missing_host_actions(tool: Tool) -> list[HostAction]:
+    def _missing_host_actions(self, tool: Tool) -> list[HostAction]:
         """List host products that are absent or differ from their catalogue pin."""
         return [
             action for action in tool.actions
             if not host_action_is_installed(action) or not host_action_is_current(action)
+            or (
+                action.type == "vscode-extension" and action.data.get("source")
+                and not any(
+                    {"type": action.type, **action.data} in installation.get("packages", {}).get(tool.name, {}).get("actions", [])
+                    for installation in self.store.data["installations"].values()
+                )
+            )
         ]
 
     def _local_paths(self, resolved: list[ResolvedPackage]) -> set[Path]:
@@ -1103,14 +1109,15 @@ class CatalogueInstaller:
                         prepared[item.tool.name] = _prepare_actions(missing_actions)
                 if current is None or current.get("version") != item.tool.version:
                     shared_host_owner = current is None and self._owned_in_another_installation(item.tool.name)
-                    actions = [
-                        action for action in item.tool.actions
-                        if current is None or not host_action_is_current(action)
-                    ]
+                    actions = list(item.tool.actions) if current is None else self._missing_host_actions(item.tool)
+                    local_extension_missing = any(
+                        action.type == "vscode-extension" and action.data.get("source")
+                        for action in self._missing_host_actions(item.tool)
+                    ) if shared_host_owner else False
                     prepared[item.tool.name] = (
-                        [] if shared_host_owner else _prepare_actions(actions)
+                        [] if shared_host_owner and not local_extension_missing else _prepare_actions(actions)
                     )
-                    if current is not None and current.get("version") != item.tool.version:
+                    if current is not None and current.get("version") != item.tool.version and prepared[item.tool.name]:
                         rollback_prepared[item.tool.name] = _prepare_rollback_actions(
                             [self._receipt_action(raw) for raw in current.get("actions", [])]
                         )
@@ -1380,6 +1387,19 @@ class CatalogueInstaller:
         restore_previous = bool(restorable)
         for action in prepared:
             apply_host_action(action)
+            if action.action.type == "vscode-extension":
+                # All projects/providers share this host product. Keep their
+                # recorded source aligned when a local build or release replaces it.
+                identity = action.action.data["extension_id"]
+                for installation in self.store.data["installations"].values():
+                    peer = installation.get("packages", {}).get(tool.name)
+                    if peer is not None:
+                        peer["actions"] = [
+                            {"type": action.action.type, **action.action.data}
+                            if record.get("type") == "vscode-extension" and record.get("extension_id") == identity
+                            else record
+                            for record in peer.get("actions", [])
+                        ]
             if restore_previous:
                 host_undo.extend(("apply", previous) for previous in reversed(restorable))
                 restore_previous = False

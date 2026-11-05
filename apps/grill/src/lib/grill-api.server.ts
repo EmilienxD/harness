@@ -32,32 +32,44 @@ export function validatePublication(value: unknown) {
   return publicationSchema.safeParse(value);
 }
 
-export async function getRound(roundId: string) {
-  const { data: round, error } = await supabaseAdmin.from("grill_rounds").select("*").eq("id", roundId).maybeSingle();
+export async function getRound(roundId: string, cachedContent = false) {
+  const query = supabaseAdmin.from("grill_rounds");
+  const { data: round, error } = cachedContent
+    ? await query.select("id,status").eq("id", roundId).maybeSingle()
+    : await query.select("*").eq("id", roundId).maybeSingle();
   if (error || !round) return null;
-  const [{ data: answers }, { data: assets }, { data: snapshots }] = await Promise.all([
+  const [answerResult, assetResult, snapshotResult] = await Promise.all([
     supabaseAdmin
       .from("grill_answer_drafts")
       .select("question_id,selected_option,note,state,updated_at,queued_at")
       .eq("round_id", roundId),
-    supabaseAdmin
-      .from("grill_round_assets")
-      .select("id,original_reference,media_type,byte_size,sha256")
-      .eq("round_id", roundId),
+    cachedContent
+      ? Promise.resolve({ data: undefined, error: null })
+      : supabaseAdmin
+          .from("grill_round_assets")
+          .select("id,original_reference,media_type,byte_size,sha256")
+          .eq("round_id", roundId),
     supabaseAdmin
       .from("grill_prompt_snapshots")
-      .select(
-        "id,prompt,reason,created_at,grill_deliveries(id,status,failure_message,created_at,completed_at,expires_at)",
-      )
+      .select("id,reason,grill_deliveries!inner(status)")
       .eq("round_id", roundId)
-      .order("created_at", { ascending: false }),
+      .eq("grill_deliveries.status", "submitted-to-terminal")
+      .limit(1, { referencedTable: "grill_deliveries" })
+      .limit(1),
   ]);
-  return { ...round, answers: answers ?? [], assets: assets ?? [], prompt_snapshots: snapshots ?? [] };
+  if (answerResult.error || assetResult.error || snapshotResult.error)
+    throw new Error("Round updates could not be loaded. Retry shortly.");
+  return {
+    ...round,
+    answers: answerResult.data ?? [],
+    ...(cachedContent ? {} : { assets: assetResult.data ?? [] }),
+    prompt_snapshots: snapshotResult.data ?? [],
+  };
 }
 
 export async function promptForRound(roundId: string) {
-  // Preview and snapshot validation only need the payload and answers. The full round also
-  // fetches assets and every historical snapshot, which grows with each copy.
+  // Explicit review needs question source and saved diagram feedback. Keep those reads
+  // separate from the board's lightweight answer and delivery updates.
   const [
     { data: round, error },
     { data: answers },

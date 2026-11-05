@@ -12,10 +12,12 @@ import subprocess
 import tempfile
 import tomllib
 import urllib.request
+import zipfile
 from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import parse_qs, quote, urlsplit
 
+from harness_cli.local_sources import extension_fingerprint
 from harness_cli.manifest import HostAction
 
 
@@ -125,6 +127,43 @@ def _npm_command() -> list[str]:
     return [executable]
 
 
+def _prepare_local_extension(action: HostAction) -> PreparedAction:
+    source = Path(_required_string(action, "source"))
+    version = _required_string(action, "version")
+    artifact: Path | None = None
+    try:
+        package = json.loads((source / "package.json").read_text(encoding="utf-8"))
+        if package.get("version") != version or f"{package.get('publisher')}.{package.get('name')}" != action.data["extension_id"]:
+            raise HostActionError("local extension identity/version changed; rerun the installer")
+        if action.data.get("fingerprint") != extension_fingerprint(source):
+            raise HostActionError("local extension build inputs changed; rerun the installer")
+        npm = _npm_command()
+        for arguments in (["ci", "--no-audit", "--no-fund"], ["run", "package"]):
+            result = subprocess.run(
+                [*npm, *arguments], cwd=source, capture_output=True, text=True,
+                encoding="utf-8", errors="replace", timeout=300,
+            )
+            if result.returncode:
+                raise HostActionError((result.stderr or result.stdout).strip() or "local extension build failed")
+        if action.data.get("fingerprint") != extension_fingerprint(source):
+            raise HostActionError("local extension build inputs changed; rerun the installer")
+        built = source / "dist" / f"{package['name']}-{version}.vsix"
+        with zipfile.ZipFile(built) as archive:
+            packaged = json.loads(archive.read("extension/package.json"))
+        if packaged.get("version") != version or f"{packaged.get('publisher')}.{packaged.get('name')}" != action.data["extension_id"]:
+            raise HostActionError("local VSIX identity/version does not match the selected checkout")
+        with tempfile.NamedTemporaryFile(prefix="harness-local-", suffix=".vsix", delete=False) as handle:
+            artifact = Path(handle.name)
+        shutil.copyfile(built, artifact)
+        return PreparedAction(action, artifact)
+    except Exception as exc:
+        if artifact is not None:
+            artifact.unlink(missing_ok=True)
+        if isinstance(exc, HostActionError):
+            raise
+        raise HostActionError(f"could not build local extension at {source}: {exc}") from exc
+
+
 def prepare(action: HostAction) -> PreparedAction:
     if action.type == "uv-tool":
         _required_string(action, "source")
@@ -137,6 +176,8 @@ def prepare(action: HostAction) -> PreparedAction:
         return PreparedAction(action)
     if action.type != "vscode-extension":
         raise HostActionError(f"unsupported host action {action.type}")
+    if action.data.get("source"):
+        return _prepare_local_extension(action)
     url = _required_string(action, "url")
     expected_digest = _required_string(action, "sha256").lower()
     expected_size = action.data.get("size")

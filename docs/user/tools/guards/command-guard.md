@@ -6,6 +6,8 @@ Platforms: **Claude Code, ChatGPT, Pi**. Install with `harness install command-g
 
 Install with `harness install command-guard` and restart the provider. Edit `.harness/guards/command-guard.toml` in a project or `~/.harness/guards/command-guard.toml` at user scope. Harness preserves edits to this starter policy on upgrade. User rules load before project rules.
 
+Claude Code and ChatGPT hooks load the project policy from the directory where the agent session started. Running a command in a subdirectory or another checkout does not select that directory's policy. Claude supplies `CLAUDE_PROJECT_DIR`; Codex runs the hook process in its session directory. The hook ignores the changing `cwd` in tool-event input. Version 2.2.8 fixes Codex policy lookup for commands with a different working directory; missing or malformed launch-directory policies still deny commands.
+
 ```toml
 version = 1
 

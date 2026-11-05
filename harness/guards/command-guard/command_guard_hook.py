@@ -120,8 +120,10 @@ def check_action() -> None:
         raise ValueError("shell action must contain a non-empty command")
 
     try:
-        configured_root = os.environ.get("CLAUDE_PROJECT_DIR") or payload.get("cwd")
-        root = Path(configured_root).resolve() if isinstance(configured_root, str) and configured_root else Path.cwd().resolve()
+        # Codex launches hooks in the session directory; payload cwd can be a
+        # tool's workdir. Claude exposes its fixed launch root separately.
+        configured_root = None if "--chatgpt" in sys.argv else os.environ.get("CLAUDE_PROJECT_DIR")
+        root = Path(configured_root).resolve() if configured_root else Path.cwd().resolve()
     except (OSError, UnicodeError, ValueError):
         _deny(MALFORMED_POLICY_MESSAGE)
         return
