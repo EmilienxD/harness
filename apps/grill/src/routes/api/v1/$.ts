@@ -93,6 +93,12 @@ async function handle(request: Request, path: string, method: string): Promise<R
   }
 
   if (path === "sessions" && method === "GET") return listSessions();
+  if (path === "changes" && method === "GET") {
+    const { data, error } = await supabaseAdmin.rpc("grill_board_changes");
+    return error
+      ? problem(503, "changes_unavailable", "Board updates could not be checked. Retrying shortly.")
+      : json(data);
+  }
   if (path === "capabilities" && method === "GET")
     return json({ schema_version: 1, providers: PROVIDERS, pi_relay: 1, video_assets: 1 });
 
@@ -111,7 +117,7 @@ async function handle(request: Request, path: string, method: string): Promise<R
 
   const roundMatch = /^rounds\/([0-9a-f-]+)$/u.exec(path);
   if (roundMatch && method === "GET") {
-    const round = await getRound(roundMatch[1] ?? "");
+    const round = await getRound(roundMatch[1] ?? "", request.headers.get("X-Grill-Content") === "cached");
     return round ? json({ round }) : problem(404, "round_not_found", "Round not found.");
   }
 
@@ -161,28 +167,20 @@ async function handle(request: Request, path: string, method: string): Promise<R
 
 async function listSessions(): Promise<Response> {
   const { data, error } = await supabaseAdmin
-    .from("grill_sessions")
+    .from("grill_session_summaries")
     .select(
-      "id,provider,provider_session_id,display_title,project_name,project_path,last_activity_at,finished_at,expires_at,grill_rounds(id,number,status,payload,grill_answer_drafts(question_id,state))",
+      "id,provider,provider_session_id,display_title,project_name,project_path,last_activity_at,finished_at,expires_at,active_round_id,active_round_number,answered_count,question_count",
     )
-    .eq("grill_rounds.status", "active")
     .order("last_activity_at", { ascending: false });
   if (error) return problem(500, "database_error", "Sessions could not be loaded.");
   const cutoff = new Date(Date.now() - 15_000).toISOString();
   const { data: presence } = await supabaseAdmin
     .from("grill_aboard_presence")
     .select("provider,provider_session_id,workspace_name,workspace_path,last_heartbeat_at")
-    .gte("last_heartbeat_at", cutoff);
+    .gte("last_heartbeat_at", cutoff)
+    .order("last_heartbeat_at", { ascending: true });
   const presenceMap = new Map((presence ?? []).map((item) => [`${item.provider}:${item.provider_session_id}`, item]));
   const sessions = (data ?? []).map((session) => {
-    const rounds = session.grill_rounds as Array<{
-      id: string;
-      number: number;
-      status: string;
-      payload: { questions?: Array<{ id: string }> };
-      grill_answer_drafts: Array<{ question_id: string; state: string }>;
-    }>;
-    const active = rounds.find((round) => round.status === "active");
     return {
       id: session.id,
       provider: session.provider,
@@ -193,15 +191,10 @@ async function listSessions(): Promise<Response> {
       last_activity_at: session.last_activity_at,
       finished_at: session.finished_at,
       expires_at: session.expires_at,
-      active_round_id: active?.id ?? null,
-      active_round_number: active?.number ?? null,
-      answered_count:
-        active?.grill_answer_drafts.filter(
-          (answer) =>
-            answer.state === "queued" &&
-            active.payload.questions?.some((question) => question.id === answer.question_id),
-        ).length ?? 0,
-      question_count: active?.payload.questions?.length ?? 0,
+      active_round_id: session.active_round_id,
+      active_round_number: session.active_round_number,
+      answered_count: session.answered_count,
+      question_count: session.question_count,
       aboard: presenceMap.get(`${session.provider}:${session.provider_session_id}`) ?? null,
     };
   });
@@ -554,7 +547,7 @@ async function saveAnswer(request: Request, roundId: string, questionId: string)
   if (!parsed.success) return problem(422, "invalid_answer", "The answer is invalid.");
   // The board autosaves every edit, so this reads only what validation needs rather than the whole round.
   const { data: round } = await supabaseAdmin
-    .from("grill_rounds")
+    .from("grill_round_answer_options")
     .select("status,payload,session_id")
     .eq("id", roundId)
     .maybeSingle();
@@ -754,96 +747,10 @@ async function syncAboard(request: Request, piRelay = false): Promise<Response> 
     )
   )
     return problem(422, "invalid_sync", "Pi presence requires the exact active round and acceptance state.");
-  const now = new Date().toISOString();
-  await supabaseAdmin
-    .from("grill_deliveries")
-    .update({ status: "expired", completed_at: now })
-    .in("status", ["pending", "claimed"])
-    .lte("expires_at", now);
-  // Refresh before pruning so an eligible session is never briefly absent between two syncs.
-  if (input.sessions.length) {
-    const { error } = await supabaseAdmin.from("grill_aboard_presence").upsert(
-      input.sessions.map((session) => ({
-        instance_id: input.instance_id,
-        provider: session.provider,
-        provider_session_id: session.session_id,
-        workspace_name: input.workspace?.name ?? null,
-        workspace_path: input.workspace?.path ?? null,
-        last_heartbeat_at: now,
-      })),
-      { onConflict: "instance_id,provider,provider_session_id" },
-    );
-    if (error) return problem(500, "presence_failed", "Aboard presence could not be updated.");
-  }
-  await supabaseAdmin
-    .from("grill_aboard_presence")
-    .delete()
-    .eq("instance_id", input.instance_id)
-    .lt("last_heartbeat_at", now);
-  for (const acknowledgement of input.acknowledgements) {
-    const { data: delivery } = await supabaseAdmin
-      .from("grill_deliveries")
-      .select("id,status,target_instance_id,provider,provider_session_id")
-      .eq("id", acknowledgement.delivery_id)
-      .maybeSingle();
-    if (!delivery || delivery.target_instance_id !== input.instance_id) continue;
-    if (
-      delivery.status === "claimed" ||
-      (piRelay &&
-        delivery.provider === "pi" &&
-        delivery.status === "expired" &&
-        acknowledgement.status === "submitted-to-terminal")
-    ) {
-      const { error: acknowledgementError } = await supabaseAdmin
-        .from("grill_deliveries")
-        .update({
-          status: acknowledgement.status,
-          failure_message:
-            acknowledgement.status === "failed"
-              ? (acknowledgement.failure_message ?? "Terminal submission failed")
-              : null,
-          completed_at: now,
-        })
-        .eq("id", delivery.id)
-        .eq("target_instance_id", input.instance_id)
-        .eq("status", delivery.status);
-      if (acknowledgementError)
-        return problem(500, "acknowledgement_failed", "The confirmed delivery could not be recorded.");
-      const { data: session } = await supabaseAdmin
-        .from("grill_sessions")
-        .select("id")
-        .eq("provider", delivery.provider)
-        .eq("provider_session_id", delivery.provider_session_id)
-        .maybeSingle();
-      if (session) await touchSession(session.id);
-    }
-  }
-  const { data, error } = await supabaseAdmin.rpc("grill_claim_deliveries", {
-    target_instance: input.instance_id,
-    target_sessions: input.sessions,
+  const { data, error } = await supabaseAdmin.rpc("grill_sync", {
+    target_input: input,
     target_native_pi: piRelay,
   });
-  if (error) return problem(500, "delivery_claim_failed", "Pending deliveries could not be claimed.");
-  const deliveries = await Promise.all(
-    (data ?? []).map(
-      async (delivery: { delivery_id: string; provider: string; session_id: string; prompt: string }) => {
-        const { data: row } = await supabaseAdmin
-          .from("grill_deliveries")
-          .select("prompt_snapshot_id,expires_at,grill_prompt_snapshots(images,diagram_revisions)")
-          .eq("id", delivery.delivery_id)
-          .single();
-        const snapshot = row?.grill_prompt_snapshots as unknown as
-          | { images: unknown[]; diagram_revisions: unknown }
-          | undefined;
-        return {
-          ...delivery,
-          snapshot_id: row?.prompt_snapshot_id,
-          expires_at: row?.expires_at,
-          images: snapshot?.images ?? [],
-          diagram_revisions: snapshot?.diagram_revisions ?? {},
-        };
-      },
-    ),
-  );
-  return json({ deliveries });
+  if (error) return problem(503, "relay_unavailable", "Cloud answers could not be synchronized. Retrying shortly.");
+  return json(data);
 }

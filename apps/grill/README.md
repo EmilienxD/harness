@@ -84,6 +84,14 @@ For Pi, install Harness's `grill-me-in-cloud` package with `--platform pi`, relo
 
 When upgrading an existing board for Pi, apply `20261014120000_add_pi_grill_relay.sql` before deploying the app. It widens provider constraints, adds snapshot idempotency for Pi, and extends the shared claim function with native round binding and recovery of an owner's outstanding claims. `GET /api/v1/capabilities` lets the extension reject older services before inference. Existing Claude/ChatGPT session identities and delivery status values remain compatible.
 
+### Database bandwidth
+
+Apply `20261105120000_reduce_board_polling_egress.sql` before deploying the current app, then reload existing board tabs. The migration adds private revision tracking, database-side session counts and answer validation, and a single-call relay heartbeat. Existing rounds, answers and provider clients are retained.
+
+A visible board checks a constant-size revision every two seconds. It reloads session summaries and saved answer/delivery state only after a change; authored HTML and JavaScript remain cached for the lifetime of the tab. Unchanged relay heartbeats do not invalidate content. Online indicators still track the existing 15-second presence window. Hidden tabs pause checks and refresh immediately on return; failures retry with a delay up to 30 seconds. Saved prompt bodies are fetched only for explicit review/delivery, and the round's resend indicator reads at most one confirmed delivery.
+
+The local database-backed bandwidth acceptance projects about 1.05 GB of HTTP responses, including headers, for one visible board plus one native relay running continuously for 30 days. It excludes active editing, initial content loads, media transfers, and deployment-specific header differences; normal hidden-tab time lowers the baseline. This leaves room within a personal free plan's 5 GB allowance without downloading the entire question catalogue every second. Run `npx playwright test test/browser/egress.spec.ts --project desktop` to measure it against local Supabase. The test also checks that large explanations and prompt history do not increase polling, summary or autosave-validation payload sizes.
+
 ## Video previews
 
 Videos publish like images: put an MP4 or WebM file in the round's supplied assets directory, reference it in the explanation, then write the round JSON last. The board shows an inline player with native controls, supports optional poster images, and pauses playback when switching questions. Playback remains in place while answers save and the board polls.
