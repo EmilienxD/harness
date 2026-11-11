@@ -96,7 +96,7 @@ Any further notes about the feature.
 
 Keep `spec` as a mandatory label.
 
-If the user asks for extra labels, verify them before writing the file: run `gh label list` and confirm each requested label exists in this repo, mapping it to the repo's own spelling. Don't invent labels — if a requested one doesn't exist, flag it to the user before proceeding, or propose a similar existing label (e.g. when the user's label has a typo).
+Include any extra labels the user requests in the draft. Publication automatically creates missing labels and preserves existing labels.
 
 Examples:
 ```

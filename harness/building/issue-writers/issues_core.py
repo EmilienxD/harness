@@ -30,8 +30,8 @@ Design notes:
   are each optional, and extra labels the user asked for may be added
   alongside. Aliased tokens map to the workflow's own "[AI]-" prefixed label
   names via LABEL_ALIASES, then are stripped from the body that gets posted.
-  Extra (non-aliased) tokens pass through as-is, and the drafting skills are
-  responsible for checking with `gh label list` that they exist.
+  Extra (non-aliased) tokens pass through as-is. Missing labels are created
+  before publishing; existing labels keep their color and description.
 - A reference to another draft issue, written as plain text "{session-id}/{i}"
   in the body (no backticks, no braces - GitHub only autolinks a bare
   "#<number>", so the resolved replacement must not sit inside inline code),
@@ -809,18 +809,20 @@ def render_parts(body: str) -> list[str]:
 # The gh boundary
 
 
-def ensure_labels(dry: bool) -> list[str]:
-    """Create the canonical labels that are missing; never touch existing ones.
+def ensure_labels(dry: bool, labels: list[str] | None = None) -> list[str]:
+    """Create missing labels, defaulting to the canonical set.
 
     "gh label create" exits non-zero with an "already exists" error when the
     label is present, so a plain create is create-only: an existing label's
-    color and description are left exactly as the user has them.
+    color and description are left exactly as the user has them. Custom
+    labels get a neutral color and an empty description.
     """
     if dry:
         return []
 
     warnings = []
-    for name, (color, description) in CANONICAL_LABELS.items():
+    for name in CANONICAL_LABELS if labels is None else dict.fromkeys(labels):
+        color, description = CANONICAL_LABELS.get(name, ("EDEDED", ""))
         result = run_gh(
             [
                 "gh", "label", "create", name,
@@ -1175,7 +1177,7 @@ def publish_batch(
                 body, _ = resolve_references(body_keeping_parent, resolved)
 
             if mutation_prelude is not None:
-                report.extend(mutation_prelude())
+                report.extend(mutation_prelude(labels))
 
             ok, record, error = publish_one(title, body, labels, parent_number, path)
             if record is not None:
@@ -1269,14 +1271,18 @@ def _run_publish(
 ) -> str:
     header = "Dry run -- nothing will be created" if dry else "Publishing drafted issues"
     report = [header, ""]
-    labels_ensured = False
+    labels_ensured: set[str] = set()
 
-    def ensure_labels_once() -> list[str]:
-        nonlocal labels_ensured
-        if labels_ensured or dry:
+    def ensure_labels_once(labels: list[str]) -> list[str]:
+        if dry:
             return []
-        labels_ensured = True
-        return ensure_labels(False)
+        missing = []
+        for name in [*CANONICAL_LABELS, *labels]:
+            key = name.casefold()
+            if key not in labels_ensured:
+                labels_ensured.add(key)
+                missing.append(name)
+        return ensure_labels(False, missing)
 
     created: list[dict] = []
     published, failed = publish_batch(

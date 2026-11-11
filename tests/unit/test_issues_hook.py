@@ -65,7 +65,7 @@ def _capture_creates(monkeypatch, urls):
         return True, urls[len(calls) - 1]
 
     monkeypatch.setattr(hook, "gh_create_issue", fake_create)
-    monkeypatch.setattr(hook, "ensure_labels", lambda dry: [])
+    monkeypatch.setattr(hook, "ensure_labels", lambda dry, labels=None: [])
     return calls
 
 
@@ -127,7 +127,7 @@ def test_draft_is_renamed_across_the_create_and_removed_on_success(
         return True, "https://github.com/x/y/issues/42"
 
     monkeypatch.setattr(hook, "gh_create_issue", fake_create)
-    monkeypatch.setattr(hook, "ensure_labels", lambda dry: [])
+    monkeypatch.setattr(hook, "ensure_labels", lambda dry, labels=None: [])
 
     hook.publish_issues(False, SID)
 
@@ -137,7 +137,7 @@ def test_draft_is_renamed_across_the_create_and_removed_on_success(
 
 def test_failed_create_restores_the_draft_for_a_rerun(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
-    monkeypatch.setattr(hook, "ensure_labels", lambda dry: [])
+    monkeypatch.setattr(hook, "ensure_labels", lambda dry, labels=None: [])
     monkeypatch.setattr(
         hook, "gh_create_issue", lambda *a, **k: (False, "GitHub unavailable")
     )
@@ -321,8 +321,7 @@ def test_malformed_lines_yield_no_labels_and_keep_body():
 
 
 def test_unknown_difficulty_value_is_treated_as_extra_label():
-    # "difficulty:extreme" isn't an alias; it passes through verbatim so a
-    # dry run shows it and a real publish lets gh be the authority.
+    # "difficulty:extreme" isn't an alias; publication creates it verbatim.
     labels, _ = _labels("> difficulty:advanced, difficulty:extreme\n\nbody")
     assert labels == ["[AI]-advanced-difficulty", "difficulty:extreme"]
 
@@ -357,6 +356,102 @@ def test_ensure_labels_creates_missing_and_leaves_existing_alone(tmp_path, monke
     assert warnings == []
     assert all("--force" not in c for c in calls)
     assert len(calls) == len(hook.CANONICAL_LABELS)
+
+
+def test_publish_creates_draft_labels_before_issues_and_preserves_existing_labels(
+    tmp_path, monkeypatch
+):
+    monkeypatch.chdir(tmp_path)
+    existing_style = ("123456", "Keep this description")
+    labels = {"good first issue": existing_style}
+    attempts = []
+    issues = []
+
+    def fake_run(args, **kwargs):
+        if args[:3] == ["gh", "label", "create"]:
+            name = args[3].casefold()
+            attempts.append(name)
+            assert "--force" not in args
+            if name in labels:
+                return subprocess.CompletedProcess(args, 1, "", "label already exists")
+            labels[name] = (
+                args[args.index("--color") + 1],
+                args[args.index("--description") + 1],
+            )
+            return subprocess.CompletedProcess(args, 0, "", "")
+        assert args[:3] == ["gh", "issue", "create"]
+        requested = [args[i + 1] for i, arg in enumerate(args) if arg == "--label"]
+        assert all(name.casefold() in labels for name in requested)
+        issues.append(requested)
+        return subprocess.CompletedProcess(
+            args, 0, f"https://github.com/x/y/issues/{len(issues)}\n", ""
+        )
+
+    monkeypatch.setattr(hook, "run_gh", fake_run)
+    first = _draft(
+        tmp_path, "issue-0.md",
+        "# First\n\n> spec, security, good first issue\n\nbody\n",
+    )
+    second = _draft(
+        tmp_path, "issue-1.md",
+        "# Second\n\n> Security, difficulty:extreme\n\nbody\n",
+    )
+    blocked = _draft(
+        tmp_path, "issue-2.md", f"# Blocked\n\n> blocked-label\n\n{SID}/99\n"
+    )
+    other = _draft(
+        tmp_path, "issue-0.md", "# Other\n\n> other-label\n\nbody\n", OTHER_SID
+    )
+
+    result = hook.publish_issues(False, SID)
+
+    assert "Published 2 issue(s)" in result
+    assert issues == [
+        ["[AI]-spec", "security", "good first issue"],
+        ["Security", "difficulty:extreme"],
+    ]
+    assert labels["good first issue"] == existing_style
+    assert labels["[ai]-spec"] == hook.CANONICAL_LABELS["[AI]-spec"]
+    assert labels["security"] == ("EDEDED", "")
+    assert labels["difficulty:extreme"] == ("EDEDED", "")
+    assert len(attempts) == len(set(attempts))
+    assert "blocked-label" not in labels
+    assert "other-label" not in labels
+    assert not first.exists() and not second.exists()
+    assert blocked.exists() and other.exists()
+
+
+def test_label_creation_failure_keeps_draft_and_rerun_retries(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    allow_creation = False
+    attempts = []
+
+    def fake_run(args, **kwargs):
+        if args[:3] == ["gh", "label", "create"]:
+            attempts.append(args[3])
+            if args[3] == "security" and not allow_creation:
+                return subprocess.CompletedProcess(args, 1, "", "permission denied")
+            return subprocess.CompletedProcess(args, 0, "", "")
+        assert args[:3] == ["gh", "issue", "create"]
+        if not allow_creation:
+            return subprocess.CompletedProcess(args, 1, "", "label not found")
+        return subprocess.CompletedProcess(args, 0, "https://github.com/x/y/issues/42\n", "")
+
+    monkeypatch.setattr(hook, "run_gh", fake_run)
+    draft = _draft(tmp_path, "issue-0.md", "# T\n\n> security\n\nbody\n")
+
+    result = hook.publish_issues(False, SID)
+
+    assert "could not ensure label 'security': permission denied" in result
+    assert "1 failed or were skipped" in result
+    assert draft.exists()
+
+    allow_creation = True
+    result = hook.publish_issues(False, SID)
+
+    assert "Published 1 issue(s) successfully" in result
+    assert attempts.count("security") == 2
+    assert not draft.exists()
 
 
 def test_references_are_plain_text_and_resolve_to_bare_numbers():
@@ -791,13 +886,13 @@ def test_dry_run_reports_each_draft_and_touches_nothing(tmp_path, monkeypatch):
 
     monkeypatch.setattr(hook, "run_gh", explode)
     draft = _draft(
-        tmp_path, "issue-0.md", "# T\n\n> difficulty:basic, mode:afk\n\nbody\n"
+        tmp_path, "issue-0.md", "# T\n\n> difficulty:basic, mode:afk, new label\n\nbody\n"
     )
 
     result = hook.run_publish_command("/publish-issues --dry", SID, tmp_path)
 
     assert '1. T' in result
-    assert 'Labels: [AI]-basic-difficulty, [AI]-afk' in result
+    assert 'Labels: [AI]-basic-difficulty, [AI]-afk, new label' in result
     assert "1 issue(s) ready to publish" in result
     assert draft.exists()
     assert not hook.notice_path(tmp_path, SID).exists()
