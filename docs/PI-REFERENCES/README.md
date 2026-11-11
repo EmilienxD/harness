@@ -24,7 +24,7 @@ The source index below is consumed by `scripts/update_references.py`. Refresh fr
 uv run python scripts/update_references.py docs/CLAUDE-REFERENCES docs/CHATGPT-REFERENCES docs/PI-REFERENCES
 ```
 
-The daily/manual `update-references` GitHub Actions workflow refreshes all three sets and commits
+The manual `update-references` GitHub Actions workflow refreshes all three sets and commits
 changed mirrors. Source URLs track upstream `main`; they are not a supported-runtime version pin.
 Each tool guide records its relevant implementation evidence and acceptance limits independently.
 

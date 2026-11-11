@@ -10,7 +10,7 @@ commands and ask/reply state.
 
 `uvx --from <pinned source> harness` opens the interactive catalogue menu by default and also exposes the
 non-interactive installer commands `install`, `uninstall`, `upgrade`, `list`, and `info`. Keep installer
-operations distinct from the persistent-session commands `run`, `ask`, `reply`, and `resume`.
+operations distinct from the persistent-session commands `run`, `ask`, `reply`, `resume`, and `watch`.
 
 ## Repository Layout
 
@@ -33,7 +33,6 @@ operations distinct from the persistent-session commands `run`, `ask`, `reply`, 
 - `docs/PI-REFERENCES/`: mirrored official Pi documentation, API declarations, and selected extension examples.
 - `docs/user/tools/`: per-tool guides across providers; keep support status and acceptance evidence with each tool.
 - `docs/user/configuration.md`: shared installation roots, ownership, settings and dependency packaging.
-- `docs/CHATGPT-COMPATIBILITY.md`: native ChatGPT target feasibility and implementation map.
 - `scripts/update_references.py`: refreshes the mirrored upstream documentation.
 
 ## Catalogue Package Shape
@@ -55,7 +54,7 @@ harness/<category>/<tool>/
 ├── <support>.py     # modules the hook imports, installed beside it
 ├── claude/           # shallow Claude-only files and settings.fragment.json
 ├── chatgpt/          # shallow ChatGPT-only files and hooks.fragment.json
-└── pi/               # proposed Pi-only extension entry points, when implemented
+└── pi/               # Pi-only extension entry points, when implemented
 ```
 
 Omit empty overlays. Keep manifests and product-neutral documentation at the tool root. Each skill

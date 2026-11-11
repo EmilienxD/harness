@@ -31,6 +31,7 @@ nav:
   - Home: index.md
   - Get started: getting-started.md
   - Configuration: configuration.md
+  - CI usage and releases: ci-usage.md
   - Tools:
       - Productivity:
           - Overview: tools/productivity.md
@@ -43,6 +44,7 @@ nav:
           - "Clear alias": tools/productivity/clear-alias.md
           - "Copy all": tools/productivity/copy-all.md
           - "Decisions": tools/productivity/decisions.md
+          - "Effort alias": tools/productivity/effort-alias.md
           - "Enable desktop notification": tools/productivity/enable-desktop-notification.md
           - "Environment context": tools/productivity/environment-context.md
           - "File mentions": tools/productivity/file-mentions.md
@@ -59,6 +61,7 @@ nav:
           - "Subagents": tools/productivity/subagents.md
           - "TODO(HITL)": tools/productivity/todo-hitl.md
           - "Tool inspector": tools/productivity/tool-inspector.md
+          - "Turn timer": tools/productivity/turn-timer.md
           - "Web toolkit": tools/productivity/web-toolkit.md
           - "Writing for agents": tools/productivity/writing-for-agents.md
           - "Zoom out": tools/productivity/zoom-out.md
