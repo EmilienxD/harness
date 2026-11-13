@@ -20,7 +20,7 @@ CapacitySource = Literal["transcript", "model", "override"]
 # entries as models are validated; extended/custom provider windows use overrides.
 # Checked 2026-09-30: platform.claude.com/docs/en/{models/overview,build-with-claude/context-windows}, code.claude.com/docs/en/model-config.
 CLAUDE_CONTEXT_WINDOWS = {
-    "claude-fable-5-1": 1_000_000,
+    "claude-fable-5-2": 1_000_000,
     "claude-fable-5": 1_000_000,
     "claude-opus-5-5": 1_000_000,
     "claude-opus-5": 1_000_000,
