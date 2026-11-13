@@ -12,4 +12,4 @@ Start with [Get started](getting-started.md) if Harness is new to you. Open [Con
 
 Each active package has its own page. Open a category above or use the navigation and search to find a tool by name.
 
-The repository README remains the compact catalogue overview and developer entry point. This site is published separately so configuration examples have room to grow. The source repository is currently private, so its links and Git-based installation require repository access.
+The repository README remains the compact catalogue overview and developer entry point. The documentation website renders the Markdown guides in `docs/user/` so configuration examples have room to grow. The source repository is currently private, so its links and Git-based installation require repository access.

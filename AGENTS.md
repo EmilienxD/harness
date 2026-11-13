@@ -26,6 +26,7 @@ operations distinct from the persistent-session commands `run`, `ask`, `reply`, 
   workflows are separate packages; tool-specific entry points and policy cores stay with their tools.
 - `apps/aboard/`: application implementation, with its own user-facing `README.md` and local `AGENTS.md`
   navigation map.
+- `apps/docs/`: documentation website; renders `docs/user/`. Follow its local `AGENTS.md` for app work.
 - `tests/unit/`: installer, catalogue, platform, settings, receipt, and session tests.
 - `tests/e2e/`: deterministic real-CLI E2E infrastructure shared with Aboard.
 - `docs/CLAUDE-REFERENCES/`: mirrored official Claude Code documentation.
@@ -100,6 +101,9 @@ uv run python scripts/update_references.py docs/CLAUDE-REFERENCES docs/CHATGPT-R
 For Aboard commands, work from `apps/aboard/` and follow its local `AGENTS.md`.
 
 ## Tests
+
+- After docs or navigation changes, run `npm run check` from `apps/docs/`. Add new tool guides
+  to `apps/docs/src/content/site.ts` unless their folder is covered by a `{ dir }` navigation group.
 
 - Generate authentication values inside isolated test fixtures. Production env files and private
   user/project configuration are not test inputs; never copy their values into source or fixtures.
