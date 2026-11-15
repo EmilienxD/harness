@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import commandRules from "../../../../harness/productivity/subagents/runtime/src/subagents_runtime/prompt-commands.json";
 
-import { createDelegationRoutes, continueHarnessDelegation, delegationParentSession, providerSession } from "../../src/bridge/manual-delegation.js";
+import { createDelegationRoutes, continueHarnessDelegation, delegationParentSession, providerSession, resolveResumeBinding, readDelegationBinding } from "../../src/bridge/manual-delegation.js";
 
 test("Pi loop delegation is refused before starting a process", async () => {
   const handler = createDelegationRoutes({ launch: async () => {
@@ -225,6 +225,111 @@ test("the published delegation credential cannot escape its workspace", async ()
   assert.equal(response.status, 403);
 });
 
+
+test("a multi-root host authorizes the child's root without relocating it to the primary folder", async () => {
+  const { mkdtemp, mkdir, rm, symlink } = await import("node:fs/promises");
+  const { tmpdir } = await import("node:os");
+  const { join } = await import("node:path");
+  const root = await mkdtemp(join(tmpdir(), "harness-multiroot-"));
+  const primary = join(root, "primary");
+  const child = join(root, "child");
+  await mkdir(primary); await mkdir(child);
+  let resumes = 0;
+  try {
+    const handler = createDelegationRoutes({ launch: async () => assert.fail("must resume"), resume: async (request) => {
+      resumes++;
+      assert.equal(request.cwd, child);
+      return { agentId: "local", sessionId: "native", terminalId: "terminal" };
+    } }, { workspaceRoot: primary, workspaceRoots: [primary, child] });
+    const request = { method: "POST", url: new URL("http://127.0.0.1/delegations"), headers: {}, authorizationScope: "delegation" as const,
+      body: { requestId: "resume", provider: "claude", mode: "interactive", prompt: "Continue", cwd: child, resumeSessionId: "native" }, signal: new AbortController().signal };
+    assert.equal((await handler(request)).status, 201);
+    assert.equal((await handler({ ...request, body: { ...request.body, requestId: "outside", cwd: root } })).status, 403);
+    await symlink(root, join(child, "escape"), process.platform === "win32" ? "junction" : "dir");
+    assert.equal((await handler({ ...request, body: { ...request.body, requestId: "alias-escape", cwd: join(child, "escape") } })).status, 403);
+    assert.equal(resumes, 1);
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test("a new host adopts a durable child and persists only its newly allocated local handles", async () => {
+  const { mkdtemp, rm } = await import("node:fs/promises");
+  const { tmpdir } = await import("node:os");
+  const { join } = await import("node:path");
+  const root = await mkdtemp(join(tmpdir(), "harness-adoption-"));
+  try {
+    const handler = createDelegationRoutes({
+      launch: async () => assert.fail("must resume"),
+      resume: async (request) => {
+        const binding = await resolveResumeBinding(request, undefined, () => "new-local", async () => ({ task: "general", cwd: root, action: "reopen" }));
+        assert.equal(binding.agentId, "new-local");
+        assert.equal(binding.sessionId, "native-child");
+        assert.equal(binding.cwd, root);
+        return { agentId: binding.agentId, sessionId: binding.sessionId, terminalId: "new-terminal" };
+      },
+    }, { stateDirectory: root });
+    const response = await handler({ method: "POST", url: new URL("http://127.0.0.1/delegations"), headers: {}, body: { requestId: "adopt", provider: "claude", mode: "interactive", prompt: "Continue", cwd: root, harnessSessionId: "child", parentSessionId: "parent", resumeAgentId: "old-local", resumeSessionId: "native-child" }, signal: new AbortController().signal });
+    assert.equal(response.status, 201);
+    const binding = await readDelegationBinding(root, "child");
+    assert.equal(binding?.agentId, "new-local");
+    assert.equal(binding?.parentSessionId, "parent");
+    assert.equal(binding?.terminalId, "new-terminal");
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test("matching local history cannot bypass a durable reservation refusal", async () => {
+  let executions = 0;
+  const request = { requestId: "resume", harnessSessionId: "child", resumeSessionId: "native", provider: "claude" as const,
+    executionMode: "interactive" as const, type: "general" as const, task: "general" as const,
+    prompt: "Continue", cwd: process.cwd(), description: "general" };
+  const handler = createDelegationRoutes({
+    launch: async () => assert.fail("must resume"),
+    resume: async (parsed) => {
+      await resolveResumeBinding(parsed, { ...request, agentId: "local", sessionId: "native" }, () => assert.fail("must not allocate"), async () => {
+        throw new Error("Reservation already claimed by another host");
+      });
+      executions++;
+      return { agentId: "local", sessionId: "native", terminalId: "terminal" };
+    },
+  });
+  const response = await handler({ method: "POST", url: new URL("http://127.0.0.1/delegations"), headers: {},
+    body: { requestId: "resume", provider: "claude", mode: "interactive", prompt: "Continue", cwd: process.cwd(), harnessSessionId: "child", resumeSessionId: "native" }, signal: new AbortController().signal });
+  assert.equal(response.status, 409);
+  assert.equal(executions, 0);
+});
+
+test("live-terminal-only authority never falls back to adopting a new local handle", async () => {
+  const request = { requestId: "resume-loop", harnessSessionId: "child", resumeSessionId: "native", provider: "claude" as const,
+    executionMode: "loop" as const, type: "general" as const, task: "loop" as const,
+    prompt: "Continue", cwd: process.cwd(), description: "Implementer" };
+  const verify = async () => ({ task: "loop" as const, cwd: process.cwd(), action: "reuse-terminal" as const });
+  await assert.rejects(resolveResumeBinding(request, undefined, () => assert.fail("must not create a duplicate"), verify), /no matching local terminal/u);
+  const binding = await resolveResumeBinding(request, { ...request, agentId: "local", sessionId: "native", terminalId: "terminal" }, () => assert.fail("must reuse"), verify);
+  assert.equal(binding.agentId, "local");
+  assert.equal(binding.resumeAction, "reuse-terminal");
+});
+
+test("missing local history cannot bypass a durable adoption refusal", async () => {
+  await assert.rejects(resolveResumeBinding({
+    requestId: "resume", harnessSessionId: "child", resumeSessionId: "native",
+    provider: "claude", executionMode: "interactive", type: "general", task: "general",
+    prompt: "Continue", cwd: process.cwd(), description: "general",
+  }, undefined, () => assert.fail("must not allocate before authorization"), async () => {
+    throw new Error("Previous execution is uncertain");
+  }), /Previous execution is uncertain/u);
+});
+
+test("resume without an old host handle uses the existing native conversation", async () => {
+  const handler = createDelegationRoutes({
+    launch: async () => assert.fail("must not launch a new conversation"),
+    resume: async (request) => {
+      assert.equal(request.resumeAgentId, undefined);
+      assert.equal(request.resumeSessionId, "native-child");
+      return { agentId: "new-local", sessionId: "native-child", terminalId: "new-terminal" };
+    },
+  });
+  const response = await handler({ method: "POST", url: new URL("http://127.0.0.1/delegations"), headers: {}, body: { requestId: "adopt", provider: "claude", mode: "interactive", prompt: "Continue", cwd: "C:\\work", harnessSessionId: "child", resumeSessionId: "native-child" }, signal: new AbortController().signal });
+  assert.equal(response.status, 201);
+});
 
 test("resume preserves skills and neutralizes built-in commands", async () => {
   let resumed = false;

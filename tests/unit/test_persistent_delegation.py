@@ -268,7 +268,7 @@ def _standalone_provider(tmp_path, monkeypatch, provider):
 
     started = []
     monkeypatch.setenv("HARNESS_STATE_DIR", str(tmp_path / "state"))
-    monkeypatch.setattr(bridge_backend, "discover", lambda _cwd: None)
+    monkeypatch.setattr(bridge_backend, "discover", lambda _cwd, **_kwargs: None)
     monkeypatch.setattr(sessions, "_command_from_config", lambda _config, _provider="claude": ["provider"])
 
     def start(execution_id, argv, _environment, _cwd, *, visible):
@@ -373,7 +373,7 @@ def test_terminal_continuations_reply_through_the_original_process_hooks(tmp_pat
     def reuse(request, request_id, *_):
         with sessions._connect() as connection:
             execution = connection.execute("SELECT id FROM executions WHERE request_id=?", (request_id,)).fetchone()[0]
-            connection.execute("UPDATE executions SET backend='bridge',state='starting' WHERE id=?", (execution,))
+            connection.execute("UPDATE executions SET backend='bridge',state='starting',fork_of='saved-conversation' WHERE id=?", (execution,))
             connection.execute("UPDATE sessions SET provider_session_id=NULL WHERE id=?", (first.child_session_id,))
         prepare_terminal_resume(first.child_session_id, execution, "child", "terminal", "saved-conversation")
         return "saved-conversation"
@@ -397,14 +397,16 @@ def test_live_chatgpt_continuation_uses_aboard_instead_of_external_terminal(tmp_
     started, inbox, first = _live_delegated_child(tmp_path, monkeypatch, "chatgpt")
     with sessions._connect() as connection:
         connection.execute("UPDATE executions SET backend_agent_id='boarded-child',backend='bridge' WHERE request_id=?", (first.request_id,))
-    monkeypatch.setattr(bridge_backend, "discover", lambda _: ("127.0.0.1", 4823, "token"))
+    monkeypatch.setattr(bridge_backend, "discover", lambda _, **_kwargs: ("127.0.0.1", 4823, "token"))
     requests = []
 
     def urlopen(request, **kwargs):
         body = json.loads(request.data)
         requests.append(body)
         from subagents_runtime.hooks import handle
+        from subagents_runtime.resume_context import resume_context
 
+        assert resume_context({**body, "hostClaim": "fork-host"})["action"] == "fork"
         with monkeypatch.context() as child_environment:
             child_environment.setenv("HARNESS_SESSION_ID", body["harnessSessionId"])
             child_environment.setenv("HARNESS_EXECUTION_ID", body["executionId"])
@@ -422,6 +424,131 @@ def test_live_chatgpt_continuation_uses_aboard_instead_of_external_terminal(tmp_
     assert len(started) == 1
     assert requests[0]["forkSessionId"] == "saved-conversation"
     assert requests[0]["resumeAgentId"] == "boarded-child"
+
+
+@pytest.mark.parametrize("schema_version", [11, 12])
+def test_stopped_child_resumes_through_new_host_without_old_handle(tmp_path, monkeypatch, schema_version):
+    import io
+    import json
+    from subagents_runtime import execution_host
+    from subagents_runtime.resume_context import resume_context
+
+    _, inbox, first = _live_delegated_child(tmp_path, monkeypatch, "chatgpt")
+    with sessions._connect() as connection:
+        execution_id = connection.execute("SELECT id FROM executions WHERE request_id=?", (first.request_id,)).fetchone()[0]
+    from subagents_runtime.delegation import arm_reply
+    arm_reply(first.child_session_id, execution_id)
+    execution_host.exited(execution_id, 0, provider_alive=False, spawn_error=None, result="Done", success=True)
+    if schema_version == 11:
+        with sessions._connect() as connection:
+            connection.execute("ALTER TABLE executions DROP COLUMN host_claim")
+            connection.execute("PRAGMA user_version=11")
+    monkeypatch.setattr(bridge_backend, "discover", lambda cwd, **_kwargs: ("127.0.0.1", 4823, "new-host-token"))
+    requests = []
+
+    def urlopen(request, **kwargs):
+        body = json.loads(request.data)
+        requests.append(body)
+        assert "resumeAgentId" not in body
+        assert body["resumeSessionId"] == "saved-conversation"
+        assert body["cwd"] == str(tmp_path.resolve())
+        body["hostClaim"] = "new-host"
+        for key, value in (("parentSessionId", "other-parent"), ("cwd", str(tmp_path.parent)), ("provider", "claude"), ("mode", "auto"), ("resumeSessionId", "other-native"), ("executionId", "other-execution")):
+            with pytest.raises(sessions.SessionError):
+                resume_context({**body, key: value})
+        for previous_state in ("prepared", "starting", "running", "uncertain"):
+            with sessions._connect() as connection:
+                connection.execute("UPDATE executions SET state=?,superseded_at=CURRENT_TIMESTAMP WHERE id=?", (previous_state, execution_id))
+            with pytest.raises(sessions.SessionError, match="running or uncertain"):
+                resume_context(body)
+        with sessions._connect() as connection:
+            connection.execute("UPDATE executions SET state='exited' WHERE id=?", (execution_id,))
+        import os
+        import subprocess
+        import sys
+        from pathlib import Path
+        from concurrent.futures import ThreadPoolExecutor
+
+        def claim(host):
+            return subprocess.run(
+                [sys.executable, "-m", "subagents_runtime.resume_context", json.dumps({**body, "hostClaim": host})],
+                env={**os.environ, "PYTHONPATH": str(Path(bridge_backend.__file__).resolve().parents[1])},
+                capture_output=True, text=True, timeout=15,
+            )
+
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            outcomes = list(pool.map(claim, ["host-one", "host-two"]))
+        assert sorted(result.returncode for result in outcomes) == [0, 1]
+        [checked] = [result for result in outcomes if result.returncode == 0]
+        assert json.loads(checked.stdout) == {"task": "general", "cwd": str(tmp_path), "action": "reopen"}
+        # An HTTP refusal after a durable host claim cannot release an uncertain launch.
+        execution_host.rejected(body["executionId"])
+        with pytest.raises(sessions.SessionError, match="already claimed"):
+            resume_context({**body, "hostClaim": "competing-host"})
+        return io.BytesIO(b'{"agentId":"new-local","sessionId":"saved-conversation","terminalId":"new-terminal"}')
+
+    monkeypatch.setattr(bridge_backend.urllib.request, "urlopen", urlopen)
+    (inbox / "continue.md").write_text("---\nresume: agent-1\n---\nContinue.", encoding="utf-8")
+    [result] = process_inbox("parent", launch=sessions.launch_delegated)
+    assert result.status == "launched", result.reason
+    assert result.child_session_id == first.child_session_id
+    assert len(requests) == 1
+
+
+def test_stopped_child_adopts_real_http_host_without_previous_workspace_state(tmp_path, monkeypatch):
+    import json
+    from pathlib import Path
+    import shutil
+    import subprocess
+    import time
+    from subagents_runtime import execution_host
+    from subagents_runtime.delegation import arm_reply
+
+    repository = Path(__file__).resolve().parents[2]
+    node = shutil.which("node")
+    esbuild = repository / "apps/aboard/node_modules/esbuild/bin/esbuild"
+    if not node or not esbuild.is_file():
+        pytest.skip("Aboard npm dependencies and Node are required for the real host contract")
+    discover = bridge_backend.discover
+    _, inbox, first = _live_delegated_child(tmp_path, monkeypatch, "chatgpt")
+    with sessions._connect() as db:
+        original = db.execute("SELECT id FROM executions WHERE request_id=?", (first.request_id,)).fetchone()[0]
+        db.execute("UPDATE sessions SET provider_session_id='native-parent' WHERE id='parent'")
+    arm_reply(first.child_session_id, original)
+    execution_host.exited(original, 0, provider_alive=False, spawn_error=None, result="Done", success=True)
+    primary = tmp_path / "new-primary"
+    primary.mkdir()
+    endpoints = tmp_path / "endpoints"
+    endpoints.mkdir()
+    local_state = tmp_path / "new-host-state"
+    script = tmp_path / "host.cjs"
+    subprocess.run([node, str(esbuild), str(repository / "apps/aboard/test/unit/fixtures/resume-host.ts"), "--bundle", "--platform=node", "--format=cjs", f"--outfile={script}"], check=True, capture_output=True, timeout=30)
+    # Retain the real discovery implementation, not the standalone fixture's stub.
+    with monkeypatch.context() as network:
+        network.setattr(bridge_backend, "discover", discover)
+        network.setattr(bridge_backend, "endpoint_directory", lambda: endpoints)
+        network.setenv("HARNESS_BRIDGE_PORT", "1")
+        network.setenv("HARNESS_BRIDGE_TOKEN", "old-parent-host")
+        host = subprocess.Popen([node, str(script), str(primary), str(tmp_path), str(local_state), str(endpoints / "host.json")], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        try:
+            deadline = time.monotonic() + 15
+            while not (endpoints / "host.json").is_file():
+                assert host.poll() is None, "isolated host exited before readiness"
+                assert time.monotonic() < deadline, "isolated host readiness timed out"
+                time.sleep(.02)
+            (inbox / "continue.md").write_text("---\nresume: agent-1\n---\nContinue.", encoding="utf-8")
+            [continued] = process_inbox("parent", launch=sessions.launch_delegated)
+            assert continued.status == "launched", continued.reason
+            assert continued.child_session_id == first.child_session_id
+            [binding] = [json.loads(path.read_text()) for path in local_state.glob("session-*.json")]
+            assert binding["agentId"] == "new-host-1"
+            assert binding["sessionId"] == "saved-conversation"
+            assert binding["cwd"] == str(tmp_path)
+            assert binding["parentSessionId"] == "parent"
+            assert json.loads((local_state / "navigation.json").read_text()) == {"parentNativeSession": "native-parent"}
+        finally:
+            host.terminate()
+            host.wait(timeout=15)
 
 
 def test_resume_command_forks_a_live_delegated_child(tmp_path, monkeypatch):
@@ -615,7 +742,7 @@ def test_detached_supervisor_binds_conversation_and_delivers_after_process_exit(
     monkeypatch.setenv("HARNESS_STATE_DIR", str(tmp_path / "state"))
     monkeypatch.delenv("ABOARD_BRIDGE_PORT", raising=False)
     monkeypatch.delenv("ABOARD_BRIDGE_TOKEN", raising=False)
-    monkeypatch.setattr(bridge_backend, "discover", lambda _: None)
+    monkeypatch.setattr(bridge_backend, "discover", lambda _, **_kwargs: None)
     monkeypatch.setattr(
         sessions, "_visible_terminal", lambda *_: pytest.fail("visible terminal opened")
     )

@@ -75,6 +75,47 @@ completion within 15 seconds, an acknowledged cancellation with no reply, an emp
 exactly six fake inference requests. These are checkout-runtime checks; the published source
 pin still needs updating when this runtime is released.
 
+The 3.1.7 checkout removes the previous Aboard agent handle as a resume prerequisite.
+The runtime sends the stable Harness child and native conversation identities, retaining the
+child's saved launch directory and settings. When the selected Aboard host has no matching
+local binding, it verifies the durable resume reservation through `subagents_runtime.resume_context`,
+allocates a fresh local agent handle, reopens the native conversation, and saves its own binding.
+The 3.1.8 checkout also checks runtime authority for matching local bindings. A transactional
+host claim permits only one host to act on each resume reservation (session schema 12 migrates
+existing state in place). The API authorizes `reopen`, an explicitly reserved `fork`, or
+`reuse-terminal` for a verified live loop execution. Non-fork reopening refuses prior executions
+not recorded as ended, even if no local lock exists. Live-terminal submission verifies the native
+conversation and provider PID/birth identity through the runtime; local locks are only an extra
+veto. Missing live-terminal ownership never falls through to reopening. A claim followed by
+failure or uncertain startup remains reserved rather than being reset for another host to replay.
+The 3.1.9 checkout routes continuations using the saved child launch root. Resume accepts inherited
+endpoint credentials only when a live published record advertises that root (or an eligible registered
+worktree); otherwise it selects another matching host. Scoped registry credentials are re-read on 401.
+Aboard 0.3.16 advertises every explicitly opened workspace folder and authorizes scoped delegation
+against those folders. Its window-local UI and Auto Run still use the first folder. Reopening never
+substitutes that folder or the parent's current directory for the child's launch root.
+
+Root containment uses absolute, filesystem-resolved paths: Windows casing and separator variants
+match, and symlink/junction aliases count as the same filesystem root. Distinct worktree directories
+remain distinct launch roots; worktree registration authorizes a host, not relocation of a child.
+A missing binding is reconstructed locally, and parent navigation can resolve native identities through
+the runtime without the old host's binding. Navigation reveals only terminals in the current window;
+there is no cross-window live-terminal takeover. Reload the window after changing its folder list.
+
+Runtime and Aboard regressions cover root routing, multi-root authorization, ownership, reservation
+claims, and binding reconstruction. A real HTTP Aboard host test verifies a stopped child is adopted
+without the old host's storage while inherited credentials point elsewhere. Native VS Code integration
+also runs in a multi-root workspace. Real Claude/Codex journeys cover root overrides, interactive/auto
+continuation and recovery. Full cross-window native-provider acceptance remains a release gate.
+
+The manifest's published runtime source pin still predates the toolkit's `--enable-inbox` command;
+shipped-pin Pi acceptance consequently fails inbox activation/child startup. Checkout-runtime tests
+are reported separately, not substituted for that release check. Publishing this checkout and updating
+the immutable source pin are required before calling this behavior shipped. Windows checkout validation
+passes all eight Claude/Codex delegation journeys and seven focused Pi checkout-runtime journeys
+(including full-stack auto/interactive, unrelated-root and busy-parent delivery). These results do not
+certify the incompatible shipped pin or the GitHub-backed full Aboard acceptance matrix.
+
 `subagents` 2.10.0 (runtime 2.10.0) adds Pi as a provider of the existing Python runtime rather
 than a second orchestrator. Requests, executions, process supervision, delivery claims and replay
 stay in the shared SQLite state; a native extension translates Pi events into versioned

@@ -13,9 +13,9 @@ test("combined live acceptance rejects remote services before creating a fixture
   await assert.rejects(runPiSubagentsJourney("auto", { localBoard: { origin: "http://127.0.0.1:18080", code: "unused-test-code" } }), /loopback/u);
 });
 
-for (const route of ["auto", "interactive"] as const) {
-  test(`a cloud interview delegates the requested model and effort in ${route} mode with the installed extension stack`, { timeout: 300_000 }, async () => {
-    const result = await runPiSubagentsJourney(route, { pinnedRuntimes: true, fullStack: true, explicitModel: true });
+for (const [route, pinnedRuntimes] of [["auto", false], ["auto", true], ["interactive", false], ["interactive", true]] as const) {
+  test(`a cloud interview delegates the requested model and effort in ${route} mode with the installed extension stack (${pinnedRuntimes ? "shipped pin" : "checkout runtime"})`, { timeout: 300_000 }, async () => {
+    const result = await runPiSubagentsJourney(route, { pinnedRuntimes, fullStack: true, explicitModel: true });
     assert.equal(result.parentStatus, "success");
     assert.equal(result.parentFinal, parentDone(route));
     assert.equal(result.request.state, "succeeded");

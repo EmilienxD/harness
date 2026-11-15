@@ -59,7 +59,7 @@ def bind(execution_id: str, conversation_id: str, agent_id: str | None, handle: 
 def rejected(execution_id: str) -> None:
     """Only a proven pre-launch refusal may release the launch intent."""
     with connect() as db:
-        db.execute("UPDATE executions SET state='prepared' WHERE id=? AND state='starting'", (execution_id,))
+        db.execute("UPDATE executions SET state='prepared' WHERE id=? AND state='starting' AND host_claim IS NULL", (execution_id,))
 
 
 def started(execution_id: str, provider_pid: int, supervisor_pid: int | None = None) -> None:

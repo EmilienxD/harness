@@ -316,20 +316,47 @@ def test_lead_interrupt_preserves_queued_report_for_next_prompt(tmp_path, monkey
 
 @pytest.mark.parametrize("provider", ["claude", "chatgpt"])
 def test_released_implementer_resumes_in_its_aboard_session(tmp_path, monkeypatch, capsys, provider):
+    from subagents_runtime.resume_context import resume_context
+    from subagents_runtime.terminal_resume import prepare_terminal_resume
+
     child = configured(tmp_path, monkeypatch, provider, difficulty="routine")
     with sessions._connect() as db:
-        db.execute("UPDATE executions SET backend='bridge',backend_agent_id='aboard-child',backend_handle='terminal' WHERE session_id=?", (child,))
+        db.execute("UPDATE executions SET backend='bridge',state='running',backend_agent_id='aboard-child',backend_handle='terminal',provider_pid=?,provider_birth=? WHERE session_id=?", (os.getpid(), processes.birth_identity(os.getpid()), child))
     with ThreadPoolExecutor() as pool:
         result = pool.submit(event, tmp_path, provider, child, "Stop", last_assistant_message="complete")
         loop.respond(child, waiting(child))
         assert result.result(timeout=5) is None
     monkeypatch.setenv("HARNESS_BRIDGE_PORT", "4823")
     monkeypatch.setenv("HARNESS_BRIDGE_TOKEN", "test-token")
+    endpoint_root = tmp_path / "endpoints"
+    endpoint_root.mkdir()
+    (endpoint_root / "host.json").write_text(json.dumps({"version": 2, "host": "127.0.0.1", "port": 4823, "delegationToken": "test-token", "workspaceRoot": str(tmp_path), "pid": os.getpid()}))
+    monkeypatch.setattr(bridge_backend, "endpoint_directory", lambda: endpoint_root)
     monkeypatch.setenv("HARNESS_SESSION_ID", "lead")
     monkeypatch.setenv("CODEX_HOME", str(tmp_path / "codex"))
     requests = []
     def urlopen(request, timeout):
-        requests.append(json.loads(request.data))
+        body = json.loads(request.data)
+        requests.append(body)
+        authority = {**body, "hostClaim": "loop-host", "localAgentId": "aboard-child", "localTerminalId": "terminal"}
+        with pytest.raises(sessions.SessionError, match="running or uncertain"):
+            resume_context({**authority, "localTerminalId": "another-window"})
+        with sessions._connect() as db:
+            db.execute("UPDATE executions SET provider_birth=NULL WHERE session_id=? AND id<>?", (child, body["executionId"]))
+        with pytest.raises(sessions.SessionError, match="running or uncertain"):
+            resume_context(authority)
+        with pytest.raises(sessions.SessionError, match="live provider identity"):
+            prepare_terminal_resume(child, body["executionId"], "aboard-child", "terminal", "provider-child")
+        with sessions._connect() as db:
+            db.execute("UPDATE executions SET provider_birth=? WHERE session_id=? AND id<>?", (processes.birth_identity(os.getpid()), child, body["executionId"]))
+        assert resume_context(authority)["action"] == "reuse-terminal"
+        with pytest.raises(sessions.SessionError, match="native conversation"):
+            prepare_terminal_resume(child, body["executionId"], "aboard-child", "terminal", "another-conversation")
+        prepare_terminal_resume(child, body["executionId"], "aboard-child", "terminal", "provider-child")
+        # Repeating the preparation is safe only for the same live terminal identity.
+        prepare_terminal_resume(child, body["executionId"], "aboard-child", "terminal", "provider-child")
+        with pytest.raises(sessions.SessionError, match="ownership"):
+            prepare_terminal_resume(child, body["executionId"], "other-agent", "terminal", "provider-child")
         return io.BytesIO(b'{"sessionId":"provider-child","agentId":"aboard-child","terminalId":"terminal"}')
     monkeypatch.setattr(bridge_backend.urllib.request, "urlopen", urlopen)
     feedback = tmp_path / "review.md"

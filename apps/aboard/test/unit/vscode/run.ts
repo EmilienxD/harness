@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, readdir, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
@@ -22,12 +22,19 @@ async function testExecutable(): Promise<string> {
 
 async function main(): Promise<void> {
   const workspace = await mkdtemp(join(tmpdir(), "aboard-vscode-"));
+  let target = workspace;
+  if (process.env.ABOARD_VSCODE_TEST_MULTI_ROOT === "1") {
+    const secondary = join(workspace, "secondary");
+    await mkdir(secondary);
+    target = join(workspace, "multi.code-workspace");
+    await writeFile(target, JSON.stringify({ folders: [{ path: workspace }, { path: secondary }] }));
+  }
   const vscodeExecutablePath = await testExecutable();
   await runTests({
     vscodeExecutablePath,
     extensionDevelopmentPath: resolve(__dirname, "../.."),
     extensionTestsPath: resolve(__dirname, "suite.js"),
-    launchArgs: [workspace, "--disable-extensions"],
+    launchArgs: [target, "--disable-extensions"],
   });
 }
 

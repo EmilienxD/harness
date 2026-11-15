@@ -8,7 +8,7 @@ import sqlite3
 import uuid
 from pathlib import Path
 
-SCHEMA_VERSION = 11
+SCHEMA_VERSION = 12
 # Lowercase letters and digits without the look-alikes 0/o and 1/i/l.
 INBOX_ALPHABET = "abcdefghjkmnpqrstuvwxyz23456789"
 
@@ -70,6 +70,14 @@ def _migrate(connection):
     try:
         version = connection.execute("PRAGMA user_version").fetchone()[0]
         if version >= SCHEMA_VERSION:
+            connection.commit()
+            return
+        if version > 0:
+            columns = {row[1] for row in connection.execute("PRAGMA table_info(executions)")}
+            if "host_claim" not in columns:
+                connection.execute("ALTER TABLE executions ADD COLUMN host_claim TEXT")
+        if version == 11:
+            connection.execute(f"PRAGMA user_version={SCHEMA_VERSION}")
             connection.commit()
             return
         # Older schemas named these two host handles after the integration.

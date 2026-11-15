@@ -3,9 +3,9 @@ import type { AgentPlatformId } from "../platform/agent-platform.js";
 import { AGENT_PLATFORM_IDS, type AgentType, type AgentSession, type ExecutionMode, type TerminalId } from "../domain/contracts.js";
 import { validateResumeMessage, type TerminalController } from "../platform/terminals.js";
 import { sanitizePromptCommands } from "../platform/prompt-commands.js";
-import type { DelegationTask } from "../platform/launch-configuration.js";
-import { isAbsolute, relative, resolve, sep } from "node:path";
-import { createHash } from "node:crypto";
+import { DELEGATION_TASKS, type DelegationTask } from "../platform/launch-configuration.js";
+import { delimiter, isAbsolute, relative, resolve, sep } from "node:path";
+import { createHash, randomUUID } from "node:crypto";
 import { mkdir, open, readFile, readdir, rename, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { protocolError, type BridgeRequestHandler } from "./protocol.js";
@@ -13,6 +13,7 @@ import { ISSUE_DIFFICULTIES, type IssueDifficulty } from "../shared/labels.js";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { realpath } from "node:fs/promises";
+import { normalizeProjectPath } from "./command-endpoint.js";
 
 /** A claim whose launch never reported an outcome: callers must verify, not retry. */
 class StartupUncertain extends Error {}
@@ -88,6 +89,55 @@ function bindingPath(directory: string, sessionId: string): string {
   return join(directory, `session-${createHash("sha256").update(sessionId).digest("hex")}.json`);
 }
 
+export type ResumeAction = "reopen" | "fork" | "reuse-terminal";
+export interface ResumeAuthority { readonly task: DelegationTask; readonly cwd: string; readonly action: ResumeAction; }
+
+/** Local history is a reuse hint, never authority to execute a continuation. */
+export async function resolveResumeBinding(
+  request: ManualDelegationLaunch,
+  local: DelegationBinding | undefined,
+  allocateAgentId: () => string,
+  verify: (request: ManualDelegationLaunch, local?: DelegationBinding) => Promise<ResumeAuthority> = verifyResumeAuthority,
+): Promise<DelegationBinding & { readonly resumeAction: ResumeAction }> {
+  if (!request.harnessSessionId || !request.resumeSessionId) throw new Error("Delegated resume requires its stable Harness and native identities");
+  const durable = await verify(request, local);
+  if (local && local.sessionId === request.resumeSessionId && local.provider === request.provider
+    && local.executionMode === request.executionMode && normalizeProjectPath(local.cwd) === normalizeProjectPath(request.cwd)
+    && local.parentSessionId === request.parentSessionId
+    && (request.resumeAgentId === undefined || local.agentId === request.resumeAgentId)) return { ...local, resumeAction: durable.action };
+  if (durable.action === "reuse-terminal") throw new Error("The live execution has no matching local terminal; resume refused");
+  return {
+    resumeAction: durable.action,
+    harnessSessionId: request.harnessSessionId, agentId: allocateAgentId(), sessionId: request.resumeSessionId,
+    type: durable.task === "loop" ? "general" : durable.task, task: durable.task, provider: request.provider, executionMode: request.executionMode,
+    cwd: durable.cwd, description: request.description,
+    ...(request.parentSessionId === undefined ? {} : { parentSessionId: request.parentSessionId }),
+    ...(request.harnessPython === undefined ? {} : { harnessPython: request.harnessPython }),
+    ...(request.harnessStateDirectory === undefined ? {} : { harnessStateDirectory: request.harnessStateDirectory }),
+    ...(request.harnessRuntimePath === undefined ? {} : { harnessRuntimePath: request.harnessRuntimePath }),
+  };
+}
+
+async function verifyResumeAuthority(request: ManualDelegationLaunch, local?: DelegationBinding): Promise<ResumeAuthority> {
+  if (!request.harnessPython || !request.harnessRuntimePath || !request.harnessStateDirectory || !request.executionId) throw new Error("Durable Harness resume authority is unavailable; adoption refused");
+  const identity = {
+    requestId: request.requestId, harnessSessionId: request.harnessSessionId,
+    parentSessionId: request.parentSessionId, executionId: request.executionId,
+    provider: request.provider, mode: request.executionMode, cwd: request.cwd,
+    resumeSessionId: request.resumeSessionId, forkSessionId: request.forkSessionId,
+    hostClaim: randomUUID(), localAgentId: local?.agentId, localTerminalId: local?.terminalId,
+  };
+  const { stdout } = await promisify(execFile)(request.harnessPython, ["-m", "subagents_runtime.resume_context", JSON.stringify(identity)], {
+    cwd: request.cwd,
+    env: { ...process.env, HARNESS_STATE_DIR: request.harnessStateDirectory, PYTHONPATH: [request.harnessRuntimePath, process.env.PYTHONPATH].filter(Boolean).join(delimiter) },
+    windowsHide: true, timeout: 15_000,
+  });
+  const value = JSON.parse(stdout) as { task?: unknown; cwd?: unknown; action?: unknown };
+  if (!DELEGATION_TASKS.includes(value.task as DelegationTask) || typeof value.cwd !== "string"
+    || (value.action !== "reopen" && value.action !== "fork" && value.action !== "reuse-terminal")) throw new Error("Invalid durable resume metadata");
+  return { task: value.task as DelegationTask, cwd: value.cwd, action: value.action };
+}
+
 export async function readDelegationBinding(directory: string, sessionId: string): Promise<DelegationBinding | undefined> {
   try { return JSON.parse(await readFile(bindingPath(directory, sessionId), "utf8")) as DelegationBinding; }
   catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined; throw error; }
@@ -96,11 +146,21 @@ export async function readDelegationBinding(directory: string, sessionId: string
 /** Resolve a delegated child to the provider session owned by its parent terminal. */
 export async function delegationParentSession(directory: string, childSessionId: string): Promise<string | undefined> {
   const child = await readDelegationBinding(directory, childSessionId);
-  return child?.parentSessionId === undefined ? undefined : providerSession(directory, child.parentSessionId);
+  return child?.parentSessionId === undefined ? undefined : providerSession(directory, child.parentSessionId, child);
 }
 
 /** A delegated Harness session runs under its own provider session; an observed one shares its ID. */
-export async function providerSession(directory: string, harnessSessionId: string): Promise<string> {
+export async function providerSession(directory: string, harnessSessionId: string,
+  runtime?: Pick<ManualDelegationLaunch, "harnessPython" | "harnessRuntimePath" | "harnessStateDirectory">,
+): Promise<string> {
+  if (runtime?.harnessPython && runtime.harnessRuntimePath && runtime.harnessStateDirectory) {
+    const { stdout } = await promisify(execFile)(runtime.harnessPython, ["-m", "subagents_runtime.resume_context", "--session", harnessSessionId], {
+      env: { ...process.env, HARNESS_STATE_DIR: runtime.harnessStateDirectory, PYTHONPATH: [runtime.harnessRuntimePath, process.env.PYTHONPATH].filter(Boolean).join(delimiter) },
+      windowsHide: true, timeout: 15_000,
+    });
+    const value = JSON.parse(stdout) as { providerSessionId?: unknown };
+    if (typeof value.providerSessionId === "string" && value.providerSessionId) return value.providerSessionId;
+  }
   return (await readDelegationBinding(directory, harnessSessionId))?.sessionId ?? harnessSessionId;
 }
 
@@ -131,7 +191,7 @@ function parse(body: unknown): ManualDelegationLaunch | undefined {
   const value = body as Record<string, unknown>;
   const identities = ["harnessSessionId", "executionId", "parentSessionId", "resumeAgentId", "resumeSessionId", "forkSessionId", "harnessStateDirectory", "harnessRuntimePath", "harnessPython"] as const;
   if (identities.some((key) => value[key] !== undefined && (typeof value[key] !== "string" || (value[key] as string).trim().length === 0))) return undefined;
-  if ((value.resumeAgentId === undefined) !== (value.resumeSessionId === undefined)) return undefined;
+  if (value.resumeAgentId !== undefined && value.resumeSessionId === undefined) return undefined;
   if (value.forkSessionId !== undefined && value.forkSessionId !== value.resumeSessionId) return undefined;
   if (Object.keys(value).some((key) => !["requestId", "skill", "provider", "mode", "model", "effort", "prompt", "cwd", "difficulty", ...identities].includes(key))) return undefined;
   if (value.effort !== undefined && !isRequestedEffort(value.effort)) return undefined;
@@ -194,6 +254,7 @@ export function createDelegationRoutes(
   launcher: ManualDelegationLauncher,
   options: {
     readonly workspaceRoot?: string;
+    readonly workspaceRoots?: readonly string[];
     readonly stateDirectory?: string;
   } = {},
 ): BridgeRequestHandler {
@@ -209,8 +270,10 @@ export function createDelegationRoutes(
     if (
       request.authorizationScope === "delegation"
       && options.workspaceRoot !== undefined
-      && !contains(options.workspaceRoot, parsed.cwd)
-      && !await registeredWorktree(options.workspaceRoot, parsed.cwd)
+      && !(await Promise.all((options.workspaceRoots ?? [options.workspaceRoot]).map(async (root) => {
+        try { return contains(await realpath(root), await realpath(parsed.cwd)) || await registeredWorktree(root, parsed.cwd); }
+        catch { return false; }
+      }))).some(Boolean)
     ) return protocolError(403, "forbidden", "The delegation credential cannot launch outside its workspace");
     const fingerprint = createHash("sha256").update(JSON.stringify(parsed)).digest("hex");
     const existing = launches.get(parsed.requestId);
@@ -237,7 +300,7 @@ export function createDelegationRoutes(
         }
         const prompt = sanitizePromptCommands(parsed.prompt, parsed.provider);
         const launchRequest = { ...parsed, prompt };
-        const launched = await (parsed.resumeAgentId === undefined ? launcher.launch(launchRequest)
+        const launched = await (parsed.resumeSessionId === undefined ? launcher.launch(launchRequest)
           : launcher.resume?.(launchRequest) ?? Promise.reject(new Error("Delegation resume is unavailable")));
         if (recordPath !== undefined) {
           if (parsed.harnessSessionId !== undefined && options.stateDirectory !== undefined) {

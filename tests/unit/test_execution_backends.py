@@ -9,6 +9,17 @@ import pytest
 from subagents_runtime import backends, bridge_backend, sessions, storage
 
 
+def test_runtime_cli_version_matches_package_metadata(capsys):
+    import tomllib
+    from subagents_runtime.cli import main
+    root = Path(sessions.__file__).parents[2]
+    expected = tomllib.loads((root / "pyproject.toml").read_text(encoding="utf-8"))["project"]["version"]
+    with pytest.raises(SystemExit) as exited:
+        main(["--version"])
+    assert exited.value.code == 0
+    assert capsys.readouterr().out.strip() == f"harness subagents {expected}"
+
+
 def test_subagents_has_no_optional_host_references():
     root = Path(sessions.__file__).parents[3]
     for path in root.rglob("*"):
@@ -61,6 +72,32 @@ def test_endpoint_registry_prefers_latest_live_matching_host(monkeypatch, tmp_pa
     for name, root, stamp, port in [("old", tmp_path, "1", 1234), ("latest", tmp_path, "2", 2345), ("other", tmp_path / "elsewhere", "3", 3456)]:
         (tmp_path / f"{name}.json").write_text(json.dumps({"version": 2, "host": "127.0.0.1", "port": port, "workspaceRoot": str(root), "pid": os.getpid(), "activatedAt": stamp, "delegationToken": name}))
     assert bridge_backend.discover(tmp_path) == ("127.0.0.1", 2345, "latest")
+
+
+def test_resume_routes_by_saved_root_not_inherited_parent_host(monkeypatch, tmp_path):
+    child_root = tmp_path / "child"
+    child_root.mkdir()
+    monkeypatch.setenv("HARNESS_BRIDGE_PORT", "1234")
+    monkeypatch.setenv("HARNESS_BRIDGE_TOKEN", "parent-token")
+    monkeypatch.setattr(bridge_backend, "endpoint_directory", lambda: tmp_path)
+    for name, roots, port in [("parent", [str(tmp_path / "parent")], 1234), ("multi", [str(tmp_path / "other"), str(child_root)], 2345)]:
+        (tmp_path / f"{name}.json").write_text(json.dumps({"version": 2, "host": "127.0.0.1", "port": port, "workspaceRoot": roots[0], "workspaceRoots": roots, "pid": os.getpid(), "activatedAt": "1", "delegationToken": name}))
+    assert bridge_backend.discover(child_root, resume=True) == ("127.0.0.1", 2345, "multi")
+    assert bridge_backend.discover(tmp_path / "different-worktree", resume=True) is None
+    monkeypatch.setenv("HARNESS_BRIDGE_PORT", "2345")
+    monkeypatch.setenv("HARNESS_BRIDGE_TOKEN", "expired")
+    assert bridge_backend.discover(child_root, resume=True) == ("127.0.0.1", 2345, "multi")
+    (tmp_path / "malformed.json").write_text(json.dumps({"version": 2, "host": "127.0.0.1", "port": 3456, "workspaceRoot": str(tmp_path), "workspaceRoots": "/", "pid": os.getpid(), "activatedAt": "9", "delegationToken": "invalid"}))
+    assert bridge_backend.discover(tmp_path / "different-worktree", resume=True) is None
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows root spelling")
+def test_resume_root_matching_normalizes_case_and_separators(monkeypatch, tmp_path):
+    monkeypatch.delenv("HARNESS_BRIDGE_PORT", raising=False)
+    monkeypatch.delenv("HARNESS_BRIDGE_TOKEN", raising=False)
+    monkeypatch.setattr(bridge_backend, "endpoint_directory", lambda: tmp_path)
+    (tmp_path / "host.json").write_text(json.dumps({"version": 2, "host": "127.0.0.1", "port": 2345, "workspaceRoot": str(tmp_path).upper().replace("\\", "/"), "pid": os.getpid(), "delegationToken": "host"}))
+    assert bridge_backend.discover(tmp_path, resume=True) == ("127.0.0.1", 2345, "host")
 
 
 def test_public_host_lifecycle_preserves_reservation_and_rejects_duplicate_intent(monkeypatch, tmp_path):

@@ -9,6 +9,8 @@ export interface CommandEndpointRecord {
   readonly port: number;
   /** The window's workspace folder: how a script recognizes its own project. */
   readonly workspaceRoot: string;
+  /** Explicit folders this host can serve; the primary root remains the UI default. */
+  readonly workspaceRoots?: readonly string[];
   readonly commandToken: string;
   /** Capability for creating manual delegated agents, and no other route. */
   readonly delegationToken: string;

@@ -112,7 +112,7 @@ def test_delegated_resume_retains_explicit_model(tmp_path, monkeypatch, provider
 
     launches = []
     configured(tmp_path / "state", monkeypatch, launches)
-    monkeypatch.setattr(bridge_backend, "discover", lambda _: None)
+    monkeypatch.setattr(bridge_backend, "discover", lambda _, **_kwargs: None)
     sessions.register_observed("parent", tmp_path, provider)
     inbox = enable_delegation("parent", "subagents-toolkit").inbox
     (inbox / "work.md").write_text(f"---\nmode: auto\nmodel: {model}\n---\nWork.", encoding="utf-8")
