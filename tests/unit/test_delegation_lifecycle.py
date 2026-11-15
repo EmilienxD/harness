@@ -17,9 +17,10 @@ from subagents_runtime.delegation import (
 )
 
 
-def test_stop_wait_rechecks_delivery_when_the_last_child_settles(monkeypatch):
+def test_stop_wait_rechecks_delivery_when_the_last_child_settles(tmp_path, monkeypatch):
     from subagents_runtime import delegation
 
+    monkeypatch.setenv("HARNESS_STATE_DIR", str(tmp_path / "state"))
     delivery = delegation.ParentDelivery("fixture-delivery", "fixture result")
     settled = False
 
@@ -62,6 +63,46 @@ def test_auto_stop_resolves_once_and_formats_a_stable_agent_number(tmp_path: Pat
     assert delivery.delivery_id and "Finished safely." in delivery.text
     replay = claim_parent_delivery(parent, "PostToolUse")
     assert replay is not None and replay.delivery_id == delivery.delivery_id
+
+
+@pytest.mark.parametrize("mode", ["auto", "interactive"])
+@pytest.mark.parametrize("initially_dead", [False, True])
+def test_stop_wait_recovers_a_dead_child_without_a_reply(tmp_path, monkeypatch, mode, initially_dead):
+    from subagents_runtime import delegation, processes
+
+    parent, request, child = setup_request(tmp_path, monkeypatch, mode)
+    with sessions._connect() as db:
+        db.execute("UPDATE executions SET state='running',supervisor_pid=123,provider_pid=456 WHERE session_id=?", (child,))
+    if mode == "interactive":
+        arm_reply(child)
+    alive = not initially_dead
+    monkeypatch.setattr(processes, "process_alive", lambda pid: alive)
+
+    def kill_during_wait(_seconds):
+        nonlocal alive
+        alive = False
+
+    monkeypatch.setattr(delegation.time, "sleep", kill_during_wait)
+    delivery = delegation.wait_parent_delivery(parent, timeout_seconds=1)
+    assert delivery is not None
+    with sessions._connect() as db:
+        assert db.execute("SELECT state,reply FROM requests WHERE id=?", (request,)).fetchone() == ("cancelled", None)
+        assert db.execute("SELECT state FROM executions WHERE session_id=?", (child,)).fetchone() == ("exited",)
+        assert db.execute("SELECT 1 FROM reply_authorizations WHERE child_session_id=?", (child,)).fetchone() is None
+
+
+@pytest.mark.parametrize("live_pid", [123, 456, None])
+def test_stop_wait_preserves_live_or_unverifiable_children(tmp_path, monkeypatch, live_pid):
+    from subagents_runtime import delegation, processes
+
+    parent, request, child = setup_request(tmp_path, monkeypatch, "interactive")
+    with sessions._connect() as db:
+        db.execute("UPDATE executions SET state='running',supervisor_pid=?,provider_pid=? WHERE session_id=?", (123 if live_pid else None, 456 if live_pid else None, child))
+    monkeypatch.setattr(processes, "process_alive", lambda pid: pid == live_pid)
+    monkeypatch.setattr(processes, "birth_identity", lambda pid: None)
+    assert delegation.wait_parent_delivery(parent, timeout_seconds=0) is None
+    with sessions._connect() as db:
+        assert db.execute("SELECT state FROM requests WHERE id=?", (request,)).fetchone() == ("pending",)
 
 
 def test_interactive_stop_requires_one_shot_reply_authorization(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

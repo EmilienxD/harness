@@ -65,6 +65,16 @@ The shared file's `autoRun` settings belong to Aboard and are ignored by this ru
 
 ## Implementation and verification
 
+The 3.1.10 checkout reconciles child process liveness during the parent's Stop-hook wait.
+Forcibly closing an interactive child's terminal can kill both the provider and its supervisor,
+preventing either from reporting cancellation. The wait now uses the existing PID and process
+birth checks to cancel verified dead children and release the parent without a child reply.
+Live or unverifiable executions remain pending. Windows real-CLI regressions for Claude Code
+and Codex kill only the child after the parent has entered its Stop wait; they require parent
+completion within 15 seconds, an acknowledged cancellation with no reply, an empty inbox, and
+exactly six fake inference requests. These are checkout-runtime checks; the published source
+pin still needs updating when this runtime is released.
+
 `subagents` 2.10.0 (runtime 2.10.0) adds Pi as a provider of the existing Python runtime rather
 than a second orchestrator. Requests, executions, process supervision, delivery claims and replay
 stay in the shared SQLite state; a native extension translates Pi events into versioned

@@ -79,6 +79,13 @@ for (const platform of ["claude", "chatgpt"] as const) {
       assert.deepEqual(server.assertions().checkpoints, []);
     } finally { await server.close(); }
   });
+  test(`subagents releases a waiting parent after killing its interactive child through real ${platform} CLIs`, { timeout: 120_000 }, async () => {
+    const result = await runSubagentsJourney(platform, "interactive", true, false, { killChildWhileWaiting: true });
+    assert.deepEqual(result.completedClis, ["parent"]);
+    assert.equal(result.inferenceRequests, 6);
+    assert.equal(result.requestFilesRemaining, 0);
+    assert.equal(result.unexpectedRequests, 0);
+  });
   test(`subagents resumes a killed parent and child through real ${platform} CLIs`, { timeout: 240_000 }, async () => {
     const result = await runSubagentsRecoveryJourney(platform);
     assert.equal(result.recoveredSessions, 2);

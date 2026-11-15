@@ -1230,9 +1230,22 @@ def wait_parent_delivery(
     timeout_seconds: float,
     poll_seconds: float = 0.25,
 ) -> ParentDelivery | None:
-    """Wait without retaining a transaction; only successes wake the parent."""
+    """Wait for results, recovering children killed without an exit callback."""
+    from subagents_runtime.processes import live_executions
+
     deadline = time.monotonic() + max(0.0, timeout_seconds)
     while True:
+        with _sessions_module()._connect() as connection:
+            children = connection.execute(
+                "SELECT DISTINCT child_session_id FROM requests WHERE parent_session_id=? "
+                "AND child_session_id IS NOT NULL AND state IN ('launching','pending','uncertain')",
+                (parent_session_id,),
+            ).fetchall()
+        # A forced terminal close can kill the supervisor as well as the provider.
+        # Reconcile outside the read transaction, using the same conservative PID
+        # and birth-identity checks as startup/resume recovery.
+        for (child_id,) in children:
+            live_executions(child_id)
         delivery = claim_parent_delivery(parent_session_id, "Stop")
         if delivery is not None:
             return delivery

@@ -1,5 +1,5 @@
 name = "subagents"
-version = "3.1.6"
+version = "3.1.10"
 description = "Persistent conversation delegation with mode-preserving resume"
 docs = "https://github.com/EmilienxD/harness/blob/main/README.md#user-invoked-skills"
 dependencies = [
