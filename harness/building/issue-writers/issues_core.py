@@ -358,11 +358,45 @@ def next_draft_path(root: Path, session_id: str) -> Path:
 def prepare_drafting_context(root: Path, session_id: str) -> str:
     """Prepare the drafts directory and return the values skills must use."""
     template = next_draft_path(root, session_id).as_posix()
+    marker = store_dir() / f"{_repo_id(root)}-{session_id}.drafting.json"
+    marker.parent.mkdir(parents=True, exist_ok=True)
+    marker.write_text(json.dumps({"first": Path(template).name}), encoding="utf-8")
     return (
         f"Draft file path: {template}\n"
         "Increments the index by 1 gives you the next issue file path, counting up "
         "from this draft index. Use these exact values to create drafts."
     )
+
+
+def fingerprint_path(root: Path, name: str) -> Path:
+    return store_dir() / f"{_repo_id(root)}-{name.removesuffix(PUBLISHING_SUFFIX)}.sha256"
+
+
+def snapshot_drafts(root: Path, session_id: str) -> None:
+    """Remember completed drafts from this drafting turn, without reading transcripts."""
+    marker = store_dir() / f"{_repo_id(root)}-{session_id}.drafting.json"
+    try:
+        first = FILENAME_PATTERN.fullmatch(json.loads(marker.read_text(encoding="utf-8"))["first"])
+        marker.unlink()
+        if first is None:
+            return
+        for path in gather_draft_files(root / DRAFTS_DIR, session_id):
+            if int(FILENAME_PATTERN.fullmatch(path.name)["index"]) >= int(first["index"]):
+                fingerprint_path(root, path.name).write_text(
+                    hashlib.sha256(path.read_bytes()).hexdigest(), encoding="utf-8"
+                )
+    except (OSError, ValueError, KeyError, TypeError):
+        pass  # Missing fingerprints are reported as unknown, never as unmodified.
+
+
+def draft_modification_status(path: Path) -> str:
+    try:
+        baseline = fingerprint_path(path.parent.parent.parent, path.name).read_text(encoding="utf-8")
+        if not re.fullmatch(r"[0-9a-f]{64}", baseline):
+            return "unknown"
+        return "unmodified" if hashlib.sha256(path.read_bytes()).hexdigest() == baseline else "modified"
+    except (OSError, UnicodeError):
+        return "unknown"
 
 
 # The pending notice, delivered on the next prompt
@@ -389,6 +423,7 @@ def queue_notice(
             "title": entry.get("title"),
             "labels": entry.get("labels") or [],
             "draft": entry.get("draft"),
+            "modification_status": entry.get("modification_status", "unknown"),
         }
         for entry in created[:available]
     )
@@ -452,6 +487,7 @@ def format_notice(created: list[dict], failed: int, omitted: int = 0, problems: 
             title = entry.get("title") or "(untitled)"
             source = f"{entry['draft']} -> " if entry.get("draft") else ""
             lines.append(f"- {source}#{entry.get('number')} \"{title}\" [{labels}]")
+            lines.append(f"  Draft modification status: {entry.get('modification_status', 'unknown')}")
         remaining = max(0, len(created) - MAX_NOTICE_ENTRIES) + omitted
         if remaining > 0:
             lines.append(f"- ... and {remaining} more")
@@ -493,12 +529,15 @@ def sweep_stale(root: Path, now: float | None = None) -> None:
             try:
                 if path.stat().st_mtime <= cutoff:
                     path.unlink()
+                    fingerprint_path(root, path.name).unlink(missing_ok=True)
             except OSError:
                 continue
     store = store_dir()
     if store.is_dir():
         prefix = f"{_repo_id(root)}-"
-        for notice in store.glob(f"{prefix}*.notice.json"):
+        for notice in store.glob(f"{prefix}*"):
+            if not notice.name.endswith((".notice.json", ".drafting.json", ".sha256")):
+                continue
             try:
                 if notice.stat().st_mtime <= cutoff:
                     notice.unlink()
@@ -687,8 +726,13 @@ def rewrite_known_references(path: Path, resolved: dict[str, str]) -> None:
 
     rewritten = REF_PATTERN.sub(_sub, text)
     if rewritten != text:
+        status = draft_modification_status(path)
         with contextlib.suppress(OSError):
             path.write_text(rewritten, encoding="utf-8")
+            if status == "unmodified":
+                fingerprint_path(path.parent.parent.parent, path.name).write_text(
+                    hashlib.sha256(path.read_bytes()).hexdigest(), encoding="utf-8"
+                )
 
 
 # Splitting a body that exceeds GitHub's limit
@@ -989,17 +1033,21 @@ def recover_interrupted(
             continue
         if matches:
             number = str(matches[0].get("number"))
+            modification_status = draft_modification_status(path)
             resolved[f"{session_id}/{match['index']}"] = number
             if created is not None:
                 created.append({"number": number, "title": title,
                                 "draft": f"{DRAFTS_DIR.as_posix()}/{original.name}",
+                                "modification_status": modification_status,
                                 "labels": extract_labels(parse_issue_file(path)[1])[0]})
             report.append(
                 f"  Recovered: {original.name} was already published as "
                 f"#{number}; discarding the draft."
             )
+            report.append(f"  Draft modification status ({original.name}): {modification_status}")
             with contextlib.suppress(OSError):
                 path.unlink()
+                fingerprint_path(path.parent.parent.parent, path.name).unlink(missing_ok=True)
             continue
         with contextlib.suppress(OSError):
             path.rename(original)
@@ -1020,6 +1068,7 @@ def publish_one(
     instead of blindly creating a duplicate.
     """
     parts = render_parts(body)
+    modification_status = draft_modification_status(path)
     publishing = path.with_name(path.name + PUBLISHING_SUFFIX)
     try:
         path.rename(publishing)
@@ -1043,10 +1092,12 @@ def publish_one(
         "parent": parent,
         "parts": len(parts),
         "draft": f"{DRAFTS_DIR.as_posix()}/{path.name}",
+        "modification_status": modification_status,
     }
     # The issue exists, so the draft has done its job either way.
     with contextlib.suppress(OSError):
         publishing.unlink()
+        fingerprint_path(path.parent.parent.parent, path.name).unlink(missing_ok=True)
 
     for index, payload in enumerate(parts[1:], 2):
         posted, error = gh_comment_issue(url, payload)
@@ -1182,6 +1233,7 @@ def publish_batch(
             ok, record, error = publish_one(title, body, labels, parent_number, path)
             if record is not None:
                 resolved[key] = str(record["number"])
+                report.append(f"  Draft modification status ({path.name}): {record['modification_status']}")
             if ok and record is not None:
                 suffix = f" ({record['parts']} parts)" if record["parts"] > 1 else ""
                 report.append(f"  Created: \"{title}\" — {record['url']}{suffix}")

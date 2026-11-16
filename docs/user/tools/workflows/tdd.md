@@ -1,6 +1,8 @@
 # Test-driven development
 
-Platforms: **Claude Code, ChatGPT, Pi**. Install with `harness install tdd`; see [installation and scope](../../getting-started.md).
+Platforms: **Claude Code, ChatGPT, Pi**.
+
+Install with `harness install tdd`. See [installation and scope](../../getting-started.md).
 
 ## When to use
 
@@ -12,11 +14,11 @@ Use `/tdd <feature or bug>` in Claude Code or `$tdd <feature or bug>` in ChatGPT
 
 ## What happens
 
-The agent tests critical paths and complex logic through public interfaces. It writes one failing test, adds only enough implementation to pass it, and repeats in vertical slices. Tests should use independent expected values and survive internal refactors; the skill rejects implementation-coupled and tautological tests. Refactoring belongs to review after the red-green loop.
+The agent tests critical paths and complex logic through public interfaces. It writes one failing test, adds only enough implementation to pass it, and repeats in vertical slices. Tests should use independent expected values and survive internal refactors. The skill rejects implementation-coupled and tautological tests. Refactoring belongs to review after the red-green loop.
 
 ## Files and prerequisites
 
-Claude Code, ChatGPT, and Pi are supported. The package installs `SKILL.md`, `tests.md`, and `mocking.md`, but no test runner or project configuration. The agent uses existing project tests, ADRs, and `CONTEXT.md` when present.
+Claude Code, ChatGPT, and Pi are supported. The package installs agent instructions, agent instructions, and agent instructions, but no test runner or project configuration. The agent uses existing project tests, ADRs, and agent instructions when present.
 
 ## Example
 
@@ -24,4 +26,4 @@ Claude Code, ChatGPT, and Pi are supported. The package installs `SKILL.md`, `te
 
 ## Pi usage
 
-Use `/skill:tdd`. The shared behavior-focused red/green workflow and references are installed unchanged. Use the project's real tests; discovery alone does not establish that a particular implementation satisfies them.
+Use `/skill:tdd`. The shared behavior-focused red/green workflow and references are installed unchanged. Use the project's real tests. Discovery alone does not establish that a particular implementation satisfies them.

@@ -2,14 +2,23 @@
 
 <img class="harness-hero" src="assets/harness_banner.png" alt="Harness ship sailing through rough water">
 
-Harness installs independent skills, hooks, command-line tools, and the optional Aboard extension for Claude Code, ChatGPT, and Pi. Each tool guide states its supported platforms, usage, configuration, and verification limits.
+Harness adds independently selectable tools to Claude Code, ChatGPT, and Pi. Start with [Get started](getting-started.md) to choose your agent and install your tools.
 
-Start with [Get started](getting-started.md) if Harness is new to you. Open [Configuration](configuration.md) when you need to edit a file under `.harness/` or understand where a setting comes from. The tool guides list the current catalogue by purpose:
+## Plan with confidence
 
-- [Productivity tools](tools/productivity.md), including persistent subagents and launcher settings
-- [Guards and extensions](tools/guards-and-extensions.md), including policy files and Aboard
-- [Planning, building, and shipping workflows](tools/workflows.md)
+- [Grill me in cloud](tools/workflows/grill-me-in-cloud.md) turns design decisions into visual interviews on your own private board.
+- [Grill me](tools/workflows/grill-me.md) stress-tests a proposal directly in your conversation.
+- [Prototype](tools/workflows/prototype.md) explores a decision with a small runnable experiment.
 
-Each active package has its own page. Open a category above or use the navigation and search to find a tool by name.
+## Work with several agents
 
-The repository README remains the compact catalogue overview and developer entry point. The documentation website renders the Markdown guides in `docs/user/` so configuration examples have room to grow. The source repository is currently private, so its links and Git-based installation require repository access.
+- [Subagents](tools/productivity/subagents.md) delegates work to persistent conversations you can continue later.
+- [Aboard](tools/extensions/aboard.md) manages visible agent sessions and issue-driven Auto Run in VS Code.
+
+## Find the right tool
+
+- [Planning, building, and shipping](tools/workflows.md) covers research, design, testing, issues, and commits.
+- [Productivity tools](tools/productivity.md) helps with everyday agent interactions.
+- [Guards and extensions](tools/guards-and-extensions.md) adds reminders and checks for common mistakes.
+- [Configuration](configuration.md) explains scope, private board connections, and customization.
+Each tool guide explains its purpose, supported agents, installation, and use.

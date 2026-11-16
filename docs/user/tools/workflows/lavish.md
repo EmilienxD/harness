@@ -1,11 +1,13 @@
 # Lavish
 
-Platforms: **Claude Code, ChatGPT, Pi**. Install with `harness install lavish`; see [installation and scope](../../getting-started.md).
+Platforms: **Claude Code, ChatGPT, Pi**.
 
-Harness is an installation bridge to [kunchenguid/lavish-axi](https://github.com/kunchenguid/lavish-axi). The skill belongs to that upstream project. Harness does not vendor, customize, or supply metadata for it.
+Install with `harness install lavish`. See [Get started](../../getting-started.md) for provider and scope options.
 
-The bridge runs the upstream-recommended `npx skills add kunchenguid/lavish-axi --skill lavish` workflow noninteractively in a temporary project, then installs the resulting skill files unchanged into the selected provider and scope. Harness records the files in its receipts for removal. It does not install a global Lavish CLI, session hooks, or plugins.
+## When to use it
 
-Installation and upgrades require network access, Git, and Node.js/npm compatible with the upstream `skills` installer. Lavish runs its CLI on demand through `npx`. Explicit upgrades fetch the current upstream skill; receipt versions include a content fingerprint so upstream changes are detected without maintaining a local copy. Installing unrelated packages preserves the existing Lavish receipt.
+Create HTML artifacts that you can inspect and review in a browser. Use it when a visual artifact will communicate an idea better than a chat response.
 
-Use `/lavish` in Claude Code, `$lavish` in ChatGPT, or `/skill:lavish` in Pi. Refer to the [upstream usage guide](https://github.com/kunchenguid/lavish-axi#quick-start) for current behavior and prerequisites. Provider skill discovery is supported; the upstream browser review workflow has not been certified by Harness's deterministic Pi E2E fixture.
+## Use it
+
+Claude Code: `/lavish` followed by your request. ChatGPT: `$lavish` followed by your request. Pi: `/skill:lavish` followed by your request. Install Git and Node.js with npm. Installation and use require network access. See the [Lavish usage guide](https://github.com/kunchenguid/lavish-axi#quick-start) for its browser workflow.

@@ -762,15 +762,19 @@ See the [Aboard README](apps/aboard/README.md) for its visual workflow guide, co
 
 ## Hosted Grill-Me board
 
-The deployable TanStack Start application lives in `apps/grill/`; its Supabase migration is under `apps/grill/supabase/migrations/`. Configure the hosted server with:
+- Deploy your own private Grill-Me board with Vercel and Supabase.
+- See the [Grill me in cloud guide](docs/user/tools/workflows/grill-me-in-cloud.md) for installation and everyday use.
+- Configure the hosted server with:
 
-- `HARNESS_GRILL_URL`: optional canonical HTTPS origin override, without a trailing slash; otherwise generated links use the request origin, falling back to `https://grill-me-in-cloud.vercel.app`.
+- `HARNESS_GRILL_URL`: your own deployment's HTTPS origin, without a trailing slash.
 - `HARNESS_GRILL_CODE`: the shared four-digit browser and machine-client code.
 - `HARNESS_GRILL_SESSION_SECRET`: a long random value used to sign browser-session cookies.
 - `CRON_SECRET`: a separate bearer secret used by the scheduled cleanup route.
 - `SUPABASE_URL` and `SUPABASE_SECRET_KEY`: server-only Supabase credentials.
 
-The grill hook and Aboard's relay default to `https://grill-me-in-cloud.vercel.app`. Only the four-digit `grill.code` is required; `grill.url` is an optional override for another deployment. They read the `grill` section of Harness config files, resolving each field from the first source that sets it:
+- Configure both your private deployment URL and its four-digit access code for the tool and Aboard.
+- Do not use another person's private instance.
+- Connection settings resolve each field from the first source that sets it:
 
 | Source | Committed | Fields |
 | :-- | :-- | :-- |
@@ -780,10 +784,7 @@ The grill hook and Aboard's relay default to `https://grill-me-in-cloud.vercel.a
 | `HARNESS_GRILL_URL`, `HARNESS_GRILL_CODE` | No | `url`, `code` |
 
 ```json
-// ~/.harness/config.json or .harness/config.local.json — enough for the default board
-{ "version": 1, "grill": { "code": "1234" } }
-// Optional .harness/config.json override for another deployment
-{ "version": 1, "grill": { "url": "https://grill.example.com" } }
+{ "version": 1, "grill": { "url": "https://your-board.example", "code": "1234" } }
 ```
 
 Every file needs `"version": 1`. For Aboard's relay, the environment row means the VS Code extension host's variables, not the agent's. The relay resolves the sources when the project initializes or the window reloads. Each initialized project relays on its own, and Aboard passes the environment values to terminals it launches. The included Vercel cron calls the cleanup route daily and authenticates with `CRON_SECRET`. The application tables have RLS enabled with no `anon` or `authenticated` grants, and the `grill-assets` bucket is private.

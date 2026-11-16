@@ -1,6 +1,8 @@
 # Grill me
 
-Platforms: **Claude Code, ChatGPT, Pi**. Install with `harness install grill-me`; see [installation and scope](../../getting-started.md).
+Platforms: **Claude Code, ChatGPT, Pi**.
+
+Install with `harness install grill-me`. See [installation and scope](../../getting-started.md).
 
 ## When to use
 
@@ -24,4 +26,4 @@ Claude Code, ChatGPT, and Pi are supported. This skill conducts the exchange in 
 
 ## Pi usage
 
-Use `/skill:grill-me [plan or design]`. The shared frontier-based interview keeps explicit user decisions. It does not require the hosted board; use [grill-me-in-cloud](grill-me-in-cloud.md) for that workflow.
+Use `/skill:grill-me [plan or design]`. The shared frontier-based interview keeps explicit user decisions. It does not require the hosted board. Use [grill-me-in-cloud](grill-me-in-cloud.md) for that workflow.

@@ -19,7 +19,10 @@ def evaluate(request: dict) -> dict:
     cwd = Path(request["cwd"]).resolve()
     os.chdir(cwd)
     session = issues_session_id(request["sessionId"])
-    if request["operation"] == "publish":
+    if request["operation"] == "snapshot":
+        core.snapshot_drafts(cwd, session)
+        message = ""
+    elif request["operation"] == "publish":
         message = core.run_publish_command("/publish-issues " + request["argument"], session, cwd)
     elif request["operation"] == "notice":
         message = core.flush_notice(cwd, session) or ""

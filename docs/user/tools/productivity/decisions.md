@@ -1,6 +1,8 @@
 # Decisions
 
-Platforms: **Claude Code, ChatGPT, Pi**. Install with `harness install decisions`; see [installation and scope](../../getting-started.md).
+Platforms: **Claude Code, ChatGPT, Pi**.
+
+Install with `harness install decisions`. See [installation and scope](../../getting-started.md).
 
 ## Use it
 
@@ -8,7 +10,9 @@ Invoke `/decisions` in Claude Code or `$decisions` in ChatGPT after work or a de
 
 ## What happens
 
-The agent reviews choices already made in the current conversation and reports consequential ones that remain uncertain, with the strongest alternative and why it may be better. If no meaningful uncertainty remains, it says so. For unresolved choices in a plan that you want to work through one at a time, use `next-decision`.
+The agent reviews choices already made in the current conversation and reports consequential ones that remain uncertain, with the strongest alternative and why it may be better.
+
+If no meaningful uncertainty remains, it says so. For unresolved choices in a plan that you want to work through one at a time, use `next-decision`.
 
 ## Practical note
 
@@ -16,4 +20,4 @@ This skill uses the work visible in the current conversation. Give the agent a m
 
 ## Pi usage
 
-Use `/skill:decisions`. The retrospective confidence review uses the conversation available to the current session; it does not recover missing history.
+Use `/skill:decisions`. The retrospective confidence review uses the conversation available to the current session. It does not recover missing history.

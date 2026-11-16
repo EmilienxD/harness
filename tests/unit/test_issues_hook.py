@@ -72,6 +72,53 @@ def _capture_creates(monkeypatch, urls):
 # The out-of-repo store
 
 
+@pytest.mark.parametrize("provider", ["claude", "chatgpt", "pi"])
+@pytest.mark.parametrize("edited", [False, True])
+def test_publication_reports_draft_modification_status(tmp_path, monkeypatch, provider, edited):
+    monkeypatch.chdir(tmp_path)
+    native_id = SID
+    session = hook.provider_session_id(provider, native_id)
+    hook.prepare_drafting_context(tmp_path, session)
+    path = _draft(tmp_path, "issue-0.md", "# Example\n\n> spec\n\nOriginal body", session)
+    if provider == "pi":
+        import issue_writers_pi
+        issue_writers_pi.evaluate({"version": 1, "operation": "snapshot", "cwd": str(tmp_path), "sessionId": native_id})
+    else:
+        result = subprocess.run(
+            [sys.executable, str(CLAUDE_ADAPTER), f"--{provider}"],
+            input=json.dumps({"hook_event_name": "Stop", "cwd": str(tmp_path), "session_id": native_id}),
+            capture_output=True, text=True, encoding="utf-8",
+        )
+        assert result.returncode == 0, result.stderr
+        assert json.loads(result.stdout) == {}
+    if edited:
+        original_mtime = path.stat().st_mtime
+        path.write_text("# Example\n\n> spec\n\nUser edited body", encoding="utf-8")
+        os.utime(path, (original_mtime, original_mtime))
+    # An unrelated later turn must not reset the original fingerprint.
+    hook.snapshot_drafts(tmp_path, session)
+    _capture_creates(monkeypatch, ["https://github.com/acme/demo/issues/41"])
+    status = "modified" if edited else "unmodified"
+    report = hook.run_publish_command("/publish-issues", session, tmp_path)
+    assert f"Draft modification status ({path.name}): {status}" in report
+    notice = hook.flush_notice(tmp_path, session)
+    assert f"Draft modification status: {status}" in notice
+    assert "User edited body" not in notice
+    assert not hook.fingerprint_path(tmp_path, path.name).exists()
+
+
+def test_legacy_draft_status_is_unknown_and_rewrites_preserve_status(tmp_path):
+    legacy = _draft(tmp_path, "issue-0.md", "# Older\n\n> spec\n\nBody")
+    assert hook.draft_modification_status(legacy) == "unknown"
+    hook.prepare_drafting_context(tmp_path, SID)
+    path = _draft(tmp_path, "issue-1.md", f"# Later\n\n> spec\n\nBlocked by {SID}/0")
+    hook.snapshot_drafts(tmp_path, SID)
+    assert hook.draft_modification_status(legacy) == "unknown"
+    hook.rewrite_known_references(path, {f"{SID}/0": "41"})
+    assert "#41" in path.read_text(encoding="utf-8")
+    assert hook.draft_modification_status(path) == "unmodified"
+
+
 def test_lock_and_notice_live_outside_the_repository(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
 

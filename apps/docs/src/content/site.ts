@@ -7,7 +7,7 @@ export const siteConfig = {
   description: "Install and configure Harness skills, hooks, command-line tools and extensions for Claude Code, ChatGPT and Pi.",
   repositoryUrl: "https://github.com/EmilienxD/harness",
   repositoryLabel: "Repository",
-  // Base URL for "Edit this page" links; Markdown paths are appended.
+  // Base URL for "Open in GitHub" links; Markdown paths are appended.
   editBaseUrl: "https://github.com/EmilienxD/harness/blob/main/docs/user/",
 };
 
@@ -30,7 +30,7 @@ export const navigation: NavTabConfig[] = [
     label: "Guides",
     groups: [
       { title: "Get started", items: [{ path: "index", label: "Introduction" }, "getting-started", "configuration"] },
-      { title: "Project", items: ["ci-usage"] },
+      { title: "Scripted installation", items: ["ci-usage"] },
     ],
   },
   {
@@ -68,9 +68,9 @@ export const unlistedPages: Record<string, { tab: string; group: string }> = {
 
 export const homeCards: { title: string; path: string; icon: IconName; description: string }[] = [
   { title: "Get started", path: "getting-started", icon: "rocket", description: "Launch the catalogue, choose providers and scope, and script installs." },
-  { title: "Configuration", path: "configuration", icon: "settings", description: "Find the file behind each setting, its scope and who owns it." },
+  { title: "Configuration", path: "configuration", icon: "settings", description: "Choose installation scope, connect your private board, and customize tools." },
   { title: "Productivity tools", path: "tools/productivity", icon: "zap", description: "Subagents, launchers, handoffs and Pi quality-of-life extensions." },
   { title: "Guards and extensions", path: "tools/guards-and-extensions", icon: "shield", description: "Policy hooks, native Pi guards and the Aboard VS Code extension." },
   { title: "Workflows", path: "tools/workflows", icon: "workflow", description: "Planning, building and engineering skills such as grill-me and commit." },
-  { title: "CI usage and releases", path: "ci-usage", icon: "git", description: "How checks run on a free account and how releases are cut." },
+  { title: "Grill me in cloud", path: "tools/workflows/grill-me-in-cloud", icon: "workflow", description: "Explore design choices with visual interviews on your own private board." },
 ];

@@ -87,6 +87,8 @@ Examples:
 
 ### 4. Publish or hand off
 
+After publication, you will be notified whether each draft was modified since drafting; rely on this status to check for edits.
+
 If the user explicitly requested publication, run the `<skill-directory>/scripts/publish_issues.py` gateway script. Add `--dry` to preview. The script publishes all remaining drafts in the current session. Report the returned results in one sentence.
 
 Otherwise, tell the user the relative file path you created and that they can review it. They can edit the file directly — title, labels, body, parent — before publishing. Ask if they want you to make changes. Mention that they can invoke `publish-issues` with `--dry` first to preview or without to publish for real.

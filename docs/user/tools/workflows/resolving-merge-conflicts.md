@@ -1,6 +1,8 @@
 # Resolving merge conflicts
 
-Platforms: **Claude Code, ChatGPT, Pi**. Install with `harness install resolving-merge-conflicts`; see [installation and scope](../../getting-started.md).
+Platforms: **Claude Code, ChatGPT, Pi**.
+
+Install with `harness install resolving-merge-conflicts`. See [installation and scope](../../getting-started.md).
 
 ## When to use
 

@@ -20,7 +20,7 @@ const paperMono = localFont({
 
 export const metadata: Metadata = {
   metadataBase: new URL("https://harness-docs-emb10.vercel.app"),
-  title: { default: "Harness documentation", template: "%s — Harness" },
+  title: { default: "Harness documentation", template: "%s | Harness" },
   description: "Install and configure Harness skills, hooks, command-line tools and extensions for Claude Code, ChatGPT and Pi.",
   icons: { icon: "/assets/harness_logo_black_transparent.png" },
 };

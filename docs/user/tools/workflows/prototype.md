@@ -1,6 +1,8 @@
 # Prototype
 
-Platforms: **Claude Code, ChatGPT, Pi**. Install with `harness install prototype`; see [installation and scope](../../getting-started.md).
+Platforms: **Claude Code, ChatGPT, Pi**.
+
+Install with `harness install prototype`. See [installation and scope](../../getting-started.md).
 
 ## When to use
 
@@ -24,4 +26,4 @@ Claude Code, ChatGPT, and Pi are supported. The agent follows user or project pr
 
 ## Pi usage
 
-Use `/skill:prototype [design question]`. Keep the shared clean-tree/throwaway-branch workflow and its interactive-only delegation rule. Available browser tooling determines UI verification depth; report missing capabilities.
+Use `/skill:prototype [design question]`. Keep the shared clean-tree/throwaway-branch workflow and its interactive-only delegation rule. Available browser tooling determines UI verification depth. Report missing capabilities.

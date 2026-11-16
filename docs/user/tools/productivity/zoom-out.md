@@ -1,6 +1,8 @@
 # Zoom out
 
-Platforms: **Claude Code, ChatGPT, Pi**. Install with `harness install zoom-out`; see [installation and scope](../../getting-started.md).
+Platforms: **Claude Code, ChatGPT, Pi**.
+
+Install with `harness install zoom-out`. See [installation and scope](../../getting-started.md).
 
 ## Use it
 

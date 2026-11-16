@@ -1,6 +1,8 @@
 # Stop overthinking
 
-Platforms: **Claude Code, ChatGPT, Pi**. Install with `harness install stop-overthinking`; see [installation and scope](../../getting-started.md).
+Platforms: **Claude Code, ChatGPT, Pi**.
+
+Install with `harness install stop-overthinking`. See [installation and scope](../../getting-started.md).
 
 ## Use it
 
@@ -16,4 +18,4 @@ Use it after the relevant risks and options are already in the conversation. The
 
 ## Pi usage
 
-Use `/skill:stop-overthinking`. The same concise practical-decision skill applies; it needs no native extension.
+Use `/skill:stop-overthinking`. The same concise practical-decision skill applies. It needs no native extension.

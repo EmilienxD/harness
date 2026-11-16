@@ -1,6 +1,8 @@
 # Handoff
 
-Platforms: **Claude Code, ChatGPT, Pi**. Install with `harness install handoff`; see [installation and scope](../../getting-started.md).
+Platforms: **Claude Code, ChatGPT, Pi**.
+
+Install with `harness install handoff`. See [installation and scope](../../getting-started.md).
 
 ## Use it
 
@@ -12,7 +14,7 @@ The skill writes a handoff document in your operating system's temporary directo
 
 ## Practical note
 
-The optional text after the invocation sets the receiving session's focus. Keep referenced artifacts available to the next agent; the handoff intentionally points to them rather than embedding their full contents. Check the generated document's path before ending the original session.
+The optional text after the invocation sets the receiving session's focus. Keep referenced artifacts available to the next agent. The handoff intentionally points to them rather than embedding their full contents. Check the generated document's path before ending the original session.
 
 ## Pi usage
 
