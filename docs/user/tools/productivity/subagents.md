@@ -114,8 +114,9 @@ Catalogue package 3.1.11 pins runtime 3.1.10 at immutable revision
 `--enable-inbox`. Windows shipped-pin acceptance passes the real Pi headless-parent auto-child
 journey, zero-inference interactive child reply and parent wakeup, and full-stack cloud interviews
 in both auto and interactive modes. These checks use isolated installed runtimes and fake inference,
-not checkout-runtime substitution. Aboard's VSIX pin remains 0.3.13 pending publication of 0.3.16;
-these results do not certify that older extension or the GitHub-backed full Aboard acceptance matrix.
+not checkout-runtime substitution. Aboard's VSIX pin is now 0.3.16, verified against the published
+asset's size and SHA-256. Its 901 unit tests, native VS Code integration and packaging checks pass;
+the GitHub-backed full Aboard acceptance matrix remains a separate verification limit.
 
 Older version-specific verification notes below describe the pins and acceptance limits at the time
 of those checks. Statements there about an unchanged runtime pin do not apply to package 3.1.11.
@@ -232,8 +233,8 @@ execution state; schema 11 migrates older host-handle columns without discarding
 
 Aboard implements this neutral protocol and publishes its own adapter registration. Auto Run's
 worker policy remains entirely on that side; no Auto Run engine change is needed. The 3.1.0
-checkout requires coordinated runtime and extension publication: the catalogue's immutable runtime
-and VSIX pins are unchanged and do not yet ship this refactor.
+checkout required coordinated runtime and extension publication. Catalogue package 3.1.11 now
+pins runtime 3.1.10, and the Aboard catalogue pins extension 0.3.16, including this refactor.
 
 ## Interactive integration prerequisites (3.1.4 checkout)
 
