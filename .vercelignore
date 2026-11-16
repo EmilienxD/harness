@@ -1,9 +1,15 @@
 *
 !docs
 !docs/**
-docs/site/**
+!apps
+!apps/docs
+!apps/docs/**
+apps/docs/node_modules/**
+apps/docs/.next/**
+apps/docs/out/**
 docs/CHATGPT-REFERENCES/**
 docs/CLAUDE-REFERENCES/**
+docs/PI-REFERENCES/**
 # Reference publishing must exclude local environment files inside docs/.
 **/.env
 **/.env.*

@@ -8,7 +8,7 @@ On Windows with AutoHotkey installed, invoke `/setup-text-replacements` in Claud
 
 ## What happens
 
-The skill edits `A_Startup\CodingHotstrings.ahk`, the per-user AutoHotkey startup script. An ordinary replacement uses `:*:trigger::replacement`, so expansion happens immediately after the last trigger character. Existing entries are preserved; if a trigger already exists, the agent asks before replacing it. The script is relaunched after editing so the new hotstring becomes active.
+The skill first verifies Windows and AutoHotkey are available, then edits `A_Startup\CodingHotstrings.ahk`, the per-user AutoHotkey startup script. An ordinary replacement uses `:*:trigger::replacement`, so expansion happens immediately after the last trigger character. Existing entries are preserved; if a trigger already exists, the agent asks before replacing it. The agent uses available shell tools to relaunch the script after editing and reports if the reload could not be completed.
 
 ## Practical note
 

@@ -27,7 +27,7 @@ Create a JSON object with `"version": 1`; `{ "version": 1 }` is valid. For persi
     "chatgpt": {
       "command": ["codex"],
       "delegations": {
-        "explore": { "model": "gpt-5.6-luna", "effort": "low" }
+        "general": { "model": "gpt-5.6-luna", "effort": "low" }
       }
     }
   },

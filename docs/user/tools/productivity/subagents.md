@@ -61,9 +61,66 @@ Configure launches in project `.harness/config.json` or user `~/.harness/config.
 }
 ```
 
-The shared file's `autoRun` settings belong to Aboard and are ignored by this runtime. `harness run` requires an explicit `--provider`. Provider entries can set a `command` and a `delegations.general` profile. This profile accepts `model` and `effort`; `"inherit"` uses native settings. Claude accepts full model IDs such as `claude-opus-5-5` as well as the native `opus`, `sonnet`, and `haiku` aliases. Claude can also set `deniedTools`. Explicit launch overrides take precedence. Skills do not select profiles. `session.stopWaitHours` sets an optional nonnegative wait for an outstanding reply. Both parent-reply and implementer waits read configuration from the saved session start directory, even when later hook events report a child working directory. Ancestor configuration is not searched. The 3.1.5 checkout (runtime 3.1.5) includes this correction; remote installations still require a newly published runtime pin. Session requests and logs live under `~/.harness/runtime/`; set `HARNESS_STATE_DIR` to change the Harness state root. If inbox activation fails, check that the updated runtime and the package's provider hook or extension are installed and active.
+The shared file's `autoRun` settings belong to Aboard and are ignored by this runtime. `harness run` requires an explicit `--provider`. Provider entries can set a `command` and a `delegations.general` profile. This profile accepts `model` and `effort`; `"inherit"` uses native settings. Claude accepts full model IDs such as `claude-opus-5-5` as well as the native `opus`, `sonnet`, and `haiku` aliases. Claude can also set `deniedTools`. Explicit launch overrides take precedence. Skills do not select profiles. `session.stopWaitHours` sets an optional nonnegative wait for an outstanding reply. Both parent-reply and implementer waits read configuration from the saved session start directory, even when later hook events report a child working directory. Ancestor configuration is not searched. Runtime 3.1.5 includes this correction; package 3.1.11's runtime 3.1.10 pin includes it for remote installations. Session requests and logs live under `~/.harness/runtime/`; set `HARNESS_STATE_DIR` to change the Harness state root. If inbox activation fails, check that the updated runtime and the package's provider hook or extension are installed and active.
 
 ## Implementation and verification
+
+The 3.1.10 checkout reconciles child process liveness during the parent's Stop-hook wait.
+Forcibly closing an interactive child's terminal can kill both the provider and its supervisor,
+preventing either from reporting cancellation. The wait now uses the existing PID and process
+birth checks to cancel verified dead children and release the parent without a child reply.
+Live or unverifiable executions remain pending. Windows real-CLI regressions for Claude Code
+and Codex kill only the child after the parent has entered its Stop wait; they require parent
+completion within 15 seconds, an acknowledged cancellation with no reply, an empty inbox, and
+exactly six fake inference requests. These are checkout-runtime checks; package 3.1.11 now
+includes this runtime in its immutable source pin. See the shipped-pin Pi checks below for
+separate remote-install acceptance.
+
+The 3.1.7 checkout removes the previous Aboard agent handle as a resume prerequisite.
+The runtime sends the stable Harness child and native conversation identities, retaining the
+child's saved launch directory and settings. When the selected Aboard host has no matching
+local binding, it verifies the durable resume reservation through `subagents_runtime.resume_context`,
+allocates a fresh local agent handle, reopens the native conversation, and saves its own binding.
+The 3.1.8 checkout also checks runtime authority for matching local bindings. A transactional
+host claim permits only one host to act on each resume reservation (session schema 12 migrates
+existing state in place). The API authorizes `reopen`, an explicitly reserved `fork`, or
+`reuse-terminal` for a verified live loop execution. Non-fork reopening refuses prior executions
+not recorded as ended, even if no local lock exists. Live-terminal submission verifies the native
+conversation and provider PID/birth identity through the runtime; local locks are only an extra
+veto. Missing live-terminal ownership never falls through to reopening. A claim followed by
+failure or uncertain startup remains reserved rather than being reset for another host to replay.
+The 3.1.9 checkout routes continuations using the saved child launch root. Resume accepts inherited
+endpoint credentials only when a live published record advertises that root (or an eligible registered
+worktree); otherwise it selects another matching host. Scoped registry credentials are re-read on 401.
+Aboard 0.3.16 advertises every explicitly opened workspace folder and authorizes scoped delegation
+against those folders. Its window-local UI and Auto Run still use the first folder. Reopening never
+substitutes that folder or the parent's current directory for the child's launch root.
+
+Root containment uses absolute, filesystem-resolved paths: Windows casing and separator variants
+match, and symlink/junction aliases count as the same filesystem root. Distinct worktree directories
+remain distinct launch roots; worktree registration authorizes a host, not relocation of a child.
+A missing binding is reconstructed locally, and parent navigation can resolve native identities through
+the runtime without the old host's binding. Navigation reveals only terminals in the current window;
+there is no cross-window live-terminal takeover. Reload the window after changing its folder list.
+
+Runtime and Aboard regressions cover root routing, multi-root authorization, ownership, reservation
+claims, and binding reconstruction. A real HTTP Aboard host test verifies a stopped child is adopted
+without the old host's storage while inherited credentials point elsewhere. Native VS Code integration
+also runs in a multi-root workspace. Real Claude/Codex journeys cover root overrides, interactive/auto
+continuation and recovery. Full cross-window native-provider acceptance remains a release gate.
+
+Catalogue package 3.1.11 pins runtime 3.1.10 at immutable revision
+`383e3c05e5ac182b001fd6d670f6cadb7e6e93d5`, replacing the older runtime that failed
+`--enable-inbox`. Windows shipped-pin acceptance passes the real Pi headless-parent auto-child
+journey, zero-inference interactive child reply and parent wakeup, and full-stack cloud interviews
+in both auto and interactive modes. These checks use isolated installed runtimes and fake inference,
+not checkout-runtime substitution. Aboard's VSIX pin is now 0.3.16, verified against the published
+asset's size and SHA-256. Its 901 unit tests, native VS Code integration and packaging checks pass;
+the GitHub-backed full Aboard acceptance matrix remains a separate verification limit.
+
+Older version-specific verification notes below describe the pins and acceptance limits at the time
+of those checks. Statements there about an unchanged runtime pin do not apply to package 3.1.11.
+The updated runtime also includes the 3.1.5 parent-wait correction and subsequent recovery fixes.
 
 `subagents` 2.10.0 (runtime 2.10.0) adds Pi as a provider of the existing Python runtime rather
 than a second orchestrator. Requests, executions, process supervision, delivery claims and replay
@@ -176,8 +233,8 @@ execution state; schema 11 migrates older host-handle columns without discarding
 
 Aboard implements this neutral protocol and publishes its own adapter registration. Auto Run's
 worker policy remains entirely on that side; no Auto Run engine change is needed. The 3.1.0
-checkout requires coordinated runtime and extension publication: the catalogue's immutable runtime
-and VSIX pins are unchanged and do not yet ship this refactor.
+checkout required coordinated runtime and extension publication. Catalogue package 3.1.11 now
+pins runtime 3.1.10, and the Aboard catalogue pins extension 0.3.16, including this refactor.
 
 ## Interactive integration prerequisites (3.1.4 checkout)
 

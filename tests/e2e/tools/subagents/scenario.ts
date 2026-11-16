@@ -18,7 +18,8 @@ export type SkillSelection = "none" | "found" | "missing";
 export const SKILL_RESOURCE = "[E2E:subagents:loaded-skill]";
 export const SKILL_RECEIPT = "selected-skill.json";
 export const CHILD_PROGRESS = "child checkpoint before interruption\n";
-export const scenarioCatalogHash = createHash("sha256").update("subagents:v5:explicit-inbox-activation").digest("hex");
+const PARENT_WAIT_MARKER = "HARNESS_SUBAGENTS_PARENT_WAITING_D21C";
+export const scenarioCatalogHash = createHash("sha256").update("subagents:v6:killed-child-stop-recovery").digest("hex");
 
 const CLAUDE_ENABLE_ID = "toolu_e2e_subagents_enable";
 const CODEX_ENABLE_ID = "call_e2e_subagents_enable";
@@ -32,8 +33,11 @@ const CODEX_PROGRESS_ID = "call_e2e_subagents_progress";
 const CLAUDE_RESUME_ID = "toolu_e2e_subagents_resume";
 const CODEX_RESUME_ID = "call_e2e_subagents_resume";
 
-export function claudeTransition(request: AnthropicMessagesRequest, repoRoot: string, mode: "interactive" | "auto" = "interactive", recovery = false, alternateRoot = false, stopFallback = false, selection: SkillSelection = "none"): AnthropicScenarioResponse {
+export function claudeTransition(request: AnthropicMessagesRequest, repoRoot: string, mode: "interactive" | "auto" = "interactive", recovery = false, alternateRoot = false, stopFallback = false, selection: SkillSelection = "none", killedChildJourney = false): AnthropicScenarioResponse {
   const text = deepText(request.messages);
+  if (killedChildJourney && text.includes(PARENT_MARKER) && text.includes(PARENT_WAIT_MARKER)) {
+    return claudeResponse("parent-received-cancellation", "end_turn", [{ type: "text", text: PARENT_REPLY }]);
+  }
   if (recovery && text.includes(PARENT_MARKER) && text.includes(RECOVERY_MARKER)) {
     if (claudeResult(request, CLAUDE_WRITE_ID) === undefined) throw new E2eProtocolError("$.messages", "parent history was not restored", "subagents");
     if (claudeResult(request, CLAUDE_RESUME_ID) === undefined) {
@@ -69,8 +73,11 @@ export function claudeTransition(request: AnthropicMessagesRequest, repoRoot: st
   throw new E2eProtocolError("$.messages", "does not select the subagents scenario", "subagents");
 }
 
-export function codexTransition(request: OpenAiResponsesRequest, repoRoot: string, mode: "interactive" | "auto" = "interactive", recovery = false, alternateRoot = false, stopFallback = false, selection: SkillSelection = "none"): OpenAiScenarioResponse {
+export function codexTransition(request: OpenAiResponsesRequest, repoRoot: string, mode: "interactive" | "auto" = "interactive", recovery = false, alternateRoot = false, stopFallback = false, selection: SkillSelection = "none", killedChildJourney = false): OpenAiScenarioResponse {
   const text = deepText([request.instructions, request.input]);
+  if (killedChildJourney && text.includes(PARENT_MARKER) && text.includes(PARENT_WAIT_MARKER)) {
+    return { scenario: "subagents", checkpoint: "parent-received-cancellation", output: finalOutput("parent-received-cancellation", PARENT_REPLY) };
+  }
   const hasOutput = (id: string) => request.input.some((item) => (item.type === "custom_tool_call_output" || item.type === "function_call_output") && item.call_id === id);
   if (recovery && text.includes(PARENT_MARKER) && text.includes(RECOVERY_MARKER)) {
     if (!hasOutput(CODEX_WRITE_ID)) throw new OpenAiProtocolError("$.input", "parent history was not restored", "subagents");
@@ -140,7 +147,7 @@ function claudeParent(request: AnthropicMessagesRequest, repoRoot: string, text:
     return claudeResponse("parent-received-reply", "end_turn", [{ type: "text", text: PARENT_REPLY }]);
   }
   if (!stopFallback) requireRequestFile(text, repoRoot, "claude");
-  return claudeResponse("parent-waiting", "end_turn", [{ type: "text", text: "Waiting for the delegated agent." }]);
+  return claudeResponse("parent-waiting", "end_turn", [{ type: "text", text: PARENT_WAIT_MARKER }]);
 }
 
 function claudeChild(request: AnthropicMessagesRequest, mode: "interactive" | "auto", continuing: boolean): AnthropicScenarioResponse {
@@ -204,7 +211,7 @@ function codexParent(request: OpenAiResponsesRequest, repoRoot: string, text: st
     return { scenario: "subagents", checkpoint: "parent-received-reply", output: finalOutput("parent-received-reply", PARENT_REPLY) };
   }
   if (!stopFallback) requireRequestFile(text, repoRoot, "codex");
-  return { scenario: "subagents", checkpoint: "parent-waiting", output: finalOutput("parent-waiting", "Waiting for the delegated agent.") };
+  return { scenario: "subagents", checkpoint: "parent-waiting", output: finalOutput("parent-waiting", PARENT_WAIT_MARKER) };
 }
 
 function codexChild(request: OpenAiResponsesRequest, mode: "interactive" | "auto", continuing: boolean): OpenAiScenarioResponse {

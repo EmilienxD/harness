@@ -32,20 +32,31 @@ def _registered_worktree(root: Path, cwd: Path) -> bool:
             capture_output=True, check=True, timeout=10,
             **({"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}),
         )
-        return any(
-            Path(os.fsdecode(field[9:])).resolve() == cwd.resolve()
+        if not cwd.is_dir() or not any(
+            _contains(Path(os.fsdecode(field[9:])), cwd)
             for field in result.stdout.split(b"\0") if field.startswith(b"worktree ")
-        )
+        ):
+            return False
+        common = []
+        for directory in (root, cwd):
+            metadata = subprocess.run(
+                ["git", "-C", str(directory), "rev-parse", "--path-format=absolute", "--git-common-dir"],
+                capture_output=True, check=True, timeout=10,
+                **({"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}),
+            )
+            common.append(Path(os.fsdecode(metadata.stdout).strip()).resolve())
+        return common[0] == common[1]
     except (OSError, subprocess.SubprocessError):
         return False
 
 
-def discover(cwd: Path, *, include_worktrees: bool = False) -> tuple[str, int, str] | None:
+def discover(cwd: Path, *, include_worktrees: bool = False, resume: bool = False) -> tuple[str, int, str] | None:
     from subagents_runtime.processes import process_alive
     from subagents_runtime.sessions import SessionError
 
     port = os.environ.get("HARNESS_BRIDGE_PORT")
     token = os.environ.get("HARNESS_BRIDGE_TOKEN")
+    inherited = None
     if port is not None or token is not None:
         if not port or not token:
             raise SessionError("Inherited runtime authentication is incomplete")
@@ -53,13 +64,18 @@ def discover(cwd: Path, *, include_worktrees: bool = False) -> tuple[str, int, s
             selected = int(port)
             if not 1 <= selected <= 65535:
                 raise ValueError()
-            return "127.0.0.1", selected, token
+            inherited = ("127.0.0.1", selected, token)
+            if not resume:
+                return inherited
         except ValueError as exc:
             raise SessionError("Inherited runtime endpoint port is invalid") from exc
     candidates = []
     for path in endpoint_directory().glob("*.json"):
         try:
             record = json.loads(path.read_text(encoding="utf-8"))
+            roots = record.get("workspaceRoots", [record.get("workspaceRoot")])
+            if not isinstance(roots, list) or not roots or not all(isinstance(root, str) and Path(root).is_absolute() for root in roots):
+                continue
             if (
                 record.get("version") == 2
                 and record.get("host") == "127.0.0.1"
@@ -71,12 +87,22 @@ def discover(cwd: Path, *, include_worktrees: bool = False) -> tuple[str, int, s
                 and type(record.get("pid")) is int
                 and record["pid"] > 0
                 and process_alive(record["pid"])
-                and (_contains(Path(record["workspaceRoot"]), cwd)
-                     or (include_worktrees and _registered_worktree(Path(record["workspaceRoot"]), cwd)))
+                and any(
+                    isinstance(root, str) and Path(root).is_absolute()
+                    and (_contains(Path(root), cwd)
+                         or (include_worktrees and _registered_worktree(Path(root), cwd)))
+                    for root in roots
+                )
             ):
                 candidates.append((str(record.get("activatedAt", "")), record["port"], record["delegationToken"]))
         except (OSError, ValueError, TypeError, AttributeError):
             continue
+    if inherited is not None:
+        matching = [candidate for candidate in candidates if candidate[1] == inherited[1]]
+        if matching:
+            # The inherited credential may be stale; use the current scoped token.
+            _, port, token = max(matching)
+            return "127.0.0.1", port, token
     if not candidates:
         return None
     _, port, token = max(candidates)
@@ -102,15 +128,23 @@ class BridgeBackend:
     def progress_path(self, execution_id: str, owner_id: str) -> Path:
         return state_dir() / "runtime" / "watch" / execution_id / "stdout.jsonl"
 
+    def _discover(self, request, cwd: Path):
+        options = {}
+        if getattr(request, "resume", None):
+            options.update(resume=True, include_worktrees=True)
+        elif request.mode == "loop":
+            options["include_worktrees"] = True
+        return discover(cwd, **options)
+
     def probe(self, request, cwd: Path) -> bool:
-        self.endpoint = discover(cwd, include_worktrees=True) if request.mode == "loop" else discover(cwd)
+        self.endpoint = self._discover(request, cwd)
         return self.endpoint is not None
 
     def launch(self, request, request_id: str, agent_number: int, cwd: Path) -> str:
         from subagents_runtime.sessions import SessionError
 
         def endpoint():
-            return discover(cwd, include_worktrees=True) if request.mode == "loop" else discover(cwd)
+            return self._discover(request, cwd)
 
         selected = self.endpoint
         if selected is None:
@@ -125,9 +159,9 @@ class BridgeBackend:
             "harnessPython": sys.executable,
         }
         if request.resume:
-            if not reserved.previous_agent_id:
-                raise SessionError("The runtime's saved child handle is unavailable; resume refused")
-            identities.update(resumeAgentId=reserved.previous_agent_id, resumeSessionId=conversation)
+            identities.update(resumeSessionId=conversation)
+            if reserved.previous_agent_id:
+                identities["resumeAgentId"] = reserved.previous_agent_id
             if fork_of:
                 identities["forkSessionId"] = fork_of
         body = json.dumps({
@@ -152,7 +186,7 @@ class BridgeBackend:
                     result = json.loads(response.read().decode("utf-8"))
                 break
             except urllib.error.HTTPError as exc:
-                if exc.code == 401 and attempt == 0 and not os.environ.get("HARNESS_BRIDGE_TOKEN"):
+                if exc.code == 401 and attempt == 0 and (request.resume or not os.environ.get("HARNESS_BRIDGE_TOKEN")):
                     selected = endpoint()
                     if selected is None:
                         raise SessionError("The runtime's delegation authentication expired") from None

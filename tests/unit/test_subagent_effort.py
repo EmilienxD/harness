@@ -21,7 +21,7 @@ def test_luna_caps_effort(model, effort):
 
 
 @pytest.mark.parametrize("model", [
-    "claude-fable-5-1", "claude-opus-5-5", "claude-opus-5",
+    "claude-fable-5-2", "claude-opus-5-5", "claude-opus-5",
     "claude-sonnet-5-5", "claude-haiku-5-5",
 ])
 @pytest.mark.parametrize("effort", EFFORT_LEVELS)

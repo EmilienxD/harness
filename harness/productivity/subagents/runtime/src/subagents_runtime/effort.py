@@ -18,7 +18,7 @@ _MODEL_EFFORTS = {
     "gpt-5.6-sol": _CODEX,
     "gpt-5.6-terra": _CODEX,
     "gpt-5.6-luna": _CODEX[:-1],
-    "claude-fable-5-1": _CLAUDE,
+    "claude-fable-5-2": _CLAUDE,
     "claude-fable-5": _CLAUDE,
     "claude-opus-5-5": _CLAUDE,
     "claude-opus-5": _CLAUDE,

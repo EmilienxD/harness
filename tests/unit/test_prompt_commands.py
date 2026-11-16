@@ -89,7 +89,7 @@ def test_explicit_skill_is_added_after_sanitization(tmp_path, monkeypatch, provi
     monkeypatch.setattr(sessions, "launch_configuration", lambda _cwd: {})
     monkeypatch.setattr(sessions, "_provider_command", lambda _config, _provider: [_provider])
     from subagents_runtime import bridge_backend
-    monkeypatch.setattr(bridge_backend, "discover", lambda *_args: None)
+    monkeypatch.setattr(bridge_backend, "discover", lambda *_args, **_kwargs: None)
     directory = ".claude" if provider == "claude" else ".agents"
     skill = tmp_path / directory / "skills" / "prototype" / "SKILL.md"
     skill.parent.mkdir(parents=True)

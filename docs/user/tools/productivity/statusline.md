@@ -11,8 +11,10 @@ harness (main)  openai gpt-6.1-sol medium  125k/200k/256k
 The project is the current directory's name; the branch comes from Pi's Git watcher.
 The provider, model ID, thinking level, and context token counts update with Pi's UI.
 `125k/200k/256k` means 125,000 tokens are used, auto-compaction's threshold is
-200,000 tokens, and the total context window is 256,000 tokens. Counts of 1,000 or more
-are rounded to the nearest thousand with a `k` suffix; smaller counts are shown directly.
+200,000 tokens, and the total context window is 256,000 tokens. Counts of 1,000,000 or more
+use an `M` suffix rounded to two decimal places, with trailing zeros omitted (for example, `1.25M`).
+Counts from 1,000 to below 1,000,000 are rounded to the nearest thousand with a `k` suffix;
+smaller counts are shown directly.
 The threshold is calculated from Pi's effective reserved-token setting and the
 current context window, including per-model overrides.
 Pi can also compact on overflow, so this is the normal trigger threshold, not a guarantee.

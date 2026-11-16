@@ -93,6 +93,14 @@ export async function run(): Promise<void> {
 
   const root = workspace.workspaceFolders?.[0]?.uri.fsPath;
   assert.ok(root, "integration workspace is open");
+  if ((workspace.workspaceFolders?.length ?? 0) > 1) {
+    const records = await Promise.all((await readdir(api.delegationEndpointDirectory)).filter((name) => name.endsWith(".json")).map(async (name) => {
+      try { return JSON.parse(await readFile(join(api.delegationEndpointDirectory, name), "utf8")) as { workspaceRoot: string; workspaceRoots?: string[] }; }
+      catch { return undefined; }
+    }));
+    const own = records.find((record) => record?.workspaceRoot === root);
+    assert.deepEqual(own?.workspaceRoots, workspace.workspaceFolders?.map((folder) => folder.uri.fsPath), "multi-root activation publishes every execution root");
+  }
 
   // Width is native presentation, not destructive truncation of session titles.
   const editorConfiguration = workspace.getConfiguration("workbench.editor");

@@ -12,7 +12,7 @@ import {
 } from "./bridge/server.js";
 import { createTerminalRoutes } from "./bridge/terminal-routes.js";
 import { CommandTerminalService, createCommandRoutes, type CommandTerminalId } from "./bridge/command-terminals.js";
-import { createDelegationRoutes, delegationParentSession, providerSession, readDelegationBinding, resumeInOpenTerminal } from "./bridge/manual-delegation.js";
+import { createDelegationRoutes, delegationParentSession, providerSession, readDelegationBinding, resolveResumeBinding, resumeInOpenTerminal, type ManualDelegationLaunch } from "./bridge/manual-delegation.js";
 import { FileCommandEndpointRegistry, commandEndpointDirectory } from "./bridge/command-endpoint.js";
 import { TerminalController, type TerminalHandle } from "./platform/terminals.js";
 import type { TerminalId } from "./domain/contracts.js";
@@ -160,8 +160,10 @@ export interface AboardExtensionApi {
 }
 
 export async function activate(context: ExtensionContext): Promise<AboardExtensionApi | undefined> {
-  if ((workspace.workspaceFolders?.length ?? 0) > 1) { void window.showErrorMessage("aboard v1 supports exactly one workspace folder. Open the project in a single-root window."); return undefined; }
-  const workspaceRoot = workspace.workspaceFolders?.[0]?.uri.fsPath;
+  // Window-local UI and Auto Run use the first folder; delegated execution uses
+  // the durable child's cwd within any explicitly opened folder.
+  const workspaceRoots = workspace.workspaceFolders?.map((folder) => folder.uri.fsPath) ?? [];
+  const workspaceRoot = workspaceRoots[0];
   if (workspaceRoot === undefined) return undefined;
   const workspaceFiles = new AgentWorkspaceFiles(context.globalStorageUri.fsPath);
   let startupHandoff = workspace.workspaceFile?.scheme === "file" ? await workspaceFiles.read(workspace.workspaceFile.fsPath, workspaceRoot) : undefined;
@@ -316,13 +318,14 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
   };
   context.subscriptions.push({ dispose: () => grillRelay?.dispose() });
   const delegationStateDirectory = join(runtime.root, "delegations");
-  const parentTerminalUri = async (childSessionId: string): Promise<string | undefined> => {
+  const parentTerminalUri = async (childSessionId: string, parentSessionId?: string, runtime?: ManualDelegationLaunch): Promise<string | undefined> => {
     try {
+      if (parentSessionId !== undefined) parentSessionId = await providerSession(delegationStateDirectory, parentSessionId, runtime);
       const target = Uri.from({
         scheme: env.uriScheme,
         authority: context.extension.id,
         path: "/focus-parent",
-        query: new URLSearchParams({ childSessionId }).toString(),
+        query: new URLSearchParams({ childSessionId, ...(parentSessionId === undefined ? {} : { parentSessionId }) }).toString(),
       });
       return (await env.asExternalUri(target)).toString();
     } catch (error) {
@@ -340,7 +343,8 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
         void window.showWarningMessage("That Aboard terminal link is invalid.");
         return;
       }
-      const parentSessionId = await delegationParentSession(delegationStateDirectory, childSessionId).catch(() => undefined);
+      const parentSessionId = await delegationParentSession(delegationStateDirectory, childSessionId).catch(() => undefined)
+        ?? parameters.get("parentSessionId") ?? undefined;
       const parent = parentSessionId === undefined ? undefined : fleet.getBySession(parentSessionId as SessionId);
       const terminalId = parent === undefined ? undefined : terminals.liveTerminalForAgent(parent.identity.agentId);
       if (terminalId === undefined) {
@@ -352,9 +356,9 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
   }));
   // A visible child opens as a tab beside its parent agent rather than in
   // whichever editor group the user happens to be working in.
-  const parentEditorPane = async (parentSessionId: string | undefined): Promise<{ readonly editorPane?: object }> => {
+  const parentEditorPane = async (parentSessionId: string | undefined, runtime?: ManualDelegationLaunch): Promise<{ readonly editorPane?: object }> => {
     if (parentSessionId === undefined) return {};
-    const sessionId = await providerSession(delegationStateDirectory, parentSessionId).catch(() => parentSessionId);
+    const sessionId = await providerSession(delegationStateDirectory, parentSessionId, runtime).catch(() => parentSessionId);
     const parent = fleet.getBySession(sessionId as SessionId);
     const terminalId = parent === undefined ? undefined : terminals.liveTerminalForAgent(parent.identity.agentId);
     const editorPane = terminalId === undefined ? undefined : await terminals.editorPaneOf(terminalId).catch(() => undefined);
@@ -848,10 +852,10 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
         }
         const configured = await launchFile.getDelegationForWorktree(request.provider, request.task, request.cwd);
         const returnUri = request.executionMode !== "auto" && request.harnessSessionId !== undefined
-          ? await parentTerminalUri(request.harnessSessionId)
+          ? await parentTerminalUri(request.harnessSessionId, request.parentSessionId, request)
           : undefined;
         return coordinator.launchManual({
-          ...(request.executionMode === "auto" ? {} : await parentEditorPane(request.parentSessionId)),
+          ...(request.executionMode === "auto" ? {} : await parentEditorPane(request.parentSessionId, request)),
           ...(request.effort === undefined ? {} : { effort: request.effort }),
           ...(request.model === undefined ? {} : { model: request.model }),
           requestId: request.requestId,
@@ -872,30 +876,31 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
         }, request.executionMode);
       }, resume: async (request) => {
         if (!request.harnessSessionId) throw new Error("Delegated resume requires its stable Harness identity");
-        const binding = await readDelegationBinding(join(runtime.root,"delegations"),request.harnessSessionId);
-        if (!binding || binding.agentId !== request.resumeAgentId || binding.sessionId !== request.resumeSessionId || binding.provider !== request.provider || binding.executionMode !== request.executionMode || binding.cwd !== request.cwd || binding.parentSessionId !== request.parentSessionId) throw new Error("Delegated session ownership or execution mode does not match");
+        const local = await readDelegationBinding(join(runtime.root, "delegations"), request.harnessSessionId);
+        const binding = await resolveResumeBinding(request, local, () => agentIdCounter.next());
         const saved = fleet.get(binding.agentId as AgentId);
         const returnUri = binding.executionMode === "interactive"
-          ? await parentTerminalUri(request.harnessSessionId)
+          ? await parentTerminalUri(request.harnessSessionId, binding.parentSessionId, request)
           : undefined;
         const lockPath = wrapperLayout.lockPathFor(binding.agentId as AgentId);
-        if ((request.executionMode === "loop" || currentConfiguration.interactiveResumeMode === "reuse-terminal") && lockMarkerLive(lockPath)) {
+        if (binding.resumeAction === "reuse-terminal" || (binding.resumeAction === "fork" && currentConfiguration.interactiveResumeMode === "reuse-terminal")) {
           const reused = await resumeInOpenTerminal(request, binding, saved, terminals, async (terminalId) => {
-            if (!request.executionId || !binding.harnessPython || !binding.harnessRuntimePath || !binding.harnessStateDirectory) throw new Error("Existing terminal's Harness runtime identity is unavailable; resume refused");
-            await promisify(execFile)(binding.harnessPython, ["-m", "subagents_runtime.terminal_resume", request.harnessSessionId as string, request.executionId, binding.agentId, terminalId, binding.sessionId], {
+            if (!request.executionId || !request.harnessPython || !request.harnessRuntimePath || !request.harnessStateDirectory) throw new Error("Harness runtime identity is unavailable; resume refused");
+            await promisify(execFile)(request.harnessPython, ["-m", "subagents_runtime.terminal_resume", request.harnessSessionId as string, request.executionId, binding.agentId, terminalId, binding.sessionId], {
               cwd: binding.cwd,
-              env: { ...process.env, HARNESS_STATE_DIR: binding.harnessStateDirectory, PYTHONPATH: [binding.harnessRuntimePath, process.env.PYTHONPATH].filter(Boolean).join(delimiter) },
+              env: { ...process.env, HARNESS_STATE_DIR: request.harnessStateDirectory, PYTHONPATH: [request.harnessRuntimePath, process.env.PYTHONPATH].filter(Boolean).join(delimiter) },
               windowsHide: true,
               timeout: 15_000,
             });
             if (!lockMarkerLive(lockPath)) throw new Error("Delegated session ended before the resume message could be submitted");
           });
           if (reused !== undefined) return reused;
+          if (binding.resumeAction === "reuse-terminal") throw new Error("The runtime permits only the existing live terminal; reopening is refused");
         }
-        if (request.forkSessionId !== undefined) {
+        if (binding.resumeAction === "fork" && request.forkSessionId !== undefined) {
           const configured = await launchFile.getDelegationForWorktree(binding.provider, binding.task, binding.cwd);
           return coordinator.launchManual({
-            ...(binding.executionMode === "auto" ? {} : await parentEditorPane(binding.parentSessionId)),
+            ...(binding.executionMode === "auto" ? {} : await parentEditorPane(binding.parentSessionId, request)),
             ...(request.effort === undefined ? {} : { effort: request.effort }),
             ...(request.model === undefined ? {} : { model: request.model }),
             forkSessionId: request.forkSessionId as SessionId,
@@ -913,7 +918,7 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
         }
         if (lockMarkerLive(lockPath)) throw new Error("Delegated execution is running or uncertain; resume refused");
         return coordinator.reopen({
-          ...(binding.executionMode === "auto" ? {} : await parentEditorPane(binding.parentSessionId)),
+          ...(binding.executionMode === "auto" ? {} : await parentEditorPane(binding.parentSessionId, request)),
           ...(request.effort === undefined ? {} : { effort: request.effort }),
           ...(request.model === undefined ? {} : { model: request.model }),
           platform: binding.provider, agentId: binding.agentId as AgentId, type: binding.type,
@@ -930,6 +935,7 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
         });
       } }, {
         workspaceRoot,
+        workspaceRoots,
         stateDirectory: delegationStateDirectory,
       }),
     ),
@@ -946,6 +952,7 @@ export async function activate(context: ExtensionContext): Promise<AboardExtensi
       workspaceRoot,
       commandToken: bridge.commandToken,
       delegationToken: bridge.delegationToken,
+      workspaceRoots,
       pid: process.pid,
       activatedAt: new Date().toISOString(),
     } as const;

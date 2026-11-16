@@ -12,7 +12,7 @@ On Windows, the skill edits the PowerShell profile and, for a cross-platform req
 
 ## What happens
 
-The agent reads the existing shell file, checks for conflicts, then appends the new definition. For `gs` mapped to `git status`, PowerShell gets `function gs { git status $args }`; Bash and Zsh get `alias gs='git status'`. Source the updated profile or open a new terminal before trying the alias.
+The agent reads the existing shell file, checks for conflicts, and verifies that the target executable is installed and supports the requested options before appending the definition. It reports the alias, the exact command it runs, and how to activate it. For `gs` mapped to `git status`, PowerShell gets `function gs { git status $args }`; Bash and Zsh get `alias gs='git status'`. Source the updated profile or open a new terminal before trying the alias.
 
 ## Pi usage
 

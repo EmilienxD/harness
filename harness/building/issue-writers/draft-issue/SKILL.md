@@ -38,7 +38,7 @@ Decide the labels:
 
 Both the difficulty and mode labels are defaults, not requirements: if the user explicitly says not to use one or both of them, leave them off the declaration line entirely rather than forcing a value.
 
-If the user asks for extra labels, verify them before writing the file: run `gh label list` and confirm each requested label exists in this repo, mapping it to the repo's own spelling. Don't invent labels — if a requested one doesn't exist, flag it to the user before proceeding, or propose a similar existing label (e.g. when the user's label has a typo).
+Include any extra labels the user requests in the draft. Publication automatically creates missing labels and preserves existing labels.
 
 ### 2. Write one file
 

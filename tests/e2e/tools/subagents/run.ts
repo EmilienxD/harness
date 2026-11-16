@@ -58,7 +58,7 @@ export async function runSubagentsRootJourney(platform: Platform): Promise<Subag
   return runSubagentsJourney(platform, "interactive", false, true);
 }
 
-export async function runSubagentsJourney(platform: Platform, mode: "interactive" | "auto" = "interactive", recovery = false, alternateRoot = false, options: { shutdownBeforeResult?: boolean; stopFallback?: boolean; failedWrite?: boolean; skill?: SkillSelection } = {}): Promise<SubagentsJourneyResult> {
+export async function runSubagentsJourney(platform: Platform, mode: "interactive" | "auto" = "interactive", recovery = false, alternateRoot = false, options: { shutdownBeforeResult?: boolean; stopFallback?: boolean; failedWrite?: boolean; skill?: SkillSelection; killChildWhileWaiting?: boolean } = {}): Promise<SubagentsJourneyResult> {
   const shutdownBeforeResult = options.shutdownBeforeResult ?? false;
   if (platform === "claude") await validateClaudeCli(); else await validateCodexCli();
   const root = await canonicalMkdtemp(join(tmpdir(), `harness-subagents-${platform}-e2e-`));
@@ -84,6 +84,17 @@ export async function runSubagentsJourney(platform: Platform, mode: "interactive
     const python = await pythonCommand(runtimeSource);
     const binRoot = await createRuntimeShim(root, python);
     await stagePayload(platform, packageRoot, projectRoot, python);
+    if (options.killChildWhileWaiting) {
+      if (!recovery || mode !== "interactive") throw new Error("Killed-child regression requires an interactive interrupted child");
+      const path = join(projectRoot, platform === "claude" ? ".claude/settings.json" : ".codex/hooks.json");
+      const settings = JSON.parse(await readFile(path, "utf8")) as HookSettings;
+      const hook = join(harnessRoot, "tests/e2e/tools/subagents/harness-subagents-hook-stop-wait.py");
+      for (const groups of Object.values(settings.hooks)) for (const group of groups) for (const entry of group.hooks) {
+        entry.command = platform === "claude" ? python : `${python} ${hook} ${platform}`;
+        if (platform === "claude") entry.args = [hook, platform];
+      }
+      await writeFile(path, JSON.stringify(settings));
+    }
     const selectedRoot = join(projectRoot, platform === "claude" ? ".claude" : ".agents", "skills", "e2e-selected");
     await mkdir(selectedRoot, { recursive: true });
     await writeFile(join(selectedRoot, "SKILL.md"), `---\nname: e2e-selected\ndescription: Fixture explicit skill.\ndisable-model-invocation: true\n---\n${SKILL_RESOURCE}\nWrite the selection receipt.\n`);
@@ -189,7 +200,7 @@ export async function runSubagentsJourney(platform: Platform, mode: "interactive
         scenarioCatalogHash,
         parseRequest: parseAnthropicMessagesRequest,
         transition: async (request,repoRoot) => {
-          const response = claudeTransition(request,repoRoot,mode,recovery,alternateRoot,options.stopFallback,options.skill);
+          const response = claudeTransition(request,repoRoot,mode,recovery,alternateRoot,options.stopFallback,options.skill,options.killChildWhileWaiting);
           if (response.checkpoint === "parent-waiting") releaseParentWait?.();
           if (options.skill && options.skill !== "missing" && response.checkpoint.startsWith("child-")) await parentWaiting;
           if (response.checkpoint === "child-interruption-ready") {
@@ -219,7 +230,7 @@ export async function runSubagentsJourney(platform: Platform, mode: "interactive
         diagnosticsPath,
         scenarioCatalogHash,
         transition: async (request) => {
-          const response = codexTransition(request,projectRoot,mode,recovery,alternateRoot,options.stopFallback,options.skill);
+          const response = codexTransition(request,projectRoot,mode,recovery,alternateRoot,options.stopFallback,options.skill,options.killChildWhileWaiting);
           if (response.checkpoint === "parent-waiting") releaseParentWait?.();
           if (options.skill && options.skill !== "missing" && response.checkpoint.startsWith("child-")) await parentWaiting;
           if (response.checkpoint === "child-interruption-ready") {
@@ -266,6 +277,34 @@ export async function runSubagentsJourney(platform: Platform, mode: "interactive
       const assertions = server.assertions();
       if (assertions.inferenceRequests !== 3 || assertions.unexpectedRequests !== 0 || await countRequestFiles(join(stateRoot, "inboxes")) !== 0) throw new Error("Missing skill request count or cleanup differed");
       return { checkpoints: ["parent-inbox-enable", "parent-request-write", "parent-received-failure"], completedClis: ["parent"], requestFilesRemaining: 0, unexpectedRequests: 0, recoveredSessions: 0, inferenceRequests: 3 };
+    }
+    if (options.killChildWhileWaiting) {
+      await waitForCheckpoint(async () => interruptionReady && (await readFile(join(cliStatusRoot, "parent-stop-waiting"), "utf8").catch(() => "")) === "waiting");
+      const before = await executionSnapshot(python, projectRoot, environment);
+      const child = before.find((item) => item.parent_session_id === parentId);
+      const parent = before.find((item) => item.session_id === parentId);
+      if (!child?.supervisor_pid || !parent || parent.dead) throw new Error("Parent and child must be live before killing only the child");
+      if (await readFile(join(projectRoot, "child-progress.txt"), "utf8") !== CHILD_PROGRESS) throw new Error("Child tool did not write its progress");
+      await killProcessTree(child.supervisor_pid);
+      releaseInterruption!();
+      // Well below the configured 90-second Stop wait: timeout is not recovery.
+      await waitForCheckpoint(async () => (await readStatus(join(cliStatusRoot, "parent.json"))) !== undefined, 15_000);
+      requireCompleted((await readStatus(join(cliStatusRoot, "parent.json")))!);
+      const persisted = await execFileAsync(python, ["-c", [
+        "import json",
+        "from subagents_runtime.storage import connect",
+        "with connect() as db:",
+        " rows=db.execute('SELECT state,reply,acknowledged_at IS NOT NULL FROM requests').fetchall()",
+        "print(json.dumps(rows))",
+      ].join("\n")], { cwd: projectRoot, env: environment, windowsHide: true, timeout: 10_000 });
+      const rows = JSON.parse(persisted.stdout) as [string, string | null, number][];
+      if (rows.length !== 1 || rows[0]![0] !== "cancelled" || rows[0]![1] !== null || rows[0]![2] !== 1) throw new Error("Killed child did not persist an acknowledged cancellation without a reply");
+      const assertions = server.assertions();
+      const checkpoints = assertions.observations.flatMap((item) => typeof item.checkpoint === "string" ? [item.checkpoint] : []);
+      if (!checkpoints.includes("parent-received-cancellation") || assertions.inferenceRequests !== 6 || assertions.unexpectedRequests !== 0) throw new Error(`Killed-child inference contract differed: ${checkpoints.join(", ")}`);
+      const requestFilesRemaining = await countRequestFiles(join(stateRoot, "inboxes"));
+      if (requestFilesRemaining !== 0) throw new Error("Killed-child journey left inbox requests");
+      return { checkpoints, completedClis: ["parent"], requestFilesRemaining, unexpectedRequests: 0, recoveredSessions: 0, inferenceRequests: 6 };
     }
     if (recovery) {
       try {
@@ -444,8 +483,8 @@ export async function killProcessTree(pid: number, allowExited = false): Promise
   }
 }
 
-async function waitForCheckpoint(ready: () => boolean | Promise<boolean>): Promise<void> {
-  const deadline = Date.now()+90_000;
+async function waitForCheckpoint(ready: () => boolean | Promise<boolean>, timeoutMs = 90_000): Promise<void> {
+  const deadline = Date.now()+timeoutMs;
   while (Date.now()<deadline) {
     if (await ready()) return;
     await new Promise((resolvePromise) => setTimeout(resolvePromise,100));
