@@ -281,8 +281,10 @@ html { scroll-behavior: auto; }
 .prose blockquote p:last-child { margin-bottom: 0; }
 .prose img, .article-image { max-width: 100%; height: auto; border-radius: 12px; }
 .harness-hero { display: block; width: 100%; margin: 0 0 28px; }
-.platform-badges { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 18px; }
-.platform-badge { border: 1px solid var(--docs-border); border-radius: 7px; background: var(--docs-hover); padding: 3px 9px; color: var(--docs-heading); font-size: 12px; line-height: 20px; }
+.provider-logos { display: flex; flex-wrap: wrap; align-items: center; gap: 16px; margin-top: 18px; }
+.provider-logo { display: inline-flex; align-items: center; justify-content: center; width: 32px; height: 32px; }
+.provider-logo img { display: block; width: 28px; height: 28px; object-fit: contain; }
+.dark .provider-logo__monochrome { filter: invert(1); }
 .tool-group-label { color: var(--docs-accent); }
 .edit-page { display: inline-flex; align-items: center; gap: 7px; margin-top: 40px; font-size: 13px; }
 .search-status { padding: 10px 16px 16px; color: var(--docs-muted); font-size: 13px; }

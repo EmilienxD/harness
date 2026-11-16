@@ -1,31 +1,19 @@
 # Tool inspector
 
-Platforms: **Pi**. Install with `harness install tool-inspector --platform pi`; see [installation and scope](../../getting-started.md).
+Platforms: **Pi**.
 
-`tool-inspector` is a Pi-only extension that adds `[Tools]` directly below `[Context]`
-in the startup resources listing. It includes built-in and extension tools and follows
-Ctrl+O expansion to show descriptions. Tools available indirectly through active
-`tool_search` or codemode are labelled `(differed)`; ordinary inactive tools remain
-`(not active)`, and hidden tools are labelled `(hidden)`.
+Find out which tools Pi has and what arguments they accept.
 
-```powershell
-uv run harness install tool-inspector --platform pi --scope user
+## Install
+
+```bash
+harness install tool-inspector --platform pi
 ```
 
-Restart Pi or run `/reload`. Use `/tools` to print every configured tool's description,
-source, exposure, readable parameter reference, and output contract. Use `/tools read`
-(or another tool name, with completion) to inspect one tool. Declared output schemas
-are converted into indented field summaries with types, required/optional markers,
-descriptions, defaults, constraints, and nested fields; no raw JSON is printed.
-Reports use the current Pi theme to color headings, field names, types, and
-required/optional markers. Inline backtick text uses the theme's code color.
-Tools without an exposed output schema are explicitly labelled
-rather than assigned an invented return type. Reports never execute tools, request
-inference, or enter the model's context. Reports use display-only session entries;
-Pi persists them once the session contains a conversation.
+Add `--scope user` to use it across projects.
 
-The exact startup placement uses Pi 1.2.0's internal resource-list layout and may need
-an update after a Pi upgrade. Quiet startup settings remain respected. The extension
-works independently of Calm and does not change tool execution or active-tool settings.
-Pi 1.4.0 also passes the real loader, registry and startup component checks; see the
-[upgrade checks](https://github.com/EmilienxD/harness/blob/main/tests/e2e/README.md#pi-140-upgrade-checks).
+See [Get started](../../getting-started.md) for installation options.
+
+## Use it
+
+Restart Pi or run `/reload` after installation. Check the startup tool listing. Expand it with Ctrl+O for descriptions. Run `/tools` to inspect all configured tools. Run `/tools read` or substitute another tool name to inspect one. The report explains parameters and available output information. Inspection does not execute tools or send a request to the model.

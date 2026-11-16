@@ -1,6 +1,8 @@
 # Break down a help wanted issue
 
-Platforms: **Claude Code, ChatGPT, Pi**. Install with `harness install breakdown-help-wanted-issue`; see [installation and scope](../../getting-started.md).
+Platforms: **Claude Code, ChatGPT, Pi**.
+
+Install with `harness install breakdown-help-wanted-issue`. See [installation and scope](../../getting-started.md).
 
 ## When to use
 
@@ -12,16 +14,18 @@ Use `/breakdown-help-wanted-issue [request]` in Claude Code or `$breakdown-help-
 
 ## What happens
 
-The agent reads the request and relevant references, checks project context, explains the underlying problem and current behavior, and recommends a concrete scope and success criteria. It asks you about unresolved choices and waits until you confirm shared understanding. The output is a short agreed summary; the skill does not implement or publish it.
+The agent reads the request and relevant references, checks project context, explains the underlying problem and current behavior, and recommends a concrete scope and success criteria. It asks you about unresolved choices and waits until you confirm shared understanding. The output is a short agreed summary. The skill does not implement or publish it.
 
 ## Files and prerequisites
 
-Claude Code, ChatGPT, and Pi are supported. `git` and `gh` are required; the default lookup needs access to the repository's issues. The package installs no project output file or configuration.
+Claude Code, ChatGPT, and Pi are supported. `git` and `gh` are required. The default lookup needs access to the repository's issues. The package installs no project output file or configuration.
 
 ## Example
 
-`/breakdown-help-wanted-issue #42` explores that issue with you. If the default lookup finds no issue, provide the request directly.
+`/breakdown-help-wanted-issue #42` explores that issue with you.
+
+If the default lookup finds no issue, provide the request directly.
 
 ## Pi usage
 
-Use `/skill:breakdown-help-wanted-issue [request]`. The shared clarification workflow is unchanged. Looking up the oldest help-wanted issue requires authenticated `gh`; Pi itself supplies no GitHub authentication.
+Use `/skill:breakdown-help-wanted-issue [request]`. The shared clarification workflow is unchanged. Looking up the oldest help-wanted issue requires authenticated `gh`. Pi itself supplies no GitHub authentication.

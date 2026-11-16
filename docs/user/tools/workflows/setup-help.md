@@ -1,6 +1,8 @@
 # Setup help
 
-Platforms: **Claude Code, ChatGPT, Pi**. Install with `harness install setup-help`; see [installation and scope](../../getting-started.md).
+Platforms: **Claude Code, ChatGPT, Pi**.
+
+Install with `harness install setup-help`. See [installation and scope](../../getting-started.md).
 
 ## When to use
 
@@ -12,11 +14,13 @@ Use `/setup-help [what to set up]` in Claude Code or `$setup-help [what to set u
 
 ## What happens
 
-The agent builds a complete checklist from your outline, project docs, the current screen, and prerequisites. Every reply gives one coherent current step with the values needed to complete it, followed by a divider and a short numbered “Still remaining” list. When you finish a step, the next moves into focus. New requirements are added to the checklist as they are discovered; the visible remainder never exceeds eight headline items.
+The agent builds a complete checklist from your outline, project docs, the current screen, and prerequisites. Every reply gives one coherent current step with the values needed to complete it, followed by a divider and a short numbered “Still remaining” list. When you finish a step, the next moves into focus. New requirements are added to the checklist as they are discovered.
+
+The visible remainder never exceeds eight headline items.
 
 ## Files and prerequisites
 
-Claude Code, ChatGPT, and Pi are supported. The package installs a skill only. Actual commands, files, accounts, and prerequisites depend on the setup task; no fixed project configuration is added by this package.
+Claude Code, ChatGPT, and Pi are supported. The package installs a skill only. Actual commands, files, accounts, and prerequisites depend on the setup task. No fixed project configuration is added by this package.
 
 ## Example
 

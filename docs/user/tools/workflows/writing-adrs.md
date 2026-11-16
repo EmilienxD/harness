@@ -1,6 +1,8 @@
 # Writing ADRs
 
-Platforms: **Claude Code, ChatGPT, Pi**. Install with `harness install writing-adrs`; see [installation and scope](../../getting-started.md).
+Platforms: **Claude Code, ChatGPT, Pi**.
+
+Install with `harness install writing-adrs`. See [installation and scope](../../getting-started.md).
 
 ## When to use
 
@@ -8,11 +10,13 @@ Use `writing-adrs` when a task creates an architectural decision record or chang
 
 ## Invocation
 
-Use `/writing-adrs [decision or ADR path]` in Claude Code or `$writing-adrs` in ChatGPT. Provide the agreed behavior, values, limits, and trade-offs; the skill does not make unsettled product decisions on its own.
+Use `/writing-adrs [decision or ADR path]` in Claude Code or `$writing-adrs` in ChatGPT. Provide the agreed behavior, values, limits, and trade-offs. The skill does not make unsettled product decisions on its own.
 
 ## What happens
 
-The agent writes a concise decision contract: the decision first, exact values and rules, accepted trade-offs, and references to related ADRs. It avoids implementation identifiers, file paths within the ADR body, and verification claims. When an agreed decision changes or reverses, the agent updates its existing ADR in place, removes outdated rules, and updates affected related ADRs and index entries. A distinct new decision gets a new numbered ADR.
+The agent writes a concise decision contract: the decision first, exact values and rules, accepted trade-offs, and references to related ADRs. It avoids implementation identifiers, file paths within the ADR body, and verification claims.
+
+When an agreed decision changes or reverses, the agent updates its existing ADR in place, removes outdated rules, and updates affected related ADRs and index entries. A distinct new decision gets a new numbered ADR.
 
 ## Files and prerequisites
 
@@ -24,4 +28,4 @@ Ask the agent to “use writing-adrs to record our agreed cache expiry policy”
 
 ## Pi usage
 
-Use `/skill:writing-adrs [decision]`. The shared durable decision-document rules apply unchanged; update an existing decision record in place when appropriate.
+Use `/skill:writing-adrs [decision]`. The shared durable decision-document rules apply unchanged. Update an existing decision record in place when appropriate.

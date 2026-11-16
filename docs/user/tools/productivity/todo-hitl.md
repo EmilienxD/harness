@@ -1,6 +1,8 @@
 # TODO(HITL)
 
-Platforms: **Claude Code, ChatGPT, Pi**. Install with `harness install todo-hitl`; see [installation and scope](../../getting-started.md).
+Platforms: **Claude Code, ChatGPT, Pi**.
+
+Install with `harness install todo-hitl`. See [installation and scope](../../getting-started.md).
 
 ## Use it
 

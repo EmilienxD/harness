@@ -1,65 +1,23 @@
 # Aboard
 
-Platforms: **Claude Code, ChatGPT, Pi**. Install with `harness install aboard`; see [installation and scope](../../getting-started.md).
+Platforms: **Claude Code, ChatGPT, Pi**.
 
-`aboard` installs the Aboard VS Code extension for Claude Code, ChatGPT, and Pi. It opens attended sessions and Auto Run workers in visible terminals, tracks live work in **Agent Fleet**, and keeps completed work in **Recent Activity**. Background agents have read-only progress views.
+Install with `harness install aboard`. See [Get started](../../getting-started.md) for provider and scope options.
 
-Select `aboard` in the Harness catalogue or run `harness install aboard`. Harness verifies and installs a pinned VSIX plus required worker assets. The coupled `auto` bridge is installed with Aboard; `issue-readers` is a reusable dependency. Initialize a project once in VS Code, then choose **Run Agent**, **Run Claude Code**, or **Run Codex** in the Aboard panel.
+## When to use it
 
-Use `harness --local <harness-checkout> install aboard` to build and install the checkout's extension version. Local upgrades also rebuild when Aboard's build inputs change without a version bump. See [local installation behavior](../../configuration.md#installation-roots-and-ownership) for build requirements and source ownership.
+Manage agent conversations from VS Code. Inspect visible terminals and return to earlier work. Process a queue of labeled GitHub issues with Auto Run.
 
-Project launch settings live in `.harness/config.json`; `{ "version": 1 }` is valid and omitted values use defaults. Aboard project settings live in `.abd/settings.json`, with `aboard.*` VS Code settings supplying user or profile defaults. New launches read current launch settings; existing terminals retain theirs.
+## Start a session
 
-Auto Run forecasts a queue of labelled GitHub issues. Review the panel forecast or run `/auto --dry` in an Aboard-launched Claude session (`$auto --dry` in ChatGPT). Start from the panel or use `/auto` (`$auto` in ChatGPT). Aboard coordinates issue branches and a RUN branch, with visible workers and recoverable state. Its final pull request remains open for review unless configured automatic merging succeeds. The [Aboard README](https://github.com/EmilienxD/harness/blob/main/apps/aboard/README.md) has the full settings reference for repository collaborators.
+Install Aboard and reload VS Code. Open your project and initialize it in the Aboard panel. Choose **Run Agent**, **Run Claude Code**, or **Run Codex**. Use **Agent Fleet** to inspect active work and **Recent Activity** for completed work. Select a background agent or run **Aboard: Watch Background Agent** to read its progress.
 
-## When to install it
+## Use Auto Run
 
-Choose Aboard when you want provider sessions in VS Code terminals you can inspect and resume, or when you want to process labelled issues through Auto Run. Select a background agent in the Fleet, or run **Aboard: Watch Background Agent**, for read-only live progress.
+Review the issue forecast in the panel before starting. Use `/auto --dry` in an Aboard-launched Claude Code session or `$auto --dry` in ChatGPT to preview the queue. Start from the panel or use `/auto` or `$auto`. AFK mode accepts a successful worker result with one clean commit. HITL mode waits for you to accept work by creating one nonempty commit with a clean working tree.
 
-## Configure launches
+Review the final pull request before merging unless you have deliberately enabled automatic merging. Interrupted runs retain recovery state.
 
-The following `.harness/config.json` selects the default Auto Run provider and gives Claude's Auto Run exploration a separate command:
+## Practical limits
 
-```json
-{
-  "version": 1,
-  "autoRun": { "provider": "claude" },
-  "providers": {
-    "claude": {
-      "autoRun": {
-        "explore": { "command": ["clauder", "run", "kiro"] }
-      }
-    }
-  }
-}
-```
-
-Manual delegation uses the `providers.<provider>.delegations.general` profile, with an optional explicitly requested child skill. Auto Run workers use separate `explore`, `address`, and `review` keys under `providers.<provider>.autoRun`. The configured command must exist. Optional `.abd/session-setup.ps1` and `.abd/session-setup.sh` scripts prepare worktree checkouts.
-
-## Auto Run choices and limits
-
-AFK mode accepts a successful worker result with one clean descendant commit. HITL mode waits for you to accept by creating exactly one nonempty commit with a clean checkout. Aboard owns branch changes, publication, and integration. A stopped or interrupted run retains recovery state; a normal HITL acceptance commit advances without manual resume.
-
-Set `aboard.sessions.interactiveResumeMode` to `reuse-terminal` in VS Code settings to submit a continuation into a matching live interactive child terminal. Its default is `fork`; if the terminal cannot be reused, Aboard uses the fork or reopen flow. Exploration is read-only and headless and cannot be taken over or resumed.
-
-## Sub-Agent execution hosting (checkout)
-
-Aboard implements the Sub-Agent runtime's neutral execution-host protocol. Initialized windows
-publish delegation-only records in `~/.harness/backends/endpoints/` in addition to their existing
-command endpoint records. Hosted agents receive `HARNESS_BRIDGE_PORT` and
-`HARNESS_BRIDGE_TOKEN`; Aboard's own lifecycle credentials remain separate environment keys.
-The existing delegation route, fleet placement, fork/reopen and live-terminal continuation behavior
-are retained. Reset and deactivation withdraw both records. Wrappers report process facts through
-the runtime's public `execution_host` API rather than accessing its database.
-
-This is checkout behavior requiring the 3.1.0 runtime and a coordinated extension release; the
-catalogue's existing immutable pins have not been updated. Auto Run's engine, restrictions and
-acceptance rules are unchanged.
-
-## Pi sessions and restrictions
-
-The catalogue's Aboard 0.3.16 pin ships native Pi launch/configuration, session lookup/resume, preflight, lifecycle and skill adapters, UI/provider choices, managed extension assets and worktree setup. Use `--platform pi` when installing the Pi assets. Visible terminal sessions, leases, authenticated bridge messages and prompt receipts retain the same product contract. Fresh sessions let Pi assign their IDs and bind the observed startup identity; resume/fork validate explicit saved identity. Session replacement ends the old binding before the new one is attached.
-
-In the checkout implementation, restricted Pi launches explicitly load Aboard's guard, disable discovered extensions, MCP and prompt templates, and select allowed tools. Exploration uses read-only tools, with the guard also checking nested calls. The Pi adapter's `requireEnforceableRestrictions` accepts restrictions without a separate coverage-admission check. Pi still runs with the operating-system user's permissions; trusted extension I/O remains outside tool guards. Worktrees supply an assigned working directory and per-turn guidance, not filesystem isolation.
-
-Auto Run keeps its existing acceptance-commit contract and Git permissions. A zero JSON process exit or accepted RPC prompt is insufficient completion evidence: settlement, final message status and abort/error outcomes matter. The full application navigation and verification commands live in the [Aboard README](https://github.com/EmilienxD/harness/blob/main/apps/aboard/README.md).
+Install and authenticate the providers you want to launch. Use [Configuration](../../configuration.md#agent-launches) for provider and launch defaults. A working directory and tool restrictions do not provide operating-system isolation.

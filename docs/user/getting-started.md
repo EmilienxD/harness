@@ -1,26 +1,71 @@
 # Get started
 
-The Harness source repository is currently private, so these Git-based commands require repository access. Install [uv](https://docs.astral.sh/uv/getting-started/installation/) and launch the catalogue from the directory where you want project-level tools:
+Harness lets you choose the tools you want for Claude Code, ChatGPT, and Pi. Install them for one project or make them available across all your projects.
+
+## Before you start
+
+Install [uv](https://docs.astral.sh/uv/getting-started/installation/), then install and sign in to the agent you want to use. The source repository is currently private, so you also need repository access.
+
+## Choose your tools
+
+Open a terminal in the project where you want to use Harness and launch the interactive catalogue:
 
 ```bash
 uvx --from "git+https://github.com/EmilienxD/harness" harness
 ```
 
-Choose Claude Code, ChatGPT, Pi, or a combination; choose project or user scope; then select the tools you want. Harness shows its plan before changing files. Rerun the catalogue to add or remove selections. Restart a provider after installing hooks so it loads their registration. For Pi extensions, restart or run `/reload` and approve the project resources when Pi asks for trust. Pi itself is an external prerequisite.
+1. Choose your agent or agents.
+2. Choose project scope for this repository or user scope for all your projects.
+3. Select the tools you want and review the installation plan before applying it.
+4. Restart your agent. In Pi, restart or run `/reload` and approve project resources when asked.
 
-For scripts, the installer has separate commands:
+Each tool is independently selectable. You can reopen the catalogue whenever you want to change your selection.
+
+## Install from the command line
+
+The guides use `harness` as shorthand. If the command is not installed, prefix it with `uvx --from "git+https://github.com/EmilienxD/harness"`. For example:
+
+```bash
+uvx --from "git+https://github.com/EmilienxD/harness" harness install grill-me-in-cloud --platform pi
+```
+
+Use these options to control the installation:
+
+| Option | Purpose |
+| --- | --- |
+| `--platform claude`, `--platform chatgpt`, or `--platform pi` | Choose one agent |
+| `--scope user` | Install across your projects |
+| `--root <path>` | Choose another project |
+| `--dry-run` | Preview changes without applying them |
+
+Without a platform option, installer commands select Claude Code and ChatGPT. Check the tool guide for supported agents and any extra prerequisites.
+
+## Use a tool
+
+Skill commands depend on your agent:
+
+| Agent | Invocation |
+| --- | --- |
+| Claude Code | `/tool-name` |
+| ChatGPT | `$tool-name` |
+| Pi | `/skill:tool-name` |
+
+Some tools provide shorter commands or work automatically. Follow their individual guides.
+
+## What to try first
+
+- [Grill me in cloud](tools/workflows/grill-me-in-cloud.md) for visual design interviews on your private board.
+- [Grill me](tools/workflows/grill-me.md) for a design interview entirely in the conversation.
+- [Subagents](tools/productivity/subagents.md) for delegating work to persistent agent conversations.
+- [Aboard](tools/extensions/aboard.md) for managing agent sessions in VS Code.
+
+## Manage your selection
 
 ```bash
 harness list
-harness info subagents
-harness install subagents --dry-run
-harness install subagents
+harness info grill-me-in-cloud
 harness upgrade
-harness uninstall subagents
+harness uninstall grill-me-in-cloud
 ```
 
-If you run Harness through `uvx` without installing its CLI, prefix each command with `uvx --from "git+https://github.com/EmilienxD/harness"`. Installer commands default to the current project, Claude Code and ChatGPT. Pi is opt-in: use `--platform pi`. Use `--platform claude` or `--platform chatgpt` for another single target, `--scope user` for user installation, and `--root <path>` to choose a project. `--dry-run` previews a change. `--json` gives installer commands machine-readable output. A tool's guide lists its actual supported platforms; selecting a provider does not make every package available for it.
-
-The installed tools expose their own names. Invoke a skill as `/skill-name` in Claude Code, `$skill-name` in ChatGPT, or `/skill:name arguments` in Pi. Pi appends arguments to the request; Claude's argument substitutions, fork semantics and tool permissions are not implied. Explicit-only skills retain `disable-model-invocation: true`; Pi's `enableSkillCommands` setting controls interactive discovery rather than authorization. Deterministic commands such as `/commit` have native handlers on Pi; their tool guides specify accepted spellings and options. The persistent-session CLI commands `run`, `ask`, `reply`, `resume`, and `watch` serve the [subagents](tools/productivity/subagents.md) workflow; they are separate from catalogue installation.
-
-Next, use [Configuration](configuration.md) to identify files you can edit, or browse the [tool guides](index.md) to choose a package.
+Use the same platform and scope when updating or removing an installation. See [Configuration](configuration.md) for connection settings and guard policies.

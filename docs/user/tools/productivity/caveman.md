@@ -1,6 +1,8 @@
 # Caveman
 
-Platforms: **Claude Code, ChatGPT, Pi**. Install with `harness install caveman`; see [installation and scope](../../getting-started.md).
+Platforms: **Claude Code, ChatGPT, Pi**.
+
+Install with `harness install caveman`. See [installation and scope](../../getting-started.md).
 
 ## Use it
 
@@ -12,8 +14,10 @@ The style persists across subsequent replies. Say “stop caveman” or “norma
 
 ## Practical note
 
-The skill shortens filler, articles, and pleasantries, and may use fragments, abbreviations, and arrows. It does not alter code blocks or quoted errors. If a terse explanation is hard to follow, ask for clarification; the skill permits a clearer answer before returning to the compressed style.
+The skill shortens filler, articles, and pleasantries, and may use fragments, abbreviations, and arrows. It does not alter code blocks or quoted errors.
+
+If a terse explanation is hard to follow, ask for clarification. The skill permits a clearer answer before returning to the compressed style.
 
 ## Pi usage
 
-Use `/skill:caveman`. The shared response-style skill is installed at project and user scope. Discovery and invocation checks do not establish a token-savings percentage, and persistence remains instruction-driven through compaction.
+Use `/skill:caveman`. The shared response-style skill is installed at project and user scope.

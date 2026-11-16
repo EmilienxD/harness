@@ -1,6 +1,8 @@
 # Read all ADRs
 
-Platforms: **Claude Code, ChatGPT, Pi**. Install with `harness install read-all-adrs`; see [installation and scope](../../getting-started.md).
+Platforms: **Claude Code, ChatGPT, Pi**.
+
+Install with `harness install read-all-adrs`. See [installation and scope](../../getting-started.md).
 
 ## When to use
 
@@ -8,7 +10,7 @@ Use `read-all-adrs` when the current task needs every recorded architectural dec
 
 ## Invocation
 
-Use `/read-all-adrs [focus]` in Claude Code or `$read-all-adrs [focus]` in ChatGPT. The focus gives context for the later discussion; it does not narrow which ADR files are read.
+Use `/read-all-adrs [focus]` in Claude Code or `$read-all-adrs [focus]` in ChatGPT. The focus gives context for the later discussion. It does not narrow which ADR files are read.
 
 ## What happens
 
@@ -24,4 +26,4 @@ Claude Code, ChatGPT, and Pi are supported. The project needs its ADRs under `do
 
 ## Pi usage
 
-Use `/skill:read-all-adrs`. Read every Markdown ADR completely. Large inventories still require enough model context; report any coverage limit rather than claiming an exhaustive read.
+Use `/skill:read-all-adrs`. Read every Markdown ADR completely. Large inventories still require enough model context. Report any coverage limit rather than claiming an exhaustive read.

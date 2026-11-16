@@ -1,6 +1,8 @@
 # Handoff grilling
 
-Platforms: **Claude Code, ChatGPT, Pi**. Install with `harness install handoff-grilling`; see [installation and scope](../../getting-started.md).
+Platforms: **Claude Code, ChatGPT, Pi**.
+
+Install with `harness install handoff-grilling`. See [installation and scope](../../getting-started.md).
 
 ## Use it
 

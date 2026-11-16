@@ -1,6 +1,6 @@
 # Productivity tools
 
-Install a package from the Harness catalogue, or run `harness install <package>` from the project directory. Claude Code invokes a skill as `/skill-name`; ChatGPT uses `$skill-name`; Pi uses `/skill:name`. The table lists every active productivity package across providers.
+Install a package from the Harness catalogue, or run `harness install <package>` from the project directory. Claude Code invokes a skill as `/skill-name`. ChatGPT uses `$skill-name`. Pi uses `/skill:name`. The table lists every active productivity package across providers.
 
 | Package | Platforms | Purpose |
 | --- | --- | --- |
@@ -36,4 +36,4 @@ Install a package from the Harness catalogue, or run `harness install <package>`
 | [`writing-for-agents`](productivity/writing-for-agents.md) | Claude Code, ChatGPT, Pi | Guidance for writing predictable documents consumed by agents |
 | [`zoom-out`](productivity/zoom-out.md) | Claude Code, ChatGPT, Pi | Gives a higher-level map of a codebase area |
 
-Open a tool guide for invocation, configuration, platform differences and verification limits. Install with `--platform pi` to select Pi; omitted platforms retain the Claude Code/ChatGPT defaults. Persistent launch and reply commands belong to [subagents](productivity/subagents.md), while shared installation roots and ownership are documented in [Configuration](../configuration.md).
+Open a tool guide for invocation, configuration, platform differences and practical limits. Install with `--platform pi` to select Pi. Omitted platforms retain the Claude Code/ChatGPT defaults. Persistent launch and reply commands belong to [subagents](productivity/subagents.md), while shared installation roots and ownership are documented in [Configuration](../configuration.md).

@@ -1,6 +1,8 @@
 # Audit
 
-Platforms: **Claude Code, ChatGPT, Pi**. Install with `harness install audit`; see [installation and scope](../../getting-started.md).
+Platforms: **Claude Code, ChatGPT, Pi**.
+
+Install with `harness install audit`. See [installation and scope](../../getting-started.md).
 
 ## When to use
 
@@ -8,7 +10,7 @@ Use `audit` for a read-only assessment of a codebase or selected path. It suppor
 
 ## Invocation
 
-Use `/audit [scope] [type] [agents=N] [focus]` in Claude Code or `$audit` with the same details in ChatGPT. An existing path limits scope; otherwise it uses the current codebase. `agents=none` requests a solo audit, while `agents=N` requests exactly N explorers.
+Use `/audit [scope] [type] [agents=N] [focus]` in Claude Code or `$audit` with the same details in ChatGPT. An existing path limits scope. Otherwise it uses the current codebase. `agents=none` requests a solo audit, while `agents=N` requests exactly N explorers.
 
 ## What happens
 
@@ -24,4 +26,4 @@ Claude Code, ChatGPT, and Pi are supported. The skill installs no project config
 
 ## Pi usage
 
-Use `/skill:audit [scope] [type] [agents=N] [focus]`. The read-only single-session workflow uses the shared skill. Explorer delegation requires available delegation tools; install [subagents](../productivity/subagents.md) when using Harness persistent explorers. Discovery tests do not certify unscripted audit judgments.
+Use `/skill:audit [scope] [type] [agents=N] [focus]`. The read-only single-session workflow uses the shared skill. Explorer delegation requires available delegation tools. Install [subagents](../productivity/subagents.md) when using Harness persistent explorers. Discovery tests do not certify unscripted audit judgments.

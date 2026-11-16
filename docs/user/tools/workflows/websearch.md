@@ -1,6 +1,8 @@
 # Websearch
 
-Platforms: **Claude Code, ChatGPT, Pi**. Install with `harness install websearch`; see [installation and scope](../../getting-started.md).
+Platforms: **Claude Code, ChatGPT, Pi**.
+
+Install with `harness install websearch`. See [installation and scope](../../getting-started.md).
 
 ## When to use
 
@@ -8,7 +10,7 @@ Use `websearch` when you need current external documentation or a source-backed 
 
 ## Invocation
 
-Use `/websearch [question]` in Claude Code or `$websearch [question]` in ChatGPT. You can name preferred search tools; otherwise the skill defaults to the Context7 CLI for library documentation, supplemented by available web search and page-fetching tools.
+Use `/websearch [question]` in Claude Code or `$websearch [question]` in ChatGPT. You can name preferred search tools. Otherwise the skill defaults to the Context7 CLI for library documentation, supplemented by available web search and page-fetching tools.
 
 ## What happens
 
@@ -16,7 +18,9 @@ Before searching, the agent reads the installed source index. It checks relevant
 
 ## Files and prerequisites
 
-Claude Code, ChatGPT, and Pi are supported. The package installs a user-editable starter index at `.harness/websearch/INDEX.md` for project installs or `~/.harness/websearch/INDEX.md` for user installs. All providers share these paths. Research uses the project index when present and otherwise the home index, and saves sources back to the selected index. Fresh research needs network access and a working search tool; the default Context7 commands run through `npx`. Source code stays unchanged.
+Claude Code, ChatGPT, and Pi are supported. The package installs a user-editable starter index at `.harness/websearch/INDEX.md` for project installs or `~/.harness/websearch/INDEX.md` for user installs. All providers share these paths. Research uses the project index when present and otherwise the home index, and saves sources back to the selected index. Fresh research needs network access and a working search tool.
+
+The default Context7 commands run through `npx`. Source code stays unchanged.
 
 ## Example
 

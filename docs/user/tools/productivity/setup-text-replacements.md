@@ -1,18 +1,22 @@
 # Setup text replacements
 
-Platforms: **Claude Code, ChatGPT, Pi**. Install with `harness install setup-text-replacements`; see [installation and scope](../../getting-started.md).
+Platforms: **Claude Code, ChatGPT, Pi**.
+
+Install with `harness install setup-text-replacements`. See [installation and scope](../../getting-started.md).
 
 ## Use it
 
-On Windows with AutoHotkey installed, invoke `/setup-text-replacements` in Claude Code or `$setup-text-replacements` in ChatGPT with a trigger and replacement, for example `$setup-text-replacements expand ;sig to my signature`.
+On Windows with AutoHotkey installed, invoke `/setup-text-replacements` in Claude Code or `$setup-text-replacements` in ChatGPT with a trigger and replacement, for example `$setup-text-replacements expand . sig to my signature`.
 
 ## What happens
 
-The skill first verifies Windows and AutoHotkey are available, then edits `A_Startup\CodingHotstrings.ahk`, the per-user AutoHotkey startup script. An ordinary replacement uses `:*:trigger::replacement`, so expansion happens immediately after the last trigger character. Existing entries are preserved; if a trigger already exists, the agent asks before replacing it. The agent uses available shell tools to relaunch the script after editing and reports if the reload could not be completed.
+The skill first verifies Windows and AutoHotkey are available, then edits your per-user AutoHotkey startup script. An ordinary replacement uses `:*:trigger::replacement`, so expansion happens immediately after the last trigger character. Existing entries are preserved.
+
+If a trigger already exists, the agent asks before replacing it. The agent uses available shell tools to relaunch the script after editing and reports if the reload could not be completed.
 
 ## Practical note
 
-Choose a trigger unlikely to appear in ordinary typing; `:*:;sig::My signature` expands as soon as `;sig` is typed. This is a system-wide AutoHotkey replacement, so test it in a text field after the script reloads.
+Choose a trigger unlikely to appear in ordinary typing. `:*:. sig::My signature` expands as soon as `. sig` is typed. This is a system-wide AutoHotkey replacement, so test it in a text field after the script reloads.
 
 ## Pi usage
 

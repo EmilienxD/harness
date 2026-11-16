@@ -648,7 +648,7 @@ older service to verify rejection before inference without publishing remote dat
 
 The actual local service/database/Storage gate passed on Windows with Pi 1.2.0. On 2026-10-14,
 the migration and app were deployed and both live journeys passed against
-`https://grill-me-in-cloud.vercel.app/`, with exactly five fake inference requests per scope.
+an explicitly configured private deployment, with exactly five fake inference requests per scope.
 Each verified the uploaded SVG bytes, queued-only answer effects, one persisted correlated
 user message, confirmed server delivery, reload/fork/tree isolation and owned test cleanup.
 These headless checks do not certify browser rendering, Pi TUI behavior or unscripted model

@@ -1,6 +1,8 @@
 # Next decision
 
-Platforms: **Claude Code, ChatGPT, Pi**. Install with `harness install next-decision`; see [installation and scope](../../getting-started.md).
+Platforms: **Claude Code, ChatGPT, Pi**.
+
+Install with `harness install next-decision`. See [installation and scope](../../getting-started.md).
 
 ## Use it
 
@@ -12,7 +14,7 @@ Each round selects the most important open choice whose prerequisites are settle
 
 ## Practical note
 
-Point the agent to an existing plan file when you want answers recorded there. You can accept the recommendation or choose another option; the skill then moves to the next ready decision. Facts the agent can establish from available context are resolved before asking you to decide.
+Point the agent to an existing plan file when you want answers recorded there. You can accept the recommendation or choose another option. The skill then moves to the next ready decision. Facts the agent can establish from available context are resolved before asking you to decide.
 
 ## Pi usage
 

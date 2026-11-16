@@ -1,6 +1,6 @@
 # Planning, building, and shipping workflows
 
-Install any package below from the Harness catalogue, or run `harness install <package-name>` from your project. Invoke skills as `/skill-name` in Claude Code, `$skill-name` in ChatGPT, or `/skill:name` in Pi. Deterministic commands such as `commit` use hooks or native extension commands; their tool guides list supported forms. Restart after installing hooks, or restart/reload Pi extensions.
+Install any package below from the Harness catalogue, or run `harness install <package-name>` from your project. Invoke skills as `/skill-name` in Claude Code, `$skill-name` in ChatGPT, or `/skill:name` in Pi. Deterministic commands such as `commit` use hooks or native extension commands. Their tool guides list supported forms. Restart after installing hooks, or restart/reload Pi extensions.
 
 | Package | Platforms | Purpose |
 | --- | --- | --- |
