@@ -61,7 +61,7 @@ Configure launches in project `.harness/config.json` or user `~/.harness/config.
 }
 ```
 
-The shared file's `autoRun` settings belong to Aboard and are ignored by this runtime. `harness run` requires an explicit `--provider`. Provider entries can set a `command` and a `delegations.general` profile. This profile accepts `model` and `effort`; `"inherit"` uses native settings. Claude accepts full model IDs such as `claude-opus-5-5` as well as the native `opus`, `sonnet`, and `haiku` aliases. Claude can also set `deniedTools`. Explicit launch overrides take precedence. Skills do not select profiles. `session.stopWaitHours` sets an optional nonnegative wait for an outstanding reply. Both parent-reply and implementer waits read configuration from the saved session start directory, even when later hook events report a child working directory. Ancestor configuration is not searched. The 3.1.5 checkout (runtime 3.1.5) includes this correction; remote installations still require a newly published runtime pin. Session requests and logs live under `~/.harness/runtime/`; set `HARNESS_STATE_DIR` to change the Harness state root. If inbox activation fails, check that the updated runtime and the package's provider hook or extension are installed and active.
+The shared file's `autoRun` settings belong to Aboard and are ignored by this runtime. `harness run` requires an explicit `--provider`. Provider entries can set a `command` and a `delegations.general` profile. This profile accepts `model` and `effort`; `"inherit"` uses native settings. Claude accepts full model IDs such as `claude-opus-5-5` as well as the native `opus`, `sonnet`, and `haiku` aliases. Claude can also set `deniedTools`. Explicit launch overrides take precedence. Skills do not select profiles. `session.stopWaitHours` sets an optional nonnegative wait for an outstanding reply. Both parent-reply and implementer waits read configuration from the saved session start directory, even when later hook events report a child working directory. Ancestor configuration is not searched. Runtime 3.1.5 includes this correction; package 3.1.11's runtime 3.1.10 pin includes it for remote installations. Session requests and logs live under `~/.harness/runtime/`; set `HARNESS_STATE_DIR` to change the Harness state root. If inbox activation fails, check that the updated runtime and the package's provider hook or extension are installed and active.
 
 ## Implementation and verification
 
@@ -72,8 +72,9 @@ birth checks to cancel verified dead children and release the parent without a c
 Live or unverifiable executions remain pending. Windows real-CLI regressions for Claude Code
 and Codex kill only the child after the parent has entered its Stop wait; they require parent
 completion within 15 seconds, an acknowledged cancellation with no reply, an empty inbox, and
-exactly six fake inference requests. These are checkout-runtime checks; the published source
-pin still needs updating when this runtime is released.
+exactly six fake inference requests. These are checkout-runtime checks; package 3.1.11 now
+includes this runtime in its immutable source pin. See the shipped-pin Pi checks below for
+separate remote-install acceptance.
 
 The 3.1.7 checkout removes the previous Aboard agent handle as a resume prerequisite.
 The runtime sends the stable Harness child and native conversation identities, retaining the
@@ -108,13 +109,17 @@ without the old host's storage while inherited credentials point elsewhere. Nati
 also runs in a multi-root workspace. Real Claude/Codex journeys cover root overrides, interactive/auto
 continuation and recovery. Full cross-window native-provider acceptance remains a release gate.
 
-The manifest's published runtime source pin still predates the toolkit's `--enable-inbox` command;
-shipped-pin Pi acceptance consequently fails inbox activation/child startup. Checkout-runtime tests
-are reported separately, not substituted for that release check. Publishing this checkout and updating
-the immutable source pin are required before calling this behavior shipped. Windows checkout validation
-passes all eight Claude/Codex delegation journeys and seven focused Pi checkout-runtime journeys
-(including full-stack auto/interactive, unrelated-root and busy-parent delivery). These results do not
-certify the incompatible shipped pin or the GitHub-backed full Aboard acceptance matrix.
+Catalogue package 3.1.11 pins runtime 3.1.10 at immutable revision
+`383e3c05e5ac182b001fd6d670f6cadb7e6e93d5`, replacing the older runtime that failed
+`--enable-inbox`. Windows shipped-pin acceptance passes the real Pi headless-parent auto-child
+journey, zero-inference interactive child reply and parent wakeup, and full-stack cloud interviews
+in both auto and interactive modes. These checks use isolated installed runtimes and fake inference,
+not checkout-runtime substitution. Aboard's VSIX pin remains 0.3.13 pending publication of 0.3.16;
+these results do not certify that older extension or the GitHub-backed full Aboard acceptance matrix.
+
+Older version-specific verification notes below describe the pins and acceptance limits at the time
+of those checks. Statements there about an unchanged runtime pin do not apply to package 3.1.11.
+The updated runtime also includes the 3.1.5 parent-wait correction and subsequent recovery fixes.
 
 `subagents` 2.10.0 (runtime 2.10.0) adds Pi as a provider of the existing Python runtime rather
 than a second orchestrator. Requests, executions, process supervision, delivery claims and replay

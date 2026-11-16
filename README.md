@@ -831,8 +831,9 @@ use the GitHub commits pinned in the manifests. `--no-cache` rebuilds the instal
 from the current checkout; local runtime installations also bypass the build cache.
 Host tools are installed for your user even when the selected scope is Project.
 Aboard builds from `apps/aboard` with `--local`; see its README for extension development.
-The task-free subagent requests require `--local` until a release refreshes the
-`subagents` runtime Git pin to include this runtime.
+The `subagents` 3.1.11 catalogue pins runtime 3.1.10 at immutable revision
+`383e3c05e5ac182b001fd6d670f6cadb7e6e93d5`; task-free requests no longer require
+`--local`. Aboard's published VSIX remains a separate release dependency.
 
 The shared deterministic E2E core uses the real Claude Code, ChatGPT, and Pi CLIs and replaces only model inference with an authenticated loopback endpoint. Tool journeys live under `tests/e2e/`; Aboard-specific journeys stay under `apps/aboard/test/e2e/`.
 
@@ -844,7 +845,8 @@ for staging real tool payloads, session control, diagnostics, and cleanup. Share
 use the real catalogue installation of `flush-out-useless-tests`.
 Persistent subagent journeys cover automatic and interactive delegation, durable replies, and
 continuation; the [subagents guide](docs/user/tools/productivity/subagents.md#implementation-and-verification)
-distinguishes checkout-runtime acceptance from the unchanged remote runtime pin.
+distinguishes checkout-runtime acceptance, the updated remote runtime pin, and the separate
+Aboard release limits.
 
 ```bash
 cd tests/e2e
