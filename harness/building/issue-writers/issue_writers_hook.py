@@ -139,6 +139,12 @@ def main(argv: list[str] | None = None) -> None:
     if callable(reconfigure):
         reconfigure(encoding="utf-8", errors="strict")
     payload = json.load(sys.stdin)
+    if payload.get("hook_event_name") == "Stop":
+        cwd = Path(str(payload.get("cwd") or ".")).resolve()
+        session_id = core.provider_session_id(provider, str(payload.get("session_id") or ""))
+        core.snapshot_drafts(cwd, session_id)
+        json.dump({}, sys.stdout)
+        return
     if provider == CLAUDE and payload.get("hook_event_name") == "SessionStart":
         claude_session_start(payload)
         return

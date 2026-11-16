@@ -1,10 +1,10 @@
 name = "issue-writers"
-version = "2.3.12"
+version = "2.3.13"
 description = "Draft and publish GitHub issues"
 requires = ["git", "gh"]
 docs = "https://github.com/EmilienxD/harness/blob/main/README.md#user-invoked-skills"
 
-dependencies = [{ name = "pi-issue-workflows", version = ">=1.0.3,<2.0.0", lifecycle = "coupled", platforms = ["pi"] }]
+dependencies = [{ name = "pi-issue-workflows", version = ">=1.0.4,<2.0.0", lifecycle = "coupled", platforms = ["pi"] }]
 
 [platforms.pi]
 status = "supported"

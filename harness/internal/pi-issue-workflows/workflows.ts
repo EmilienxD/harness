@@ -20,6 +20,9 @@ export function registerIssueWorkflow(pi: any, packageName: string, skills: stri
     return result;
   };
   const display = (text: string) => pi.sendMessage({ customType: `harness-${packageName}`, content: text, display: true }, { triggerTurn: false });
+  if (publish) pi.on("agent_settled", async (_event: any, ctx: any) => {
+    try { await request("snapshot", "", "", ctx); } catch { /* Missing snapshots report unknown. */ }
+  });
   // Keep the human report in the transcript; the next input receives the compact notice.
   if (publish) pi.on("context", (event: any) => ({
     messages: event.messages.filter((message: any) => message.customType !== `harness-${packageName}`),

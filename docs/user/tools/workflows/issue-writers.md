@@ -22,6 +22,8 @@ ChatGPT uses `CODEX_THREAD_ID`; Pi uses `PI_SESSION_ID`. Claude's SessionStart h
 
 Review and edit the Markdown files directly. The dry-run text lists valid drafts in publication order with their paths, labels, parents and blockers, followed by errors for skipped drafts. References such as `draft 0` identify the `.issue-0.md` filename index, not the displayed publication position. The preview stays local and does not verify GitHub access or permissions.
 
+Publication results tell the agent whether each draft was modified since the drafting turn finished, without describing the edits. Drafts without a saved fingerprint report `unknown`.
+
 Publication automatically creates missing labels declared in each draft before creating its issue. Standard workflow labels retain their predefined styling; new custom labels use a neutral gray color and no description. Existing labels keep their color and description. `--dry` lists the requested labels without creating them.
 
 ## Files and prerequisites
