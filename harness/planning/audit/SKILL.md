@@ -1,6 +1,6 @@
 ---
 name: audit
-description: User-invoked only. Agents must not invoke this skill on their own. Audit a codebase or selected scope and report evidence-backed findings. Use when the user requests a security, architecture, quality, performance, or general code audit.
+description: Developer-invoked only. Agents must not invoke this skill on their own. Audit a codebase or selected scope and report evidence-backed findings. Use when the developer requests a security, architecture, quality, performance, or general code audit.
 argument-hint: "[scope] [type] [agents=N] [focus]"
 license: MIT
 metadata:
@@ -8,20 +8,20 @@ metadata:
 disable-model-invocation: true
 ---
 
-Audit the codebase according to whatever the user said alongside their invocation of this skill.
+Audit the codebase according to whatever the developer said alongside their invocation of this skill.
 
-This is a read-only assessment. Do not edit the codebase unless the user separately asks for fixes.
+This is a read-only assessment. Do not edit the codebase unless the developer separately asks for fixes.
 
 ## Interpret the invocation details
 
-Everything the user wrote alongside the invocation is optional and may appear in any order:
+Everything the developer wrote alongside the invocation is optional and may appear in any order:
 
 - An existing file or directory sets the audit scope. Default to the current codebase. Never audit outside an explicit scope.
 - One of the audit-type keywords below selects its focus. Default to `general`.
 - `agents=N` requests exactly N explorer subagents; `agents=none` or an equivalent natural-language instruction requires you to work alone.
 - Treat everything else as additional focus, constraints, or context.
 
-Explicit user instructions override the defaults and delegation heuristic. If the user names a different audit type, use their description rather than forcing it into a preset.
+Explicit developer instructions override the defaults and delegation heuristic. If the developer names a different audit type, use their description rather than forcing it into a preset.
 
 ## Audit types
 
@@ -65,7 +65,7 @@ Delegate all explorers at once so they run in parallel. Assign each one an exclu
 Each explorer brief must include:
 
 - its exact allowed scope and exclusions;
-- the selected audit-type sentence and any user focus;
+- the selected audit-type sentence and any focus specified by the developer;
 - a requirement to audit only its assigned portion;
 - a request for actionable findings with file-and-line evidence, impact, severity, confidence, remediation difficulty, and a concrete recommendation;
 - a request to state uncertainties and return no finding that it cannot support.
@@ -90,7 +90,7 @@ Do not claim exhaustive coverage, exploitability, measured performance impact, o
 
 ## 5. Present the audit in the end-of-turn message
 
-Write the final audit directly in the conversation. Do not create an audit file unless the user asks for one.
+Write the final audit directly in the conversation. Do not create an audit file unless the developer asks for one.
 
 Use this structure:
 
@@ -98,7 +98,7 @@ Use this structure:
 # Codebase Audit
 
 **Scope:** [audited paths and explicit exclusions]
-**Type:** [audit type and user-supplied focus]
+**Type:** [audit type and developer-supplied focus]
 **Method:** [main-agent-only or number and partitioning of explorers; selective verification performed]
 
 ## Executive summary

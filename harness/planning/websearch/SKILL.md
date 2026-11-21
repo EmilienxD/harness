@@ -1,6 +1,6 @@
 ---
 name: websearch
-description: User-invoked only. Agents must not invoke this skill on their own. Research a question and return a concise, source-backed answer. Use when the user explicitly requests web research.
+description: Developer-invoked only. Agents must not invoke this skill on their own. Research a question and return a concise, source-backed answer. Use when the developer explicitly requests web research.
 argument-hint: "[research question]"
 license: MIT
 metadata:
@@ -8,13 +8,13 @@ metadata:
 disable-model-invocation: true
 ---
 
-Research the user's query and answer it directly in the end turn message. This is a read-only workflow: do not create or edit source code.
+Research the developer's query and answer it directly in the end turn message. This is a read-only workflow: do not create or edit source code.
 
 You may quickly search the codebase when its dependencies, versions, terminology, or implementation details would make the research more accurate.
 
 Before doing any search, read `.harness/websearch/INDEX.md` to get a list of common, known, and validated sources for the project. Without a project index, use `~/.harness/websearch/INDEX.md`. Keep using the selected index for this research. Use any source that is relevant to the task and fetch it.
 
-If the user requests you to use specific search tools, use them. Otherwise, default to the Context7 npx CLI and complete the search with your available web search tools. If web tools are unavailable, report the coverage gap and synthesize only from sources you could access.
+If the developer requests you to use specific search tools, use them. Otherwise, default to the Context7 npx CLI and complete the search with your available web search tools. If web tools are unavailable, report the coverage gap and synthesize only from sources you could access.
 
 How to use the Context7 CLI:
 - Resolve a library name to a Context7 library ID: `npx ctx7@latest library <name> [topic]` where `name` is the library name to search for and `topic` is what to look up in the library's documentation.

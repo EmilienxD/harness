@@ -7,6 +7,13 @@ from harness_cli.cli import main
 from harness_cli.host_actions import PreparedAction
 
 
+@pytest.fixture
+def caveman_version():
+    from harness_cli.manifest import discover
+
+    return discover()["caveman"].version
+
+
 def test_symlink_install_warns_about_git_worktree_checkout(tmp_path, monkeypatch, capsys):
     subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
     monkeypatch.setenv("HARNESS_STATE_DIR", str(tmp_path / "state"))
@@ -372,7 +379,9 @@ def test_failed_switch_from_symlink_to_copy_restores_original_layout(
     assert (tmp_path / "state/receipts.json").read_bytes() == before
 
 
-def test_list_json_reports_installed_catalogue_packages(tmp_path, monkeypatch, capsys):
+def test_list_json_reports_installed_catalogue_packages(
+    tmp_path, monkeypatch, capsys, caveman_version
+):
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("HARNESS_STATE_DIR", str(tmp_path / "state"))
     assert main(["install", "caveman", "--platform", "claude", "--json"]) == 0
@@ -392,13 +401,13 @@ def test_list_json_reports_installed_catalogue_packages(tmp_path, monkeypatch, c
         {
             "name": "caveman",
             "available": True,
-            "version": "1.1.0",
+            "version": caveman_version,
             "description": "Ultra-compressed communication mode (~75% fewer tokens)",
             "category": "productivity",
             "docs": "https://github.com/EmilienxD/harness/blob/main/harness/productivity/caveman/SKILL.md",
             "support": {"claude": {"status": "supported"}},
             "installed": [
-                {"platform": "claude", "version": "1.1.0", "ownership": "selected"}
+                {"platform": "claude", "version": caveman_version, "ownership": "selected"}
             ],
         }
     ]
@@ -417,7 +426,8 @@ def test_list_installed_surfaces_packages_missing_from_the_pinned_catalogue(
     receipts_path = state / "receipts.json"
     receipts = json.loads(receipts_path.read_text(encoding="utf-8"))
     installation = next(iter(receipts["installations"].values()))
-    installation["packages"]["retired-caveman"] = installation["packages"].pop("caveman")
+    retired_package = installation["packages"].pop("caveman")
+    installation["packages"]["retired-caveman"] = retired_package
     receipts_path.write_text(json.dumps(receipts), encoding="utf-8")
 
     assert main(["list", "--installed", "--platform", "claude", "--json"]) == 0
@@ -432,7 +442,7 @@ def test_list_installed_surfaces_packages_missing_from_the_pinned_catalogue(
         "name": "retired-caveman",
         "available": False,
         "installed": [
-            {"platform": "claude", "version": "1.1.0", "ownership": "selected"}
+            {"platform": "claude", "version": retired_package["version"], "ownership": "selected"}
         ],
     }
 
@@ -504,7 +514,9 @@ def test_retained_package_survives_upgrade_and_can_be_uninstalled(tmp_path, monk
     ]
 
 
-def test_upgrade_reconciles_existing_selection_to_current_catalogue(tmp_path, monkeypatch, capsys):
+def test_upgrade_reconciles_existing_selection_to_current_catalogue(
+    tmp_path, monkeypatch, capsys, caveman_version
+):
     monkeypatch.chdir(tmp_path)
     state = tmp_path / "state"
     monkeypatch.setenv("HARNESS_STATE_DIR", str(state))
@@ -521,11 +533,11 @@ def test_upgrade_reconciles_existing_selection_to_current_catalogue(tmp_path, mo
     result = json.loads(capsys.readouterr().out)
     assert result["command"] == "upgrade"
     assert result["results"][0]["changes"] == [
-        {"action": "upgrade", "package": "caveman", "reason": "0.9.0 -> 1.1.0"}
+        {"action": "upgrade", "package": "caveman", "reason": f"0.9.0 -> {caveman_version}"}
     ]
     updated = json.loads(receipts_path.read_text(encoding="utf-8"))
     installation = next(iter(updated["installations"].values()))
-    assert installation["packages"]["caveman"]["version"] == "1.1.0"
+    assert installation["packages"]["caveman"]["version"] == caveman_version
 
 
 def test_json_operational_errors_keep_stdout_machine_readable(capsys):

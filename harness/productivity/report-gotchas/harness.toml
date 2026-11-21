@@ -1,5 +1,5 @@
 name = "report-gotchas"
-version = "2.2.0"
+version = "2.2.1"
 description = "Send noteworthy agent handoff gotchas to Discord"
 docs = "https://github.com/EmilienxD/harness/blob/main/README.md#model-invoked-skills"
 requires = ["python"]

@@ -1,6 +1,6 @@
 ---
 name: setup-command-aliases
-description: User-invoked only. Agents must not invoke this skill on their own. Add or change cross-platform shell command aliases when the user asks for a new alias or shortcut command.
+description: Developer-invoked only. Agents must not invoke this skill on their own. Add or change cross-platform shell command aliases when the developer asks for a new alias or shortcut command.
 argument-hint: "[alias request]"
 license: MIT
 metadata:
@@ -8,7 +8,7 @@ metadata:
 disable-model-invocation: true
 ---
 
-Add or modify command aliases in the user's shell configuration files.
+Add or modify command aliases in the developer's shell configuration files.
 
 ## Platform Detection
 
@@ -50,21 +50,21 @@ alias aliasname='command'
 
 ## Examples
 
-User: "Add alias `ll` for `ls -la`"
+Request: "Add alias `ll` for `ls -la`"
 - PowerShell: `function ll { ls -la $args }`
 - Bash/Zsh: `alias ll='ls -la'`
 
-User: "Add alias `gs` for `git status`"
+Request: "Add alias `gs` for `git status`"
 - PowerShell: `function gs { git status $args }`
 - Bash/Zsh: `alias gs='git status'`
 
-User: "Add alias `dc` for `docker-compose`"
+Request: "Add alias `dc` for `docker-compose`"
 - PowerShell: `function dc { docker-compose $args }`
 - Bash/Zsh: `alias dc='docker-compose'`
 
 ## Multi-platform Requests
 
-When the user asks for "cross-platform" or mentions multiple shells, update all applicable files for their system:
+When the developer asks for "cross-platform" or mentions multiple shells, update all applicable files for their system:
 - On Windows: Update both PowerShell profile and `~/.bashrc` (for Git Bash)
 - On macOS/Linux: Update both `~/.bashrc` and `~/.zshrc` (if both shells are used)
 

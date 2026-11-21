@@ -1,6 +1,6 @@
 ---
 name: address-this
-description: User-invoked only. Agents must not invoke this skill on their own. Implement a pinned request and validate the completed work. Use when the user invokes the address workflow for a supplied target.
+description: Developer-invoked only. Agents must not invoke this skill on their own. Implement a pinned request and validate the completed work. Use when the developer invokes the address workflow for a supplied target.
 argument-hint: "[request or pinned target]"
 license: MIT
 metadata:
@@ -8,7 +8,7 @@ metadata:
 disable-model-invocation: true
 ---
 
-Address whatever the user provides end to end, like a 10x senior engineer in a hurry.
+Address whatever the developer provides end to end, like a 10x senior engineer in a hurry.
 
 Don't assume. Don't hide confusion. Surface. If a missing decision, dependency, caveat, or out-of-scope problem makes a correct and complete solution impossible, report the blocker and its evidence precisely and concisely rather than presenting partial work. If you discover it mid work, stop without reverting your changes.
 

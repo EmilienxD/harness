@@ -1,6 +1,6 @@
 ---
 name: cleanup-git
-description: User-invoked only. Agents must not invoke this skill on their own. Inspect merged local branches and worktrees, then approve cleanup.
+description: Developer-invoked only. Agents must not invoke this skill on their own. Inspect merged local branches and worktrees, then approve cleanup.
 disable-model-invocation: true
 ---
 
@@ -20,7 +20,7 @@ You should have received a **Git cleanup inventory**, describing every local bra
 | --- | --- |
 | Current branch tip is an ancestor of the selected target; no protection or worktree applies | Propose branch deletion. |
 | Commits remain outside the target | Preserve and explain the remaining work. |
-| Squash/rebase merge or cherry-picked changes | Inspect content and PR evidence; preserve unless the user approves the specific rewritten-history case. |
+| Squash/rebase merge or cherry-picked changes | Inspect content and PR evidence; preserve unless the developer approves the specific rewritten-history case. |
 | Merged PR followed by local commits | Preserve the later work. |
 | Open PR, including a draft | Preserve. |
 | Closed PR or deleted remote branch | Require independent merge evidence. |
@@ -41,4 +41,4 @@ You should have received a **Git cleanup inventory**, describing every local bra
 Present every branch/worktree with its proposed action and reason. Explain remaining work and unresolved facts. Propose worktree removal separately from branch deletion.
 
 ### 3. Apply
-Obtain approval for the named cleanup actions unless the user already approved them specifically. Double check the live state; refresh affected facts immediately before each action. Proceed with the cleanup approved following the user decisions, user rules and project rules.
+Obtain approval for the named cleanup actions unless the developer already approved them specifically. Double check the live state; refresh affected facts immediately before each action. Proceed with the cleanup approved following the developer's decisions, user rules and project rules.

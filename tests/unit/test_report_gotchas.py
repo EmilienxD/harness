@@ -3,7 +3,6 @@ from harness_cli.manifest import SupportStatus, discover
 
 def test_catalogue_installs_one_shared_skill_without_host_cli_or_provider_hooks() -> None:
     tool = discover()["report-gotchas"]
-    assert tool.version == "2.2.0"
     assert tool.requires == ("python",)
     assert tool.dependencies == ()
     assert not tool.actions

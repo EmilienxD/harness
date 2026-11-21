@@ -1,5 +1,5 @@
 name = "websearch"
-version = "1.6.0"
+version = "1.6.1"
 description = "Web research with concise answers and a Markdown source index"
 
 [platforms.claude]

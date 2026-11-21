@@ -1,5 +1,5 @@
 name = "grill-me-in-cloud"
-version = "2.8.7"
+version = "2.8.8"
 description = "Publishes visual design interviews to a persistent hosted board"
 docs = "https://github.com/EmilienxD/harness/blob/main/README.md#user-invoked-skills"
 requires = []

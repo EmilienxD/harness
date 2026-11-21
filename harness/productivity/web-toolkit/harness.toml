@@ -1,5 +1,5 @@
 name = "web-toolkit"
-version = "1.5.0"
+version = "1.5.1"
 description = "Skill for local web search and page fetching through the Web Toolkit CLI"
 requires = ["git", "uv"]
 docs = "https://github.com/EmilienxD/harness/blob/main/README.md#web-toolkit"
