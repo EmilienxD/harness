@@ -34,7 +34,7 @@ root: <directory path>    # Optional. Include only when the user explicitly requ
 Include `model` only when the user explicitly requests a particular model for the subagent. Otherwise omit the field and let the runtime apply its general delegation profile and native provider defaults.
 
 Use the requested model's exact ID for the selected provider from this list:
-- ChatGPT/Codex: `gpt-6.1-sol`, `gpt-6-astra`, `gpt-6-sol`, `gpt-6-luna`, `gpt-5.6-sol`, `gpt-5.6-terra`, `gpt-5.6-luna`
+- ChatGPT/Codex: `gpt-6.2-sol`, `gpt-6.2-astra`, `gpt-6.1-sol`, `gpt-6-astra`, `gpt-6-sol`, `gpt-6-luna`, `gpt-5.6-sol`, `gpt-5.6-terra`, `gpt-5.6-luna`
 - Claude: `claude-fable-5-2`, `claude-opus-5-5`, `claude-opus-5`, `claude-sonnet-5-5`, `claude-haiku-5-5`
 - Pi: Any model id from ChatGPT or Claude above, with the prefix `openai/` or `anthropic/` respectively (e.g. `anthropic/claude-opus-5-5`). Use when the user mention Pi.
 
