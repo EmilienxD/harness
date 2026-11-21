@@ -1,6 +1,6 @@
 ---
 name: flush-out-useless-tests
-description: User-invoked only. Agents must not invoke this skill on their own. Audit passing tests in up to 35 test files and propose deletion or rewriting for approval.
+description: Developer-invoked only. Agents must not invoke this skill on their own. Audit passing tests in up to 35 test files and propose deletion or rewriting for approval.
 argument-hint: "[path or module] [focus]"
 license: MIT
 metadata:

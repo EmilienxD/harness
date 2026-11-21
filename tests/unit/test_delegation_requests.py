@@ -230,7 +230,9 @@ def configured_parent(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> str:
     monkeypatch.setattr(sessions, "_command_from_config", lambda _config, _provider="claude": ["claude"])
     from subagents_runtime import processes
     monkeypatch.setattr(processes,"start",lambda execution_id,*args,**kwargs: processes.confirm_startup(execution_id))
-    return sessions.launch(provider="claude", cwd=tmp_path / "project")
+    project = tmp_path / "project"
+    project.mkdir()
+    return sessions.launch(provider="claude", cwd=project)
 
 
 def test_live_grant_processes_three_siblings_independently(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

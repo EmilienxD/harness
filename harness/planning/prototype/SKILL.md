@@ -1,6 +1,6 @@
 ---
 name: prototype
-description: User-invoked only. Agents must not invoke this skill on their own. Build a disposable prototype to answer a design question. Use when the user asks for a prototype, draft or preview.
+description: Developer-invoked only. Agents must not invoke this skill on their own. Build a disposable prototype to answer a design question. Use when the developer asks for a prototype, draft or preview.
 argument-hint: "[design question]"
 license: MIT
 metadata:
@@ -13,7 +13,7 @@ disable-model-invocation: true
 A prototype is **throwaway code that answers a design question**. The question
 decides the shape and the stopping point.
 
-Run this workflow in an interactive conversation where the user can inspect the prototype and give feedback. If the session cannot accept user replies, report that requirement before creating a branch or building the prototype.
+Run this workflow in an interactive conversation where the developer can inspect the prototype and give feedback. If the session cannot accept replies from the developer, report that requirement before creating a branch or building the prototype.
 
 ## Frame the question
 
@@ -23,20 +23,20 @@ Then choose the prototype shape:
 - **Does this logic or state model feel right?** Read [LOGIC.md](LOGIC.md).
 - **What should this interface look and feel like?** Read [UI.md](UI.md).
 
-If the question is ambiguous, ask the user when they are available. Otherwise,
+If the question is ambiguous, ask the developer when they are available. Otherwise,
 infer the shape from the surrounding work and show the assumption in the
 prototype.
 
 ## Set up the prototype
 
-Follow the user's or project's prototype instructions (check `AGENTS.md`,
+Follow the developer's or project's prototype instructions (check `AGENTS.md`,
 `CLAUDE.md`, and contributor docs). Otherwise, use this branch workflow:
 
 Check `git status --short` before starting. If there are staged, unstaged, or
-untracked changes, stop and ask the user to make the working tree clean before
+untracked changes, stop and ask the developer to make the working tree clean before
 you proceed. Once it is clean, choose a descriptive prototype name and create
 and switch to a new `proto/<prototype-name>` branch. Develop the prototype on
-that branch, make sur your prototype edits are not gitignored. Report any inconsistency/contradiction between this rule, the project rules and architecture and the user's request.
+that branch, make sur your prototype edits are not gitignored. Report any inconsistency/contradiction between this rule, the project rules and architecture and the developer's request.
 
 Inspect the repository for domain language, behavior, dimensions, and visual
 conventions.
@@ -46,7 +46,7 @@ conventions.
 1. Write the question and material assumptions into the prototype.
 2. Build the smallest artifact that makes the answer observable.
 3. Run the decisive happy path and edge cases; fix only defects that obscure the answer.
-4. Put the runnable prototype in front of the user and incorporate feedback while it sharpens the same question.
+4. Put the runnable prototype in front of the developer and incorporate feedback while it sharpens the same question.
 5. Stop when the prototype supplies enough evidence for the named decision.
 
 Keep state in memory and use representative fixtures. Make startup obvious: one

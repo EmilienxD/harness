@@ -91,10 +91,9 @@ export async function runHookFailureJourney(tool: HookTool, event: HookEvent, fa
     } }), "utf8");
     await writeFile(join(project, "sentinel.txt"), "before\n", "utf8");
     await initializeRepository(project);
-    if (failure === "completed" && tool === "commit") await writeFile(join(project, "sentinel.txt"), "after\n", "utf8");
     server = await startFakeOpenAiServer({
-      scenarioCatalogHash: createHash("sha256").update("hook-failures:v1").digest("hex"),
-      transition: (request) => transition(request, event, tool),
+      scenarioCatalogHash: createHash("sha256").update("hook-failures:v2").digest("hex"),
+      transition: (request) => transition(request, event, tool, failure),
     });
     const home = await prepareCodexHome({ root, baseUrl: server.baseUrl, trustedProjects: [project], extraConfig: ["[features]", "hooks = true"] });
     const env = isolatedCodexEnvironment({
@@ -108,15 +107,14 @@ export async function runHookFailureJourney(tool: HookTool, event: HookEvent, fa
       delete env.ABOARD_BRIDGE_PORT;
       delete env.ABOARD_BRIDGE_TOKEN;
     }
-    const prompt = tool === "auto" ? "$auto" : tool === "commit" ? (failure === "completed" ? "$commit fixture completion" : "$commit fixture failure") : tool === "issue-writers" ? "$draft-issue fixture" : "fixture";
+    const prompt = tool === "auto" ? "$auto" : tool === "commit" ? "$commit fixture failure" : tool === "issue-writers" ? "$draft-issue fixture" : "fixture";
     const result = await runCodex(["exec", "--json", "--dangerously-bypass-hook-trust", "--dangerously-bypass-approvals-and-sandbox", prompt], project, env, 30_000);
     if (result.timedOut) throw new Error(`Codex did not settle for ${tool} ${event}`);
     return {
       code: result.code, inferenceRequests: server.assertions().inferenceRequests,
       unexpectedRequests: server.assertions().unexpectedRequests,
       sentinel: await readFile(join(project, "sentinel.txt"), "utf8"),
-      commitSubject: failure === "completed" && tool === "commit"
-        ? (await execFileAsync("git", ["log", "-1", "--format=%s"], { cwd: project, windowsHide: true, encoding: "utf8" })).stdout.trim() : null,
+      documentCreated: failure === "policy" && (await readdir(join(project, "docs"))).includes("fixture.md"),
     };
   } finally {
     await server?.close();
@@ -124,7 +122,7 @@ export async function runHookFailureJourney(tool: HookTool, event: HookEvent, fa
   }
 }
 
-function transition(request: OpenAiResponsesRequest, event: HookEvent, tool: HookTool): OpenAiScenarioResponse {
+function transition(request: OpenAiResponsesRequest, event: HookEvent, tool: HookTool, failure: Failure): OpenAiScenarioResponse {
   if (event === "UserPromptSubmit" || event === "SessionStart") throw new OpenAiProtocolError("$.input", "blocked prompt reached inference", "hook-failures");
   const results = request.input.filter((item) => item.type === "function_call_output" || item.type === "custom_tool_call_output");
   if (event !== "Stop" && results.length === 0) {
@@ -137,8 +135,11 @@ function transition(request: OpenAiResponsesRequest, event: HookEvent, tool: Hoo
   if (event !== "Stop" && results.length !== 1) throw new OpenAiProtocolError("$.input", "unexpected tool result count", "hook-failures");
   if (event !== "Stop") {
     const output = JSON.stringify(results[0]);
-    const reason = /fixture dependency failure|policy.*(?:load|configuration)|could not.*(?:check|load)|invalid.*configuration/iu;
-    if (!reason.test(output)) throw new OpenAiProtocolError("$.input", "hook failure was not delivered as tool feedback", "hook-failures");
+    // Malformed project policy is ignored; the bundled rules still protect the document.
+    const observed = failure === "policy"
+      ? output.includes("doc-drafts/") && output.includes("fixture.md")
+      : /fixture dependency failure|policy.*(?:load|configuration)|could not.*(?:check|load)|invalid.*configuration/iu.test(output);
+    if (!observed) throw new OpenAiProtocolError("$.input", "expected hook decision was not delivered as tool feedback", "hook-failures");
   }
   return { scenario: "hook-failures", checkpoint: "complete", output: { type: "message", id: "msg_failure_done", role: "assistant", status: "completed", content: [{ type: "output_text", text: "fixture complete", annotations: [] }] } };
 }

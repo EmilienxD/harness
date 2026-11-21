@@ -1,6 +1,6 @@
 ---
 name: review-this
-description: User-invoked only. Agents must not invoke this skill on their own. Review a pinned change, fix clear local problems, and validate the result. Use when the user invokes the review workflow for a specific target.
+description: Developer-invoked only. Agents must not invoke this skill on their own. Review a pinned change, fix clear local problems, and validate the result. Use when the developer invokes the review workflow for a specific target.
 argument-hint: "[review target or expectations]"
 license: MIT
 metadata:
@@ -8,9 +8,9 @@ metadata:
 disable-model-invocation: true
 ---
 
-Review whatever the user provides end to end, like a 10x senior engineer in a hurry. Be the last line of defense.
+Review whatever the developer provides end to end, like a 10x senior engineer in a hurry. Be the last line of defense.
 
-Pin the fixed point. Whatever the user identifies as the review target—a commit, branch, tag, merge-base, range, pull request, or whole diff—defines the entire review scope. Resolve it once, read the whole resulting diff, and stay anchored to it. When none is supplied, review the change at `HEAD` against its parent; for a root commit, review everything it introduces.
+Pin the fixed point. Whatever the developer identifies as the review target—a commit, branch, tag, merge-base, range, pull request, or whole diff—defines the entire review scope. Resolve it once, read the whole resulting diff, and stay anchored to it. When none is supplied, review the change at `HEAD` against its parent; for a root commit, review everything it introduces.
 
 Don't assume. Don't hide confusion. Surface. Understand the requested outcome and inspect enough surrounding code, tests, call sites, documentation, and history to judge the pinned diff's consequences. Account for every changed path. Pursue only concrete, material problems introduced by that diff and relevant to the requested work: incorrect behavior, missed requirements, regressions, broken invariants, unsafe edge cases, scope creep, or speculative generality. Skip preferences, pre-existing defects, unrelated cleanup, and anything tooling already settles.
 

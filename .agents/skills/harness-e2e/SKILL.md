@@ -109,4 +109,4 @@ Use checked-in official references under `docs/CLAUDE-REFERENCES/`, `docs/CHATGP
 
 For core or tool changes, run the root E2E check and focused journey, then any consuming adapter's checks. For Aboard lifecycle, protocol, environment-routing, or repository changes, use the full sequence in [references/aboard.md](references/aboard.md).
 
-Destructive bootstrap is never implied by routine E2E verification. It requires explicit user authorization and the exact safety preconditions in the Aboard reference.
+Destructive bootstrap is never implied by routine E2E verification. It requires explicit developer authorization and the exact safety preconditions in the Aboard reference.

@@ -38,9 +38,12 @@ export async function runFixtureInstaller(workspace: PiWorkspace, operation: "in
   // Install/upgrade include real pinned-runtime acquisition and native npm installation.
   // Allow bounded download/build time, especially under Windows process contention.
   const timeoutMs = operation === "install" || operation === "upgrade" ? 120_000 : 30_000;
+  // Only the installer needs the explicitly selected persistent hook interpreter.
+  const python = process.env.HARNESS_PYTHON;
+  const env = python === undefined ? workspace.env : { ...workspace.env, HARNESS_PYTHON: python };
   let stdout: string;
   try {
-    stdout = (await execFileAsync(command.file, [...command.args], { cwd: workspace.projectRoot, env: workspace.env, encoding: "utf8", windowsHide: true, timeout: timeoutMs, maxBuffer: 4 * 1024 * 1024 })).stdout;
+    stdout = (await execFileAsync(command.file, [...command.args], { cwd: workspace.projectRoot, env, encoding: "utf8", windowsHide: true, timeout: timeoutMs, maxBuffer: 4 * 1024 * 1024 })).stdout;
   } catch { throw new Error(`Harness E2E installer ${operation} failed; run uv sync in the checkout before these journeys`); }
   let result: unknown;
   try { result = JSON.parse(stdout) as unknown; } catch { throw new Error("Harness E2E installer emitted invalid JSON"); }

@@ -1,5 +1,5 @@
 name = "enable-desktop-notification"
-version = "1.1.7"
+version = "1.1.8"
 description = "Enable desktop notifications for final responses in the current session without a model call"
 docs = "https://github.com/EmilienxD/harness/blob/main/README.md#user-invoked-skills"
 

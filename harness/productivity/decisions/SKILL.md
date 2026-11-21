@@ -1,6 +1,6 @@
 ---
 name: decisions
-description: User-invoked only. Agents must not invoke this skill on their own. Review important decisions made during the current work and surface only those where confidence remains low.
+description: Developer-invoked only. Agents must not invoke this skill on their own. Review important decisions made during the current work and surface only those where confidence remains low.
 argument-hint: "[focus]"
 license: MIT
 metadata:

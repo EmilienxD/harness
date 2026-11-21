@@ -49,7 +49,7 @@ Bootstrap recreates the repository and is not routine verification. Reset restor
 
 ## Bootstrap safety
 
-Bootstrap deletes and recreates a GitHub repository. Run it only when the user explicitly asks to recreate the fixture.
+Bootstrap deletes and recreates a GitHub repository. Run it only when the developer explicitly asks to recreate the fixture.
 
 Before deletion it must verify the active account is EmilienxD, the exact slug is EmilienxD/harness-e2e, the repository is private, ABOARD_E2E_RECREATE exactly matches, and the credential has delete_repo.
 

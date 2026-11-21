@@ -832,7 +832,7 @@ use the GitHub commits pinned in the manifests. `--no-cache` rebuilds the instal
 from the current checkout; local runtime installations also bypass the build cache.
 Host tools are installed for your user even when the selected scope is Project.
 Aboard builds from `apps/aboard` with `--local`; see its README for extension development.
-The `subagents` 3.1.11 catalogue pins runtime 3.1.10 at immutable revision
+The `subagents` catalogue pins runtime 3.1.10 at immutable revision
 `383e3c05e5ac182b001fd6d670f6cadb7e6e93d5`; task-free requests no longer require
 `--local`. Aboard's published VSIX remains a separate release dependency.
 

@@ -1,6 +1,6 @@
 ---
 name: grill-me-in-cloud
-description: User-invoked only. Agents must not invoke this skill on their own. Stress-test a plan through branching interview rounds on a persistent hosted board.
+description: Developer-invoked only. Agents must not invoke this skill on their own. Stress-test a plan through branching interview rounds on a persistent hosted board.
 argument-hint: "[plan or design]"
 license: MIT
 metadata:
@@ -8,21 +8,21 @@ metadata:
 disable-model-invocation: true
 ---
 
-Interview the user relentlessly until you reach a shared understanding. Map this as a **design tree**: every decision branches into the decisions that hang off it.
+Interview the developer relentlessly until you reach a shared understanding. Map this as a **design tree**: every decision branches into the decisions that hang off it.
 
-Work the tree in **rounds**. The **frontier** is every decision whose prerequisites are already settled: the questions you can ask _now_ without guessing at answers you haven't heard yet. Ask the whole frontier in one round: number each question, give 1–4 options, and provide your recommended answer. Prefer giving your recommendation as **the first option** (A) for readability. Then publish the round to the hosted board and wait for the user's answers before the next round.
+Work the tree in **rounds**. The **frontier** is every decision whose prerequisites are already settled: the questions you can ask _now_ without guessing at answers you haven't heard yet. Ask the whole frontier in one round: number each question, give 1–4 options, and provide your recommended answer. Prefer giving your recommendation as **the first option** (A) for readability. Then publish the round to the hosted board and wait for the developer's answers before the next round.
 
-Each round the user answers reshapes the tree: settled decisions push the frontier outward and unblock questions that **depend** on them. Recompute the frontier and ask the next round. A question whose answer depends on another question still open in this round belongs to a _later_ round, not this one.
+Each round the developer answers reshapes the tree: settled decisions push the frontier outward and unblock questions that **depend** on them. Recompute the frontier and ask the next round. A question whose answer depends on another question still open in this round belongs to a _later_ round, not this one.
 
-Finding _facts_ is your job, never the user's. When a frontier question needs a fact from the environment (filesystem, tools, etc.), explore to find it; don't ask the user for anything you could look up yourself in the codebase. When working with sub-agents, don't block on them: a running exploration is an unsettled prerequisite, so only the questions downstream of it wait for the sub-agent(s) to report; ask the rest of the frontier now. The _decisions_ are the user's: present each to them and wait.
+Finding _facts_ is your job, never the developer's. When a frontier question needs a fact from the environment (filesystem, tools, etc.), explore to find it; don't ask the developer for anything you could look up yourself in the codebase. When working with sub-agents, don't block on them: a running exploration is an unsettled prerequisite, so only the questions downstream of it wait for the sub-agent(s) to report; ask the rest of the frontier now. The _decisions_ are the developer's: present each to them and wait.
 
 Prioritize questioning high-impact decisions (e.g., UI/UX changes, failure behavior, scope boundaries, interaction with existing rules, architecture changes, dependency changes, migrations, security concerns) over low-impact decisions (e.g., creating a class, creating new tests, updating an endpoint).
 
-If a question cannot be answered solely from the code or from judgment, you may consider a web search to find real-world examples, open-source code to reuse, benchmarks, or prototyping before assuming your recommendation is correct. If so, propose your ideas to the user before proceeding (e.g., "This API doesn't provide enough documentation; we should consider prototyping it before assuming it's the right decision.").
+If a question cannot be answered solely from the code or from judgment, you may consider a web search to find real-world examples, open-source code to reuse, benchmarks, or prototyping before assuming your recommendation is correct. If so, propose your ideas to the developer before proceeding (e.g., "This API doesn't provide enough documentation; we should consider prototyping it before assuming it's the right decision.").
 
-Every question requires an explicit answer from the user. Silence, omission, an ambiguous response, or answering other questions does not approve your recommendation. Keep every unanswered question open and present it again in a later round; settle only the questions the user actually answered.
+Every question requires an explicit answer from the developer. Silence, omission, an ambiguous response, or answering other questions does not approve your recommendation. Keep every unanswered question open and present it again in a later round; settle only the questions the developer actually answered.
 
-The session is done when the frontier is empty: every branch of the design tree has been visited, and nothing is left silently assumed. Do not act on it until the user confirms you have reached a shared understanding. Simply tell the user that you have reached a shared understanding, summarize the core solution decided upon to solve the initial problem in 1–3 sentences, and state that you are ready to proceed to the next steps.
+The session is done when the frontier is empty: every branch of the design tree has been visited, and nothing is left silently assumed. Do not act on it until the developer confirms you have reached a shared understanding. Simply tell the developer that you have reached a shared understanding, summarize the core solution decided upon to solve the initial problem in 1–3 sentences, and state that you are ready to proceed to the next steps.
 
 ## Publishing a round
 
@@ -32,7 +32,7 @@ After publication succeeds, reply only `Round <round-number> with <questions-cou
 
 On a validation rejection, fix the reported problem and write the complete round to the updated inbox file. On a setup or publication failure such as no inbox file supplied, report the error without diagnosing it and stop.
 
-Nothing persists between rounds or between questions: give every question all the context, styles, scripts, and media it needs. The user answers from the board alone, with no access to the codebase: a file path is only a label, so when a decision depends on specific code, quote those lines as a code block captioned with the path and line range, inside `<details>` when long.
+Nothing persists between rounds or between questions: give every question all the context, styles, scripts, and media it needs. The developer answers from the board alone, with no access to the codebase: a file path is only a label, so when a decision depends on specific code, quote those lines as a code block captioned with the path and line range, inside `<details>` when long.
 
 The following JSON + HTML inbox system is strictly reserved for grilling questions; once a shared understanding has been reached, you must forget this system and continue communicating through normal text messages.
 
@@ -80,8 +80,8 @@ Every visual explains the decision rather than decorating it:
 <figure data-grill-diagram="publication-flow">
   <pre class="mermaid">flowchart LR
     A[Write assets] --&gt; B[Publish round]
-    B --&gt; C[User reviews]</pre>
-  <figcaption>Assets are ready before the user sees the round.</figcaption>
+    B --&gt; C[Developer reviews]</pre>
+  <figcaption>Assets are ready before the developer sees the round.</figcaption>
 </figure>
 ```
 

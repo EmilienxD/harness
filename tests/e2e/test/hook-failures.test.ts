@@ -4,7 +4,7 @@ import { runHookFailureJourney, type Failure, type HookEvent, type HookTool } fr
 
 const cases: readonly [HookTool, HookEvent, Failure][] = [
   ["auto", "UserPromptSubmit", "exception"], ["auto", "UserPromptSubmit", "handled"], ["auto", "UserPromptSubmit", "completed"],
-  ["commit", "UserPromptSubmit", "exception"], ["commit", "UserPromptSubmit", "handled"], ["commit", "UserPromptSubmit", "completed"],
+  ["commit", "UserPromptSubmit", "exception"], ["commit", "UserPromptSubmit", "handled"],
   ["commit", "PreToolUse", "exception"], ["commit", "PostToolUse", "exception"],
   ["issue-writers", "UserPromptSubmit", "exception"],
   ["mid-prompt-skills", "UserPromptSubmit", "exception"],
@@ -21,7 +21,7 @@ for (const [tool, event, failure] of cases) {
     assert.equal(result.code, 0);
     assert.equal(result.inferenceRequests, event === "PreToolUse" || event === "PostToolUse" ? 2 : event === "Stop" ? 1 : 0);
     assert.equal(result.unexpectedRequests, 0);
-    assert.equal(result.sentinel, event === "PostToolUse" || (tool === "commit" && failure === "completed") ? "after\n" : "before\n");
-    if (tool === "commit" && failure === "completed") assert.equal(result.commitSubject, "fixture completion");
+    assert.equal(result.sentinel, event === "PostToolUse" ? "after\n" : "before\n");
+    if (failure === "policy") assert.equal(result.documentCreated, false);
   });
 }

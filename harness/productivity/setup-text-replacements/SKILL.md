@@ -1,6 +1,6 @@
 ---
 name: setup-text-replacements
-description: User-invoked only. Agents must not invoke this skill on their own. Add or change always-on AutoHotkey text replacements when the user asks for a new trigger or expansion.
+description: Developer-invoked only. Agents must not invoke this skill on their own. Add or change always-on AutoHotkey text replacements when the developer asks for a new trigger or expansion.
 argument-hint: "[trigger and expansion]"
 license: MIT
 metadata:

@@ -1,6 +1,6 @@
 ---
 name: read-all-adrs
-description: User-invoked only. Agents must not invoke this skill on their own. Load every project ADR to establish complete decision context. Use when the user explicitly asks to read all ADRs.
+description: Developer-invoked only. Agents must not invoke this skill on their own. Load every project ADR to establish complete decision context. Use when the developer explicitly asks to read all ADRs.
 argument-hint: "[focus]"
 license: MIT
 metadata:

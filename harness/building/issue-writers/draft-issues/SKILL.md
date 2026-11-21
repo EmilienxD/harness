@@ -1,6 +1,6 @@
 ---
 name: draft-issues
-description: User-invoked only. Agents must not invoke this skill on their own. Break a plan or specification into connected tracer-bullet issue drafts. Use when the work needs multiple reviewable tickets before publication.
+description: Developer-invoked only. Agents must not invoke this skill on their own. Break a plan or specification into connected tracer-bullet issue drafts. Use when the work needs multiple reviewable tickets before publication.
 argument-hint: "[plan, spec, issue, or request]"
 license: MIT
 metadata:
@@ -10,13 +10,13 @@ disable-model-invocation: true
 
 Break a plan, spec, or conversation into a set of GitHub issues: tracer-bullet vertical slices, each declaring the issues that block it.
 
-Write Markdown drafts through the issues gateway provided by the system. If you didn't get access to it, stop and alert the user. Hand the drafts back for review or publish immediatly if explicitly asked using the gateway script; you are not allowed to call `gh issue create`.
+Write Markdown drafts through the issues gateway provided by the system. If you didn't get access to it, stop and alert the developer. Hand the drafts back for review or publish immediatly if explicitly asked using the gateway script; you are not allowed to call `gh issue create`.
 
 ## Process
 
 ### 1. Gather context
 
-Work from whatever is already in the conversation context. If the user passes a description as an argument, use it. If the user passes a reference (a spec path, an issue number or URL) as an argument, fetch it and read its full body, plus any relevant reference in that body.
+Work from whatever is already in the conversation context. If the developer passes a description as an argument, use it. If the developer passes a reference (a spec path, an issue number or URL) as an argument, fetch it and read its full body, plus any relevant reference in that body.
 
 (Optional) If you haven't already explored the codebase or read the related contract documents, do so to understand the current state of the code. Look for pre-factoring opportunities that make the implementation easier. "Make the change easy, then make the easy change."
 
@@ -43,17 +43,17 @@ For each issue, decide:
   - `expert`: For multi-step complex work, anything needing careful judgment, complex UI design, wide context and bug prone. 60% usage rate.
 - **Mode** (default, but optional): `afk` or `hitl`. Use `hitl` when the work is sensitive, touches frontend or UI design, or is complex enough that a human should review it before it lands. Use `afk` when the agent can be trusted to implement it in one shot with no review.
 - **Browser**: add `chrome` when the task needs a real browser to test a design change end to end. Omit it when browser testing is unnecessary or a non-browser test is sufficient.
-- **Extra labels** (only if the user asks): any other labels the user explicitly requests.
+- **Extra labels** (only if the developer asks): any other labels the developer explicitly requests.
 
-Both the difficulty and mode labels are defaults, not requirements: if the user explicitly says not to use one or both of them, leave them off the breakdown entirely rather than forcing a value.
+Both the difficulty and mode labels are defaults, not requirements: if the developer explicitly says not to use one or both of them, leave them off the breakdown entirely rather than forcing a value.
 
-Include any extra labels the user requests in the draft. Publication automatically creates missing labels and preserves existing labels.
+Include any extra labels the developer requests in the draft. Publication automatically creates missing labels and preserves existing labels.
 
-### 3. Review the mapping with the user
+### 3. Review the mapping with the developer
 
 Present the proposed breakdown as a numbered list, showing title, summary, parent, blocked-by, and whichever labels were decided (difficulty, mode, extras) for each issue.
 
-Ask the user:
+Ask the developer:
 
 - Does the granularity feel right? (too coarse / too fine — remember, one agent per issue)
 - Is the parent right, if these issues belong under one?
@@ -61,11 +61,11 @@ Ask the user:
 - Do the label assignments look right — difficulty and mode where they're used, `chrome` where real-browser end-to-end design testing is needed, and any extras?
 - Should any issues be merged or split further?
 
-Iterate until the user approves the breakdown. Stop after presenting or revising the mapping and wait for their response. Once the user approves it, continue directly with the drafting steps below in that same conversation; do not ask them to invoke this skill again.
+Iterate until the developer approves the breakdown. Stop after presenting or revising the mapping and wait for their response. Once the developer approves it, continue directly with the drafting steps below in that same conversation; do not ask them to invoke this skill again.
 
 ### 4. Write one file per issue
 
-Write one draft file per finding at the file paths instructed by the hook. If no hook gave you that info, stop immediately and alert the user about the bug instead of finding a workaround.
+Write one draft file per finding at the file paths instructed by the hook. If no hook gave you that info, stop immediately and alert the developer about the bug instead of finding a workaround.
 
 Index them in the order you plan to publish them (blockers before what they block).
 
@@ -116,6 +116,6 @@ In "Parent" and "Blocked by", reference other issues drafted in this turn by the
 
 After publication, you will be notified whether each draft was modified since drafting; rely on this status to check for edits.
 
-If the user explicitly requested publication, run the `<skill-directory>/scripts/publish_issues.py` gateway script. Add `--dry` to preview. The script publishes all remaining drafts in the current session. Report the returned results in one sentence.
+If the developer explicitly requested publication, run the `<skill-directory>/scripts/publish_issues.py` gateway script. Add `--dry` to preview. The script publishes all remaining drafts in the current session. Report the returned results in one sentence.
 
-Otherwise, tell the user the relative file paths you created and that they can review them. They can edit the files directly — titles, labels, bodies, parents — before publishing. Ask if they want you to make changes. Mention that they can invoke `publish-issues` with `--dry` first to preview or without it to publish for real.
+Otherwise, tell the developer the relative file paths you created and that they can review them. They can edit the files directly — titles, labels, bodies, parents — before publishing. Ask if they want you to make changes. Mention that they can invoke `publish-issues` with `--dry` first to preview or without it to publish for real.

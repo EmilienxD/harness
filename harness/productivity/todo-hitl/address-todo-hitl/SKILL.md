@@ -1,6 +1,6 @@
 ---
 name: address-todo-hitl
-description: User-invoked only. Agents must not invoke this skill on their own. Investigate and address the most important TODO(HITL) with human agreement. Use when deferred work is ready for a human decision and implementation.
+description: Developer-invoked only. Agents must not invoke this skill on their own. Investigate and address the most important TODO(HITL) with human agreement. Use when deferred work is ready for a human decision and implementation.
 argument-hint: "[TODO(HITL) or scope]"
 license: MIT
 metadata:
@@ -13,8 +13,8 @@ comment and explore its surrounding code, callers, tests, and local documentatio
 many answers as the codebase provides.
 
 Before modifying anything, recommend a concrete resolution and briefly state its scope and material
-uncertainties. If the objective is still unclear, ask the user one concise clarifying question instead.
-Wait for the user to agree on the resolution.
+uncertainties. If the objective is still unclear, ask the developer one concise clarifying question instead.
+Wait for the developer to agree on the resolution.
 
 After agreement, implement and verify the resolution. Remove the selected `TODO(HITL)` comment only when
 its work has been addressed. Then rescan the codebase. If another remains, end with: "Would you like to

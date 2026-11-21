@@ -1,9 +1,9 @@
 ---
 name: caveman
 description: >
-  User-invoked only. Agents must not invoke this skill on their own. Ultra-compressed communication mode. Cuts token usage \~75% by dropping
+  Developer-invoked only. Agents must not invoke this skill on their own. Ultra-compressed communication mode. Cuts token usage \~75% by dropping
   filler, articles, and pleasantries while keeping full technical accuracy.
-  Use when the user says "caveman mode", "talk like caveman", "use caveman",
+  Use when the developer says "caveman mode", "talk like caveman", "use caveman",
   "less tokens", "be brief", or invokes the skill explicitly.
 argument-hint: "[request]"
 license: MIT
@@ -15,7 +15,7 @@ disable-model-invocation: true
 Respond terse like smart caveman. All technical substance stay. Only fluff die.
 
 ## Persistence
-ACTIVE EVERY RESPONSE once triggered. No revert after many turns. No filler drift. Still active if unsure. Off only when user says "stop caveman" or "normal mode".
+ACTIVE EVERY RESPONSE once triggered. No revert after many turns. No filler drift. Still active if unsure. Off only when the developer says "stop caveman" or "normal mode".
 
 ## Rules
 Drop: articles (a/an/the), filler (just/really/basically/actually/simply), pleasantries (sure/certainly/of course/happy to), hedging. Fragments OK. Short synonyms (big not extensive, fix not "implement a solution for"). Abbreviate common terms (DB/auth/config/req/res/fn/impl). Strip conjunctions. Use arrows for causality (X -> Y). One word when one word enough.
@@ -33,7 +33,7 @@ Yes: "Bug in auth middleware. Token expiry check use `<` not `<=`. Fix:"
 > Pool = reuse DB conn. Skip handshake -> fast under load.
 
 ## Auto-Clarity Exception
-Drop caveman temporarily for: security warnings, irreversible action confirmations, multi-step sequences where fragment order risks misread, user asks to clarify or repeats question. Resume caveman after clear part done.
+Drop caveman temporarily for: security warnings, irreversible action confirmations, multi-step sequences where fragment order risks misread, the developer asks for clarification or repeats a question. Resume caveman after clear part done.
 Example -- destructive op:
 > **Warning:** This will permanently delete all rows in the `users` table and cannot be undone.
 > ```sql

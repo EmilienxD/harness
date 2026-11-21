@@ -132,6 +132,7 @@ export async function runCodexCommitContextJourney(mode: ContextMode): Promise<v
       const nextHead = (await exec("git", ["rev-parse", "HEAD"], { cwd: project })).stdout;
       if (mode === "verified") {
         assert.notEqual(nextHead, head);
+        assert.equal((await exec("git", ["log", "-1", "--format=%s"], { cwd: project })).stdout.trim(), "context fixture");
         assert.equal((await exec("git", ["show", "--pretty=", "--name-only"], { cwd: project })).stdout.trim(), "sentinel.txt");
       } else assert.equal(nextHead, head);
       assert.equal((await exec("git", ["diff", "--cached", "--name-only"], { cwd: project })).stdout, "");

@@ -1,5 +1,5 @@
 name = "read-all-adrs"
-version = "1.1.1"
+version = "1.1.2"
 description = "Reads every project ADR for complete architectural context"
 docs = "https://github.com/EmilienxD/harness/blob/main/harness/planning/read-all-adrs/SKILL.md"
 

@@ -1,6 +1,6 @@
 ---
 name: setup-git-worktree-maker
-description: User-invoked only. Agents must not invoke this skill on their own. Create or update a repository-specific command for fully initialized Git worktrees.
+description: Developer-invoked only. Agents must not invoke this skill on their own. Create or update a repository-specific command for fully initialized Git worktrees.
 argument-hint: "[copy or setup requirements]"
 license: MIT
 metadata:
@@ -32,7 +32,7 @@ Present a concrete plan, without generated code, containing:
 - Worktree behavior: the future command accepts or prompts for a branch, reuses an unattached local branch or creates one from the invoking checkout's HEAD, and creates a numbered sibling of the primary checkout. Give a naming example; no worktree is created during this skill.
 - Proposed VS Code integration, including whether it requires creating `.vscode/`.
 
-Ask the user to approve or suggest modifications, then **stop before writing the script or changing integration files**. Resolve uncertainty in the plan rather than silently inventing commands or selecting sensitive files. After modifications, obtain approval of the revised plan.
+Ask the developer to approve or suggest modifications, then **stop before writing the script or changing integration files**. Resolve uncertainty in the plan rather than silently inventing commands or selecting sensitive files. After modifications, obtain approval of the revised plan.
 
 ## 3. Implement the approved plan
 
@@ -51,4 +51,4 @@ Mark managed scripts and integration entries with `setup-git-worktree-maker`. Up
 
 If approved, add or update a `Create Git Worktree` VS Code task that invokes the same command in an integrated terminal without a branch argument, allowing its prompt.
 
-Concisely tell the user what you created and how to use it.
+Concisely tell the developer what you created and how to use it.
