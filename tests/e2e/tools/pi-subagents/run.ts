@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { mkdir, readFile, readdir, writeFile } from "node:fs/promises";
+import { mkdir, readFile, readdir, rename, writeFile } from "node:fs/promises";
 import { delimiter, join } from "node:path";
 import { promisify } from "node:util";
 
@@ -142,6 +142,8 @@ export async function runPiSubagentsJourney(route: Route, options: {
     await runFixtureInstaller(fixture.workspace, "install", packages, { scope: "project", pinnedRuntimes: options.pinnedRuntimes ?? true });
     if (options.alternateRoot) {
       await runFixtureInstaller({ ...fixture.workspace, projectRoot: unrelated }, "install", ["subagents"], { scope: "project", pinnedRuntimes: options.pinnedRuntimes ?? true });
+      // A fresh worktree has the package declaration but none of Pi's generated npm state.
+      await rename(join(unrelated, ".pi/npm"), join(fixture.root, "original-child-npm"));
     }
     await readFile(join(project, ".pi", "skills", "subagents-toolkit", "scripts", "enable_inbox.py"));
     if (options.skill) {
@@ -167,7 +169,9 @@ export async function runPiSubagentsJourney(route: Route, options: {
     }), { flag: "wx" });
     if (options.alternateRoot) {
       await mkdir(join(unrelated, ".harness"), { recursive: true });
-      await writeFile(join(unrelated, ".harness/config.json"), await readFile(join(project, ".harness/config.json")));
+      await writeFile(join(unrelated, ".harness/config.json"), JSON.stringify({
+        version: 1, providers: { pi: { command: ["pi", "--approve", "--no-mcp", "--no-prompt-templates", "--no-themes"] } },
+      }));
     }
     const captures = join(fixture.root, "terminals");
     const stateDir = env.HARNESS_STATE_DIR!;
@@ -193,6 +197,8 @@ export async function runPiSubagentsJourney(route: Route, options: {
         return files[0] ? JSON.parse(await readFile(join(captures, files[0]), "utf8")) as { environment: NodeJS.ProcessEnv; argv: string[] } : undefined;
       }, "interactive child launch", 60_000);
       const childId = specification.environment.HARNESS_SESSION_ID!;
+      const childPackage = join(unrelated, ".pi/npm/node_modules/harness-pi-subagents/package.json");
+      if (options.alternateRoot) await assert.rejects(readFile(childPackage), { code: "ENOENT" });
       const launchOption = (name: string) => {
         const index = specification.argv.indexOf(name);
         return index >= 0 ? specification.argv[index + 1] : undefined;
@@ -200,7 +206,7 @@ export async function runPiSubagentsJourney(route: Route, options: {
       const model = launchOption("--model");
       const thinkingLevel = launchOption("--thinking");
       child = new PiRpcClient({ ...fixture.workspace, projectRoot: options.alternateRoot ? unrelated : project, env: specification.environment }, {
-        sessionId: childId, timeoutMs: 180_000,
+        sessionId: childId, timeoutMs: 180_000, installLocalPackages: options.alternateRoot ?? false,
         ...(model ? { model } : {}), ...(thinkingLevel ? { thinkingLevel } : {}),
       });
       const first = await waiting;
@@ -236,6 +242,8 @@ export async function runPiSubagentsJourney(route: Route, options: {
       // delivery continued a busy parent or started a new turn in an idle one.
       await waitFor(async () => (await runtimeState(python, stateDir, parentId)).requests[0]?.[5] === 1 ? true : undefined, "persisted result acknowledged");
       if (options.alternateRoot) {
+        await readFile(childPackage);
+        assert.equal(await readFile(join(stateDir, "runtime/reply-ready", specification.environment.HARNESS_EXECUTION_ID!), "utf8"), "pi");
         assert.equal((await child.prompt(`${childMarker(route)} Continue after replying.`, 60_000)).status, "success");
       }
     }

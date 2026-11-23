@@ -123,13 +123,16 @@ export class PiRpcClient {
   #prompting = false;
   #closing: Promise<void> | undefined;
 
-  constructor(workspace: PiWorkspace, options: { readonly sessionId?: string; readonly timeoutMs?: number; readonly model?: string; readonly thinkingLevel?: string } = {}) {
+  constructor(workspace: PiWorkspace, options: { readonly sessionId?: string; readonly timeoutMs?: number; readonly model?: string; readonly thinkingLevel?: string; readonly installLocalPackages?: boolean } = {}) {
     if (options.model && !options.model.startsWith(`${PROVIDER}/`)) throw new Error("Pi fixture model overrides must use its fake provider");
     if (options.thinkingLevel && !["off", "minimal", "low", "medium", "high", "xhigh"].includes(options.thinkingLevel)) throw new Error("Invalid Pi fixture thinking level");
-    const command = spawnableCommand("pi", [...baseArgs(workspace, "rpc"), "--session-id", options.sessionId ?? randomUUID(),
+    const command = spawnableCommand("pi", [...baseArgs(workspace, "rpc", options.installLocalPackages), "--session-id", options.sessionId ?? randomUUID(),
       ...(options.model ? ["--model", options.model] : []), ...(options.thinkingLevel ? ["--thinking", options.thinkingLevel] : []),
     ]);
-    this.#child = spawn(command.file, [...command.args], { cwd: workspace.projectRoot, env: workspace.env, shell: false, windowsHide: true, detached: process.platform !== "win32", stdio: ["pipe", "pipe", "pipe"] });
+    const env = options.installLocalPackages ? {
+      ...workspace.env, PI_OFFLINE: "0", npm_config_offline: "true", npm_config_audit: "false", npm_config_ignore_scripts: "true",
+    } : workspace.env;
+    this.#child = spawn(command.file, [...command.args], { cwd: workspace.projectRoot, env, shell: false, windowsHide: true, detached: process.platform !== "win32", stdio: ["pipe", "pipe", "pipe"] });
     this.#child.stdout.on("data", (chunk: Buffer) => {
       this.#bytes += chunk.length;
       if (this.#bytes > MAX_OUTPUT_BYTES) return this.#fail(new Error("Pi RPC exceeded the in-memory output limit"));
@@ -239,8 +242,8 @@ export function summarizePiRun(events: readonly PiEvent[], handled = false): PiR
   };
 }
 
-function baseArgs(workspace: PiWorkspace, mode: "json" | "rpc"): string[] {
-  return ["--mode", mode, "--offline", "--approve", "--no-mcp", "--no-prompt-templates", "--no-themes", "--session-dir", workspace.sessionsDir];
+function baseArgs(workspace: PiWorkspace, mode: "json" | "rpc", installLocalPackages = false): string[] {
+  return ["--mode", mode, ...(installLocalPackages ? [] : ["--offline"]), "--approve", "--no-mcp", "--no-prompt-templates", "--no-themes", "--session-dir", workspace.sessionsDir];
 }
 
 async function cliOutput(args: readonly string[], workspace: PiWorkspace): Promise<string> {

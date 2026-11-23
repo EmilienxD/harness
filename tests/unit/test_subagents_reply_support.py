@@ -107,6 +107,44 @@ def test_disabled_pi_resources_are_rejected(project):
         reply_support.validate(project, "pi")
 
 
+@pytest.mark.parametrize("scope", ["project", "user"])
+def test_pi_package_can_be_installed_by_child_startup(project, monkeypatch, scope):
+    archive = project.parent / "fixture.tgz"
+    archive.touch()
+    root = project / ".pi" if scope == "project" else project.parent / "pi-home"
+    root.mkdir()
+    settings = root / "settings.json"
+    source = f"npm:harness-pi-subagents@file:{archive.as_posix()}"
+    config = json.dumps({"packages": [source]})
+    settings.write_text(config)
+    monkeypatch.setenv("HARNESS_EXECUTION_ID", "execution")
+    monkeypatch.setenv("HARNESS_EXECUTION_MODE", "interactive")
+
+    reply_support.validate(project, "pi")
+    reply_support.acknowledge(project, "pi")
+    assert not reply_support.is_ready("execution", "pi")
+    assert list(root.iterdir()) == [settings]
+    assert settings.read_text() == config
+
+    if scope == "user":
+        local = project / ".pi"
+        local.mkdir()
+        (local / "settings.json").write_text(json.dumps({
+            "packages": [{"source": source, "extensions": []}],
+        }))
+        with pytest.raises(sessions.SessionError):
+            reply_support.validate(project, "pi")
+    else:
+        package = root / "npm/node_modules/harness-pi-subagents"
+        package.mkdir(parents=True)
+        with pytest.raises(sessions.SessionError):
+            reply_support.validate(project, "pi")
+        package.rmdir()
+        archive.unlink()
+        with pytest.raises(sessions.SessionError):
+            reply_support.validate(project, "pi")
+
+
 @pytest.mark.parametrize("provider", ["claude", "chatgpt", "pi"])
 @pytest.mark.parametrize("resume", [False, True])
 def test_parent_installation_does_not_authorize_nested_root(project, monkeypatch, provider, resume):

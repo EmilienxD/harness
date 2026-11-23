@@ -54,7 +54,7 @@ for (const pinnedRuntimes of [false, true]) {
   });
 }
 
-test("an unrelated-root Pi child replies without inference and wakes its live parent", { timeout: 300_000 }, async () => {
+test("a Pi child installs its fresh worktree packages, replies without inference, and wakes its live parent", { timeout: 300_000 }, async () => {
   const result = await runPiSubagentsJourney("interactive", { pinnedRuntimes: false, alternateRoot: true });
   assert.equal(result.previousReplyInferenceRequests, 0);
   assert.equal(result.parentStatus, "success");

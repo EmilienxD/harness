@@ -44,4 +44,6 @@ harness watch [session-id|agent-i] [--once]
 
 ## Before you start
 
-Install and authenticate each provider you want children to use. Restart your agent after installing the tool. Use [Configuration](../../configuration.md#agent-launches) to customize launch defaults. Install child skills separately. Missing requested skills stop the launch. Pi background children need trusted project resources or a user-scope installation for nested delegation.
+Install and authenticate each provider you want children to use. Restart your agent after installing the tool. Use [Configuration](../../configuration.md#agent-launches) to customize launch defaults. Install child skills separately. Missing requested skills stop the launch.
+
+In a fresh worktree, an interactive Pi child can install its declared Harness Subagents package on first launch if the local package archive is still available. You don’t need to open Pi there first. Pi’s normal project trust and offline settings still apply. Pi background children need trusted project resources or a user-scope installation for nested delegation.

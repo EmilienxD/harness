@@ -73,10 +73,37 @@ def available(cwd: Path, provider: str) -> bool:
     return not disabled and required <= events
 
 
+def _pi_pending_install(cwd: Path) -> bool:
+    """Allow Pi to hydrate an installer-managed package on native startup."""
+    from subagents_runtime.roles import pi_agent_directory
+
+    package_name = "harness-pi-subagents"
+    prefix = f"npm:{package_name}@file:"
+    for root in (cwd.resolve() / ".pi", pi_agent_directory()):
+        for entry in _settings(root / "settings.json").get("packages", []):
+            source = entry.get("source") if isinstance(entry, dict) else entry
+            if not isinstance(source, str) or source.split("@", 1)[0] != f"npm:{package_name}":
+                continue
+            # Project declarations take precedence. Do not assume filtered resources load.
+            if not source.startswith(prefix):
+                return False
+            if isinstance(entry, dict) and (
+                entry.get("autoload") is False or "skills" in entry or "extensions" in entry
+            ):
+                return False
+            archive = Path(source.removeprefix(prefix))
+            return (
+                archive.is_absolute()
+                and archive.is_file()
+                and not (root / "npm/node_modules" / package_name).exists()
+            )
+    return False
+
+
 def validate(cwd: Path, provider: str) -> None:
     """Reject missing prerequisites before selecting or starting an execution backend."""
     try:
-        if available(cwd, provider):
+        if available(cwd, provider) or (provider == "pi" and _pi_pending_install(cwd)):
             return
     except (OSError, ValueError, TypeError):
         pass
